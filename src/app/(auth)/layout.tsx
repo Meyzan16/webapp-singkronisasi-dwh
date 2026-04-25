@@ -27,7 +27,7 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
           </div>
         </nav>
       </div>
-      <div className="flex-1 flex flex-col items-center justify-center px-6 font-sans">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 font-sans min-h-[100svh] sm:min-h-[100dvh]">
         {children}
       </div>
 

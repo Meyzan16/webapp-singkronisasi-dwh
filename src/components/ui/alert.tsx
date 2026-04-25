@@ -3,58 +3,79 @@
 import { createPortal } from "react-dom";
 import React, { useContext, useEffect, useState } from "react";
 import { GlobalContext } from "@/app/context";
+import type { AlertSeverity } from "@/app/context";
 
-const severityStyles: Record<string, string> = {
-  success: "bg-green-500 text-white",
-  error: "bg-red-500 text-white",
-  warning: "bg-yellow-500 text-black",
-  info: "bg-blue-500 text-white",
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const SEVERITY_STYLES: Record<AlertSeverity, string> = {
+  success: "bg-emerald-500 text-white",
+  error:   "bg-red-500 text-white",
+  warning: "bg-amber-400 text-black",
+  info:    "bg-blue-500 text-white",
 };
 
-const severityIcons: Record<string, string> = {
-    success: "✅",
-    error: "❌",
-    warning: "⚠️",
-    info: "ℹ️",
+const SEVERITY_ICONS: Record<AlertSeverity, string> = {
+  success: "✅",
+  error:   "❌",
+  warning: "⚠️",
+  info:    "ℹ️",
 };
+
+// error = 0 → no auto-dismiss, user must close manually
+const DISMISS_DURATION: Record<AlertSeverity, number> = {
+  success: 3000,
+  info:    3000,
+  warning: 5000,
+  error:   0,
+};
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 const AlertComponent = () => {
   const { openAlert, setOpenAlert } = useContext(GlobalContext)!;
   const [isVisible, setIsVisible] = useState(false);
 
-  useEffect(() => {
-    if (openAlert.status) {
-      setIsVisible(true); // Munculkan alert dengan animasi
-      const timer = setTimeout(() => {
-        setIsVisible(false); // Sembunyikan alert setelah 5 detik
-        setTimeout(() => {
-          setOpenAlert({ status: false, message: "", severity: "" });
-        }, 1000);
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [openAlert.status, setOpenAlert]);
+  const dismiss = () => {
+    setIsVisible(false);
+    setTimeout(() => {
+      setOpenAlert({ status: false, message: "", severity: "" });
+    }, 300);
+  };
 
-  if (!openAlert.status) return null;
+  useEffect(() => {
+    if (!openAlert.status || !openAlert.severity) return;
+
+    setIsVisible(true);
+
+    const duration = DISMISS_DURATION[openAlert.severity as AlertSeverity];
+    if (duration === 0) return; // error — manual dismiss only
+
+    const timer = setTimeout(dismiss, duration);
+    return () => clearTimeout(timer);
+  }, [openAlert.status]);
+
+  if (!openAlert.status || !openAlert.severity) return null;
+
+  const severity = openAlert.severity as AlertSeverity;
 
   return createPortal(
     <div
-      className={`fixed left-1/2 top-0 transform -translate-x-1/2 px-6 py-3 rounded-full 
-        shadow-lg transition-all duration-300 
-        ${isVisible ? "translate-y-20 opacity-100" : "-translate-y-full opacity-0"} 
-        ${severityStyles[openAlert.severity]}
-        z-[9999]`}
-      data-severity={openAlert.severity}
+      role="alert"
+      aria-live="assertive"
+      className={`fixed left-1/2 top-0 z-[9999] -translate-x-1/2 transition-all duration-300
+        ${isVisible ? "translate-y-6 opacity-100" : "-translate-y-full opacity-0"}
+        ${SEVERITY_STYLES[severity]}
+        flex items-center gap-3 rounded-full px-5 py-3 shadow-lg`}
     >
-      <div className="md:flex gap-4 items-center justify-between">
-        <span className="mr-2">{severityIcons[openAlert.severity]}</span>
-        <span className="font-Poppins text-xs  md:text-md">{openAlert.message}</span>
-        <button
-          className="ml-auto text-lg font-bold"
-          onClick={() => setIsVisible(false)}
-        >
-        </button>
-      </div>
+      <span>{SEVERITY_ICONS[severity]}</span>
+      <span className="text-sm font-medium">{openAlert.message}</span>
+      <button
+        onClick={dismiss}
+        aria-label="Close alert"
+        className="ml-2 text-current opacity-70 hover:opacity-100 transition-opacity text-lg leading-none"
+      >
+        ×
+      </button>
     </div>,
     document.body
   );

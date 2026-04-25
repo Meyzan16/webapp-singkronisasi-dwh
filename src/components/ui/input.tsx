@@ -4,11 +4,12 @@ import { FC, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
 interface InputProps {
-  label: string;
+  label?: string;
   type: string;
   value: string | undefined;
   onChange: React.ChangeEventHandler<HTMLInputElement>;
   id: string;
+  placeholder?: string;
   errors?: string;
   touched?: boolean;
 }
@@ -21,6 +22,7 @@ const Input: FC<InputProps> = ({
   onChange,
   errors,
   touched,
+  placeholder
 }) => {
   const [isFilledOrFocused, setIsFilledOrFocused] = useState(
     () => !!value && value.toString().length > 0,
@@ -51,6 +53,7 @@ const Input: FC<InputProps> = ({
           onChange(e);
           setIsFilledOrFocused(e.target.value.length > 0);
         }}
+        placeholder={placeholder}
         onFocus={() => setIsFilledOrFocused(true)}
         aria-label={label}
         className={`w-full px-4 pt-5 pb-2 border rounded-full  

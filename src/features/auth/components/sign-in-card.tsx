@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useContext } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import DottedSeparator from "@/components/ui/dotted-separator";
 import { Button } from "@/components/ui/button";
@@ -10,10 +11,12 @@ import Input from "@/components/ui/input";
 import CircleLoader from "@/components/ui/circleloader";
 import { useFormik } from "formik";
 import { signInSchema } from "../schema";
-const SignInCard = () => {
+import { useAsyncLoader } from "@/hooks/use-async-loader";
 
-    
-  const { pageLevelLoader, setPageLevelLoader  } = useContext(GlobalContext)!;
+const SignInCard = () => {
+  const router = useRouter();
+  const { pageLevelLoader } = useContext(GlobalContext)!;
+  const run = useAsyncLoader();
 
   const formik = useFormik({
     initialValues: {
@@ -23,21 +26,23 @@ const SignInCard = () => {
     validate: (values) => {
       const result = signInSchema.safeParse(values);
       if (!result.success) {
-        return result.error.flatten().fieldErrors; // Konversi error agar kompatibel dengan Formik
+        return result.error.flatten().fieldErrors;
       }
       return {};
     },
-    onSubmit: (values) => {
-      setPageLevelLoader(true);
-      // TODO: ganti dengan pemanggilan API login nyata
-      console.log("Submitting sign-in form with values:", values);
+    onSubmit: async () => {
+      await run(async () => {
+        // TODO: ganti dengan pemanggilan API login nyata
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        router.push("/dashboards");
+      });
     },
   });
 
   const { errors, touched, values, handleChange, handleSubmit } = formik;
 
   return (
-    <Card className="md:w-[487px] w-full h-full border border-gray-300 shadow-lg bg-white mx-auto items-center justify-cente">
+    <Card className="w-full max-w-sm sm:max-w-md md:w-[487px] border border-gray-300 shadow-lg bg-white mx-auto">
       <CardHeader className="flex items-center justify-center text-center p-7">
         <CardTitle className="text-2xl">Welcome Back</CardTitle>
       </CardHeader>
@@ -80,13 +85,6 @@ const SignInCard = () => {
       <div className="px-7 mb-4">
         <DottedSeparator />
       </div>
-
-
-      <div className="px-7 mb-4">
-        <DottedSeparator />
-      </div>
-
-      
     </Card>
   );
 };

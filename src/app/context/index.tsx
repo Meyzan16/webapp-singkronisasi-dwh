@@ -1,36 +1,36 @@
 'use client';
 import React, { createContext } from "react";
 
-interface AlertState {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type AlertSeverity = "success" | "error" | "warning" | "info";
+
+export interface AlertState {
   status: boolean;
   message: string;
-  severity: string;
-};
+  severity: AlertSeverity | "";
+}
 
-interface ComponentLoaderState {
-  loading: boolean;
-  id: string;
-};
-
+export interface CurrentUser {
+  name: string;
+  email: string;
+  avatar?: string;
+}
 
 type ContextType = {
-  componentLevelLoader: ComponentLoaderState;
-  setComponentLevelLoader: React.Dispatch<React.SetStateAction<ComponentLoaderState>>;
-  pageLevelLoader: boolean;
-  setPageLevelLoader: React.Dispatch<React.SetStateAction<boolean>>;
   openAlert: AlertState;
   setOpenAlert: React.Dispatch<React.SetStateAction<AlertState>>;
-
+  pageLevelLoader: boolean;
+  setPageLevelLoader: React.Dispatch<React.SetStateAction<boolean>>;
+  currentUser: CurrentUser | null;
+  setCurrentUser: React.Dispatch<React.SetStateAction<CurrentUser | null>>;
 };
+
+// ─── Context ──────────────────────────────────────────────────────────────────
 
 export const GlobalContext = createContext<ContextType | null>(null);
 
-export default function GlobalState({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-
+export default function GlobalState({ children }: { children: React.ReactNode }) {
   const [openAlert, setOpenAlert] = React.useState<AlertState>({
     status: false,
     message: "",
@@ -39,10 +39,7 @@ export default function GlobalState({
 
   const [pageLevelLoader, setPageLevelLoader] = React.useState(false);
 
-  const [componentLevelLoader, setComponentLevelLoader] = React.useState<ComponentLoaderState>({
-    loading: false,
-    id: "",
-  });
+  const [currentUser, setCurrentUser] = React.useState<CurrentUser | null>(null);
 
   return (
     <GlobalContext.Provider
@@ -51,8 +48,8 @@ export default function GlobalState({
         setOpenAlert,
         pageLevelLoader,
         setPageLevelLoader,
-        componentLevelLoader,
-        setComponentLevelLoader
+        currentUser,
+        setCurrentUser,
       }}
     >
       {children}
