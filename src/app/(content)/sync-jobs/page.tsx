@@ -1,152 +1,112 @@
+// src/app/(content)/sync-jobs/page.tsx
+
 "use client";
 
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { FiRefreshCw, FiPauseCircle, FiPlayCircle, FiEye, FiFileText, FiSearch } from "react-icons/fi"; // Add search icon
-import DatePicker from "@/components/ui/date-picker"; // Import DatePicker component
-import TableComponents from "@/components/ui/table"; // Import TableComponents component
+import { JobStatusFilter, SyncJobDetail } from "@/types/sync-jobs-extended";
 
-// Sample data for jobs
-const jobs = [
-  { id: "4800002250", name: "User Data Sync", status: "Running", lastRun: "Today, 06:50 PM", duration: "09:35 - 11:03 PM" },
-  { id: "4800002251", name: "Order Sync Process", status: "Success", lastRun: "Today, 06:00 PM", duration: "09:35 - 11:03 PM" },
-  { id: "4800002252", name: "Invoice Sync", status: "Failed", lastRun: "Today, 08:00 PM", duration: "08:35 - 11:03 PM" },
-  { id: "4800002253", name: "Customer Info Update", status: "Success", lastRun: "Today, 06:30 PM", duration: "09:23 - 11:03 PM" },
-  { id: "4800002254", name: "Inventory Sync", status: "Success", lastRun: "Today, 08:00 PM", duration: "08:13 - 11:03 PM" },
-  // Additional jobs can be added here
-];
+import JobStatsCards from "@/features/sync-jobs/components/job-stats-cards";
+import JobsFilterBar from "@/features/sync-jobs/components/jobs-filter-bar";
+import JobsTableEnhanced from "@/features/sync-jobs/components/jobs-table-enhanced";
+import JobDetailDrawer from "@/features/sync-jobs/components/job-detail-drawer";
+import Pagination from "@/features/sync-jobs/components/pagination";
 
-// Column definitions
-const columns: { name: string; key: "id" | "name" | "status" | "lastRun" | "duration" | "actions" }[] = [
-  { name: "Job ID", key: "id" },
-  { name: "Job Name", key: "name" },
-  { name: "Status", key: "status" },
-  { name: "Last Run", key: "lastRun" },
-  { name: "Duration", key: "duration" },
-  { name: "Actions", key: "actions" },
-];
+import { syncJobsStats, syncJobsData } from "@/features/sync-jobs/data/mock-data";
+
+const ITEMS_PER_PAGE = 10;
 
 export default function SyncJobsPage() {
-  const [activeStatus, setActiveStatus] = useState<"All" | "Running" | "Success" | "Failed">("All");
-  const [search, setSearch] = useState("");
-  const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([null, null]);
+  // Filter state
+  const [statusFilter, setStatusFilter] = useState<JobStatusFilter>("All");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  // Filtering jobs based on search term, status, and date range
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Drawer state
+  const [selectedJob, setSelectedJob] = useState<SyncJobDetail | null>(null);
+
+  // Filtered & paginated data
   const filteredJobs = useMemo(() => {
-    return jobs.filter((job) => {
-      const queryMatched =
-        job.id.includes(search) ||
-        job.name.toLowerCase().includes(search.toLowerCase()) ||
-        job.status.toLowerCase().includes(search.toLowerCase());
+    return syncJobsData.filter((job) => {
+      // Status filter
+      const statusMatch = statusFilter === "All" || job.status === statusFilter;
 
-      const statusMatched = activeStatus === "All" || job.status === activeStatus;
+      // Search filter
+      const searchLower = searchQuery.toLowerCase();
+      const searchMatch =
+        job.id.toLowerCase().includes(searchLower) ||
+        job.name.toLowerCase().includes(searchLower);
 
-      return queryMatched && statusMatched;
+      return statusMatch && searchMatch;
     });
-  }, [activeStatus, search, dateRange]);
+  }, [statusFilter, searchQuery]);
 
-  // Checkbox handler function for row selection
-  const handleCheckboxChange = (id: string, checked: boolean) => {
-    console.log("Checkbox changed for: ", id, "checked=", checked);
+  const totalPages = Math.ceil(filteredJobs.length / ITEMS_PER_PAGE);
+  const paginatedJobs = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredJobs.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredJobs, currentPage]);
+
+  // Handlers
+  const handleReset = () => {
+    setStatusFilter("All");
+    setSearchQuery("");
+    setCurrentPage(1);
   };
 
-  // Render action buttons with icons
-  const renderActionButtons = (job: any) => (
-    <div className="flex items-center gap-2">
-      <button
-        className="p-2 text-gray-600 hover:text-gray-800 border rounded-lg"
-        onClick={() => console.log(`View details for job ${job.id}`)}
-      >
-        <FiEye size={20} />
-      </button>
-      <button
-        className="p-2 text-gray-600 hover:text-gray-800 border rounded-lg"
-        onClick={() => console.log(`Logs for job ${job.id}`)}
-      >
-        <FiFileText size={20} />
-      </button>
-      {job.status === "Failed" ? (
-        <button
-          className="p-2 text-primarygreen hover:text-green-600 border rounded-lg"
-          onClick={() => console.log(`Retry job ${job.id}`)}
-        >
-          <FiRefreshCw size={20} />
-        </button>
-      ) : job.status === "Running" ? (
-        <button
-          className="p-2 text-red-600 hover:text-red-800 border rounded-lg"
-          onClick={() => console.log(`Stop job ${job.id}`)}
-        >
-          <FiPauseCircle size={20} />
-        </button>
-      ) : (
-        <button
-          className="p-2 text-blue-600 hover:text-blue-800 border rounded-lg"
-          onClick={() => console.log(`Re-run job ${job.id}`)}
-        >
-          <FiPlayCircle size={20} />
-        </button>
-      )}
-    </div>
-  );
+  const handleViewDetails = (job: SyncJobDetail) => {
+    setSelectedJob(job);
+  };
+
+  const handleCreateJob = () => {
+    // TODO: buka modal create job
+    console.log("Create new job");
+  };
 
   return (
-    <main className="space-y-6">
-      <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          {/* Date range picker */}
-          <DatePicker value={dateRange} onChange={setDateRange} />
+    <main className="space-y-4 pb-8">
+      {/* Header actions */}
+      <div className="flex items-center justify-end">
+        <Button
+          variant="primary"
+          size="md"
+          onClick={handleCreateJob}
+          className="rounded-xl"
+        >
+          + Create Job
+        </Button>
+      </div>
 
-          {/* Search bar */}
-          <div className="flex items-center gap-3">
-            {/* Updated search bar with icon */}
-            <div className="relative">
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search jobs..."
-                className="px-3 py-2 border rounded-lg w-64 text-sm pr-10"
-              />
-              {/* Search icon */}
-              <FiSearch size={20} className="absolute top-1/2 right-3 transform -translate-y-1/2 text-gray-500" />
-            </div>
-            <Button variant="secondary" size="md" className="text-sm" onClick={() => setSearch("")}>
-              Reset
-            </Button>
-          </div>
-        </div>
-      </section>
+      {/* Stat cards */}
+      <JobStatsCards stats={syncJobsStats} />
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-        {/* Filter section */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 mb-4">
-          {/* Status buttons */}
-          <div className="flex items-center gap-2 mb-2">
-            {["All", "Running", "Success", "Failed"].map((status) => (
-              <button
-                key={status}
-                onClick={() => setActiveStatus(status as "All" | "Running" | "Success" | "Failed")}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-                  activeStatus === status
-                    ? "bg-primarygreen text-white"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Filter bar */}
+      <JobsFilterBar
+        activeStatus={statusFilter}
+        onStatusChange={setStatusFilter}
+        search={searchQuery}
+        onSearchChange={setSearchQuery}
+        onReset={handleReset}
+      />
 
-        {/* Table displaying filtered jobs */}
-        <TableComponents
-          data={filteredJobs}
-          columns={columns}
-          onRowCheckboxChange={handleCheckboxChange}
-          renderActionButtons={renderActionButtons}
-        />
-      </section>
+      {/* Table */}
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <JobsTableEnhanced jobs={paginatedJobs} onViewDetails={handleViewDetails} />
+        {filteredJobs.length > ITEMS_PER_PAGE && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={filteredJobs.length}
+            itemsPerPage={ITEMS_PER_PAGE}
+            onPageChange={setCurrentPage}
+          />
+        )}
+      </div>
+
+      {/* Drawer detail */}
+      <JobDetailDrawer job={selectedJob} onClose={() => setSelectedJob(null)} />
     </main>
   );
 }
