@@ -33,13 +33,13 @@ jobs:
       - name: Build
         run: npm run build
 
-  deploy:
-    name: Deploy to Vercel
+  deploy-preview:
+    name: Deploy Preview to Vercel
     needs: build
     runs-on: ubuntu-latest
 
     outputs:
-      deploy_url: ${{ steps.deploy.outputs.deploy_url }}
+      preview_url: ${{ steps.deploy_preview.outputs.preview_url }}
 
     steps:
       - name: Checkout code
@@ -49,21 +49,21 @@ jobs:
         run: npm install -g vercel@latest
 
       - name: Pull Vercel Environment
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Build for Production
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build Preview
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Deploy to Vercel
-        id: deploy
+      - name: Deploy Preview
+        id: deploy_preview
         run: |
-          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
-          echo "deploy_url=$DEPLOY_URL" >> $GITHUB_OUTPUT
-          echo "Deployed to: $DEPLOY_URL"
+          PREVIEW_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          echo "preview_url=$PREVIEW_URL" >> $GITHUB_OUTPUT
+          echo "Preview deployed to: $PREVIEW_URL"
 
   test:
     name: TestSprite AI Testing
-    needs: deploy
+    needs: deploy-preview
     runs-on: ubuntu-latest
 
     steps:
@@ -75,7 +75,7 @@ jobs:
         uses: TestSprite/run-action@v1
         with:
           testsprite-api-key: ${{ secrets.TESTSPRITE_API_KEY }}
-          base_url: ${{ needs.deploy.outputs.deploy_url }}
+          base_url: ${{ needs.deploy-preview.outputs.preview_url }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           blocking: "true"
 
@@ -86,9 +86,43 @@ jobs:
           echo "**Passed:** ${{ steps.testsprite.outputs.passed_tests }} / ${{ steps.testsprite.outputs.total_tests }}" >> $GITHUB_STEP_SUMMARY
           echo "**Results:** ${{ steps.testsprite.outputs.result_url }}" >> $GITHUB_STEP_SUMMARY
 
+  deploy-production:
+    name: Deploy Production to Vercel
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Pull Vercel Environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build Production
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy Production
+        id: deploy_production
+        run: |
+          PRODUCTION_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "production_url=$PRODUCTION_URL" >> $GITHUB_OUTPUT
+          echo "Production deployed to: $PRODUCTION_URL"
+
+      - name: Post Deploy Summary
+        run: |
+          echo "## Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Production URL:** ${{ steps.deploy_production.outputs.production_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
   notify-failure:
     name: Notify on Failure
-    needs: [build, deploy, test]
+    needs: [build, deploy-preview, test, deploy-production]
     runs-on: ubuntu-latest
     if: failure()
 
