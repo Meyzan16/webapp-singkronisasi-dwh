@@ -33,52 +33,17 @@ jobs:
       - name: Build
         run: npm run build
 
-  test:
-    name: TestSprite AI Testing
+  deploy:
+    name: Deploy to Vercel
     needs: build
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run TestSprite E2E Tests
-        id: testsprite
-        uses: TestSprite/run-action@v1
-        with:
-          testsprite-api-key: ${{ secrets.TESTSPRITE_API_KEY }}
-          base_url: ${{ secrets.TESTSPRITE_BASE_URL }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          blocking: "true"
-
-      - name: Print TestSprite Results
-        run: |
-          echo "## TestSprite Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Passed:** ${{ steps.testsprite.outputs.passed_tests }} / ${{ steps.testsprite.outputs.total_tests }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Results:** ${{ steps.testsprite.outputs.result_url }}" >> $GITHUB_STEP_SUMMARY
-
-          echo "Passed: ${{ steps.testsprite.outputs.passed_tests }} / ${{ steps.testsprite.outputs.total_tests }}"
-          echo "Results: ${{ steps.testsprite.outputs.result_url }}"
-
-  deploy:
-    name: Deploy to Vercel
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      deploy_url: ${{ steps.deploy.outputs.deploy_url }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
 
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
@@ -96,17 +61,34 @@ jobs:
           echo "deploy_url=$DEPLOY_URL" >> $GITHUB_OUTPUT
           echo "Deployed to: $DEPLOY_URL"
 
-      - name: Post Deploy Summary
+  test:
+    name: TestSprite AI Testing
+    needs: deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run TestSprite E2E Tests
+        id: testsprite
+        uses: TestSprite/run-action@v1
+        with:
+          testsprite-api-key: ${{ secrets.TESTSPRITE_API_KEY }}
+          base_url: ${{ needs.deploy.outputs.deploy_url }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          blocking: "true"
+
+      - name: Print TestSprite Results
         run: |
-          echo "## Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "## TestSprite Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**URL:** ${{ steps.deploy.outputs.deploy_url }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Passed:** ${{ steps.testsprite.outputs.passed_tests }} / ${{ steps.testsprite.outputs.total_tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Results:** ${{ steps.testsprite.outputs.result_url }}" >> $GITHUB_STEP_SUMMARY
 
   notify-failure:
     name: Notify on Failure
-    needs: [build, test, deploy]
+    needs: [build, deploy, test]
     runs-on: ubuntu-latest
     if: failure()
 
