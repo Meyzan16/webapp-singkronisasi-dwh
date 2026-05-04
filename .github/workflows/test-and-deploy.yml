@@ -1,0 +1,165 @@
+name: Test and Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  build:
+    name: Build and Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+  test:
+    name: TestSprite AI Testing
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger TestSprite Test Run
+        id: trigger_test
+        run: |
+          echo "Triggering TestSprite test run..."
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            -X POST "https://api.testsprite.com/v1/tests/run" \
+            -H "Authorization: Bearer ${{ secrets.TESTSPRITE_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "project_id": "${{ secrets.TESTSPRITE_PROJECT_ID }}",
+              "source": "github-actions",
+              "commit_sha": "${{ github.sha }}",
+              "branch": "${{ github.ref_name }}"
+            }')
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            RUN_ID=$(echo "$BODY" | jq -r '.run_id // .id // empty')
+            echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+            echo "Test triggered successfully. Run ID: $RUN_ID"
+          else
+            echo "Failed to trigger TestSprite test"
+            exit 1
+          fi
+
+      - name: Poll TestSprite Results
+        id: test_results
+        run: |
+          echo "Waiting for TestSprite results..."
+          RUN_ID="${{ steps.trigger_test.outputs.run_id }}"
+
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+          STATUS="running"
+
+          while [ "$STATUS" = "running" ] || [ "$STATUS" = "pending" ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+
+            if [ "$ATTEMPT" -gt "$MAX_ATTEMPTS" ]; then
+              echo "Timeout: TestSprite test exceeded 30 minutes"
+              exit 1
+            fi
+
+            echo "Polling attempt $ATTEMPT/$MAX_ATTEMPTS..."
+            sleep 30
+
+            RESULT=$(curl -s \
+              -H "Authorization: Bearer ${{ secrets.TESTSPRITE_API_KEY }}" \
+              "https://api.testsprite.com/v1/tests/run/$RUN_ID/status")
+
+            STATUS=$(echo "$RESULT" | jq -r '.status // "unknown"')
+            echo "Status: $STATUS"
+          done
+
+          if [ "$STATUS" = "passed" ] || [ "$STATUS" = "completed" ]; then
+            echo "All tests passed!"
+            echo "test_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Tests failed with status: $STATUS"
+            SUMMARY=$(echo "$RESULT" | jq -r '.summary // "No summary available"')
+            echo "Summary: $SUMMARY"
+            echo "test_passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+  deploy:
+    name: Deploy to Vercel
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Pull Vercel Environment
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build for Production
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy to Vercel
+        id: deploy
+        run: |
+          DEPLOY_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "deploy_url=$DEPLOY_URL" >> $GITHUB_OUTPUT
+          echo "Deployed to: $DEPLOY_URL"
+
+      - name: Post Deploy Summary
+        run: |
+          echo "## Deployment Successful!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** ${{ steps.deploy.outputs.deploy_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  notify-failure:
+    name: Notify on Failure
+    needs: [build, test, deploy]
+    runs-on: ubuntu-latest
+    if: failure()
+    steps:
+      - name: Failure Summary
+        run: |
+          echo "## Pipeline Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Author:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
