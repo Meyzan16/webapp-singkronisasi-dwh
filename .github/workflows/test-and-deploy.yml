@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: Build Deploy and TestSprite
 
 on:
   push:
@@ -66,3 +66,28 @@ jobs:
           echo "**URL:** ${{ steps.deploy.outputs.deploy_url }}" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  testsprite:
+    name: TestSprite AI Testing
+    needs: deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run TestSprite Existing Test Cases
+        id: testsprite
+        uses: TestSprite/run-action@v1
+        with:
+          testsprite-api-key: ${{ secrets.TESTSPRITE_API_KEY }}
+          base_url: ${{ needs.deploy.outputs.deploy_url }}/sign-in
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          blocking: "true"
+
+      - name: Print TestSprite Results
+        run: |
+          echo "## TestSprite Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Passed:** ${{ steps.testsprite.outputs.passed_tests }} / ${{ steps.testsprite.outputs.total_tests }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Results:** ${{ steps.testsprite.outputs.result_url }}" >> $GITHUB_STEP_SUMMARY
