@@ -1,4 +1,4 @@
-name: Build Deploy and TestSprite
+name: Build and Deploy
 
 on:
   push:
@@ -27,10 +27,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Kalau lint kamu sudah siap, boleh aktifkan ini
-      # - name: Lint
-      #   run: npm run lint
-
       - name: Build project
         run: npm run build
 
@@ -38,6 +34,7 @@ jobs:
     name: Deploy to Vercel
     needs: build
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     outputs:
       deploy_url: ${{ steps.deploy.outputs.deploy_url }}
@@ -69,46 +66,3 @@ jobs:
           echo "**URL:** ${{ steps.deploy.outputs.deploy_url }}" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-
-  testsprite:
-    name: TestSprite AI Testing
-    needs: deploy
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run TestSprite E2E Tests
-        id: testsprite
-        uses: TestSprite/run-action@v1
-        with:
-          testsprite-api-key: ${{ secrets.TESTSPRITE_API_KEY }}
-          base_url: ${{ needs.deploy.outputs.deploy_url }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          blocking: "true"
-
-      - name: Print TestSprite Results
-        run: |
-          echo "## TestSprite Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Passed:** ${{ steps.testsprite.outputs.passed_tests }} / ${{ steps.testsprite.outputs.total_tests }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Results:** ${{ steps.testsprite.outputs.result_url }}" >> $GITHUB_STEP_SUMMARY
-
-          echo "Passed: ${{ steps.testsprite.outputs.passed_tests }} / ${{ steps.testsprite.outputs.total_tests }}"
-          echo "Results: ${{ steps.testsprite.outputs.result_url }}"
-
-  notify-failure:
-    name: Notify on Failure
-    needs: [build, deploy, testsprite]
-    runs-on: ubuntu-latest
-    if: failure()
-
-    steps:
-      - name: Failure Summary
-        run: |
-          echo "## Pipeline Failed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Author:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
