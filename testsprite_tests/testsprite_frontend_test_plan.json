@@ -1,0 +1,323 @@
+[
+  {
+    "id": "TC001",
+    "title": "Dashboard loads operational overview content",
+    "description": "This verifies that an analyst can open the dashboard and review the key operational widgets rendered from mock data.",
+    "category": "Dashboard UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /dashboards"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify dashboard metric cards are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an activity chart is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify recent jobs and notifications are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Sync jobs page shows list and controls",
+    "description": "This verifies that an operations user can open the sync jobs page and see the list, filters, pagination, and job detail access points.",
+    "category": "Sync Jobs UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /sync-jobs"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the sync jobs list is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify filtering controls are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pagination controls are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify job detail access is available"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Sign in form shows required controls",
+    "description": "This verifies that a guest can open the sign-in screen and see the controls needed to start signing in.",
+    "category": "Sign-in UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /sign-in"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the email or username input is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the password input is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the login action is available"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Sync job details open from the list",
+    "description": "This verifies that a user can open a sync job from the list and inspect its detail view.",
+    "category": "Sync Jobs UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /sync-jobs"
+      },
+      {
+        "type": "action",
+        "description": "Open a job from the list"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the job detail drawer is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the selected job details are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Sync jobs filter narrows the visible jobs",
+    "description": "This verifies that applying a filter changes the visible sync jobs list in a way the user can observe.",
+    "category": "Sync Jobs UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /sync-jobs"
+      },
+      {
+        "type": "action",
+        "description": "Select a job filter value"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the visible jobs list updates to reflect the filter"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the filtered results remain on the sync jobs page"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Empty sign-in submission shows validation",
+    "description": "This verifies that submitting the sign-in form without credentials produces UI validation feedback and does not leave the sign-in screen.",
+    "category": "Sign-in UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /sign-in"
+      },
+      {
+        "type": "action",
+        "description": "Click the login action"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the user remains on the sign-in page"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "Dashboard displays populated widgets",
+    "description": "This verifies that the dashboard presents meaningful metric and trend content rather than an empty or broken layout.",
+    "category": "Dashboard UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /dashboards"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify dashboard metric cards are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify dashboard trend data is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify operational activity content is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Sync jobs pagination moves through results",
+    "description": "This verifies that a user can browse beyond the first page of sync jobs and see a different set of results.",
+    "category": "Sync Jobs UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /sync-jobs"
+      },
+      {
+        "type": "action",
+        "description": "Advance to the next page of results"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a different set of jobs is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pagination indicates the page change"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Information pages render from app navigation",
+    "description": "This verifies that a user can move through the informational pages and see each route's expected content.",
+    "category": "Dashboard UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /monitoring"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify monitoring content is displayed"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to the data mapping page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify data mapping content is displayed"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to the settings page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify settings content is displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC010",
+    "title": "Review settings information",
+    "description": "A guest user can open the settings page and review the settings options shown there.",
+    "category": "Settings Page",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /settings"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify settings options are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC011",
+    "title": "Review data mapping information",
+    "description": "A guest user can open the data mapping page and review the data mapping information shown there.",
+    "category": "Data Mapping Page",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /data-mapping"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify data mapping information is displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC012",
+    "title": "Review monitoring information",
+    "description": "A guest user can open the monitoring page and review the monitoring information shown there.",
+    "category": "Monitoring Page",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /monitoring"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify monitoring information is displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC013",
+    "title": "Sync job details can be closed and reopened",
+    "description": "This verifies that a user can dismiss a job detail view and open another job detail again without losing list navigation.",
+    "category": "Sync Jobs UI",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /sync-jobs"
+      },
+      {
+        "type": "action",
+        "description": "Open a job from the list"
+      },
+      {
+        "type": "action",
+        "description": "Close the job detail drawer"
+      },
+      {
+        "type": "action",
+        "description": "Open a job from the list again"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the job detail drawer is displayed again"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the job details are displayed"
+      }
+    ],
+    "priority": "Low"
+  }
+]

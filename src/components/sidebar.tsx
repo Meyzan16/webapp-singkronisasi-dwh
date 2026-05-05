@@ -8,7 +8,7 @@ export const Sidebar = () => {
     return (
         <aside className="h-full flex flex-col p-2 w-full  bg-neutral-100 text-white justify-between">
                 <Link className="px-4" href="/">
-                    <Image src="/jamkrindo.png" alt="logo" width={164} height={48} />
+                    <Image src="/logo.svg" alt="logo" width={164} height={48} />
                 </Link>
                 <DottedSeparator className="my-4" />
                 <Navigation />

@@ -23,7 +23,7 @@ const AuthLayout = ({ children }: AuthLayoutProps) => {
         <nav className="flex justify-between items-center">
           <Image src="/Danantara.png" height={60} width={152} alt="logo" />
           <div className="flex items-center gap-2">
-            <Image src="/jamkrindo.png" height={60} width={152} alt="logo" />
+            <Image src="/logo.svg" height={60} width={152} alt="logo" />
           </div>
         </nav>
       </div>
