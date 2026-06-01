@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+backend/.venv/
+__pycache__/
 
 # next.js
 /.next/
