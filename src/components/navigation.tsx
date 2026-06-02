@@ -1,40 +1,45 @@
 "use client";
 
-import { SettingsIcon, Database, Activity, LogOut } from "lucide-react";
+import { SettingsIcon, LogOut, BarChart3, TrendingUp, Zap, Grid2X2, LineChart } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useContext } from "react";
 import Link from "next/link";
-import { GoHome, GoHomeFill, GoSync } from "react-icons/go";
 import DottedSeparator from "./ui/dotted-separator";
 import { GlobalContext } from "@/app/context";
 
 const routes = [
   {
-    label: "Dashboard (Dasbor Utama)",
+    label: "Dashboard",
     href: "/dashboards",
-    icon: GoHome,
-    activeIcon: GoHomeFill,
+    icon: Grid2X2,
+    activeIcon: Grid2X2,
   },
   {
-    label: "Synchronization Jobs (Manajemen Sinkronisasi)",
-    href: "/sync-jobs",
-    icon: GoSync,
-    activeIcon: GoSync,
+    label: "Scanner",
+    href: "/scanner",
+    icon: BarChart3,
+    activeIcon: BarChart3,
   },
   {
-    label: "Data Mapping & Configuration (Konfigurasi Data)",
-    href: "/data-mapping",
-    icon: Database,
-    activeIcon: Database,
+    label: "Signal Feed",
+    href: "/signals",
+    icon: Zap,
+    activeIcon: Zap,
   },
   {
-    label: "Monitoring & Logs (Pemantauan dan Jejak Audit)",
-    href: "/monitoring",
-    icon: Activity,
-    activeIcon: Activity,
+    label: "Charts",
+    href: "/charts",
+    icon: LineChart,
+    activeIcon: LineChart,
   },
   {
-    label: "Settings & Access (Pengaturan Sistem)",
+    label: "Backtest",
+    href: "/backtest",
+    icon: TrendingUp,
+    activeIcon: TrendingUp,
+  },
+  {
+    label: "Settings",
     href: "/settings",
     icon: SettingsIcon,
     activeIcon: SettingsIcon,

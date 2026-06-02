@@ -4,29 +4,33 @@ import { usePathname } from "next/navigation";
 const pathnameMap = {
   "dashboards": {
     title: "Dashboard",
-    description: "Overview of all synchronization activities",
+    description: "Portfolio summary & active signals",
   },
-  "sync-jobs": {
-    title: "Synchronization Jobs",
-    description: "Manage and monitor all synchronization tasks",
+  "scanner": {
+    title: "Scanner",
+    description: "Volume heatmap & top movers",
   },
-  "data-mapping": {
-    title: "Data Mapping & Configuration",
-    description: "Configure data mapping between source and target systems",
+  "signals": {
+    title: "Signal Feed",
+    description: "Live trading signals with entry/SL/TP",
   },
-  "monitoring": {
-    title: "Monitoring & Logs",
-    description: "Track audit trails and system activity logs",
+  "charts": {
+    title: "Charts",
+    description: "Technical analysis with EMA & S/R zones",
+  },
+  "backtest": {
+    title: "Backtest",
+    description: "Strategy testing against historical data",
   },
   "settings": {
-    title: "Settings & Access",
-    description: "Manage system settings and user permissions",
+    title: "Settings",
+    description: "Agent configuration & risk rules",
   },
 };
 
 const defaultMap = {
-  title: "Home",
-  description: "Monitor all synchronization activities",
+  title: "Crypto Trading Agent",
+  description: "AI-powered multi-timeframe technical analysis",
 };
 
 export const Navbar = () => {
