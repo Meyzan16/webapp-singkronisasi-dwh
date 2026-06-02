@@ -11,6 +11,7 @@ from app.api.v1.wyckoff import router as wyckoff_router
 from app.api.v1.support_resistance import router as sr_router
 from app.api.v1.pattern import router as pattern_router
 from app.api.v1.trigger import router as trigger_router
+from app.api.v1.signals import router as signals_router
 from app.config import get_settings
 from app.database import AsyncSessionLocal, create_db_schema, dispose_engine
 from app.services.data_pipeline.binance_client import BinanceClient
@@ -57,6 +58,7 @@ app.include_router(wyckoff_router, prefix=settings.api_v1_prefix)
 app.include_router(sr_router, prefix=settings.api_v1_prefix)
 app.include_router(pattern_router, prefix=settings.api_v1_prefix)
 app.include_router(trigger_router, prefix=settings.api_v1_prefix)
+app.include_router(signals_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health")

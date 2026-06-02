@@ -185,3 +185,45 @@ class BatchTriggerAnalysisResponseSchema(BaseModel):
 
     analysis: list[TriggerAnalysisResponseSchema]
     timestamp: str
+
+
+class SignalReasoningSchema(BaseModel):
+    """Reasoning chain for the signal."""
+
+    phase: str
+    T0_wyckoff: str
+    T1_trend: str
+    T2_support_resistance: str
+    T3_pattern: str
+    T4_trigger: str
+
+
+class SignalCardSchema(BaseModel):
+    """Complete trading signal with full reasoning."""
+
+    pair: str
+    timeframe: str
+    direction: str  # "LONG" or "SHORT"
+    entry: float
+    stop_loss: float
+    take_profit: float
+    risk_reward: str  # "1:3.0" format
+    confidence: float  # 0-100
+    position_size_pct: float
+    reasoning: SignalReasoningSchema
+    timestamp: str
+
+
+class SignalResponseSchema(BaseModel):
+    """API response for signal generation."""
+
+    signal: Optional[SignalCardSchema]
+    skip_reason: Optional[str]  # If signal is None, why it was skipped
+    timestamp: str
+
+
+class BatchSignalResponseSchema(BaseModel):
+    """API response for batch signal generation."""
+
+    signals: list[SignalCardSchema]
+    timestamp: str
