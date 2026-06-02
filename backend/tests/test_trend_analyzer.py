@@ -18,7 +18,7 @@ class TestEMA:
 
     def test_ema_basic(self):
         """Test basic EMA calculation."""
-        closes = [100, 102, 101, 103, 105, 104, 106, 108, 107, 109]
+        closes = [100 + i * 0.5 for i in range(30)]  # Need >= 21 data points
         ema_data = get_ema_pair(closes)
 
         # EMA should exist for this data length
@@ -63,8 +63,9 @@ class TestSwingPoints:
 
     def test_swing_points_basic(self):
         """Test basic swing point detection."""
-        highs = [100, 110, 105, 115, 112, 120, 118, 125, 122]
-        lows = [95, 100, 98, 108, 105, 110, 110, 118, 115]
+        # Data with clear swings: up-down-up-down-up pattern
+        highs = [100, 110, 105, 95,  108, 115, 100, 90,  112, 118, 105]
+        lows  = [95,  105, 100, 88,  102, 108, 94,  82,  106, 112, 98]
 
         swings = detect_swing_points(highs, lows)
 

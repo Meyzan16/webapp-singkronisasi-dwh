@@ -98,7 +98,7 @@ def build_signal_card(
         "T4": (trigger_confidence, 0.3),  # Trigger is most important
     }
 
-    total_confidence = sum(score * weight for score, (_, weight) in weights.items() if weight)
+    total_confidence = sum(score * weight for _, (score, weight) in weights.items() if weight)
     confidence = min(100.0, total_confidence)
 
     # Format R:R ratio

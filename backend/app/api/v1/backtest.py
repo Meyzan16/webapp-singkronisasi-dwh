@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.database import get_db
+from app.database import get_session as get_db
 from app.services.data_pipeline.kline_repository import KlineRepository
 from app.services.signal_generator.pipeline import SignalPipeline
 from app.services.backtest_engine.backtest import BacktestEngine, BacktestMetrics
