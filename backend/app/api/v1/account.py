@@ -48,10 +48,9 @@ class SpotBalanceResponse(BaseModel):
     total_usdt: float
 
 
-def _sign(secret: str, params: dict) -> str:
+def _sign(secret: str, query_string: str) -> str:
     """HMAC-SHA256 signature for Binance API."""
-    query = urlencode(params)
-    return hmac.new(secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(secret.encode("utf-8"), query_string.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 async def _binance_get(
@@ -61,31 +60,32 @@ async def _binance_get(
     testnet: bool = False,
 ) -> dict:
     """Signed GET request to Binance API."""
-    # Try known accessible domains in order
     base_urls = [
-        "https://data-api.binance.vision",  # accessible from Indonesia (public only)
-        "https://api.binance.com",           # main (blocked in Indonesia)
+        "https://api.binance.com",
         "https://api1.binance.com",
         "https://api2.binance.com",
+        "https://api3.binance.com",
     ]
     if testnet:
         base_urls = ["https://testnet.binance.vision"]
 
-    params = {"timestamp": int(time.time() * 1000), "recvWindow": 10000}
-    params["signature"] = _sign(api_secret, params)
+    # Build query string manually for deterministic signing
+    timestamp = int(time.time() * 1000)
+    query_string = f"timestamp={timestamp}&recvWindow=10000"
+    signature = _sign(api_secret, query_string)
+    full_query = f"{query_string}&signature={signature}"
 
     headers = {"X-MBX-APIKEY": api_key}
 
     last_error = "All endpoints unreachable"
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=15, verify=True) as client:
         for base in base_urls:
             try:
-                url = f"{base}{path}"
-                resp = await client.get(url, params=params, headers=headers)
+                url = f"{base}{path}?{full_query}"
+                resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     return resp.json()
                 if resp.status_code in (401, 403):
-                    # Bad credentials — no point trying other domains
                     raise HTTPException(
                         status_code=401,
                         detail=f"Invalid API credentials: {resp.json().get('msg', resp.text)}",
