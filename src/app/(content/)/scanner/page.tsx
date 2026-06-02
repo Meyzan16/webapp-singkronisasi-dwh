@@ -18,40 +18,36 @@ const TRADING_PAIRS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "SUIUSDT"];
 
 export default function ScannerPage() {
   const [pairData, setPairData] = useState<PairData[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchKlineData();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchKlineData, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   const fetchKlineData = async () => {
     try {
-      setIsLoading(true);
       setError(null);
 
       // Fetch klines data from backend for 1H timeframe
       const data: PairData[] = [];
+
+      interface Kline {
+        open: string;
+        close: string;
+        volume: string;
+      }
 
       for (const pair of TRADING_PAIRS) {
         try {
           const response = await fetch(`/api/v1/klines/${pair}/1h?limit=100`);
           if (response.ok) {
             const result = await response.json();
-            const klines = result.klines;
+            const klines: Kline[] = result.klines;
 
             if (klines && klines.length > 0) {
               const latest = klines[klines.length - 1];
-              const prev = klines[klines.length - 2];
 
               // Calculate 24h change
-              const change24h = ((latest.close - klines[0].close) / klines[0].close) * 100;
+              const change24h = ((parseFloat(latest.close) - parseFloat(klines[0].close)) / parseFloat(klines[0].close)) * 100;
 
               // Calculate average volume
-              const volumesLast7 = klines.slice(-7).map((k: any) => parseFloat(k.volume));
+              const volumesLast7 = klines.slice(-7).map((k) => parseFloat(k.volume));
               const avgVolume = volumesLast7.reduce((a: number, b: number) => a + b, 0) / volumesLast7.length;
               const currentVolume = parseFloat(latest.volume);
               const volumeSpike = currentVolume > avgVolume * 1.5;
@@ -75,10 +71,20 @@ export default function ScannerPage() {
     } catch (err) {
       setError("Failed to fetch market data");
       console.error(err);
-    } finally {
-      setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    const initData = async () => {
+      await fetchKlineData();
+    };
+    void initData();
+    // Refresh every 30 seconds
+    const interval = setInterval(() => {
+      void initData();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Sort by volume spike and change
   const sortedPairs = [...pairData].sort((a, b) => {
