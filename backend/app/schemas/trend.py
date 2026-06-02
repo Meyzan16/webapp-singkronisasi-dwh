@@ -44,3 +44,30 @@ class BatchTrendAnalysisResponseSchema(BaseModel):
 
     analysis: list[TrendAnalysisResponseSchema]
     timestamp: str
+
+
+class WyckoffStateSchema(BaseModel):
+    """Schema for Wyckoff phase state."""
+
+    phase: str  # "Accumulation", "Mark Up", "Distribution", "Mark Down"
+    strength: float  # 0-100
+    description: str
+    support_level: float
+    resistance_level: float
+    volume_trend: str  # "increasing", "decreasing", "normal", "unknown"
+
+
+class WyckoffAnalysisResponseSchema(BaseModel):
+    """API response for Wyckoff phase analysis."""
+
+    pair: str
+    timeframe: str
+    wyckoff: WyckoffStateSchema
+    timestamp: str
+
+
+class BatchWyckoffAnalysisResponseSchema(BaseModel):
+    """API response for batch Wyckoff analysis."""
+
+    analysis: list[WyckoffAnalysisResponseSchema]
+    timestamp: str

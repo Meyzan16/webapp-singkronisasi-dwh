@@ -7,6 +7,7 @@ Provides T0-T4 analysis layers for trading signal generation.
 from .ema import calculate_ema, get_latest_ema, get_ema_pair
 from .trendline import detect_swing_points, detect_trendline, SwingPoint, Trendline
 from .trend_analyzer import analyze_trend, TrendState
+from .wyckoff import detect_wyckoff_phase, WyckoffPhase, WyckoffState
 
 __all__ = [
     # EMA
@@ -21,4 +22,8 @@ __all__ = [
     # Trend analyzer
     "analyze_trend",
     "TrendState",
+    # Wyckoff
+    "detect_wyckoff_phase",
+    "WyckoffPhase",
+    "WyckoffState",
 ]
