@@ -1,1 +1,3 @@
-// Settings components will be added as features expand
+export { RiskConfig } from "./RiskConfig";
+export { TAParametersForm } from "./TAParametersForm";
+export { APIKeyForm } from "./APIKeyForm";
