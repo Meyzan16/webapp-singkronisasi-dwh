@@ -157,3 +157,31 @@ class BatchPatternAnalysisResponseSchema(BaseModel):
 
     analysis: list[PatternAnalysisResponseSchema]
     timestamp: str
+
+
+class TriggerSignalSchema(BaseModel):
+    """Schema for entry trigger signal."""
+
+    direction: str  # "buy" or "sell"
+    confidence: float  # 0-100
+    candlestick_pattern: Optional[str]
+    stochastic_signal: Optional[str]
+    has_volume_spike: bool
+    taker_buy_pressure: Optional[float]
+    reasoning: str
+
+
+class TriggerAnalysisResponseSchema(BaseModel):
+    """API response for trigger analysis."""
+
+    pair: str
+    timeframe: str
+    trigger: Optional[TriggerSignalSchema]
+    timestamp: str
+
+
+class BatchTriggerAnalysisResponseSchema(BaseModel):
+    """API response for batch trigger analysis."""
+
+    analysis: list[TriggerAnalysisResponseSchema]
+    timestamp: str

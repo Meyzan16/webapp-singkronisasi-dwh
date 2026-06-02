@@ -18,6 +18,9 @@ from .pattern_detector import (
     MarketStructureAnalysis,
     MarketStructure,
 )
+from .stochastic import calculate_stochastic, get_latest_stochastic, detect_stochastic_signal, StochasticValue
+from .candlestick import detect_candlestick_pattern, CandlePattern
+from .trigger_analyzer import detect_trigger, validate_no_dry_volume, TriggerSignal
 
 __all__ = [
     # EMA
@@ -50,4 +53,16 @@ __all__ = [
     "PatternType",
     "MarketStructureAnalysis",
     "MarketStructure",
+    # Stochastic
+    "calculate_stochastic",
+    "get_latest_stochastic",
+    "detect_stochastic_signal",
+    "StochasticValue",
+    # Candlestick
+    "detect_candlestick_pattern",
+    "CandlePattern",
+    # Trigger
+    "detect_trigger",
+    "validate_no_dry_volume",
+    "TriggerSignal",
 ]
