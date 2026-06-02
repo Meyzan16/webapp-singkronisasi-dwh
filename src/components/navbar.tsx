@@ -22,6 +22,10 @@ const pathnameMap = {
     title: "Backtest",
     description: "Strategy testing against historical data",
   },
+  "architecture": {
+    title: "Architecture",
+    description: "14-step build order & system design",
+  },
   "settings": {
     title: "Settings",
     description: "Agent configuration & risk rules",

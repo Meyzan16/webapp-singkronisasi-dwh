@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsIcon, LogOut, BarChart3, TrendingUp, Zap, Grid2X2, LineChart } from "lucide-react";
+import { SettingsIcon, LogOut, BarChart3, TrendingUp, Zap, Grid2X2, LineChart, BookOpen } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useContext } from "react";
 import Link from "next/link";
@@ -37,6 +37,12 @@ const routes = [
     href: "/backtest",
     icon: TrendingUp,
     activeIcon: TrendingUp,
+  },
+  {
+    label: "Architecture",
+    href: "/architecture",
+    icon: BookOpen,
+    activeIcon: BookOpen,
   },
   {
     label: "Settings",
