@@ -13,10 +13,8 @@ interface DatePickerProps {
 
 export default function CustomDatePicker({ value, onChange }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [selectedRange, setSelectedRange] = useState("Last 7 Days");
 
   const handlePresetChange = (preset: string) => {
-    setSelectedRange(preset);
     const today = new Date();
     let startDate: Date | null = null;
     let endDate: Date | null = null;

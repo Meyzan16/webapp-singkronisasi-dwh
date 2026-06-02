@@ -80,7 +80,7 @@ function TableComponents<T extends Record<string, unknown> & { id: string }>({
   const handleRowSelect = (id: string, checked: boolean) => {
     setSelectedRows((prev) => {
       const next = new Set(prev);
-      checked ? next.add(id) : next.delete(id);
+      if (checked) { next.add(id); } else { next.delete(id); }
       return next;
     });
     onRowCheckboxChange?.(id, checked);

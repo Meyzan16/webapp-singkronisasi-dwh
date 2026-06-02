@@ -1,12 +1,9 @@
 "use client";
 
 import AlertComponent from "@/components/ui/alert";
-import {Button} from "@/components/ui/button";
 import Image from "next/image";
 import React, { useContext } from "react";
 import { GlobalContext } from "../context";
-import { usePathname } from "next/navigation";
-import Link from "next/link";
 
 interface AuthLayoutProps {
   children: React.ReactNode;
@@ -14,8 +11,6 @@ interface AuthLayoutProps {
 
 const AuthLayout = ({ children }: AuthLayoutProps) => {
   const { openAlert } = useContext(GlobalContext)!;
-  const pathname = usePathname();
-  const isSignIn = pathname === "/sign-in";
 
   return (
     <main className="bg-neutral-100 min-h-screen flex flex-col">

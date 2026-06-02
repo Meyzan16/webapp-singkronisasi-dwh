@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import React, { useContext, useEffect, useState } from "react";
+import { useContext, useCallback, useEffect, useMemo, useRef } from "react";
 import { GlobalContext } from "@/app/context";
 import type { AlertSeverity } from "@/app/context";
 
@@ -33,28 +33,31 @@ const DISMISS_DURATION: Record<AlertSeverity, number> = {
 
 const AlertComponent = () => {
   const { openAlert, setOpenAlert } = useContext(GlobalContext)!;
-  const [isVisible, setIsVisible] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const dismiss = () => {
-    setIsVisible(false);
-    setTimeout(() => {
-      setOpenAlert({ status: false, message: "", severity: "" });
-    }, 300);
-  };
+  const isVisible = useMemo(
+    () => Boolean(openAlert.status && openAlert.severity),
+    [openAlert.status, openAlert.severity]
+  );
+
+  const dismiss = useCallback(() => {
+    setOpenAlert({ status: false, message: "", severity: "" });
+  }, [setOpenAlert]);
 
   useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
     if (!openAlert.status || !openAlert.severity) return;
-
-    setIsVisible(true);
 
     const duration = DISMISS_DURATION[openAlert.severity as AlertSeverity];
     if (duration === 0) return; // error — manual dismiss only
 
-    const timer = setTimeout(dismiss, duration);
-    return () => clearTimeout(timer);
-  }, [openAlert.status]);
+    timerRef.current = setTimeout(dismiss, duration);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [openAlert.status, openAlert.severity, dismiss]);
 
-  if (!openAlert.status || !openAlert.severity) return null;
+  if (!isVisible) return null;
 
   const severity = openAlert.severity as AlertSeverity;
 
@@ -62,8 +65,7 @@ const AlertComponent = () => {
     <div
       role="alert"
       aria-live="assertive"
-      className={`fixed left-1/2 top-0 z-[9999] -translate-x-1/2 transition-all duration-300
-        ${isVisible ? "translate-y-6 opacity-100" : "-translate-y-full opacity-0"}
+      className={`fixed left-1/2 top-0 z-[9999] -translate-x-1/2 translate-y-6 opacity-100
         ${SEVERITY_STYLES[severity]}
         flex items-center gap-3 rounded-full px-5 py-3 shadow-lg`}
     >
