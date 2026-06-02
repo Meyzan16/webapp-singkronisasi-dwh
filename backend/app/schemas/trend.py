@@ -71,3 +71,41 @@ class BatchWyckoffAnalysisResponseSchema(BaseModel):
 
     analysis: list[WyckoffAnalysisResponseSchema]
     timestamp: str
+
+
+class SRZoneSchema(BaseModel):
+    """Schema for support/resistance zone."""
+
+    zone_type: str  # "Support" or "Resistance"
+    price_low: float
+    price_high: float
+    midpoint: float
+    num_bounces: int
+    strength: float  # 0-100
+    is_fibonacci: bool
+
+
+class SRAnalysisSchema(BaseModel):
+    """Schema for complete S/R analysis."""
+
+    support_zones: list[SRZoneSchema]
+    resistance_zones: list[SRZoneSchema]
+    strongest_support: Optional[SRZoneSchema]
+    strongest_resistance: Optional[SRZoneSchema]
+    current_price: float
+
+
+class SRAnalysisResponseSchema(BaseModel):
+    """API response for S/R analysis."""
+
+    pair: str
+    timeframe: str
+    analysis: SRAnalysisSchema
+    timestamp: str
+
+
+class BatchSRAnalysisResponseSchema(BaseModel):
+    """API response for batch S/R analysis."""
+
+    analysis: list[SRAnalysisResponseSchema]
+    timestamp: str

@@ -8,6 +8,7 @@ from .ema import calculate_ema, get_latest_ema, get_ema_pair
 from .trendline import detect_swing_points, detect_trendline, SwingPoint, Trendline
 from .trend_analyzer import analyze_trend, TrendState
 from .wyckoff import detect_wyckoff_phase, WyckoffPhase, WyckoffState
+from .support_resistance import detect_support_resistance, validate_entry_with_sr, SRZone, SRAnalysis, ZoneType
 
 __all__ = [
     # EMA
@@ -26,4 +27,10 @@ __all__ = [
     "detect_wyckoff_phase",
     "WyckoffPhase",
     "WyckoffState",
+    # Support/Resistance
+    "detect_support_resistance",
+    "validate_entry_with_sr",
+    "SRZone",
+    "SRAnalysis",
+    "ZoneType",
 ]

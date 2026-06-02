@@ -1,0 +1,107 @@
+<h2 class="sr-only">Mockup halaman backtest: strategy tester dan performance metrics</h2>
+<style>
+*{box-sizing:border-box;margin:0}
+.page{display:flex;gap:0;font-family:var(--font-sans);background:var(--color-background-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;min-height:560px}
+.side{width:180px;min-width:180px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);padding:16px 12px;display:flex;flex-direction:column;gap:4px}
+.logo{font-size:14px;font-weight:500;color:var(--color-text-primary);padding:8px 10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.logo span{display:block;font-size:11px;font-weight:400;color:var(--color-text-tertiary);margin-top:2px}
+.ni{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--border-radius-md);font-size:13px;color:var(--color-text-secondary);cursor:pointer}
+.ni:hover{background:var(--color-background-secondary)}
+.ni.a{background:#1D9E75;color:#fff}
+.ni i{font-size:16px}
+.main{flex:1;padding:20px;overflow:hidden}
+.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.hd h1{font-size:18px;font-weight:500}
+.btn-run{padding:6px 16px;border-radius:var(--border-radius-md);border:none;font-size:12px;color:#fff;background:#1D9E75;cursor:pointer;display:flex;align-items:center;gap:6px}
+.config{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.cfg{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);font-size:11px;color:var(--color-text-secondary)}
+.cfg select,.cfg input{border:none;background:transparent;font-size:11px;font-weight:500;color:var(--color-text-primary);outline:none;font-family:var(--font-sans)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.stat{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px 12px}
+.stat .lbl{font-size:10px;color:var(--color-text-tertiary)}
+.stat .val{font-size:16px;font-weight:500;color:var(--color-text-primary);margin-top:2px}
+.stat .val.green{color:#0F6E56}
+.stat .val.red{color:#A32D2D}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:10px}
+.card h3{font-size:13px;font-weight:500;margin-bottom:10px}
+.eq-chart{height:100px;position:relative;border-bottom:0.5px solid var(--color-border-tertiary)}
+.eq-line{position:absolute;bottom:0;left:0;right:0}
+.eq-area{fill:rgba(29,158,117,0.1);stroke:none}
+.eq-stroke{fill:none;stroke:#1D9E75;stroke-width:1.5}
+.eq-labels{display:flex;justify-content:space-between;font-size:9px;color:var(--color-text-tertiary);padding-top:4px}
+.journal{width:100%;font-size:11px;border-collapse:collapse}
+.journal th{text-align:left;font-size:10px;color:var(--color-text-tertiary);font-weight:400;padding:6px 4px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.journal td{padding:7px 4px;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary)}
+.journal .mono{font-family:var(--font-mono);font-size:10px}
+.pill-s{padding:2px 6px;border-radius:8px;font-size:9px;font-weight:500}
+.pill-w{background:#E1F5EE;color:#085041}
+.pill-l{background:#FCEBEB;color:#791F1F}
+.pill-lg{background:#E1F5EE;color:#085041}
+.pill-sh{background:#FCEBEB;color:#791F1F}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.insight-item{padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary);font-size:12px}
+.insight-item:last-child{border:none}
+.insight-label{font-weight:500;color:var(--color-text-primary);margin-bottom:2px}
+.insight-desc{color:var(--color-text-secondary);font-size:11px}
+</style>
+<div class="page">
+<div class="side">
+<div class="logo">Trading agent<span>On-chain crypto</span></div>
+<div class="ni"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> Dashboard</div>
+<div class="ni"><i class="ti ti-antenna-bars-5" aria-hidden="true"></i> Signal feed</div>
+<div class="ni"><i class="ti ti-radar-2" aria-hidden="true"></i> Scanner</div>
+<div class="ni"><i class="ti ti-chart-candle" aria-hidden="true"></i> Charts</div>
+<div class="ni a"><i class="ti ti-flask" aria-hidden="true"></i> Backtest</div>
+<div class="ni"><i class="ti ti-settings" aria-hidden="true"></i> Settings</div>
+</div>
+<div class="main">
+<div class="hd"><h1>Backtest</h1><div class="btn-run"><i class="ti ti-player-play" style="font-size:14px" aria-hidden="true"></i> Run backtest</div></div>
+<div class="config">
+<div class="cfg">Pair: <select><option>BONK/USDT</option></select></div>
+<div class="cfg">From: <input type="text" value="2025-01-01" style="width:80px"></div>
+<div class="cfg">To: <input type="text" value="2025-06-01" style="width:80px"></div>
+<div class="cfg">Capital: <input type="text" value="$10,000" style="width:60px"></div>
+<div class="cfg">Risk: <input type="text" value="2%" style="width:30px"></div>
+</div>
+<div class="stats">
+<div class="stat"><div class="lbl">Net profit</div><div class="val green">+$3,240</div></div>
+<div class="stat"><div class="lbl">Win rate</div><div class="val">68%</div></div>
+<div class="stat"><div class="lbl">Max drawdown</div><div class="val red">-8.4%</div></div>
+<div class="stat"><div class="lbl">Sharpe ratio</div><div class="val">1.82</div></div>
+<div class="stat"><div class="lbl">Total trades</div><div class="val">60</div></div>
+<div class="stat"><div class="lbl">Avg R:R achieved</div><div class="val green">1:3.4</div></div>
+<div class="stat"><div class="lbl">Profit factor</div><div class="val green">2.1</div></div>
+<div class="stat"><div class="lbl">Avg hold time</div><div class="val">4.2h</div></div>
+</div>
+<div class="card">
+<h3>Equity curve</h3>
+<div class="eq-chart">
+<svg width="100%" height="100" viewBox="0 0 440 100" preserveAspectRatio="none">
+<polygon class="eq-area" points="0,80 30,75 60,70 90,78 120,65 150,55 180,60 210,48 240,42 270,50 300,38 330,30 360,25 390,20 420,15 440,12 440,100 0,100"/>
+<polyline class="eq-stroke" points="0,80 30,75 60,70 90,78 120,65 150,55 180,60 210,48 240,42 270,50 300,38 330,30 360,25 390,20 420,15 440,12"/>
+</svg>
+</div>
+<div class="eq-labels"><span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span></div>
+</div>
+<div class="row2">
+<div class="card">
+<h3>Trade journal (recent)</h3>
+<table class="journal">
+<tr><th>Pair</th><th>Dir</th><th>R:R</th><th>PnL</th><th>Result</th></tr>
+<tr><td>BONK</td><td><span class="pill-s pill-lg">Long</span></td><td class="mono">1:3.5</td><td class="mono" style="color:#0F6E56">+$180</td><td><span class="pill-s pill-w">Win</span></td></tr>
+<tr><td>SOL</td><td><span class="pill-s pill-lg">Long</span></td><td class="mono">1:4.1</td><td class="mono" style="color:#0F6E56">+$245</td><td><span class="pill-s pill-w">Win</span></td></tr>
+<tr><td>PEPE</td><td><span class="pill-s pill-sh">Short</span></td><td class="mono">1:3.0</td><td class="mono" style="color:#A32D2D">-$95</td><td><span class="pill-s pill-l">Loss</span></td></tr>
+<tr><td>WIF</td><td><span class="pill-s pill-lg">Long</span></td><td class="mono">1:3.2</td><td class="mono" style="color:#0F6E56">+$156</td><td><span class="pill-s pill-w">Win</span></td></tr>
+<tr><td>ARB</td><td><span class="pill-s pill-sh">Short</span></td><td class="mono">1:3.8</td><td class="mono" style="color:#0F6E56">+$210</td><td><span class="pill-s pill-w">Win</span></td></tr>
+</table>
+</div>
+<div class="card">
+<h3>Agent insights</h3>
+<div class="insight-item"><div class="insight-label">Best performing phase</div><div class="insight-desc">Accumulation: 78% win rate, avg R:R 1:3.8</div></div>
+<div class="insight-item"><div class="insight-label">Weakest pattern</div><div class="insight-desc">H&amp;S in mark up: only 45% win rate</div></div>
+<div class="insight-item"><div class="insight-label">Optimal timeframe</div><div class="insight-desc">1H trigger performs 12% better than 15m</div></div>
+<div class="insight-item"><div class="insight-label">Volume threshold</div><div class="insight-desc">Spike &gt; 2.5x has 74% win vs 58% for &lt; 2x</div></div>
+</div>
+</div>
+</div>
+</div>

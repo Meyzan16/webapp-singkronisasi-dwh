@@ -1,0 +1,157 @@
+<h2 class="sr-only">Mockup halaman charts: TA workspace dengan candlestick dan indikator</h2>
+<style>
+*{box-sizing:border-box;margin:0}
+.page{display:flex;gap:0;font-family:var(--font-sans);background:var(--color-background-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;min-height:560px}
+.side{width:180px;min-width:180px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);padding:16px 12px;display:flex;flex-direction:column;gap:4px}
+.logo{font-size:14px;font-weight:500;color:var(--color-text-primary);padding:8px 10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.logo span{display:block;font-size:11px;font-weight:400;color:var(--color-text-tertiary);margin-top:2px}
+.ni{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--border-radius-md);font-size:13px;color:var(--color-text-secondary);cursor:pointer}
+.ni:hover{background:var(--color-background-secondary)}
+.ni.a{background:#1D9E75;color:#fff}
+.ni i{font-size:16px}
+.main{flex:1;padding:20px;overflow:hidden}
+.chart-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.ch-left{display:flex;align-items:center;gap:12px}
+.ch-sym{font-size:16px;font-weight:500}
+.ch-price{font-size:14px;font-weight:500;color:#0F6E56}
+.ch-change{font-size:11px;color:#0F6E56}
+.pill-ph{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500;background:#FAEEDA;color:#633806}
+.tfs{display:flex;gap:2px}
+.tf{padding:4px 10px;border-radius:var(--border-radius-md);font-size:11px;color:var(--color-text-secondary);cursor:pointer;background:transparent}
+.tf.a{background:#1D9E75;color:#fff}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:0;margin-bottom:8px;overflow:hidden}
+.chart-area{position:relative;height:220px;padding:12px 16px}
+.chart-placeholder{width:100%;height:100%;position:relative}
+.sr-zone{position:absolute;left:0;right:0;border-radius:0;opacity:0.12}
+.sr-zone.sup{background:#1D9E75;bottom:48px;height:16px}
+.sr-zone.res{background:#E24B4A;top:22px;height:16px}
+.sr-label{position:absolute;font-size:9px;font-weight:500;right:8px}
+.sr-label.sup{bottom:50px;color:#0F6E56}
+.sr-label.res{top:24px;color:#A32D2D}
+.candle-row{position:absolute;bottom:24px;left:16px;right:50px;display:flex;align-items:flex-end;gap:3px;height:170px}
+.candle{display:flex;flex-direction:column;align-items:center;flex:1}
+.wick{width:1px;background:var(--color-text-tertiary)}
+.body{width:6px;border-radius:1px}
+.body.g{background:#1D9E75}
+.body.r{background:#E24B4A}
+.ema-line{position:absolute;left:16px;right:50px;border-top:1.5px dashed;pointer-events:none}
+.ema13{top:80px;border-color:#378ADD}
+.ema21{top:95px;border-color:#EF9F27}
+.ema-legend{position:absolute;right:8px;font-size:9px;font-weight:500}
+.ema-legend.l13{top:72px;color:#378ADD}
+.ema-legend.l21{top:88px;color:#EF9F27}
+.entry-line{position:absolute;left:16px;right:50px;top:120px;border-top:1px solid #1D9E75}
+.sl-line{position:absolute;left:16px;right:50px;top:168px;border-top:1px dashed #E24B4A}
+.tp-line{position:absolute;left:16px;right:50px;top:45px;border-top:1px dashed #1D9E75}
+.level-label{position:absolute;right:4px;font-size:8px;font-weight:500;padding:1px 4px;border-radius:3px}
+.level-label.entry{top:115px;background:#E1F5EE;color:#085041}
+.level-label.sl{top:163px;background:#FCEBEB;color:#791F1F}
+.level-label.tp{top:40px;background:#E1F5EE;color:#085041}
+.y-axis{position:absolute;right:0;top:0;bottom:0;width:48px;display:flex;flex-direction:column;justify-content:space-between;padding:8px 4px;font-size:9px;color:var(--color-text-tertiary);font-family:var(--font-mono);text-align:right;border-left:0.5px solid var(--color-border-tertiary)}
+.stoch-panel{border-top:0.5px solid var(--color-border-tertiary);padding:10px 16px;height:70px;position:relative}
+.stoch-label{font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px}
+.stoch-zone{position:absolute;left:16px;right:50px;height:10px;border-radius:2px;opacity:0.1}
+.stoch-ob{top:14px;background:#E24B4A}
+.stoch-os{bottom:8px;background:#1D9E75}
+.stoch-ob-lbl{position:absolute;right:8px;top:14px;font-size:8px;color:#A32D2D}
+.stoch-os-lbl{position:absolute;right:8px;bottom:8px;font-size:8px;color:#0F6E56}
+.stoch-k{position:absolute;left:16px;right:50px;top:42px;border-top:1.5px solid #378ADD}
+.stoch-d{position:absolute;left:16px;right:50px;top:46px;border-top:1.5px dashed #EF9F27}
+.stoch-cross{position:absolute;left:70%;top:40px;width:6px;height:6px;border-radius:50%;background:#1D9E75;border:1px solid #fff}
+.vol-panel{border-top:0.5px solid var(--color-border-tertiary);padding:10px 16px;height:50px}
+.vol-label{font-size:10px;color:var(--color-text-tertiary);margin-bottom:4px}
+.vol-bars{display:flex;align-items:flex-end;gap:3px;height:24px}
+.vb{flex:1;border-radius:1px 1px 0 0;min-height:2px}
+.vb.g{background:rgba(29,158,117,0.5)}
+.vb.r{background:rgba(226,75,74,0.4)}
+.vb.spike{background:#1D9E75}
+.info-bar{display:flex;gap:8px;padding:8px 12px;font-size:11px;color:var(--color-text-secondary)}
+.info-item{display:flex;align-items:center;gap:4px}
+.dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+</style>
+<div class="page">
+<div class="side">
+<div class="logo">Trading agent<span>On-chain crypto</span></div>
+<div class="ni"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> Dashboard</div>
+<div class="ni"><i class="ti ti-antenna-bars-5" aria-hidden="true"></i> Signal feed</div>
+<div class="ni"><i class="ti ti-radar-2" aria-hidden="true"></i> Scanner</div>
+<div class="ni a"><i class="ti ti-chart-candle" aria-hidden="true"></i> Charts</div>
+<div class="ni"><i class="ti ti-flask" aria-hidden="true"></i> Backtest</div>
+<div class="ni"><i class="ti ti-settings" aria-hidden="true"></i> Settings</div>
+</div>
+<div class="main">
+<div class="chart-head">
+<div class="ch-left">
+<span class="ch-sym">BONK/USDT</span>
+<span class="ch-price">$0.00002345</span>
+<span class="ch-change">+12.4%</span>
+<span class="pill-ph">Accumulation</span>
+</div>
+<div class="tfs">
+<span class="tf">1W</span><span class="tf">1D</span><span class="tf">4H</span><span class="tf a">1H</span><span class="tf">15m</span>
+</div>
+</div>
+<div class="card">
+<div class="chart-area">
+<div class="chart-placeholder">
+<div class="sr-zone res"></div><div class="sr-label res">Resistance (4x bounce)</div>
+<div class="sr-zone sup"></div><div class="sr-label sup">Support (3x bounce)</div>
+<div class="ema-line ema13"></div><div class="ema-legend l13">EMA 13</div>
+<div class="ema-line ema21"></div><div class="ema-legend l21">EMA 21</div>
+<div class="entry-line"></div><div class="level-label entry">Entry $0.0000234</div>
+<div class="sl-line"></div><div class="level-label sl">SL $0.0000218</div>
+<div class="tp-line"></div><div class="level-label tp">TP $0.0000282</div>
+<div class="candle-row">
+<div class="candle"><div class="wick" style="height:8px"></div><div class="body r" style="height:22px"></div><div class="wick" style="height:12px"></div></div>
+<div class="candle"><div class="wick" style="height:6px"></div><div class="body r" style="height:18px"></div><div class="wick" style="height:20px"></div></div>
+<div class="candle"><div class="wick" style="height:10px"></div><div class="body g" style="height:14px"></div><div class="wick" style="height:8px"></div></div>
+<div class="candle"><div class="wick" style="height:4px"></div><div class="body g" style="height:20px"></div><div class="wick" style="height:6px"></div></div>
+<div class="candle"><div class="wick" style="height:14px"></div><div class="body r" style="height:10px"></div><div class="wick" style="height:30px"></div></div>
+<div class="candle"><div class="wick" style="height:6px"></div><div class="body g" style="height:16px"></div><div class="wick" style="height:10px"></div></div>
+<div class="candle"><div class="wick" style="height:8px"></div><div class="body g" style="height:26px"></div><div class="wick" style="height:4px"></div></div>
+<div class="candle"><div class="wick" style="height:10px"></div><div class="body r" style="height:12px"></div><div class="wick" style="height:16px"></div></div>
+<div class="candle"><div class="wick" style="height:3px"></div><div class="body g" style="height:20px"></div><div class="wick" style="height:8px"></div></div>
+<div class="candle"><div class="wick" style="height:5px"></div><div class="body g" style="height:30px"></div><div class="wick" style="height:4px"></div></div>
+<div class="candle"><div class="wick" style="height:12px"></div><div class="body r" style="height:8px"></div><div class="wick" style="height:14px"></div></div>
+<div class="candle"><div class="wick" style="height:6px"></div><div class="body g" style="height:22px"></div><div class="wick" style="height:6px"></div></div>
+<div class="candle"><div class="wick" style="height:4px"></div><div class="body g" style="height:34px"></div><div class="wick" style="height:3px"></div></div>
+</div>
+<div class="y-axis"><span>0.0000290</span><span>0.0000260</span><span>0.0000234</span><span>0.0000218</span><span>0.0000200</span></div>
+</div>
+</div>
+<div class="stoch-panel">
+<div class="stoch-label">Stochastic (5,3,3)</div>
+<div class="stoch-zone stoch-ob"></div><span class="stoch-ob-lbl">80</span>
+<div class="stoch-zone stoch-os"></div><span class="stoch-os-lbl">20</span>
+<div class="stoch-k"></div>
+<div class="stoch-d"></div>
+<div class="stoch-cross" title="Cross up from oversold"></div>
+</div>
+<div class="vol-panel">
+<div class="vol-label">Volume</div>
+<div class="vol-bars">
+<div class="vb r" style="height:10px"></div>
+<div class="vb r" style="height:8px"></div>
+<div class="vb g" style="height:6px"></div>
+<div class="vb g" style="height:12px"></div>
+<div class="vb r" style="height:4px"></div>
+<div class="vb g" style="height:8px"></div>
+<div class="vb g" style="height:14px"></div>
+<div class="vb r" style="height:5px"></div>
+<div class="vb g" style="height:10px"></div>
+<div class="vb spike" style="height:24px"></div>
+<div class="vb r" style="height:4px"></div>
+<div class="vb g" style="height:12px"></div>
+<div class="vb spike" style="height:22px"></div>
+</div>
+</div>
+</div>
+<div class="info-bar">
+<div class="info-item"><span class="dot" style="background:#378ADD"></span> EMA 13</div>
+<div class="info-item"><span class="dot" style="background:#EF9F27"></span> EMA 21</div>
+<div class="info-item"><span class="dot" style="background:rgba(29,158,117,0.3)"></span> Support zone</div>
+<div class="info-item"><span class="dot" style="background:rgba(226,75,74,0.3)"></span> Resistance zone</div>
+<div class="info-item"><span class="dot" style="background:#1D9E75"></span> Volume spike</div>
+</div>
+</div>
+</div>

@@ -1,0 +1,119 @@
+<h2 class="sr-only">Mockup halaman scanner: volume heatmap dan token discovery</h2>
+<style>
+*{box-sizing:border-box;margin:0}
+.page{display:flex;gap:0;font-family:var(--font-sans);background:var(--color-background-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;min-height:580px}
+.side{width:180px;min-width:180px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);padding:16px 12px;display:flex;flex-direction:column;gap:4px}
+.logo{font-size:14px;font-weight:500;color:var(--color-text-primary);padding:8px 10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.logo span{display:block;font-size:11px;font-weight:400;color:var(--color-text-tertiary);margin-top:2px}
+.ni{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--border-radius-md);font-size:13px;color:var(--color-text-secondary);cursor:pointer}
+.ni:hover{background:var(--color-background-secondary)}
+.ni.a{background:#1D9E75;color:#fff}
+.ni i{font-size:16px}
+.main{flex:1;padding:20px;overflow:hidden}
+.hd{margin-bottom:14px}
+.hd h1{font-size:18px;font-weight:500}
+.hd p{font-size:12px;color:var(--color-text-tertiary);margin-top:2px}
+.tabs{display:flex;gap:4px;margin-bottom:14px}
+.tab{padding:6px 14px;border-radius:var(--border-radius-md);font-size:12px;color:var(--color-text-secondary);background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);cursor:pointer}
+.tab.a{background:#1D9E75;color:#fff;border-color:#1D9E75}
+.card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:12px}
+.card h3{font-size:13px;font-weight:500;margin-bottom:10px}
+.hmap{display:grid;grid-template-columns:repeat(8,1fr);gap:4px}
+.hcell{border-radius:4px;padding:6px 4px;text-align:center;cursor:pointer}
+.hcell .sym{font-size:10px;font-weight:500}
+.hcell .pct{font-size:9px;margin-top:2px}
+.h1{background:#E1F5EE}.h1 .sym{color:#085041}.h1 .pct{color:#0F6E56}
+.h2{background:#9FE1CB}.h2 .sym{color:#04342C}.h2 .pct{color:#085041}
+.h3{background:#5DCAA5}.h3 .sym{color:#04342C}.h3 .pct{color:#04342C}
+.h4{background:#FCEBEB}.h4 .sym{color:#791F1F}.h4 .pct{color:#A32D2D}
+.h5{background:#F09595}.h5 .sym{color:#501313}.h5 .pct{color:#791F1F}
+.h6{background:#FAEEDA}.h6 .sym{color:#633806}.h6 .pct{color:#854F0B}
+.tbl{width:100%;font-size:12px;border-collapse:collapse}
+.tbl th{text-align:left;font-size:10px;color:var(--color-text-tertiary);font-weight:400;padding:6px 4px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.tbl td{padding:8px 4px;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-primary)}
+.tbl .sym-cell{font-weight:500}
+.tbl .green{color:#0F6E56}
+.tbl .red{color:#A32D2D}
+.tbl .mono{font-family:var(--font-mono);font-size:11px}
+.pill-sm{padding:2px 6px;border-radius:8px;font-size:9px;font-weight:500}
+.pill-new{background:#E6F1FB;color:#0C447C}
+.pill-spike{background:#FAEEDA;color:#633806}
+.spike-bar{height:4px;border-radius:2px;background:var(--color-border-tertiary)}
+.spike-fill{height:100%;border-radius:2px;background:#1D9E75}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.listing-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
+.listing-item:last-child{border:none}
+.li-left{display:flex;align-items:center;gap:8px}
+.li-sym{font-size:13px;font-weight:500;color:var(--color-text-primary)}
+.li-sub{font-size:10px;color:var(--color-text-tertiary)}
+.li-time{font-size:11px;color:var(--color-text-tertiary)}
+.li-vol{font-size:11px;font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono)}
+</style>
+<div class="page">
+<div class="side">
+<div class="logo">Trading agent<span>On-chain crypto</span></div>
+<div class="ni"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> Dashboard</div>
+<div class="ni"><i class="ti ti-antenna-bars-5" aria-hidden="true"></i> Signal feed</div>
+<div class="ni a"><i class="ti ti-radar-2" aria-hidden="true"></i> Scanner</div>
+<div class="ni"><i class="ti ti-chart-candle" aria-hidden="true"></i> Charts</div>
+<div class="ni"><i class="ti ti-flask" aria-hidden="true"></i> Backtest</div>
+<div class="ni"><i class="ti ti-settings" aria-hidden="true"></i> Settings</div>
+</div>
+<div class="main">
+<div class="hd"><h1>Scanner</h1><p>Binance 24h volume scanner + new listing tracker</p></div>
+<div class="tabs">
+<div class="tab a">Volume heatmap</div>
+<div class="tab">Top movers</div>
+<div class="tab">New listings</div>
+<div class="tab">Watchlist</div>
+</div>
+<div class="card">
+<h3>Volume heatmap — Binance 24h (color = spike intensity)</h3>
+<div class="hmap">
+<div class="hcell h3"><div class="sym">BTC</div><div class="pct">+4.2%</div></div>
+<div class="hcell h2"><div class="sym">ETH</div><div class="pct">+2.8%</div></div>
+<div class="hcell h3"><div class="sym">SOL</div><div class="pct">+6.1%</div></div>
+<div class="hcell h1"><div class="sym">BNB</div><div class="pct">+0.8%</div></div>
+<div class="hcell h5"><div class="sym">DOGE</div><div class="pct">-3.2%</div></div>
+<div class="hcell h3"><div class="sym">BONK</div><div class="pct">+12.4%</div></div>
+<div class="hcell h6"><div class="sym">WIF</div><div class="pct">+1.1%</div></div>
+<div class="hcell h4"><div class="sym">PEPE</div><div class="pct">-1.8%</div></div>
+<div class="hcell h2"><div class="sym">XRP</div><div class="pct">+3.4%</div></div>
+<div class="hcell h1"><div class="sym">ADA</div><div class="pct">+0.5%</div></div>
+<div class="hcell h3"><div class="sym">AVAX</div><div class="pct">+5.2%</div></div>
+<div class="hcell h6"><div class="sym">LINK</div><div class="pct">+1.9%</div></div>
+<div class="hcell h4"><div class="sym">UNI</div><div class="pct">-0.6%</div></div>
+<div class="hcell h2"><div class="sym">ARB</div><div class="pct">+2.1%</div></div>
+<div class="hcell h3"><div class="sym">SUI</div><div class="pct">+7.8%</div></div>
+<div class="hcell h1"><div class="sym">DOT</div><div class="pct">+0.3%</div></div>
+</div>
+</div>
+<div class="row2">
+<div class="card">
+<h3>Top volume spikes (24h)</h3>
+<table class="tbl">
+<tr><th>Token</th><th>Vol 24h</th><th>Spike</th><th>Change</th></tr>
+<tr><td class="sym-cell">BONK/USDT <span class="pill-sm pill-spike">3.2x</span></td><td class="mono">$85M</td><td><div class="spike-bar" style="width:100%"><div class="spike-fill" style="width:100%"></div></div></td><td class="green">+12.4%</td></tr>
+<tr><td class="sym-cell">SUI/USDT <span class="pill-sm pill-spike">2.8x</span></td><td class="mono">$120M</td><td><div class="spike-bar" style="width:100%"><div class="spike-fill" style="width:87%"></div></div></td><td class="green">+7.8%</td></tr>
+<tr><td class="sym-cell">SOL/USDT <span class="pill-sm pill-spike">2.4x</span></td><td class="mono">$340M</td><td><div class="spike-bar" style="width:100%"><div class="spike-fill" style="width:75%"></div></div></td><td class="green">+6.1%</td></tr>
+<tr><td class="sym-cell">AVAX/USDT <span class="pill-sm pill-spike">2.1x</span></td><td class="mono">$78M</td><td><div class="spike-bar" style="width:100%"><div class="spike-fill" style="width:65%"></div></div></td><td class="green">+5.2%</td></tr>
+</table>
+</div>
+<div class="card">
+<h3>New listings</h3>
+<div class="listing-item">
+<div class="li-left"><div><span class="li-sym">MYRO/USDT</span><span class="pill-sm pill-new" style="margin-left:6px">New</span><div class="li-sub">Listed 2h ago</div></div></div>
+<div style="text-align:right"><div class="li-vol">$12.4M</div><div class="li-time" style="color:#0F6E56">+340%</div></div>
+</div>
+<div class="listing-item">
+<div class="li-left"><div><span class="li-sym">ONDO/USDT</span><span class="pill-sm pill-new" style="margin-left:6px">New</span><div class="li-sub">Listed 8h ago</div></div></div>
+<div style="text-align:right"><div class="li-vol">$45M</div><div class="li-time" style="color:#0F6E56">+82%</div></div>
+</div>
+<div class="listing-item">
+<div class="li-left"><div><span class="li-sym">JUP/USDT</span><div class="li-sub">Listed 1d ago</div></div></div>
+<div style="text-align:right"><div class="li-vol">$67M</div><div class="li-time" style="color:#A32D2D">-12%</div></div>
+</div>
+</div>
+</div>
+</div>
+</div>

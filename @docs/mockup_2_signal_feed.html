@@ -1,0 +1,143 @@
+<h2 class="sr-only">Mockup halaman signal feed: live trading signals</h2>
+<style>
+*{box-sizing:border-box;margin:0}
+.page{display:flex;gap:0;font-family:var(--font-sans);background:var(--color-background-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;min-height:580px}
+.side{width:180px;min-width:180px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);padding:16px 12px;display:flex;flex-direction:column;gap:4px}
+.logo{font-size:14px;font-weight:500;color:var(--color-text-primary);padding:8px 10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.logo span{display:block;font-size:11px;font-weight:400;color:var(--color-text-tertiary);margin-top:2px}
+.ni{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--border-radius-md);font-size:13px;color:var(--color-text-secondary);cursor:pointer}
+.ni:hover{background:var(--color-background-secondary)}
+.ni.a{background:#1D9E75;color:#fff}
+.ni i{font-size:16px}
+.main{flex:1;padding:20px;overflow:hidden}
+.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.hd h1{font-size:18px;font-weight:500}
+.tabs{display:flex;gap:4px;margin-bottom:12px}
+.tab{padding:6px 14px;border-radius:var(--border-radius-md);font-size:12px;color:var(--color-text-secondary);background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);cursor:pointer}
+.tab.a{background:#1D9E75;color:#fff;border-color:#1D9E75}
+.filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.flt{padding:4px 10px;border-radius:14px;font-size:11px;border:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);background:var(--color-background-primary);cursor:pointer}
+.flt.a{border-color:#1D9E75;color:#085041;background:#E1F5EE}
+.sc{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:10px}
+.sc-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
+.sc-left{display:flex;align-items:center;gap:10px}
+.sc-sym{font-size:15px;font-weight:500;color:var(--color-text-primary)}
+.sc-pair{font-size:11px;color:var(--color-text-tertiary)}
+.pill{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:500}
+.pill.l{background:#E1F5EE;color:#085041}
+.pill.s{background:#FCEBEB;color:#791F1F}
+.pill.ph{background:#FAEEDA;color:#633806;margin-left:4px}
+.sc-score{text-align:right}
+.sc-score .num{font-size:18px;font-weight:500;color:#0F6E56}
+.sc-score .lbl{font-size:10px;color:var(--color-text-tertiary)}
+.sc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 0;border-top:0.5px solid var(--color-border-tertiary);border-bottom:0.5px solid var(--color-border-tertiary)}
+.sc-grid .g-label{font-size:10px;color:var(--color-text-tertiary)}
+.sc-grid .g-val{font-size:12px;font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono)}
+.sc-grid .g-val.green{color:#0F6E56}
+.sc-grid .g-val.red{color:#A32D2D}
+.sc-reason{padding:10px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+.reason-tag{padding:3px 8px;border-radius:var(--border-radius-md);font-size:10px;background:var(--color-background-secondary);color:var(--color-text-secondary)}
+.sc-expand{font-size:11px;color:#1D9E75;cursor:pointer;margin-top:8px;display:flex;align-items:center;gap:4px}
+.sc2{border-left:3px solid #1D9E75;border-radius:0}
+.sc3{border-left:3px solid #E24B4A;border-radius:0}
+</style>
+<div class="page">
+<div class="side">
+<div class="logo">Trading agent<span>On-chain crypto</span></div>
+<div class="ni"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> Dashboard</div>
+<div class="ni a"><i class="ti ti-antenna-bars-5" aria-hidden="true"></i> Signal feed</div>
+<div class="ni"><i class="ti ti-radar-2" aria-hidden="true"></i> Scanner</div>
+<div class="ni"><i class="ti ti-chart-candle" aria-hidden="true"></i> Charts</div>
+<div class="ni"><i class="ti ti-flask" aria-hidden="true"></i> Backtest</div>
+<div class="ni"><i class="ti ti-settings" aria-hidden="true"></i> Settings</div>
+</div>
+<div class="main">
+<div class="hd"><h1>Signal feed</h1><span style="font-size:12px;color:var(--color-text-tertiary)">Last scan: 30s ago</span></div>
+<div class="tabs">
+<div class="tab a">Active (3)</div>
+<div class="tab">Pending (2)</div>
+<div class="tab">Closed today (5)</div>
+<div class="tab">Expired</div>
+</div>
+<div class="filters">
+<span class="flt a">All chains</span>
+<span class="flt">Solana</span>
+<span class="flt">Ethereum</span>
+<span class="flt">BSC</span>
+<span style="flex:1"></span>
+<span class="flt a">All phases</span>
+<span class="flt">Accumulation</span>
+<span class="flt">Mark up</span>
+</div>
+<div class="sc sc2">
+<div class="sc-top">
+<div class="sc-left">
+<div><span class="sc-sym">BONK/USDT</span><div class="sc-pair">Binance spot</div></div>
+<span class="pill l">Long</span>
+<span class="pill ph">Accumulation</span>
+</div>
+<div class="sc-score"><div class="num">87</div><div class="lbl">Confidence</div></div>
+</div>
+<div class="sc-grid">
+<div><div class="g-label">Entry</div><div class="g-val">$0.0000234</div></div>
+<div><div class="g-label">Stop loss</div><div class="g-val red">$0.0000218</div></div>
+<div><div class="g-label">Take profit</div><div class="g-val green">$0.0000282</div></div>
+<div><div class="g-label">R:R</div><div class="g-val green">1:3.5</div></div>
+</div>
+<div class="sc-reason">
+<span class="reason-tag">T0: Accumulation spring</span>
+<span class="reason-tag">T1: EMA13 &gt; 21 on 1D</span>
+<span class="reason-tag">T2: Support 3x bounce</span>
+<span class="reason-tag">T3: Double bottom 1H</span>
+<span class="reason-tag">T4: Engulfing + Stoch cross 18</span>
+</div>
+<div class="sc-expand"><i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i> Expand full TA breakdown</div>
+</div>
+<div class="sc sc2">
+<div class="sc-top">
+<div class="sc-left">
+<div><span class="sc-sym">WIF/USDT</span><div class="sc-pair">Binance spot</div></div>
+<span class="pill l">Long</span>
+<span class="pill ph">Mark up</span>
+</div>
+<div class="sc-score"><div class="num">74</div><div class="lbl">Confidence</div></div>
+</div>
+<div class="sc-grid">
+<div><div class="g-label">Entry</div><div class="g-val">$1.234</div></div>
+<div><div class="g-label">Stop loss</div><div class="g-val red">$1.148</div></div>
+<div><div class="g-label">Take profit</div><div class="g-val green">$1.492</div></div>
+<div><div class="g-label">R:R</div><div class="g-val green">1:3.0</div></div>
+</div>
+<div class="sc-reason">
+<span class="reason-tag">T0: Mark up confirmed</span>
+<span class="reason-tag">T1: Strong uptrend 1W</span>
+<span class="reason-tag">T2: Pullback to EMA21</span>
+<span class="reason-tag">T4: Hammer + vol spike 2.4x</span>
+</div>
+<div class="sc-expand"><i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i> Expand full TA breakdown</div>
+</div>
+<div class="sc sc3">
+<div class="sc-top">
+<div class="sc-left">
+<div><span class="sc-sym">PEPE/USDT</span><div class="sc-pair">Binance spot</div></div>
+<span class="pill s">Short</span>
+<span class="pill ph">Distribution</span>
+</div>
+<div class="sc-score"><div class="num">69</div><div class="lbl">Confidence</div></div>
+</div>
+<div class="sc-grid">
+<div><div class="g-label">Entry</div><div class="g-val">$0.0000121</div></div>
+<div><div class="g-label">Stop loss</div><div class="g-val red">$0.0000128</div></div>
+<div><div class="g-label">Take profit</div><div class="g-val green">$0.0000100</div></div>
+<div><div class="g-label">R:R</div><div class="g-val green">1:3.0</div></div>
+</div>
+<div class="sc-reason">
+<span class="reason-tag">T0: Distribution break</span>
+<span class="reason-tag">T1: EMA13 &lt; 21 on 1D</span>
+<span class="reason-tag">T2: LH + LL forming</span>
+<span class="reason-tag">T4: Evening star + Stoch cross 82</span>
+</div>
+<div class="sc-expand"><i class="ti ti-chevron-down" style="font-size:14px" aria-hidden="true"></i> Expand full TA breakdown</div>
+</div>
+</div>
+</div>

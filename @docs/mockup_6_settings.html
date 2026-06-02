@@ -1,0 +1,100 @@
+<h2 class="sr-only">Mockup halaman settings: konfigurasi agent, TA parameters, risk rules</h2>
+<style>
+*{box-sizing:border-box;margin:0}
+.page{display:flex;gap:0;font-family:var(--font-sans);background:var(--color-background-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;min-height:560px}
+.side{width:180px;min-width:180px;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);padding:16px 12px;display:flex;flex-direction:column;gap:4px}
+.logo{font-size:14px;font-weight:500;color:var(--color-text-primary);padding:8px 10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:8px}
+.logo span{display:block;font-size:11px;font-weight:400;color:var(--color-text-tertiary);margin-top:2px}
+.ni{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:var(--border-radius-md);font-size:13px;color:var(--color-text-secondary);cursor:pointer}
+.ni:hover{background:var(--color-background-secondary)}
+.ni.a{background:#1D9E75;color:#fff}
+.ni i{font-size:16px}
+.main{flex:1;padding:20px;overflow:hidden}
+.hd{margin-bottom:14px}
+.hd h1{font-size:18px;font-weight:500}
+.hd p{font-size:12px;color:var(--color-text-tertiary);margin-top:2px}
+.section{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:14px 16px;margin-bottom:10px}
+.section h3{font-size:13px;font-weight:500;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.section h3 i{font-size:16px;color:var(--color-text-tertiary)}
+.field-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
+.field-row:last-child{border:none}
+.f-left{display:flex;flex-direction:column;gap:2px}
+.f-label{font-size:12px;font-weight:500;color:var(--color-text-primary)}
+.f-desc{font-size:10px;color:var(--color-text-tertiary)}
+.f-input{padding:4px 10px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary);font-size:12px;width:100px;text-align:right;font-family:var(--font-mono);color:var(--color-text-primary);background:var(--color-background-secondary)}
+.f-select{padding:4px 10px;border-radius:var(--border-radius-md);border:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-primary);background:var(--color-background-secondary)}
+.toggle{width:36px;height:20px;border-radius:10px;position:relative;cursor:pointer}
+.toggle.on{background:#1D9E75}
+.toggle.off{background:var(--color-border-secondary)}
+.toggle-dot{width:16px;height:16px;border-radius:50%;background:#fff;position:absolute;top:2px;transition:left 0.2s}
+.toggle.on .toggle-dot{left:18px}
+.toggle.off .toggle-dot{left:2px}
+.pair-tags{display:flex;gap:4px;flex-wrap:wrap}
+.pair-tag{padding:3px 8px;border-radius:var(--border-radius-md);font-size:10px;background:var(--color-background-secondary);color:var(--color-text-secondary);display:flex;align-items:center;gap:4px}
+.pair-tag i{font-size:12px;cursor:pointer}
+.btn-save{padding:8px 20px;border-radius:var(--border-radius-md);border:none;font-size:12px;color:#fff;background:#1D9E75;cursor:pointer;float:right;margin-top:8px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+</style>
+<div class="page">
+<div class="side">
+<div class="logo">Trading agent<span>On-chain crypto</span></div>
+<div class="ni"><i class="ti ti-layout-dashboard" aria-hidden="true"></i> Dashboard</div>
+<div class="ni"><i class="ti ti-antenna-bars-5" aria-hidden="true"></i> Signal feed</div>
+<div class="ni"><i class="ti ti-radar-2" aria-hidden="true"></i> Scanner</div>
+<div class="ni"><i class="ti ti-chart-candle" aria-hidden="true"></i> Charts</div>
+<div class="ni"><i class="ti ti-flask" aria-hidden="true"></i> Backtest</div>
+<div class="ni a"><i class="ti ti-settings" aria-hidden="true"></i> Settings</div>
+</div>
+<div class="main">
+<div class="hd"><h1>Settings</h1><p>Agent configuration and trading parameters</p></div>
+<div class="row2">
+<div class="section">
+<h3><i class="ti ti-robot" aria-hidden="true"></i> Agent</h3>
+<div class="field-row"><div class="f-left"><div class="f-label">Agent status</div><div class="f-desc">Enable/disable scanning</div></div><div class="toggle on"><div class="toggle-dot"></div></div></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Scan interval</div><div class="f-desc">Seconds between scans</div></div><input class="f-input" value="30s"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Mode</div><div class="f-desc">Paper or live trading</div></div><select class="f-select"><option>Paper trade</option></select></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Pairs monitored</div></div></div>
+<div style="padding:4px 0"><div class="pair-tags">
+<span class="pair-tag">BONK/USDT <i class="ti ti-x" aria-hidden="true"></i></span>
+<span class="pair-tag">SOL/USDT <i class="ti ti-x" aria-hidden="true"></i></span>
+<span class="pair-tag">WIF/USDT <i class="ti ti-x" aria-hidden="true"></i></span>
+<span class="pair-tag">PEPE/USDT <i class="ti ti-x" aria-hidden="true"></i></span>
+<span class="pair-tag" style="border:0.5px dashed var(--color-border-secondary);background:transparent"><i class="ti ti-plus" aria-hidden="true"></i> Add</span>
+</div></div>
+</div>
+<div class="section">
+<h3><i class="ti ti-shield" aria-hidden="true"></i> Risk management</h3>
+<div class="field-row"><div class="f-left"><div class="f-label">Risk per trade</div><div class="f-desc">% of capital per trade</div></div><input class="f-input" value="2%"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Min R:R ratio</div><div class="f-desc">Skip trades below this</div></div><input class="f-input" value="1:3"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Daily loss limit</div><div class="f-desc">Stop agent if exceeded</div></div><input class="f-input" value="3%"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Max open positions</div><div class="f-desc">Concurrent trades</div></div><input class="f-input" value="5"></div>
+</div>
+</div>
+<div class="row2">
+<div class="section">
+<h3><i class="ti ti-chart-line" aria-hidden="true"></i> TA parameters</h3>
+<div class="field-row"><div class="f-left"><div class="f-label">EMA fast</div></div><input class="f-input" value="13"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">EMA slow</div></div><input class="f-input" value="21"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Stochastic K</div></div><input class="f-input" value="5"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Stochastic D</div></div><input class="f-input" value="3"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Stochastic smooth</div></div><input class="f-input" value="3"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Min trendline touches</div></div><input class="f-input" value="2"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">S/R lookback (days)</div></div><input class="f-input" value="100"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Min bounce for S/R</div></div><input class="f-input" value="2"></div>
+</div>
+<div class="section">
+<h3><i class="ti ti-key" aria-hidden="true"></i> API keys</h3>
+<div class="field-row"><div class="f-left"><div class="f-label">Binance API key</div><div class="f-desc">Required for data + trading</div></div><input class="f-input" value="••••••••" style="width:120px"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Binance secret</div><div class="f-desc">Required for trading</div></div><input class="f-input" value="••••••••" style="width:120px"></div>
+<div class="field-row"><div class="f-left"><div class="f-label">GoPlus API</div><div class="f-desc">Optional, for safety check</div></div><input class="f-input" value="Not set" style="width:120px;color:var(--color-text-tertiary)"></div>
+<div style="margin-top:12px">
+<h3 style="font-size:13px"><i class="ti ti-bell" aria-hidden="true"></i> Notifications</h3>
+</div>
+<div class="field-row"><div class="f-left"><div class="f-label">Browser push</div></div><div class="toggle on"><div class="toggle-dot"></div></div></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Sound alerts</div></div><div class="toggle off"><div class="toggle-dot"></div></div></div>
+<div class="field-row"><div class="f-left"><div class="f-label">Alert on signal only</div><div class="f-desc">Skip scan notifications</div></div><div class="toggle on"><div class="toggle-dot"></div></div></div>
+</div>
+</div>
+<div class="btn-save">Save settings</div>
+</div>
+</div>

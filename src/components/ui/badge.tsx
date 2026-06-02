@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { JobStatus } from "@/utilities/types";
+import { JobStatus } from "@/types/sync-jobs";
 
 interface BadgeProps extends React.HTMLAttributes<HTMLDivElement> {
   variant?: "default" | "secondary" | "destructive" | "outline" | JobStatus;

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import DottedSeparator from "@/components/ui/dotted-separator";
 import { Button } from "@/components/ui/button";
 import { GlobalContext } from "@/app/context/index";
-import { loginFormControls } from "@/constants/auth-controls";
+import { loginFormControls } from "@/features/auth/constants";
 import Input from "@/components/ui/input";
 import CircleLoader from "@/components/ui/circleloader";
 import { useFormik } from "formik";

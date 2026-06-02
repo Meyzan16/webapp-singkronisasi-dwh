@@ -1,3 +1,4 @@
+export type JobStatus = "running" | "success" | "failed";
 
 export type SyncJob = {
     id: string;
