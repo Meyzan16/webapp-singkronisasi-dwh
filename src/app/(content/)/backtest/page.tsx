@@ -31,25 +31,40 @@ export default function BacktestPage() {
   const handleRunBacktest = async () => {
     setLoading(true);
     try {
-      // Simulate backtest run
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const response = await fetch(`/api/v1/backtest/${selectedPair}/${selectedTF}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pair: selectedPair,
+          timeframe: selectedTF,
+          start_date: startDate,
+          end_date: endDate,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Backtest failed: ${response.statusText}`);
+      }
+
+      const data = await response.json();
 
       const result: BacktestResult = {
         pair: selectedPair,
         timeframe: selectedTF,
         startDate,
         endDate,
-        totalTrades: Math.floor(Math.random() * 100) + 20,
-        winRate: Math.random() * 0.4 + 0.5,
-        profitFactor: Math.random() * 2 + 1.5,
-        maxDrawdown: Math.random() * 0.15 + 0.05,
-        totalReturn: Math.random() * 0.3 - 0.05,
+        totalTrades: data.total_trades,
+        winRate: data.win_rate,
+        profitFactor: data.profit_factor,
+        maxDrawdown: data.max_drawdown,
+        totalReturn: data.total_return_pct,
         status: "completed",
       };
 
       setResults(result);
     } catch (err) {
       console.error("Backtest failed:", err);
+      alert(`Error: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setLoading(false);
     }
