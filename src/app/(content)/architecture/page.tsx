@@ -253,7 +253,7 @@ export default function ArchitecturePage() {
             <div>T0 (Wyckoff) ─┬─ GATE ─┐</div>
             <div>T1 (Trend)   ─┼─ GATE ─┼─ COMBINE</div>
             <div>T2 (S/R)     ─┼─ GATE ─┼─ COMBINE ─ FILTER</div>
-            <div>T3 (Pattern) ─┼─ GATE ─┼─ COMBINE ─ (R:R >= 1:3)</div>
+            <div>T3 (Pattern) ─┼─ GATE ─┼─ COMBINE ─ (R:R &gt;= 1:3)</div>
             <div>T4 (Trigger) ─┴─ GATE ─┘</div>
           </div>
           <p className="mt-3">
