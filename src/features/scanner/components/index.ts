@@ -1,0 +1,1 @@
+export { VolumeHeatmap } from "./VolumeHeatmap";
