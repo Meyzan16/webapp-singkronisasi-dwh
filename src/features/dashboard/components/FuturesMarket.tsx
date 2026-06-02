@@ -1,6 +1,8 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getCoinCategory, ALL_CATEGORIES } from "../data/categories";
+import { CoinModal } from "./CoinModal";
 
 interface FuturesTicker {
   symbol: string;
@@ -11,25 +13,19 @@ interface FuturesTicker {
   low_24h: number;
 }
 
-interface MarketData {
-  tickers: FuturesTicker[];
-}
-
 export function FuturesMarket() {
-  const [data, setData] = useState<MarketData | null>(null);
+  const [tickers, setTickers] = useState<FuturesTicker[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showAll, setShowAll] = useState(false);
+  const [category, setCategory] = useState("All");
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const res = await fetch("/api/v1/market/futures-market");
-      if (!res.ok) throw new Error(await res.text());
-      setData(await res.json());
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to fetch market data");
+      const d = await res.json();
+      setTickers(d.tickers ?? []);
     } finally {
       setLoading(false);
     }
@@ -41,40 +37,94 @@ export function FuturesMarket() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  const tickers = data?.tickers ?? [];
-  const visible = showAll ? tickers : tickers.slice(0, 20);
+  const filtered = useMemo(() => {
+    return tickers.filter((t) => {
+      const matchSearch = t.symbol.toLowerCase().includes(search.toLowerCase());
+      const matchCat = category === "All" || getCoinCategory(t.symbol) === category;
+      return matchSearch && matchCat;
+    });
+  }, [tickers, category, search]);
 
-  const formatVolume = (v: number) => {
-    if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(1)}B`;
-    if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
-    return `$${(v / 1_000).toFixed(0)}K`;
-  };
+  const fmtVol = (v: number) =>
+    v >= 1e9 ? `${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : `${(v / 1e3).toFixed(0)}K`;
+
+  const fmtPrice = (p: number) =>
+    p < 0.001 ? p.toFixed(6) : p < 1 ? p.toFixed(4) : p.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+  // Category counts
+  const catCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: tickers.length };
+    for (const t of tickers) {
+      const c = getCoinCategory(t.symbol);
+      counts[c] = (counts[c] ?? 0) + 1;
+    }
+    return counts;
+  }, [tickers]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
-          <span>Futures Market — 24h Change</span>
-          {data && (
-            <span className="text-xs text-muted-foreground font-normal">
-              {tickers.length} pairs • sorted by gain ↑
-            </span>
+    <>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+            <span>Futures Market — 24h Change</span>
+            <div className="flex items-center gap-2">
+              {!loading && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  {filtered.length}/{tickers.length} pairs
+                </span>
+              )}
+              <input
+                type="text"
+                placeholder="Search coin..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="text-sm border rounded-lg px-3 py-1.5 w-36 focus:outline-none focus:border-primarygreen"
+              />
+            </div>
+          </CardTitle>
+
+          {/* Category tabs */}
+          <div className="flex gap-1.5 flex-wrap mt-2">
+            {ALL_CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setCategory(cat)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors border ${
+                  category === cat
+                    ? "bg-primarygreen text-white border-primarygreen"
+                    : "bg-neutral-50 text-neutral-600 border-neutral-200 hover:border-primarygreen hover:text-primarygreen"
+                }`}
+              >
+                {cat}
+                {catCounts[cat] !== undefined && (
+                  <span className={`ml-1 ${category === cat ? "opacity-80" : "text-muted-foreground"}`}>
+                    {catCounts[cat]}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </CardHeader>
+
+        <CardContent className="pt-0">
+          {loading && tickers.length === 0 && (
+            <div className="flex items-center justify-center py-10">
+              <span className="animate-spin w-6 h-6 border-2 border-primarygreen border-t-transparent rounded-full" />
+            </div>
           )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {loading && !data && (
-          <p className="text-sm text-muted-foreground">Loading market data...</p>
-        )}
-        {error && <p className="text-sm text-red-500">{error}</p>}
-        {data && (
-          <>
+
+          {!loading && filtered.length === 0 && (
+            <p className="text-center text-muted-foreground py-8 text-sm">No coins found</p>
+          )}
+
+          {filtered.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-xs text-muted-foreground border-b">
-                    <th className="text-left py-2 pr-3">#</th>
+                    <th className="text-left py-2 pr-3 pl-1">#</th>
                     <th className="text-left py-2 pr-3">Symbol</th>
+                    <th className="text-left py-2 pr-3">Category</th>
                     <th className="text-right py-2 pr-3">Price</th>
                     <th className="text-right py-2 pr-3">24h %</th>
                     <th className="text-right py-2 pr-3">Volume</th>
@@ -83,48 +133,59 @@ export function FuturesMarket() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visible.map((t, i) => (
-                    <tr key={t.symbol} className="border-b border-neutral-50 hover:bg-neutral-50">
-                      <td className="py-2 pr-3 text-muted-foreground text-xs">{i + 1}</td>
-                      <td className="py-2 pr-3 font-semibold">
-                        {t.symbol.replace("USDT", "")}
-                        <span className="text-xs text-muted-foreground font-normal">/USDT</span>
-                      </td>
-                      <td className="py-2 pr-3 text-right font-mono text-xs">
-                        ${t.price < 0.001
-                          ? t.price.toFixed(6)
-                          : t.price < 1
-                          ? t.price.toFixed(4)
-                          : t.price.toLocaleString()}
-                      </td>
-                      <td className={`py-2 pr-3 text-right font-bold ${t.change_24h >= 0 ? "text-green-600" : "text-red-500"}`}>
-                        {t.change_24h >= 0 ? "+" : ""}{t.change_24h.toFixed(2)}%
-                      </td>
-                      <td className="py-2 pr-3 text-right text-xs text-muted-foreground">
-                        {formatVolume(t.volume_24h)}
-                      </td>
-                      <td className="py-2 pr-3 text-right text-xs text-green-600 font-mono">
-                        ${t.high_24h < 1 ? t.high_24h.toFixed(4) : t.high_24h.toLocaleString()}
-                      </td>
-                      <td className="py-2 text-right text-xs text-red-500 font-mono">
-                        ${t.low_24h < 1 ? t.low_24h.toFixed(4) : t.low_24h.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
+                  {filtered.map((t, i) => {
+                    const base = t.symbol.replace("USDT", "");
+                    const cat = getCoinCategory(t.symbol);
+                    return (
+                      <tr
+                        key={t.symbol}
+                        onClick={() => setSelectedSymbol(t.symbol)}
+                        className="border-b border-neutral-50 hover:bg-teal-50 cursor-pointer transition-colors group"
+                      >
+                        <td className="py-2.5 pr-3 pl-1 text-muted-foreground text-xs">{i + 1}</td>
+                        <td className="py-2.5 pr-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-primarygreen/10 flex items-center justify-center flex-shrink-0">
+                              <span className="text-[10px] font-bold text-primarygreen">{base.slice(0, 3)}</span>
+                            </div>
+                            <div>
+                              <span className="font-semibold group-hover:text-primarygreen transition-colors">{base}</span>
+                              <span className="text-xs text-muted-foreground">/USDT</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-2.5 pr-3">
+                          <span className="text-xs bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded-full">{cat}</span>
+                        </td>
+                        <td className="py-2.5 pr-3 text-right font-mono text-xs font-semibold">
+                          ${fmtPrice(t.price)}
+                        </td>
+                        <td className={`py-2.5 pr-3 text-right font-bold text-sm ${t.change_24h >= 0 ? "text-green-600" : "text-red-500"}`}>
+                          {t.change_24h >= 0 ? "▲" : "▼"} {Math.abs(t.change_24h).toFixed(2)}%
+                        </td>
+                        <td className="py-2.5 pr-3 text-right text-xs text-muted-foreground">
+                          ${fmtVol(t.volume_24h)}
+                        </td>
+                        <td className="py-2.5 pr-3 text-right text-xs text-green-600 font-mono">
+                          ${fmtPrice(t.high_24h)}
+                        </td>
+                        <td className="py-2.5 text-right text-xs text-red-500 font-mono">
+                          ${fmtPrice(t.low_24h)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-            {tickers.length > 20 && (
-              <button
-                onClick={() => setShowAll(!showAll)}
-                className="mt-3 w-full text-xs text-primarygreen hover:underline"
-              >
-                {showAll ? "Show less ↑" : `Show all ${tickers.length} pairs ↓`}
-              </button>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Coin Modal */}
+      {selectedSymbol && (
+        <CoinModal symbol={selectedSymbol} onClose={() => setSelectedSymbol(null)} />
+      )}
+    </>
   );
 }
