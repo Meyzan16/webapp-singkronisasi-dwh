@@ -6,6 +6,7 @@ import structlog
 from fastapi import FastAPI
 
 from app.api.v1.klines import router as klines_router
+from app.api.v1.trend import router as trend_router
 from app.config import get_settings
 from app.database import AsyncSessionLocal, create_db_schema, dispose_engine
 from app.services.data_pipeline.binance_client import BinanceClient
@@ -47,6 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.include_router(klines_router, prefix=settings.api_v1_prefix)
+app.include_router(trend_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/health")
