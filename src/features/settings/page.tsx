@@ -11,6 +11,8 @@ const DEFAULT_SETTINGS: AgentSettings = {
     takeProfitPercent: 6.0,
     maxDrawdown: 10.0,
     riskRewardMin: 3.0,
+    leverage: 5,
+    maxOpenPositions: 3,
   },
   ta: {
     ema13Period: 13,

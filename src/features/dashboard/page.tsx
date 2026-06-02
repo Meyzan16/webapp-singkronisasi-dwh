@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { MetricsCard, SystemStatusCard } from "./components";
+import { MetricsCard, SystemStatusCard, OpenPositions } from "./components";
 
 export default function DashboardPage() {
   const [stats] = useState({
@@ -23,6 +23,7 @@ export default function DashboardPage() {
       </Card>
 
       <MetricsCard stats={stats} />
+      <OpenPositions />
       <SystemStatusCard />
     </div>
   );

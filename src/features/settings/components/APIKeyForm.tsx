@@ -13,7 +13,6 @@ export function APIKeyForm({ settings, onUpdate }: APIKeyFormProps) {
     onUpdate({ ...settings, [key]: value });
   };
 
-  const isMasked = (value: string) => value.length > 0 && !value.includes("sk_");
   const maskValue = (value: string) => value.substring(0, 10) + "..." + value.substring(value.length - 4);
 
   return (
@@ -33,7 +32,7 @@ export function APIKeyForm({ settings, onUpdate }: APIKeyFormProps) {
             >
               Binance Account Settings
             </a>
-            . Enable "Spot Trading" permission only for security.
+            . Enable Spot Trading and Futures permissions.
           </p>
         </div>
 

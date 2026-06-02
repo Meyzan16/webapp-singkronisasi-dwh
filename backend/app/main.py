@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 
 from app.api.v1.klines import router as klines_router
 from app.api.v1.trend import router as trend_router
@@ -13,10 +13,12 @@ from app.api.v1.pattern import router as pattern_router
 from app.api.v1.trigger import router as trigger_router
 from app.api.v1.signals import router as signals_router
 from app.api.v1.backtest import router as backtest_router
+from app.api.v1.positions import router as positions_router
 from app.config import get_settings
 from app.database import AsyncSessionLocal, create_db_schema, dispose_engine
 from app.services.data_pipeline.binance_client import BinanceClient
 from app.services.data_pipeline.kline_fetcher import KlineFetcher
+from app.ws.position_stream import position_stream
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -61,6 +63,14 @@ app.include_router(pattern_router, prefix=settings.api_v1_prefix)
 app.include_router(trigger_router, prefix=settings.api_v1_prefix)
 app.include_router(signals_router, prefix=settings.api_v1_prefix)
 app.include_router(backtest_router, prefix=settings.api_v1_prefix)
+app.include_router(positions_router, prefix=settings.api_v1_prefix)
+
+
+@app.websocket("/ws/positions")
+async def ws_positions(websocket: WebSocket) -> None:
+    """WebSocket endpoint for real-time position streaming."""
+
+    await position_stream(websocket)
 
 
 @app.get("/health")

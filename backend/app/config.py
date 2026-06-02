@@ -20,7 +20,14 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
     )
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
+
+    # Binance connection
     binance_exchange_id: str = "binance"
+    binance_api_key: str = Field(default="", validation_alias="BINANCE_API_KEY")
+    binance_api_secret: str = Field(default="", validation_alias="BINANCE_API_SECRET")
+    binance_testnet: bool = Field(default=True, validation_alias="BINANCE_TESTNET")
+
+    # Trading config
     trading_pairs: list[str] = Field(
         default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "SUIUSDT"]
     )
@@ -28,6 +35,12 @@ class Settings(BaseSettings):
     historical_months: int = 6
     polling_interval_seconds: int = 60
     auto_start_pipeline: bool = Field(default=True, validation_alias="AUTO_START_PIPELINE")
+
+    # Futures settings
+    default_leverage: int = Field(default=5, validation_alias="DEFAULT_LEVERAGE")
+    max_leverage: int = Field(default=20, validation_alias="MAX_LEVERAGE")
+    position_size_percent: float = Field(default=2.0, validation_alias="POSITION_SIZE_PERCENT")
+    max_open_positions: int = Field(default=3, validation_alias="MAX_OPEN_POSITIONS")
 
 
 @lru_cache

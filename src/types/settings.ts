@@ -4,6 +4,8 @@ export interface RiskSettings {
   takeProfitPercent: number;
   maxDrawdown: number;
   riskRewardMin: number; // Minimum R:R ratio
+  leverage: number; // Futures leverage multiplier
+  maxOpenPositions: number;
 }
 
 export interface TASettings {

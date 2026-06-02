@@ -97,6 +97,38 @@ export function RiskConfig({ settings, onUpdate }: RiskConfigProps) {
           />
           <p className="text-xs text-muted-foreground mt-1">Filter signals below this ratio</p>
         </div>
+
+        <div>
+          <label className="text-sm font-semibold block mb-2">
+            Leverage: {settings.leverage}x
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="20"
+            step="1"
+            value={settings.leverage}
+            onChange={(e) => handleChange("leverage", parseInt(e.target.value))}
+            className="w-full"
+          />
+          <p className="text-xs text-muted-foreground mt-1">Futures leverage multiplier</p>
+        </div>
+
+        <div>
+          <label className="text-sm font-semibold block mb-2">
+            Max Open Positions: {settings.maxOpenPositions}
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="10"
+            step="1"
+            value={settings.maxOpenPositions}
+            onChange={(e) => handleChange("maxOpenPositions", parseInt(e.target.value))}
+            className="w-full"
+          />
+          <p className="text-xs text-muted-foreground mt-1">Maximum concurrent positions</p>
+        </div>
       </CardContent>
     </Card>
   );
