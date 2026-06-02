@@ -1,23 +1,42 @@
-INFO:     Started server process [6464]
+INFO:     Started server process [24284]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:62270 - "WebSocket /ws/positions" [accepted]
+INFO:     127.0.0.1:64482 - "WebSocket /ws/positions" [accepted]
 INFO:     connection open
-INFO:     127.0.0.1:60966 - "WebSocket /ws/positions" [accepted]
+INFO:     127.0.0.1:61913 - "WebSocket /ws/positions" [accepted]
 INFO:     connection open
-INFO:     127.0.0.1:58787 - "WebSocket /ws/positions" [accepted]
+INFO:     127.0.0.1:50396 - "WebSocket /ws/positions" [accepted]
 INFO:     connection open
-Exception in callback _ProactorBasePipeTransport._call_connection_lost()
-handle: <Handle _ProactorBasePipeTransport._call_connection_lost()>
-Traceback (most recent call last):
-  File "C:\Users\customer\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\events.py", line 94, in _run
-    self._context.run(self._callback, *self._args)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\customer\AppData\Local\Python\pythoncore-3.14-64\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
-    self._sock.shutdown(socket.SHUT_RDWR)
-    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
-ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+INFO:     127.0.0.1:51361 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:59554 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:54781 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:49803 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:56095 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:64251 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:51541 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     127.0.0.1:54601 - "WebSocket /ws/positions" [accepted]
+INFO:     connection closed
+INFO:     127.0.0.1:55451 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:57556 - "WebSocket /ws/positions" [accepted]
+INFO:     connection open
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
+INFO:     connection closed
 INFO:     connection closed
 INFO:     connection closed
 INFO:     connection closed

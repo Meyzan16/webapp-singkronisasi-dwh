@@ -1,106 +1,196 @@
-2026-06-02 21:55:45 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600945989 timeframe=1w
-2026-06-02 21:55:46 [info     ] ws_connected                   total=1
-2026-06-02 21:55:46 [info     ] ws_connected                   total=2
-2026-06-02 21:55:47 [info     ] backfilled_klines              count=26 pair=BTCUSDT timeframe=1w
-2026-06-02 21:55:47 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600945989 timeframe=1d
-2026-06-02 21:55:47 [info     ] backfilled_klines              count=183 pair=BTCUSDT timeframe=1d
-2026-06-02 21:55:47 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600945989 timeframe=4h
-INFO:     127.0.0.1:53229 - "GET /health HTTP/1.1" 200 OK
-2026-06-02 21:55:50 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779004800000 timeframe=4h
-2026-06-02 21:55:50 [info     ] backfilled_klines              count=1098 pair=BTCUSDT timeframe=4h
-2026-06-02 21:55:50 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600945989 timeframe=1h
-2026-06-02 21:55:52 [info     ] ws_connected                   total=3
-2026-06-02 21:55:52 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768201200000 timeframe=1h
-2026-06-02 21:55:53 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771801200000 timeframe=1h
-2026-06-02 21:55:56 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775401200000 timeframe=1h
-2026-06-02 21:55:59 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779001200000 timeframe=1h
-2026-06-02 21:56:00 [info     ] backfilled_klines              count=4392 pair=BTCUSDT timeframe=1h
-2026-06-02 21:56:00 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600945989 timeframe=15m
-2026-06-02 21:56:01 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1765501200000 timeframe=15m
-2026-06-02 21:56:04 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1766401200000 timeframe=15m
-2026-06-02 21:56:06 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1767301200000 timeframe=15m
-2026-06-02 21:56:08 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768201200000 timeframe=15m
-2026-06-02 21:56:11 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1769101200000 timeframe=15m
-2026-06-02 21:56:13 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770001200000 timeframe=15m
-2026-06-02 21:56:14 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770901200000 timeframe=15m
-2026-06-02 21:56:16 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771801200000 timeframe=15m
-2026-06-02 21:56:19 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1772701200000 timeframe=15m
-2026-06-02 21:56:20 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1773601200000 timeframe=15m
-2026-06-02 21:56:24 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1774501200000 timeframe=15m
-2026-06-02 21:56:25 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775401200000 timeframe=15m
-2026-06-02 21:56:26 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1776301200000 timeframe=15m
-2026-06-02 21:56:28 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1777201200000 timeframe=15m
-2026-06-02 21:56:31 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1778101200000 timeframe=15m
-2026-06-02 21:56:32 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779001200000 timeframe=15m
-2026-06-02 21:56:35 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779901200000 timeframe=15m
-2026-06-02 21:56:36 [info     ] backfilled_klines              count=17568 pair=BTCUSDT timeframe=15m
-2026-06-02 21:56:36 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600945989 timeframe=1w
-2026-06-02 21:56:36 [info     ] backfilled_klines              count=26 pair=ETHUSDT timeframe=1w
-2026-06-02 21:56:36 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600945989 timeframe=1d
-2026-06-02 21:56:37 [info     ] backfilled_klines              count=183 pair=ETHUSDT timeframe=1d
-2026-06-02 21:56:37 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600945989 timeframe=4h
-2026-06-02 21:56:38 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779004800000 timeframe=4h
-2026-06-02 21:56:38 [info     ] backfilled_klines              count=1098 pair=ETHUSDT timeframe=4h
-2026-06-02 21:56:38 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600945989 timeframe=1h
-2026-06-02 21:56:41 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768201200000 timeframe=1h
-2026-06-02 21:56:43 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771801200000 timeframe=1h
-2026-06-02 21:56:45 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775401200000 timeframe=1h
-2026-06-02 21:56:46 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779001200000 timeframe=1h
-2026-06-02 21:56:47 [info     ] backfilled_klines              count=4392 pair=ETHUSDT timeframe=1h
-2026-06-02 21:56:47 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600945989 timeframe=15m
-2026-06-02 21:56:48 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1765501200000 timeframe=15m
-2026-06-02 21:56:51 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1766401200000 timeframe=15m
-2026-06-02 21:56:54 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1767301200000 timeframe=15m
-2026-06-02 21:56:55 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768201200000 timeframe=15m
-2026-06-02 21:56:56 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1769101200000 timeframe=15m
-2026-06-02 21:56:57 [info     ] ws_disconnected                total=2
-2026-06-02 21:56:58 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770001200000 timeframe=15m
-2026-06-02 21:56:59 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770901200000 timeframe=15m
-2026-06-02 21:57:01 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771801200000 timeframe=15m
-2026-06-02 21:57:01 [info     ] ws_disconnected                total=1
-2026-06-02 21:57:01 [info     ] ws_disconnected                total=0
-2026-06-02 21:57:01 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1772701200000 timeframe=15m
-2026-06-02 21:57:02 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1773601200000 timeframe=15m
-2026-06-02 21:57:03 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1774501200000 timeframe=15m
-2026-06-02 21:57:04 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775401200000 timeframe=15m
-2026-06-02 21:57:04 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1776301200000 timeframe=15m
-2026-06-02 21:57:05 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1777201200000 timeframe=15m
-2026-06-02 21:57:06 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1778101200000 timeframe=15m
-2026-06-02 21:57:06 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779001200000 timeframe=15m
-2026-06-02 21:57:07 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779901200000 timeframe=15m
-2026-06-02 21:57:07 [info     ] backfilled_klines              count=17568 pair=ETHUSDT timeframe=15m
-2026-06-02 21:57:07 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600945989 timeframe=1w
-2026-06-02 21:57:07 [info     ] backfilled_klines              count=26 pair=SOLUSDT timeframe=1w
-2026-06-02 21:57:07 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600945989 timeframe=1d
-2026-06-02 21:57:07 [info     ] backfilled_klines              count=183 pair=SOLUSDT timeframe=1d
-2026-06-02 21:57:07 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600945989 timeframe=4h
-2026-06-02 21:57:08 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779004800000 timeframe=4h
-2026-06-02 21:57:08 [info     ] backfilled_klines              count=1098 pair=SOLUSDT timeframe=4h
-2026-06-02 21:57:08 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600945989 timeframe=1h
-2026-06-02 21:57:09 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768201200000 timeframe=1h
-2026-06-02 21:57:10 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771801200000 timeframe=1h
-2026-06-02 21:57:10 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775401200000 timeframe=1h
-2026-06-02 21:57:11 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779001200000 timeframe=1h
-2026-06-02 21:57:11 [info     ] backfilled_klines              count=4392 pair=SOLUSDT timeframe=1h
-2026-06-02 21:57:11 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600945989 timeframe=15m
-2026-06-02 21:57:12 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1765501200000 timeframe=15m
-2026-06-02 21:57:13 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1766401200000 timeframe=15m
-2026-06-02 21:57:13 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1767301200000 timeframe=15m
-2026-06-02 21:57:14 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768201200000 timeframe=15m
-2026-06-02 21:57:15 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1769101200000 timeframe=15m
-2026-06-02 21:57:15 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770001200000 timeframe=15m
-2026-06-02 21:57:16 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770901200000 timeframe=15m
-2026-06-02 21:57:16 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771801200000 timeframe=15m
-2026-06-02 21:57:17 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1772701200000 timeframe=15m
-2026-06-02 21:57:17 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1773601200000 timeframe=15m
-2026-06-02 21:57:18 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1774501200000 timeframe=15m
-2026-06-02 21:57:19 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775401200000 timeframe=15m
-2026-06-02 21:57:19 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1776301200000 timeframe=15m
-2026-06-02 21:57:20 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1777201200000 timeframe=15m
-2026-06-02 21:57:21 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1778101200000 timeframe=15m
-2026-06-02 21:57:21 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779001200000 timeframe=15m
-2026-06-02 21:57:22 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779901200000 timeframe=15m
-2026-06-02 21:57:22 [info     ] backfilled_klines              count=17568 pair=SOLUSDT timeframe=15m
-2026-06-02 21:57:22 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764600945989 timeframe=1w
-2026-06-02 21:57:22 [info     ] backfilled_klines              count=26 pair=BNBUSDT timeframe=1w
-2026-06-02 21:57:22 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764600945989 timeframe=1d
+2026-06-02 22:46:26 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764603986112 timeframe=1w
+2026-06-02 22:46:26 [info     ] ws_connected                   total=1
+2026-06-02 22:46:27 [info     ] ws_connected                   total=2
+2026-06-02 22:46:27 [info     ] ws_connected                   total=3
+INFO:     127.0.0.1:50410 - "GET /health HTTP/1.1" 200 OK
+2026-06-02 22:46:29 [info     ] backfilled_klines              count=26 pair=BTCUSDT timeframe=1w
+2026-06-02 22:46:29 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764603986112 timeframe=1d
+2026-06-02 22:46:30 [info     ] ws_connected                   total=4
+2026-06-02 22:46:31 [info     ] backfilled_klines              count=183 pair=BTCUSDT timeframe=1d
+2026-06-02 22:46:31 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764603986112 timeframe=4h
+2026-06-02 22:46:33 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779004800000 timeframe=4h
+2026-06-02 22:46:34 [info     ] backfilled_klines              count=1098 pair=BTCUSDT timeframe=4h
+2026-06-02 22:46:34 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764603986112 timeframe=1h
+2026-06-02 22:46:37 [info     ] ws_connected                   total=5
+2026-06-02 22:46:39 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768204800000 timeframe=1h
+2026-06-02 22:46:43 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771804800000 timeframe=1h
+2026-06-02 22:46:45 [info     ] ws_connected                   total=6
+2026-06-02 22:46:49 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775404800000 timeframe=1h
+2026-06-02 22:46:50 [info     ] ws_connected                   total=7
+2026-06-02 22:46:54 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779004800000 timeframe=1h
+2026-06-02 22:46:56 [info     ] backfilled_klines              count=4392 pair=BTCUSDT timeframe=1h
+2026-06-02 22:46:56 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764603986112 timeframe=15m
+2026-06-02 22:47:02 [info     ] ws_disconnected                total=6
+2026-06-02 22:47:02 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1765504800000 timeframe=15m
+2026-06-02 22:47:06 [info     ] spot_positions_fetched         count=4 total_usdt=475.8
+INFO:     127.0.0.1:62500 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-02 22:47:07 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1766404800000 timeframe=15m
+2026-06-02 22:47:10 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:62500 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:47:13 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1767304800000 timeframe=15m
+2026-06-02 22:47:14 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:62500 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-02 22:47:17 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768204800000 timeframe=15m
+2026-06-02 22:47:23 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1769104800000 timeframe=15m
+2026-06-02 22:47:25 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770004800000 timeframe=15m
+2026-06-02 22:47:31 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770904800000 timeframe=15m
+2026-06-02 22:47:35 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771804800000 timeframe=15m
+2026-06-02 22:47:37 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1772704800000 timeframe=15m
+2026-06-02 22:47:41 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1773604800000 timeframe=15m
+2026-06-02 22:47:48 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1774504800000 timeframe=15m
+2026-06-02 22:47:52 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775404800000 timeframe=15m
+2026-06-02 22:47:54 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1776304800000 timeframe=15m
+2026-06-02 22:48:01 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1777204800000 timeframe=15m
+2026-06-02 22:48:03 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1778104800000 timeframe=15m
+2026-06-02 22:48:08 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779004800000 timeframe=15m
+2026-06-02 22:48:12 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779904800000 timeframe=15m
+2026-06-02 22:48:20 [info     ] backfilled_klines              count=17568 pair=BTCUSDT timeframe=15m
+2026-06-02 22:48:20 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764603986112 timeframe=1w
+2026-06-02 22:48:21 [info     ] backfilled_klines              count=26 pair=ETHUSDT timeframe=1w
+2026-06-02 22:48:21 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764603986112 timeframe=1d
+2026-06-02 22:48:21 [info     ] backfilled_klines              count=183 pair=ETHUSDT timeframe=1d
+2026-06-02 22:48:21 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764603986112 timeframe=4h
+2026-06-02 22:48:24 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779004800000 timeframe=4h
+2026-06-02 22:48:26 [info     ] backfilled_klines              count=1098 pair=ETHUSDT timeframe=4h
+2026-06-02 22:48:26 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764603986112 timeframe=1h
+2026-06-02 22:48:32 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768204800000 timeframe=1h
+2026-06-02 22:48:35 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771804800000 timeframe=1h
+2026-06-02 22:48:39 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775404800000 timeframe=1h
+2026-06-02 22:48:43 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779004800000 timeframe=1h
+2026-06-02 22:48:50 [info     ] backfilled_klines              count=4392 pair=ETHUSDT timeframe=1h
+2026-06-02 22:48:50 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764603986112 timeframe=15m
+2026-06-02 22:48:52 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1765504800000 timeframe=15m
+2026-06-02 22:48:59 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1766404800000 timeframe=15m
+2026-06-02 22:49:02 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1767304800000 timeframe=15m
+2026-06-02 22:49:07 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768204800000 timeframe=15m
+INFO:     127.0.0.1:57032 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-02 22:49:10 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1769104800000 timeframe=15m
+INFO:     127.0.0.1:64116 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64118 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61434 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61432 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50484 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50483 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52593 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52592 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63361 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-02 22:49:14 [info     ] ws_connected                   total=7
+2026-06-02 22:49:14 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770004800000 timeframe=15m
+2026-06-02 22:49:18 [info     ] ws_connected                   total=8
+2026-06-02 22:49:18 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770904800000 timeframe=15m
+2026-06-02 22:49:25 [info     ] ws_connected                   total=9
+2026-06-02 22:49:25 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771804800000 timeframe=15m
+2026-06-02 22:49:32 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1772704800000 timeframe=15m
+2026-06-02 22:49:33 [info     ] ws_disconnected                total=8
+2026-06-02 22:49:39 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1773604800000 timeframe=15m
+2026-06-02 22:49:44 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1774504800000 timeframe=15m
+2026-06-02 22:49:45 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775404800000 timeframe=15m
+2026-06-02 22:49:53 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1776304800000 timeframe=15m
+2026-06-02 22:49:59 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1777204800000 timeframe=15m
+2026-06-02 22:50:01 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1778104800000 timeframe=15m
+2026-06-02 22:50:08 [info     ] ws_connected                   total=9
+2026-06-02 22:50:10 [info     ] ws_connected                   total=10
+2026-06-02 22:50:13 [info     ] ws_connected                   total=11
+2026-06-02 22:50:13 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779004800000 timeframe=15m
+2026-06-02 22:50:16 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55456 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:50:16 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:55457 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-02 22:50:19 [info     ] spot_positions_fetched         count=4 total_usdt=473.70000000000005
+INFO:     127.0.0.1:55455 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-02 22:50:22 [info     ] ws_disconnected                total=10
+2026-06-02 22:50:22 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779904800000 timeframe=15m
+2026-06-02 22:50:24 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:57749 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:50:25 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:64470 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-02 22:50:26 [info     ] backfilled_klines              count=17568 pair=ETHUSDT timeframe=15m
+2026-06-02 22:50:26 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764603986112 timeframe=1w
+2026-06-02 22:50:27 [info     ] backfilled_klines              count=26 pair=SOLUSDT timeframe=1w
+2026-06-02 22:50:27 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764603986112 timeframe=1d
+2026-06-02 22:50:30 [info     ] spot_positions_fetched         count=4 total_usdt=473.73999999999995
+INFO:     127.0.0.1:64496 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-02 22:50:33 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:62416 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:50:34 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:51508 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-02 22:50:34 [info     ] backfilled_klines              count=183 pair=SOLUSDT timeframe=1d
+2026-06-02 22:50:34 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764603986112 timeframe=4h
+2026-06-02 22:50:39 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55510 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:50:42 [info     ] spot_positions_fetched         count=4 total_usdt=473.65999999999997
+INFO:     127.0.0.1:60095 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-02 22:50:47 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779004800000 timeframe=4h
+2026-06-02 22:50:55 [info     ] backfilled_klines              count=1098 pair=SOLUSDT timeframe=4h
+2026-06-02 22:50:55 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764603986112 timeframe=1h
+2026-06-02 22:50:55 [info     ] ws_disconnected                total=9
+2026-06-02 22:50:57 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:52616 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:50:57 [info     ] spot_positions_fetched         count=4 total_usdt=473.71999999999997
+2026-06-02 22:50:58 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:52618 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-02 22:51:00 [info     ] spot_positions_fetched         count=4 total_usdt=473.71999999999997
+INFO:     127.0.0.1:52615 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:01 [info     ] futures_market_fetched         count=598
+2026-06-02 22:51:02 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768204800000 timeframe=1h
+2026-06-02 22:51:05 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:64776 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:11 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771804800000 timeframe=1h
+2026-06-02 22:51:15 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:53555 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:16 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775404800000 timeframe=1h
+2026-06-02 22:51:27 [info     ] ws_disconnected                total=8
+2026-06-02 22:51:27 [info     ] ws_disconnected                total=7
+2026-06-02 22:51:27 [info     ] ws_disconnected                total=6
+2026-06-02 22:51:27 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:56562 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:27 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779004800000 timeframe=1h
+2026-06-02 22:51:27 [info     ] ws_disconnected                total=5
+2026-06-02 22:51:27 [info     ] ws_disconnected                total=4
+2026-06-02 22:51:28 [info     ] ws_disconnected                total=3
+2026-06-02 22:51:29 [info     ] ws_disconnected                total=2
+2026-06-02 22:51:29 [info     ] backfilled_klines              count=4392 pair=SOLUSDT timeframe=1h
+2026-06-02 22:51:29 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764603986112 timeframe=15m
+2026-06-02 22:51:29 [info     ] ws_disconnected                total=1
+2026-06-02 22:51:30 [info     ] ws_disconnected                total=0
+2026-06-02 22:51:30 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:54536 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-02 22:51:30 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:56002 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:30 [info     ] spot_positions_fetched         count=4 total_usdt=474.03000000000003
+INFO:     127.0.0.1:54534 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:31 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1765504800000 timeframe=15m
+2026-06-02 22:51:32 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:58489 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:33 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1766404800000 timeframe=15m
+2026-06-02 22:51:34 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:50740 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:36 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1767304800000 timeframe=15m
+2026-06-02 22:51:37 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:53813 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:38 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768204800000 timeframe=15m
+2026-06-02 22:51:39 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:50403 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:41 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1769104800000 timeframe=15m
+2026-06-02 22:51:42 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:58989 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:43 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770004800000 timeframe=15m
+2026-06-02 22:51:44 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55404 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:45 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770904800000 timeframe=15m
+2026-06-02 22:51:47 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771804800000 timeframe=15m
+2026-06-02 22:51:48 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55100 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:49 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1772704800000 timeframe=15m
+2026-06-02 22:51:53 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1773604800000 timeframe=15m
+2026-06-02 22:51:55 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:62058 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:55 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:62059 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-02 22:51:55 [info     ] spot_positions_fetched         count=4 total_usdt=474.24
+INFO:     127.0.0.1:62055 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:55 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1774504800000 timeframe=15m
+2026-06-02 22:51:57 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775404800000 timeframe=15m
+2026-06-02 22:51:58 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:61752 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-02 22:51:59 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1776304800000 timeframe=15m
