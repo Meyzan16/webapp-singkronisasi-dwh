@@ -109,3 +109,51 @@ class BatchSRAnalysisResponseSchema(BaseModel):
 
     analysis: list[SRAnalysisResponseSchema]
     timestamp: str
+
+
+class PatternDetectionSchema(BaseModel):
+    """Schema for detected chart pattern."""
+
+    pattern_type: str
+    formation_strength: float  # 0-100
+    potential_breakout: str  # "up", "down", "bidirectional"
+    confirmation_needed: bool
+
+
+class MarketStructureSchema(BaseModel):
+    """Schema for market structure analysis."""
+
+    structure: str  # "Bullish", "Bearish", "Transitional"
+    recent_high: float
+    recent_low: float
+    hh_count: int
+    ll_count: int
+    has_choch: bool
+    has_bos: bool
+    breakout_level: Optional[float]
+    bias_strength: float  # 0-100
+
+
+class PatternAnalysisSchema(BaseModel):
+    """Schema for complete pattern analysis."""
+
+    pattern: Optional[PatternDetectionSchema]
+    structure: MarketStructureSchema
+    is_valid: bool
+    validation_reason: str
+
+
+class PatternAnalysisResponseSchema(BaseModel):
+    """API response for pattern analysis."""
+
+    pair: str
+    timeframe: str
+    analysis: PatternAnalysisSchema
+    timestamp: str
+
+
+class BatchPatternAnalysisResponseSchema(BaseModel):
+    """API response for batch pattern analysis."""
+
+    analysis: list[PatternAnalysisResponseSchema]
+    timestamp: str

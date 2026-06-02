@@ -9,6 +9,15 @@ from .trendline import detect_swing_points, detect_trendline, SwingPoint, Trendl
 from .trend_analyzer import analyze_trend, TrendState
 from .wyckoff import detect_wyckoff_phase, WyckoffPhase, WyckoffState
 from .support_resistance import detect_support_resistance, validate_entry_with_sr, SRZone, SRAnalysis, ZoneType
+from .pattern_detector import (
+    detect_patterns,
+    analyze_market_structure,
+    validate_pattern_with_trend,
+    PatternDetection,
+    PatternType,
+    MarketStructureAnalysis,
+    MarketStructure,
+)
 
 __all__ = [
     # EMA
@@ -33,4 +42,12 @@ __all__ = [
     "SRZone",
     "SRAnalysis",
     "ZoneType",
+    # Pattern detection
+    "detect_patterns",
+    "analyze_market_structure",
+    "validate_pattern_with_trend",
+    "PatternDetection",
+    "PatternType",
+    "MarketStructureAnalysis",
+    "MarketStructure",
 ]
