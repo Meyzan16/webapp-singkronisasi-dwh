@@ -15,7 +15,17 @@ class BinanceClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         exchange_class = getattr(ccxt, settings.binance_exchange_id)
-        self._exchange = exchange_class({"enableRateLimit": True})
+        self._exchange = exchange_class({
+            "enableRateLimit": True,
+            "urls": {
+                "api": {
+                    "public": "https://data-api.binance.vision/api/v3",
+                    "private": "https://data-api.binance.vision/api/v3",
+                    "v1": "https://data-api.binance.vision/api/v1",
+                    "v3": "https://data-api.binance.vision/api/v3",
+                },
+            },
+        })
 
     @staticmethod
     def to_binance_symbol(pair: str) -> str:

@@ -27,6 +27,18 @@ class FuturesClient:
         if settings.binance_testnet:
             config["sandbox"] = True
 
+        # Override API URLs for Indonesia (api.binance.com is blocked)
+        config["urls"] = {
+            "api": {
+                "public": "https://data-api.binance.vision/api/v3",
+                "private": "https://data-api.binance.vision/api/v3",
+                "v1": "https://data-api.binance.vision/api/v1",
+                "v3": "https://data-api.binance.vision/api/v3",
+                "fapiPublic": "https://data-api.binance.vision/fapi/v1",
+                "fapiPrivate": "https://data-api.binance.vision/fapi/v1",
+            },
+        }
+
         self._exchange: ccxt.binance = ccxt.binance(config)
 
     @staticmethod

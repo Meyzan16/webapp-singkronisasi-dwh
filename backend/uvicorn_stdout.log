@@ -1,0 +1,266 @@
+2026-06-02 21:46:55 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600415340 timeframe=1w
+2026-06-02 21:46:56 [info     ] ws_connected                   total=1
+2026-06-02 21:46:56 [info     ] ws_connected                   total=2
+2026-06-02 21:46:56 [info     ] ws_connected                   total=3
+2026-06-02 21:46:56 [info     ] ws_connected                   total=4
+2026-06-02 21:46:56 [info     ] ws_connected                   total=5
+2026-06-02 21:46:56 [info     ] ws_connected                   total=6
+2026-06-02 21:46:57 [info     ] ws_connected                   total=7
+2026-06-02 21:46:57 [info     ] backfilled_klines              count=26 pair=BTCUSDT timeframe=1w
+2026-06-02 21:46:57 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600415340 timeframe=1d
+2026-06-02 21:46:57 [info     ] ws_connected                   total=8
+2026-06-02 21:46:58 [info     ] ws_connected                   total=9
+2026-06-02 21:46:59 [info     ] ws_connected                   total=10
+2026-06-02 21:47:00 [info     ] ws_connected                   total=11
+2026-06-02 21:47:01 [info     ] backfilled_klines              count=183 pair=BTCUSDT timeframe=1d
+2026-06-02 21:47:01 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600415340 timeframe=4h
+2026-06-02 21:47:01 [info     ] ws_connected                   total=12
+2026-06-02 21:47:13 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779004800000 timeframe=4h
+2026-06-02 21:47:24 [info     ] backfilled_klines              count=1098 pair=BTCUSDT timeframe=4h
+2026-06-02 21:47:24 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600415340 timeframe=1h
+INFO:     127.0.0.1:57049 - "GET /health HTTP/1.1" 200 OK
+2026-06-02 21:47:33 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768201200000 timeframe=1h
+2026-06-02 21:47:35 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771801200000 timeframe=1h
+2026-06-02 21:47:41 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775401200000 timeframe=1h
+2026-06-02 21:47:52 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779001200000 timeframe=1h
+2026-06-02 21:47:55 [info     ] backfilled_klines              count=4392 pair=BTCUSDT timeframe=1h
+2026-06-02 21:47:55 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764600415340 timeframe=15m
+INFO:     127.0.0.1:64146 - "GET /api/v1/klines/BTCUSDT/1d?limit=3 HTTP/1.1" 200 OK
+2026-06-02 21:48:03 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1765501200000 timeframe=15m
+2026-06-02 21:48:11 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1766401200000 timeframe=15m
+2026-06-02 21:48:11 [info     ] ws_connected                   total=13
+2026-06-02 21:48:21 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1767301200000 timeframe=15m
+2026-06-02 21:48:30 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768201200000 timeframe=15m
+2026-06-02 21:48:33 [info     ] ws_connected                   total=14
+2026-06-02 21:48:33 [info     ] ws_disconnected                total=13
+2026-06-02 21:48:33 [info     ] ws_disconnected                total=12
+2026-06-02 21:48:33 [info     ] ws_disconnected                total=11
+2026-06-02 21:48:36 [info     ] ws_disconnected                total=10
+2026-06-02 21:48:36 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1769101200000 timeframe=15m
+2026-06-02 21:48:42 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770001200000 timeframe=15m
+2026-06-02 21:48:45 [info     ] ws_disconnected                total=9
+2026-06-02 21:48:45 [info     ] ws_disconnected                total=8
+2026-06-02 21:48:45 [info     ] ws_disconnected                total=7
+2026-06-02 21:48:46 [info     ] ws_disconnected                total=6
+2026-06-02 21:48:48 [info     ] ws_disconnected                total=5
+2026-06-02 21:48:48 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770901200000 timeframe=15m
+2026-06-02 21:48:49 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771801200000 timeframe=15m
+2026-06-02 21:48:54 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1772701200000 timeframe=15m
+2026-06-02 21:48:54 [info     ] ws_disconnected                total=4
+2026-06-02 21:48:59 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1773601200000 timeframe=15m
+2026-06-02 21:49:02 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1774501200000 timeframe=15m
+2026-06-02 21:49:03 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775401200000 timeframe=15m
+2026-06-02 21:49:08 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1776301200000 timeframe=15m
+2026-06-02 21:49:13 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1777201200000 timeframe=15m
+2026-06-02 21:49:13 [info     ] ws_disconnected                total=3
+2026-06-02 21:49:13 [info     ] ws_disconnected                total=2
+2026-06-02 21:49:14 [info     ] ws_disconnected                total=1
+2026-06-02 21:49:14 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1778101200000 timeframe=15m
+2026-06-02 21:49:16 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779001200000 timeframe=15m
+2026-06-02 21:49:16 [info     ] ws_disconnected                total=0
+INFO:     127.0.0.1:56274 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56276 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56278 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-02 21:49:17 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779901200000 timeframe=15m
+INFO:     127.0.0.1:56280 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56282 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-02 21:49:17 [info     ] backfilled_klines              count=17568 pair=BTCUSDT timeframe=15m
+2026-06-02 21:49:17 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600415340 timeframe=1w
+2026-06-02 21:49:18 [info     ] backfilled_klines              count=26 pair=ETHUSDT timeframe=1w
+2026-06-02 21:49:18 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600415340 timeframe=1d
+2026-06-02 21:49:18 [info     ] backfilled_klines              count=183 pair=ETHUSDT timeframe=1d
+2026-06-02 21:49:18 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600415340 timeframe=4h
+2026-06-02 21:49:19 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779004800000 timeframe=4h
+2026-06-02 21:49:19 [info     ] backfilled_klines              count=1098 pair=ETHUSDT timeframe=4h
+2026-06-02 21:49:19 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600415340 timeframe=1h
+2026-06-02 21:49:20 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768201200000 timeframe=1h
+2026-06-02 21:49:21 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771801200000 timeframe=1h
+2026-06-02 21:49:22 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775401200000 timeframe=1h
+2026-06-02 21:49:23 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779001200000 timeframe=1h
+2026-06-02 21:49:23 [info     ] backfilled_klines              count=4392 pair=ETHUSDT timeframe=1h
+2026-06-02 21:49:23 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764600415340 timeframe=15m
+2026-06-02 21:49:24 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1765501200000 timeframe=15m
+2026-06-02 21:49:25 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1766401200000 timeframe=15m
+2026-06-02 21:49:25 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1767301200000 timeframe=15m
+2026-06-02 21:49:26 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768201200000 timeframe=15m
+2026-06-02 21:49:27 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1769101200000 timeframe=15m
+2026-06-02 21:49:28 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770001200000 timeframe=15m
+2026-06-02 21:49:29 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770901200000 timeframe=15m
+2026-06-02 21:49:30 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771801200000 timeframe=15m
+2026-06-02 21:49:31 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1772701200000 timeframe=15m
+2026-06-02 21:49:32 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1773601200000 timeframe=15m
+2026-06-02 21:49:32 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1774501200000 timeframe=15m
+2026-06-02 21:49:33 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775401200000 timeframe=15m
+2026-06-02 21:49:34 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1776301200000 timeframe=15m
+2026-06-02 21:49:34 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1777201200000 timeframe=15m
+2026-06-02 21:49:35 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1778101200000 timeframe=15m
+2026-06-02 21:49:36 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779001200000 timeframe=15m
+2026-06-02 21:49:37 [info     ] ws_connected                   total=1
+2026-06-02 21:49:37 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779901200000 timeframe=15m
+2026-06-02 21:49:38 [info     ] backfilled_klines              count=17568 pair=ETHUSDT timeframe=15m
+2026-06-02 21:49:38 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600415340 timeframe=1w
+2026-06-02 21:49:38 [info     ] backfilled_klines              count=26 pair=SOLUSDT timeframe=1w
+2026-06-02 21:49:38 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600415340 timeframe=1d
+2026-06-02 21:49:38 [info     ] backfilled_klines              count=183 pair=SOLUSDT timeframe=1d
+2026-06-02 21:49:38 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600415340 timeframe=4h
+2026-06-02 21:49:41 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779004800000 timeframe=4h
+INFO:     127.0.0.1:65112 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65116 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65118 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61770 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61771 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53825 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53827 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55397 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55398 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60134 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-02 21:49:41 [info     ] backfilled_klines              count=1098 pair=SOLUSDT timeframe=4h
+2026-06-02 21:49:41 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600415340 timeframe=1h
+2026-06-02 21:49:41 [info     ] ws_disconnected                total=0
+2026-06-02 21:49:42 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768201200000 timeframe=1h
+2026-06-02 21:49:43 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771801200000 timeframe=1h
+2026-06-02 21:49:44 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775401200000 timeframe=1h
+2026-06-02 21:49:44 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779001200000 timeframe=1h
+2026-06-02 21:49:45 [info     ] backfilled_klines              count=4392 pair=SOLUSDT timeframe=1h
+2026-06-02 21:49:45 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764600415340 timeframe=15m
+2026-06-02 21:49:45 [info     ] ws_connected                   total=1
+2026-06-02 21:49:45 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1765501200000 timeframe=15m
+INFO:     127.0.0.1:62088 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-02 21:49:46 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1766401200000 timeframe=15m
+2026-06-02 21:49:47 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1767301200000 timeframe=15m
+2026-06-02 21:49:48 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768201200000 timeframe=15m
+2026-06-02 21:49:50 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1769101200000 timeframe=15m
+2026-06-02 21:49:51 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770001200000 timeframe=15m
+2026-06-02 21:49:51 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770901200000 timeframe=15m
+2026-06-02 21:49:52 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771801200000 timeframe=15m
+2026-06-02 21:49:53 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1772701200000 timeframe=15m
+2026-06-02 21:49:54 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1773601200000 timeframe=15m
+INFO:     127.0.0.1:52962 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-02 21:49:54 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1774501200000 timeframe=15m
+2026-06-02 21:49:56 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775401200000 timeframe=15m
+2026-06-02 21:49:57 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1776301200000 timeframe=15m
+2026-06-02 21:49:58 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1777201200000 timeframe=15m
+2026-06-02 21:49:58 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1778101200000 timeframe=15m
+2026-06-02 21:49:59 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779001200000 timeframe=15m
+2026-06-02 21:50:00 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779901200000 timeframe=15m
+2026-06-02 21:50:01 [info     ] backfilled_klines              count=17568 pair=SOLUSDT timeframe=15m
+2026-06-02 21:50:01 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764600415340 timeframe=1w
+2026-06-02 21:50:02 [info     ] backfilled_klines              count=26 pair=BNBUSDT timeframe=1w
+2026-06-02 21:50:02 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764600415340 timeframe=1d
+2026-06-02 21:50:03 [info     ] backfilled_klines              count=183 pair=BNBUSDT timeframe=1d
+2026-06-02 21:50:03 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764600415340 timeframe=4h
+2026-06-02 21:50:04 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779004800000 timeframe=4h
+2026-06-02 21:50:04 [info     ] backfilled_klines              count=1098 pair=BNBUSDT timeframe=4h
+2026-06-02 21:50:04 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764600415340 timeframe=1h
+2026-06-02 21:50:05 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1768201200000 timeframe=1h
+2026-06-02 21:50:06 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1771801200000 timeframe=1h
+2026-06-02 21:50:07 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1775401200000 timeframe=1h
+2026-06-02 21:50:09 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779001200000 timeframe=1h
+2026-06-02 21:50:10 [info     ] backfilled_klines              count=4392 pair=BNBUSDT timeframe=1h
+2026-06-02 21:50:10 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764600415340 timeframe=15m
+2026-06-02 21:50:10 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1765501200000 timeframe=15m
+2026-06-02 21:50:11 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1766401200000 timeframe=15m
+2026-06-02 21:50:12 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1767301200000 timeframe=15m
+2026-06-02 21:50:14 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1768201200000 timeframe=15m
+2026-06-02 21:50:15 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1769101200000 timeframe=15m
+2026-06-02 21:50:16 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1770001200000 timeframe=15m
+2026-06-02 21:50:17 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1770901200000 timeframe=15m
+2026-06-02 21:50:18 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1771801200000 timeframe=15m
+2026-06-02 21:50:18 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1772701200000 timeframe=15m
+2026-06-02 21:50:19 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1773601200000 timeframe=15m
+2026-06-02 21:50:20 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1774501200000 timeframe=15m
+2026-06-02 21:50:22 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1775401200000 timeframe=15m
+2026-06-02 21:50:23 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1776301200000 timeframe=15m
+2026-06-02 21:50:24 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1777201200000 timeframe=15m
+2026-06-02 21:50:25 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1778101200000 timeframe=15m
+2026-06-02 21:50:26 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779001200000 timeframe=15m
+2026-06-02 21:50:27 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779901200000 timeframe=15m
+INFO:     127.0.0.1:53877 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53879 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53881 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53175 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49684 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-02 21:50:28 [info     ] backfilled_klines              count=17568 pair=BNBUSDT timeframe=15m
+2026-06-02 21:50:28 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764600415340 timeframe=1w
+2026-06-02 21:50:28 [info     ] backfilled_klines              count=26 pair=SUIUSDT timeframe=1w
+2026-06-02 21:50:28 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764600415340 timeframe=1d
+2026-06-02 21:50:28 [info     ] ws_disconnected                total=0
+2026-06-02 21:50:28 [info     ] backfilled_klines              count=183 pair=SUIUSDT timeframe=1d
+2026-06-02 21:50:28 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764600415340 timeframe=4h
+2026-06-02 21:50:29 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779004800000 timeframe=4h
+2026-06-02 21:50:29 [info     ] backfilled_klines              count=1098 pair=SUIUSDT timeframe=4h
+2026-06-02 21:50:29 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764600415340 timeframe=1h
+2026-06-02 21:50:30 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1768201200000 timeframe=1h
+2026-06-02 21:50:31 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1771801200000 timeframe=1h
+2026-06-02 21:50:32 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1775401200000 timeframe=1h
+2026-06-02 21:50:32 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779001200000 timeframe=1h
+2026-06-02 21:50:33 [info     ] backfilled_klines              count=4392 pair=SUIUSDT timeframe=1h
+2026-06-02 21:50:33 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764600415340 timeframe=15m
+2026-06-02 21:50:33 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1765501200000 timeframe=15m
+2026-06-02 21:50:34 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1766401200000 timeframe=15m
+2026-06-02 21:50:35 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1767301200000 timeframe=15m
+2026-06-02 21:50:35 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1768201200000 timeframe=15m
+2026-06-02 21:50:36 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1769101200000 timeframe=15m
+2026-06-02 21:50:37 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1770001200000 timeframe=15m
+2026-06-02 21:50:37 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1770901200000 timeframe=15m
+2026-06-02 21:50:38 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1771801200000 timeframe=15m
+2026-06-02 21:50:38 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1772701200000 timeframe=15m
+2026-06-02 21:50:39 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1773601200000 timeframe=15m
+2026-06-02 21:50:40 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1774501200000 timeframe=15m
+2026-06-02 21:50:40 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1775401200000 timeframe=15m
+2026-06-02 21:50:41 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1776301200000 timeframe=15m
+2026-06-02 21:50:41 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1777201200000 timeframe=15m
+2026-06-02 21:50:42 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1778101200000 timeframe=15m
+2026-06-02 21:50:43 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779001200000 timeframe=15m
+2026-06-02 21:50:44 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779901200000 timeframe=15m
+2026-06-02 21:50:44 [info     ] backfilled_klines              count=17568 pair=SUIUSDT timeframe=15m
+2026-06-02 21:50:44 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
+2026-06-02 21:50:44 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
+2026-06-02 21:50:44 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
+2026-06-02 21:50:45 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
+2026-06-02 21:50:45 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780401600000 timeframe=4h
+2026-06-02 21:50:45 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
+2026-06-02 21:50:45 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780408800000 timeframe=1h
+2026-06-02 21:50:45 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
+2026-06-02 21:50:45 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780411500000 timeframe=15m
+2026-06-02 21:50:45 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
+2026-06-02 21:50:45 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
+2026-06-02 21:50:45 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
+2026-06-02 21:50:45 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
+2026-06-02 21:50:45 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
+2026-06-02 21:50:45 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780401600000 timeframe=4h
+2026-06-02 21:50:45 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
+2026-06-02 21:50:45 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780408800000 timeframe=1h
+2026-06-02 21:50:46 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
+2026-06-02 21:50:46 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780411500000 timeframe=15m
+2026-06-02 21:50:46 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
+2026-06-02 21:50:46 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
+2026-06-02 21:50:46 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
+2026-06-02 21:50:46 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
+2026-06-02 21:50:46 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
+2026-06-02 21:50:46 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780401600000 timeframe=4h
+2026-06-02 21:50:46 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
+2026-06-02 21:50:46 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780408800000 timeframe=1h
+2026-06-02 21:50:46 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
+2026-06-02 21:50:46 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780411500000 timeframe=15m
+2026-06-02 21:50:47 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
+2026-06-02 21:50:47 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
+2026-06-02 21:50:47 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
+2026-06-02 21:50:47 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
+2026-06-02 21:50:47 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
+2026-06-02 21:50:47 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780401600000 timeframe=4h
+2026-06-02 21:50:47 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
+2026-06-02 21:50:47 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780408800000 timeframe=1h
+2026-06-02 21:50:47 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
+2026-06-02 21:50:47 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780411500000 timeframe=15m
+2026-06-02 21:50:47 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
+2026-06-02 21:50:47 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
+2026-06-02 21:50:47 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
+2026-06-02 21:50:47 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
+2026-06-02 21:50:48 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
+2026-06-02 21:50:48 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780401600000 timeframe=4h
+2026-06-02 21:50:48 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
+2026-06-02 21:50:48 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780408800000 timeframe=1h
+2026-06-02 21:50:48 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
+2026-06-02 21:50:48 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780411500000 timeframe=15m
+2026-06-02 21:50:48 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m

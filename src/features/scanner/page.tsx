@@ -27,12 +27,14 @@ export default function ScannerPage() {
             const response = await fetch(`/api/v1/klines/${pair}/1d?limit=1`);
             if (response.ok) {
               const result = await response.json();
-              if (result.klines && result.klines.length > 0) {
-                const k = result.klines[0];
+              // Backend returns array directly, not {klines: [...]}
+              const klines = Array.isArray(result) ? result : result.klines ?? [];
+              if (klines.length > 0) {
+                const k = klines[0];
                 data.push({
                   pair,
-                  price: k.close,
-                  volume24h: k.volume,
+                  price: parseFloat(k.close),
+                  volume24h: parseFloat(k.volume),
                   change24h: Math.random() * 20 - 10,
                   lastUpdate: new Date().toISOString(),
                 });
