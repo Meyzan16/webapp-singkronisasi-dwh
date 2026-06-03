@@ -1,23 +1,24 @@
-2026-06-03 09:31:12 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764642672297 timeframe=1w
-2026-06-03 09:31:14 [info     ] backfilled_klines              count=26 pair=BTCUSDT timeframe=1w
-2026-06-03 09:31:14 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764642672297 timeframe=1d
-INFO:     127.0.0.1:50413 - "GET /api/v1/market/spot-positions HTTP/1.1" 500 Internal Server Error
-INFO:     127.0.0.1:50418 - "GET /api/v1/market/futures-market HTTP/1.1" 500 Internal Server Error
-INFO:     127.0.0.1:50419 - "GET /api/v1/market/futures-positions HTTP/1.1" 500 Internal Server Error
-2026-06-03 09:31:14 [info     ] backfilled_klines              count=183 pair=BTCUSDT timeframe=1d
-2026-06-03 09:31:14 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764642672297 timeframe=4h
-2026-06-03 09:31:15 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779048000000 timeframe=4h
-2026-06-03 09:31:15 [info     ] backfilled_klines              count=1098 pair=BTCUSDT timeframe=4h
-2026-06-03 09:31:15 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764642672297 timeframe=1h
-2026-06-03 09:31:16 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768244400000 timeframe=1h
-2026-06-03 09:31:17 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771844400000 timeframe=1h
-2026-06-03 09:31:17 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775444400000 timeframe=1h
-INFO:     127.0.0.1:59109 - "GET /api/v1/market/futures-positions HTTP/1.1" 500 Internal Server Error
-2026-06-03 09:31:18 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779044400000 timeframe=1h
-2026-06-03 09:31:19 [info     ] backfilled_klines              count=4392 pair=BTCUSDT timeframe=1h
-2026-06-03 09:31:19 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764642672297 timeframe=15m
-2026-06-03 09:31:19 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1765543500000 timeframe=15m
-2026-06-03 09:31:20 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1766443500000 timeframe=15m
-2026-06-03 09:31:20 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1767343500000 timeframe=15m
-2026-06-03 09:31:21 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768243500000 timeframe=15m
-2026-06-03 09:31:22 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1769143500000 timeframe=15m
+2026-06-03 10:04:16 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764644656493 timeframe=1w
+2026-06-03 10:04:17 [info     ] backfilled_klines              count=26 pair=BTCUSDT timeframe=1w
+2026-06-03 10:04:17 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764644656493 timeframe=1d
+INFO:     127.0.0.1:60982 - "GET /api/v1/coin/APRUSDT/analyze?style=daytrading HTTP/1.1" 200 OK
+2026-06-03 10:04:18 [info     ] backfilled_klines              count=183 pair=BTCUSDT timeframe=1d
+2026-06-03 10:04:18 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764644656493 timeframe=4h
+INFO:     127.0.0.1:60991 - "GET /health HTTP/1.1" 200 OK
+2026-06-03 10:04:19 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779048000000 timeframe=4h
+INFO:     127.0.0.1:57771 - "GET /api/v1/coin/APRUSDT/klines?interval=15m&limit=200 HTTP/1.1" 200 OK
+2026-06-03 10:04:20 [info     ] backfilled_klines              count=1098 pair=BTCUSDT timeframe=4h
+2026-06-03 10:04:20 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764644656493 timeframe=1h
+2026-06-03 10:04:22 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768248000000 timeframe=1h
+INFO:     127.0.0.1:51387 - "GET /api/v1/coin/APRUSDT/analyze?style=scalping HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55312 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 10:04:23 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771848000000 timeframe=1h
+INFO:     127.0.0.1:60522 - "GET /api/v1/coin/APRUSDT/analyze?style=scalping HTTP/1.1" 200 OK
+2026-06-03 10:04:24 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775448000000 timeframe=1h
+2026-06-03 10:04:25 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779048000000 timeframe=1h
+2026-06-03 10:04:26 [info     ] backfilled_klines              count=4392 pair=BTCUSDT timeframe=1h
+2026-06-03 10:04:26 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764644656493 timeframe=15m
+INFO:     127.0.0.1:50282 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 10:04:27 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1765545300000 timeframe=15m
+2026-06-03 10:04:28 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1766445300000 timeframe=15m
+INFO:     127.0.0.1:51196 - "GET /api/v1/coin/APRUSDT/analyze?style=scalping HTTP/1.1" 200 OK

@@ -59,15 +59,15 @@ async def _binance_get(
     path: str,
     testnet: bool = False,
 ) -> dict:
-    """Signed GET request to Binance API."""
-    base_urls = [
-        "https://api.binance.com",
-        "https://api1.binance.com",
-        "https://api2.binance.com",
-        "https://api3.binance.com",
-    ]
+    """Signed GET request to Binance API. URLs from config/env."""
+    from app.services.binance_urls import get_spot_url, testnet_url
     if testnet:
-        base_urls = ["https://testnet.binance.vision"]
+        base_urls = [testnet_url()]
+    else:
+        base_urls = [
+            get_spot_url(),       # binance.bh (primary)
+            "https://api.binance.com",  # fallback if VPN active
+        ]
 
     # Build query string manually for deterministic signing
     timestamp = int(time.time() * 1000)

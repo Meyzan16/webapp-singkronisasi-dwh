@@ -27,15 +27,19 @@ class FuturesClient:
         if settings.binance_testnet:
             config["sandbox"] = True
 
-        # Override API URLs for Indonesia (api.binance.com is blocked)
+        # Use URL from config (env-driven, default binance.bh)
+        spot_base = settings.binance_spot_url
+        fapi_base = settings.binance_fapi_url
         config["urls"] = {
             "api": {
-                "public": "https://data-api.binance.vision/api/v3",
-                "private": "https://data-api.binance.vision/api/v3",
-                "v1": "https://data-api.binance.vision/api/v1",
-                "v3": "https://data-api.binance.vision/api/v3",
-                "fapiPublic": "https://data-api.binance.vision/fapi/v1",
-                "fapiPrivate": "https://data-api.binance.vision/fapi/v1",
+                "public":      f"{spot_base}/api/v3",
+                "private":     f"{spot_base}/api/v3",
+                "v1":          f"{spot_base}/api/v1",
+                "v3":          f"{spot_base}/api/v3",
+                "fapiPublic":  f"{fapi_base}/fapi/v1",
+                "fapiPrivate": f"{fapi_base}/fapi/v1",
+                "fapiPublicV2": f"{fapi_base}/fapi/v2",
+                "fapiPrivateV2": f"{fapi_base}/fapi/v2",
             },
         }
 

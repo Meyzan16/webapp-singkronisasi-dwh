@@ -15,9 +15,7 @@ from app.config import get_settings
 router = APIRouter(tags=["market"])
 logger = structlog.get_logger(__name__)
 
-SPOT_BASE = "https://api.binance.com"
-FAPI_BASE = "https://fapi.binance.com"
-BH_BASE   = "https://www.binance.bh"   # accessible from Indonesia without VPN
+from app.services.binance_urls import get_spot_url, get_fapi_url, fapi, spot
 
 
 def _sign(secret: str, query_string: str) -> str:
@@ -100,10 +98,10 @@ async def get_spot_positions() -> SpotPositionsResponse:
 
     async with httpx.AsyncClient(timeout=15) as client:
         # Get account balances
-        account = await _get(client, f"{SPOT_BASE}/api/v3/account?{qs}", _auth_headers(s.binance_api_key))
+        account = await _get(client, spot(f"/api/v3/account?{qs}"), _auth_headers(s.binance_api_key))
 
         # Get all spot prices in one call
-        prices_raw: list = await _get(client, f"{SPOT_BASE}/api/v3/ticker/price")
+        prices_raw: list = await _get(client, spot("/api/v3/ticker/price"))
         prices = {p["symbol"]: float(p["price"]) for p in prices_raw}
 
     assets: list[SpotAsset] = []
@@ -149,11 +147,11 @@ async def get_futures_positions() -> FuturesPositionsResponse:
     qs = _signed_url("/fapi/v2/positionRisk", s.binance_api_secret)
 
     async with httpx.AsyncClient(timeout=15) as client:
-        # Try binance.bh first for Indonesia access
-        try:
-            raw: list = await _get(client, f"{BH_BASE}/fapi/v2/positionRisk?{qs}", _auth_headers(s.binance_api_key))
-        except Exception:
-            raw = await _get(client, f"{FAPI_BASE}/fapi/v2/positionRisk?{qs}", _auth_headers(s.binance_api_key))
+        raw: list = await _get(
+            client,
+            fapi(f"/fapi/v2/positionRisk?{qs}"),
+            _auth_headers(s.binance_api_key),
+        )
 
     positions: list[FuturesPosition] = []
     for p in raw:
@@ -191,14 +189,8 @@ async def get_futures_positions() -> FuturesPositionsResponse:
 @router.get("/market/futures-market", response_model=FuturesMarketResponse)
 async def get_futures_market() -> FuturesMarketResponse:
     """Fetch all USDT futures pairs sorted by 24h change (highest first)."""
-    # Try binance.bh first (accessible from Indonesia), fallback to fapi
     async with httpx.AsyncClient(timeout=15) as client:
-        try:
-            raw: list = await _get(client, f"{BH_BASE}/fapi/v1/ticker/24hr")
-            if not raw:
-                raise ValueError("empty")
-        except Exception:
-            raw = await _get(client, f"{FAPI_BASE}/fapi/v1/ticker/24hr")
+        raw: list = await _get(client, fapi("/fapi/v1/ticker/24hr"))
 
     tickers: list[FuturesTicker] = []
     for t in raw:

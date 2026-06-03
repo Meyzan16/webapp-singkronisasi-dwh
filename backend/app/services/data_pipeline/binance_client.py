@@ -15,14 +15,15 @@ class BinanceClient:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         exchange_class = getattr(ccxt, settings.binance_exchange_id)
+        base = settings.binance_spot_url  # from env, default binance.bh
         self._exchange = exchange_class({
             "enableRateLimit": True,
             "urls": {
                 "api": {
-                    "public": "https://data-api.binance.vision/api/v3",
-                    "private": "https://data-api.binance.vision/api/v3",
-                    "v1": "https://data-api.binance.vision/api/v1",
-                    "v3": "https://data-api.binance.vision/api/v3",
+                    "public":  f"{base}/api/v3",
+                    "private": f"{base}/api/v3",
+                    "v1":      f"{base}/api/v1",
+                    "v3":      f"{base}/api/v3",
                 },
             },
         })

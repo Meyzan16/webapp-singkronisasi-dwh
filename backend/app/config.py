@@ -25,7 +25,18 @@ class Settings(BaseSettings):
     binance_exchange_id: str = "binance"
     binance_api_key: str = Field(default="", validation_alias="BINANCE_API_KEY")
     binance_api_secret: str = Field(default="", validation_alias="BINANCE_API_SECRET")
-    binance_testnet: bool = Field(default=True, validation_alias="BINANCE_TESTNET")
+    binance_testnet: bool = Field(default=False, validation_alias="BINANCE_TESTNET")
+
+    # Binance base URLs — override via .env for different regions
+    binance_spot_url: str = Field(
+        default="https://www.binance.bh", validation_alias="BINANCE_SPOT_URL"
+    )
+    binance_fapi_url: str = Field(
+        default="https://www.binance.bh", validation_alias="BINANCE_FAPI_URL"
+    )
+    binance_fallback_url: str = Field(
+        default="https://data-api.binance.vision", validation_alias="BINANCE_FALLBACK_URL"
+    )
 
     # Trading config
     trading_pairs: list[str] = Field(

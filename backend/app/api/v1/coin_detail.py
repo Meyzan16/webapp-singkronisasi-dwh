@@ -12,18 +12,14 @@ from app.services.signal_generator.pipeline import SignalPipeline
 router = APIRouter(tags=["coin_detail"])
 logger = structlog.get_logger(__name__)
 
-FAPI_BASE = "https://fapi.binance.com"
-BH_BASE = "https://www.binance.bh"          # accessible from Indonesia without VPN
-VISION_BASE = "https://data-api.binance.vision"
+from app.services.binance_urls import get_fapi_url, get_fallback_url, fapi, spot
 
-# Fallback URLs per endpoint type
 async def _fetch_klines_with_fallback(client: httpx.AsyncClient, symbol: str, interval: str, limit: int) -> list:
-    """Try binance.bh first (accessible from Indonesia), then fapi, then vision."""
+    """Try fapi (binance.bh) first, fallback to vision for klines."""
     urls = [
-        f"{BH_BASE}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}",
-        f"{BH_BASE}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
-        f"{FAPI_BASE}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}",
-        f"{VISION_BASE}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
+        fapi(f"/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"),
+        spot(f"/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"),
+        f"{get_fallback_url()}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
     ]
     last_error = "all URLs failed"
     for url in urls:
@@ -218,23 +214,30 @@ async def get_coin_info(symbol: str) -> CoinInfo:
     sym = symbol.upper()
     async with httpx.AsyncClient(timeout=15, verify=False) as client:
         ticker_r, mark_r, oi_r, funding_r = await _gather_urls(client, [
-            f"{VISION_BASE}/api/v3/ticker/24hr?symbol={sym}",
-            f"{VISION_BASE}/api/v3/ticker/24hr?symbol={sym}",  # vision has no premiumIndex, reuse ticker
-            f"{VISION_BASE}/api/v3/ticker/24hr?symbol={sym}",  # OI not available on vision, use ticker
-            f"{VISION_BASE}/api/v3/ticker/24hr?symbol={sym}",  # funding not available on vision
+            fapi(f"/fapi/v1/ticker/24hr?symbol={sym}"),
+            fapi(f"/fapi/v1/premiumIndex?symbol={sym}"),
+            fapi(f"/fapi/v1/openInterest?symbol={sym}"),
+            fapi(f"/fapi/v1/fundingRate?symbol={sym}&limit=1"),
         ])
-    last_price = float(ticker_r.get("lastPrice", ticker_r.get("price", 0)))
+    last_price = float(ticker_r.get("lastPrice", 0))
+    mark_price = float(mark_r.get("markPrice", last_price))
+    index_price = float(mark_r.get("indexPrice", last_price))
+    funding_rate = 0.0
+    if isinstance(funding_r, list) and funding_r:
+        funding_rate = float(funding_r[0].get("fundingRate", 0))
+    elif isinstance(funding_r, dict):
+        funding_rate = float(funding_r.get("lastFundingRate", mark_r.get("lastFundingRate", 0)))
+
     return CoinInfo(
         symbol=sym, last_price=last_price,
-        mark_price=last_price,  # vision has no mark price, use last
-        index_price=last_price,
+        mark_price=mark_price, index_price=index_price,
         change_24h=round(float(ticker_r.get("priceChangePercent", 0)), 2),
         high_24h=float(ticker_r.get("highPrice", 0)), low_24h=float(ticker_r.get("lowPrice", 0)),
         volume_24h=round(float(ticker_r.get("volume", 0)), 2),
         quote_volume_24h=round(float(ticker_r.get("quoteVolume", 0)), 0),
-        open_interest=0.0,  # not available via vision
-        funding_rate=0.0,   # not available via vision
-        next_funding_time=0,
+        open_interest=round(float(oi_r.get("openInterest", 0)), 2),
+        funding_rate=round(funding_rate * 100, 4),
+        next_funding_time=int(mark_r.get("nextFundingTime", 0)),
         count_24h=int(ticker_r.get("count", 0)),
     )
 
