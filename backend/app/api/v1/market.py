@@ -101,50 +101,54 @@ async def _fetch_avg_buy_price(
     api_secret: str,
 ) -> float | None:
     """
-    Calculate weighted average buy price from trade history.
-    Fetches last 500 trades and works backwards to cover current holding.
-    Returns None if USDT pair not found or no trades.
+    Calculate avg buy price using FIFO (First In, First Out).
+
+    Process trades oldest→newest:
+    - BUY: add lot to queue
+    - SELL: consume from oldest lots first (FIFO)
+    - Remaining lots in queue = current holding → weighted avg
     """
     if asset == "USDT":
         return 1.0
     symbol = f"{asset}USDT"
     try:
-        qs = _signed_url(f"/api/v3/myTrades", api_secret, {"symbol": symbol, "limit": 500})
-        trades = await client.get(spot(f"/api/v3/myTrades?{qs}"), headers=_auth_headers(api_key))
-        if trades.status_code != 200:
+        qs = _signed_url("/api/v3/myTrades", api_secret, {"symbol": symbol, "limit": 500})
+        resp = await client.get(spot(f"/api/v3/myTrades?{qs}"), headers=_auth_headers(api_key))
+        if resp.status_code != 200:
             return None
-        trade_list = trades.json()
+        trade_list = resp.json()
         if not trade_list or not isinstance(trade_list, list):
             return None
 
-        # Work backwards through trades to find avg cost of current holding
-        remaining = total_held
-        total_cost = 0.0
-        for t in reversed(trade_list):
+        # FIFO queue of buy lots: list of [price, qty]
+        buy_lots: list[list[float]] = []
+
+        for t in trade_list:  # oldest first (Binance returns asc by default)
             qty = float(t.get("qty", 0))
             price = float(t.get("price", 0))
-            is_buyer = t.get("isBuyer", False)
 
-            if is_buyer:
-                take = min(qty, remaining)
-                total_cost += take * price
-                remaining -= take
-                if remaining <= 0:
-                    break
+            if t.get("isBuyer"):
+                buy_lots.append([price, qty])
             else:
-                # Sold some — add back to remaining (we need more buys to cover)
-                remaining += qty
+                # Sell: consume FIFO from oldest buy lots
+                to_sell = qty
+                while to_sell > 1e-8 and buy_lots:
+                    oldest_price, oldest_qty = buy_lots[0]
+                    if oldest_qty <= to_sell + 1e-8:
+                        to_sell -= oldest_qty
+                        buy_lots.pop(0)
+                    else:
+                        buy_lots[0][1] -= to_sell
+                        to_sell = 0
 
-        if remaining > total_held * 0.5:
-            # Not enough trade history, use simple average of all buys
-            buys = [t for t in trade_list if t.get("isBuyer")]
-            if not buys:
-                return None
-            total_qty = sum(float(t["qty"]) for t in buys)
-            total_val = sum(float(t["qty"]) * float(t["price"]) for t in buys)
-            return total_val / total_qty if total_qty > 0 else None
+        # Remaining lots = current holding
+        total_qty = sum(lot[1] for lot in buy_lots)
+        if total_qty < 1e-8:
+            return None
 
-        return total_cost / total_held if total_held > 0 else None
+        total_val = sum(lot[0] * lot[1] for lot in buy_lots)
+        return total_val / total_qty
+
     except Exception:
         return None
 
