@@ -16,12 +16,15 @@ interface ScanSignal {
   take_profit: number;
   risk_reward: string;
   alert_type: string;
+  style_note: string;
 }
 
 interface ScannerData {
   results: ScanSignal[];
   scanned: number;
   style: string;
+  style_label: string;
+  timeframe: string;
   generated_at: number;
 }
 
@@ -49,10 +52,10 @@ const ALERT_LABELS: Record<string, string> = {
 };
 
 const STYLES = [
-  { key: "15m", label: "Scalping",  icon: "⚡", desc: "Menit–Jam"    },
-  { key: "1h",  label: "Day Trade", icon: "📅", desc: "Harian"       },
-  { key: "4h",  label: "Swing",     icon: "🌊", desc: "Hari–Minggu"  },
-  { key: "1d",  label: "Position",  icon: "🏔", desc: "Minggu–Bulan" },
+  { key: "scalping",   label: "Scalping",  icon: "⚡", desc: "15m · Menit–Jam",    hint: "RSI ekstrem, vol spike, momentum cepat"   },
+  { key: "daytrading", label: "Day Trade", icon: "📅", desc: "1H · Harian",        hint: "Balance trend & momentum, intraday setup"  },
+  { key: "swing",      label: "Swing",     icon: "🌊", desc: "4H · Hari–Minggu",   hint: "BB squeeze, akumulasi, breakout multi-hari" },
+  { key: "position",   label: "Position",  icon: "🏔", desc: "1D · Minggu–Bulan",  hint: "Akumulasi panjang, trend makro, S/R weekly" },
 ];
 
 const fmtPrice = (p: number) =>
@@ -68,26 +71,26 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
   const [data, setData]       = useState<ScannerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter]   = useState<"ALL" | "LONG" | "SHORT">("ALL");
-  const [tf, setTf]           = useState("4h"); // default Swing
+  const [style, setStyle]     = useState("swing"); // default Swing
 
-  const fetchData = useCallback(async (timeframe: string) => {
+  const fetchData = useCallback(async (s: string) => {
     try {
       setLoading(true);
-      const r = await fetch(`/api/v1/scanner/scan?style=${timeframe}&limit=100`);
+      const r = await fetch(`/api/v1/scanner/scan?style=${s}`);
       setData(await r.json());
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
-    void fetchData(tf);
-    const t = setInterval(() => void fetchData(tf), 5 * 60 * 1000);
+    void fetchData(style);
+    const t = setInterval(() => void fetchData(style), 5 * 60 * 1000);
     return () => clearInterval(t);
-  }, [fetchData, tf]);
+  }, [fetchData, style]);
 
-  const handleTfChange = (newTf: string) => {
-    setTf(newTf);
-    void fetchData(newTf);
+  const handleStyleChange = (s: string) => {
+    setStyle(s);
+    void fetchData(s);
   };
 
   const filtered = data?.results.filter(r => filter === "ALL" || r.direction === filter) ?? [];
@@ -112,7 +115,7 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
               {loading && <span className="animate-spin w-3 h-3 border-2 border-teal-400 border-t-transparent rounded-full" />}
               {data && !loading && (
                 <span className="text-[10px] text-neutral-500">
-                  {STYLES.find(s => s.key === tf)?.label} · {data.scanned} scanned · {timeAgo === 0 ? "just now" : `${timeAgo}m ago`}
+                  {data.style_label} ({data.timeframe}) · {data.scanned} pairs · {timeAgo === 0 ? "baru" : `${timeAgo}m lalu`}
                 </span>
               )}
               <button onClick={() => void fetchData(tf)}
@@ -123,17 +126,22 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
           </div>
 
           {/* Trading style selector */}
-          <div className="flex gap-1.5 flex-wrap">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
             {STYLES.map(s => (
-              <button key={s.key} onClick={() => handleTfChange(s.key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
-                  tf === s.key
+              <button key={s.key} onClick={() => handleStyleChange(s.key)}
+                title={s.hint}
+                className={`flex flex-col items-start px-3 py-2 rounded-xl border text-left transition-all ${
+                  style === s.key
                     ? "bg-teal-600 border-teal-500 text-white shadow-sm"
-                    : "bg-neutral-800 border-neutral-700 text-neutral-400 hover:border-teal-600/50 hover:text-white"
+                    : "bg-neutral-800 border-neutral-700 text-neutral-400 hover:border-teal-600/50 hover:text-neutral-100"
                 }`}>
-                <span>{s.icon}</span>
-                <span>{s.label}</span>
-                {tf === s.key && <span className="text-[10px] opacity-75">({s.desc})</span>}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base">{s.icon}</span>
+                  <span className="font-bold text-xs">{s.label}</span>
+                </div>
+                <span className={`text-[10px] mt-0.5 leading-tight ${style === s.key ? "opacity-80" : "opacity-50"}`}>
+                  {s.desc}
+                </span>
               </button>
             ))}
           </div>
@@ -183,7 +191,7 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
 
         {!loading && filtered.length === 0 && (
           <p className="text-center text-neutral-500 text-sm py-8">
-            No early-warning setups found for {STYLES.find(s => s.key === tf)?.label} style
+            No early-warning setups found for {STYLES.find(s => s.key === style)?.label} style
           </p>
         )}
 
@@ -245,6 +253,9 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
                       <p key={i} className="text-[10px] text-neutral-300 leading-relaxed">{s}</p>
                     ))}
                   </div>
+
+                  {/* Style note */}
+                  <p className="text-[10px] text-neutral-600 mb-1.5">{r.style_note}</p>
 
                   {/* Key level + stats */}
                   <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1.5 border-t border-neutral-700/50">
