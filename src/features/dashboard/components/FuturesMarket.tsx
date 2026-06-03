@@ -13,12 +13,15 @@ interface FuturesTicker {
   low_24h: number;
 }
 
+const PAGE_SIZE = 50;
+
 export function FuturesMarket() {
   const [tickers, setTickers] = useState<FuturesTicker[]>([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState("All");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const fetchData = useCallback(async () => {
     try {
@@ -44,6 +47,12 @@ export function FuturesMarket() {
       return matchSearch && matchCat;
     });
   }, [tickers, category, search]);
+
+  // Reset to page 1 when filter/search changes
+  useMemo(() => { setPage(1); }, [filtered.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const fmtVol = (v: number) =>
     v >= 1e9 ? `${(v / 1e9).toFixed(1)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(0)}M` : `${(v / 1e3).toFixed(0)}K`;
@@ -133,16 +142,17 @@ export function FuturesMarket() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((t, i) => {
+                  {paginated.map((t, i) => {
                     const base = t.symbol.replace("USDT", "");
                     const cat = getCoinCategory(t.symbol);
+                    const globalIdx = (page - 1) * PAGE_SIZE + i + 1;
                     return (
                       <tr
                         key={t.symbol}
                         onClick={() => setSelectedSymbol(t.symbol)}
                         className="border-b border-neutral-50 hover:bg-teal-50 cursor-pointer transition-colors group"
                       >
-                        <td className="py-2.5 pr-3 pl-1 text-muted-foreground text-xs">{i + 1}</td>
+                        <td className="py-2.5 pr-3 pl-1 text-muted-foreground text-xs">{globalIdx}</td>
                         <td className="py-2.5 pr-3">
                           <div className="flex items-center gap-2">
                             <div className="w-7 h-7 rounded-full bg-primarygreen/10 flex items-center justify-center flex-shrink-0">
@@ -177,6 +187,37 @@ export function FuturesMarket() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4 pt-3 border-t">
+              <span className="text-xs text-muted-foreground">
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+              <div className="flex gap-1 items-center">
+                <button onClick={() => setPage(1)} disabled={page === 1}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30 hover:bg-neutral-50">«</button>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                  className="px-2.5 py-1 text-xs rounded border disabled:opacity-30 hover:bg-neutral-50">‹</button>
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  const start = Math.max(1, Math.min(page - 2, totalPages - 4));
+                  const p = start + i;
+                  return (
+                    <button key={p} onClick={() => setPage(p)}
+                      className={`px-2.5 py-1 text-xs rounded border transition-colors ${
+                        p === page ? "bg-primarygreen text-white border-primarygreen" : "hover:bg-neutral-50"
+                      }`}>
+                      {p}
+                    </button>
+                  );
+                })}
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                  className="px-2.5 py-1 text-xs rounded border disabled:opacity-30 hover:bg-neutral-50">›</button>
+                <button onClick={() => setPage(totalPages)} disabled={page === totalPages}
+                  className="px-2 py-1 text-xs rounded border disabled:opacity-30 hover:bg-neutral-50">»</button>
+              </div>
             </div>
           )}
         </CardContent>

@@ -17,6 +17,7 @@ from app.api.v1.positions import router as positions_router
 from app.api.v1.account import router as account_router
 from app.api.v1.market import router as market_router
 from app.api.v1.coin_detail import router as coin_detail_router
+from app.api.v1.scanner import router as scanner_router
 from app.config import get_settings
 from app.database import AsyncSessionLocal, create_db_schema, dispose_engine
 from app.services.data_pipeline.binance_client import BinanceClient
@@ -70,6 +71,7 @@ app.include_router(positions_router, prefix=settings.api_v1_prefix)
 app.include_router(account_router, prefix=settings.api_v1_prefix)
 app.include_router(market_router, prefix=settings.api_v1_prefix)
 app.include_router(coin_detail_router, prefix=settings.api_v1_prefix)
+app.include_router(scanner_router, prefix=settings.api_v1_prefix)
 
 
 @app.websocket("/ws/positions")

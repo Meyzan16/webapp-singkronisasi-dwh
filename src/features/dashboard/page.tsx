@@ -4,6 +4,7 @@ import { SpotPositions } from "./components/SpotPositions";
 import { FuturesPositions } from "./components/FuturesPositions";
 import { FuturesMarket } from "./components/FuturesMarket";
 import { SystemStatusCard } from "./components/SystemStatusCard";
+import { ScannerWidget } from "./components/ScannerWidget";
 
 export default function DashboardPage() {
   return (
@@ -13,18 +14,19 @@ export default function DashboardPage() {
         <CardContent className="pt-6">
           <h1 className="text-3xl font-bold mb-2">AI Trading Agent</h1>
           <p className="text-sm opacity-90">
-            Multi-timeframe technical analysis • 5 trading pairs • Wyckoff + EMA + S/R zones
+            Multi-timeframe technical analysis · Wyckoff + EMA + S/R + Order Flow · 24H Scanner
           </p>
         </CardContent>
       </Card>
 
-      {/* Spot + Futures Positions side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Spot + Futures Positions + Scanner */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <SpotPositions />
         <FuturesPositions />
+        <ScannerWidget />
       </div>
 
-      {/* Futures Market — all coins 24h change */}
+      {/* Futures Market */}
       <FuturesMarket />
 
       {/* System Status */}

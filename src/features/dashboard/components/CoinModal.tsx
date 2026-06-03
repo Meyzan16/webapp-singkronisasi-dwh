@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
-import { CandlestickChart } from "@/components/ui/candlestick-chart";
+import { TradingChart } from "@/components/ui/trading-chart";
 
 interface Candle { time: number; open: number; high: number; low: number; close: number; volume: number; }
 interface CoinInfo {
@@ -227,7 +227,15 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
                 </div>
                 {loadingCandles && <span className="text-xs text-muted-foreground animate-pulse">Loading...</span>}
               </div>
-              {candles.length > 0 && !loadingCandles && <CandlestickChart candles={candles} height={350} />}
+              {candles.length > 0 && !loadingCandles && (
+                <TradingChart
+                  candles={candles}
+                  height={380}
+                  entryPrice={analysis?.entry ?? undefined}
+                  stopLoss={analysis?.stop_loss ?? undefined}
+                  takeProfits={analysis?.take_profits?.map(tp => ({ price: tp.price, level: tp.level })) ?? undefined}
+                />
+              )}
             </div>
           )}
 

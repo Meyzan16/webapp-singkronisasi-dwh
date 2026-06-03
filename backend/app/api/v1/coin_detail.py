@@ -518,6 +518,38 @@ async def quick_analysis(
             detail=f"Candle: {candle} | Stoch: {stoch} | Conf: {trigger.confidence:.0f}%",
         ))
 
+        # ── T5: Order Flow ─────────────────────────────────────────────────────
+        from app.services.ta_engine import analyze_order_flow
+        order_flow = analyze_order_flow(o4, h4, l4, c4, v4)
+        if order_flow:
+            of_signal_map = {
+                "strong_buy": "STRONG BUY 🔥", "buy": "BUY",
+                "strong_sell": "STRONG SELL 🔥", "sell": "SELL", "neutral": "NEUTRAL",
+            }
+            of_status = "passed" if order_flow.direction in ("bullish", "bearish") else "skipped"
+            # Gate: order flow direction should align with trade direction
+            of_aligned = (
+                (trade_direction == "uptrend" and order_flow.direction == "bullish") or
+                (trade_direction == "downtrend" and order_flow.direction == "bearish") or
+                order_flow.direction == "neutral"
+            )
+            if not of_aligned:
+                of_status = "gate_failed"
+            layers.append(TALayer(
+                name="T5 Order Flow", timeframe=tf4.upper(), status=of_status,
+                signal=of_signal_map.get(order_flow.signal, order_flow.signal),
+                detail=order_flow.description,
+            ))
+            # If T5 gate fails, still allow signal but reduce confidence
+            if not of_aligned:
+                # Don't block signal from T5, just warn
+                pass
+        else:
+            layers.append(TALayer(
+                name="T5 Order Flow", timeframe=tf4.upper(), status="skipped",
+                detail="Insufficient data for order flow",
+            ))
+
         # ── Risk Management ────────────────────────────────────────────────────
         current_price = c4[-1]
         direction_str = "long" if trade_direction == "uptrend" else "short"
@@ -567,12 +599,21 @@ async def quick_analysis(
         sl_basis = "Below strongest support zone" if direction_out == "LONG" else "Above strongest resistance zone"
         best_tp = take_profits[1] if len(take_profits) >= 2 else (take_profits[0] if take_profits else None)
 
-        # Confidence: weighted average of layer signals
+        # Confidence: weighted average of layer signals (T0-T5)
+        of_score = 0.0
+        if order_flow:
+            of_map = {"strong_buy": 90, "buy": 70, "neutral": 50, "sell": 30, "strong_sell": 10}
+            of_raw = of_map.get(order_flow.signal, 50)
+            if trade_direction == "downtrend":
+                of_raw = 100 - of_raw  # invert for shorts
+            of_score = of_raw
+
         confidence = min(99.0, (
-            wyckoff.strength * 0.2 +
-            trigger.confidence * 0.4 +
-            (pattern.formation_strength if pattern else 50) * 0.2 +
-            risk_calc.risk_reward_ratio * 5 * 0.2
+            wyckoff.strength * 0.15 +
+            trigger.confidence * 0.30 +
+            (pattern.formation_strength if pattern else 50) * 0.15 +
+            risk_calc.risk_reward_ratio * 5 * 0.15 +
+            of_score * 0.25
         ))
 
         return QuickAnalysisResponse(
