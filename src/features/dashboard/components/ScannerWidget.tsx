@@ -48,11 +48,11 @@ const ALERT_LABELS: Record<string, string> = {
   reversal:     "↩ Reversal",
 };
 
-const TIMEFRAMES = [
-  { key: "15m", label: "15m" },
-  { key: "1h",  label: "1H"  },
-  { key: "4h",  label: "4H"  },
-  { key: "1d",  label: "1D"  },
+const STYLES = [
+  { key: "15m", label: "Scalping",  icon: "⚡", desc: "Menit–Jam"    },
+  { key: "1h",  label: "Day Trade", icon: "📅", desc: "Harian"       },
+  { key: "4h",  label: "Swing",     icon: "🌊", desc: "Hari–Minggu"  },
+  { key: "1d",  label: "Position",  icon: "🏔", desc: "Minggu–Bulan" },
 ];
 
 const fmtPrice = (p: number) =>
@@ -68,7 +68,7 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
   const [data, setData]       = useState<ScannerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter]   = useState<"ALL" | "LONG" | "SHORT">("ALL");
-  const [tf, setTf]           = useState("4h");
+  const [tf, setTf]           = useState("4h"); // default Swing
 
   const fetchData = useCallback(async (timeframe: string) => {
     try {
@@ -112,7 +112,7 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
               {loading && <span className="animate-spin w-3 h-3 border-2 border-teal-400 border-t-transparent rounded-full" />}
               {data && !loading && (
                 <span className="text-[10px] text-neutral-500">
-                  {data.scanned} scanned · {timeAgo === 0 ? "just now" : `${timeAgo}m ago`}
+                  {STYLES.find(s => s.key === tf)?.label} · {data.scanned} scanned · {timeAgo === 0 ? "just now" : `${timeAgo}m ago`}
                 </span>
               )}
               <button onClick={() => void fetchData(tf)}
@@ -122,19 +122,20 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
             </div>
           </div>
 
-          {/* Timeframe selector */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] text-neutral-500 uppercase tracking-wider">Timeframe</span>
-            <div className="flex bg-neutral-900 rounded-lg p-0.5 gap-0.5">
-              {TIMEFRAMES.map(t => (
-                <button key={t.key} onClick={() => handleTfChange(t.key)}
-                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold transition-colors ${
-                    tf === t.key ? "bg-teal-600 text-white" : "text-neutral-400 hover:text-white"
-                  }`}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
+          {/* Trading style selector */}
+          <div className="flex gap-1.5 flex-wrap">
+            {STYLES.map(s => (
+              <button key={s.key} onClick={() => handleTfChange(s.key)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
+                  tf === s.key
+                    ? "bg-teal-600 border-teal-500 text-white shadow-sm"
+                    : "bg-neutral-800 border-neutral-700 text-neutral-400 hover:border-teal-600/50 hover:text-white"
+                }`}>
+                <span>{s.icon}</span>
+                <span>{s.label}</span>
+                {tf === s.key && <span className="text-[10px] opacity-75">({s.desc})</span>}
+              </button>
+            ))}
           </div>
 
           {/* Direction filter + stats */}
@@ -182,7 +183,7 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
 
         {!loading && filtered.length === 0 && (
           <p className="text-center text-neutral-500 text-sm py-8">
-            No early-warning setups found on {tf.toUpperCase()} timeframe
+            No early-warning setups found for {STYLES.find(s => s.key === tf)?.label} style
           </p>
         )}
 
