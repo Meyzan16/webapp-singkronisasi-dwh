@@ -1,23 +1,24 @@
 """
-24H Scanner Agent — scans all USDT futures for high-probability setups.
+24H Scanner Agent — detects coins BEFORE a big move happens.
 
-Scoring criteria:
-- Volume spike vs 20-period avg
-- Price momentum (RSI-like calculation)
-- EMA crossover status
-- Candle pattern
-- Order flow (CVD direction)
+Early-warning signals:
+1. Volatility Squeeze   — BB tight, price coiling before explosion
+2. Volume Accumulation  — volume rising while price is flat/down (smart money buying)
+3. Breakout Zone        — price within 1-2% of key resistance
+4. Momentum Divergence  — higher lows on volume while price flat (hidden bullish)
+5. Order Flow Shift     — buy pressure increasing over last 5 candles
+6. Low Float Spike      — volume suddenly 2-3x avg without major price move yet
 
-Returns top recommendations with BUY/SELL direction + probability score.
+Returns coins scored by "probability of big move soon" NOT "already moved".
 """
 
 import asyncio
+import math
 import time
-from typing import Optional
 
 import httpx
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.services.binance_urls import fapi
@@ -25,285 +26,341 @@ from app.services.binance_urls import fapi
 router = APIRouter(tags=["scanner"])
 logger = structlog.get_logger(__name__)
 
-# Cache so we don't re-scan on every request
-_cache: dict = {"data": None, "ts": 0}
-CACHE_TTL = 300  # 5 minutes
+_cache: dict[str, dict] = {}
+CACHE_TTL = 300  # 5 min
 
 
-class ScannerResult(BaseModel):
+# ── Schemas ────────────────────────────────────────────────────────────────────
+
+class ScanSignal(BaseModel):
     symbol: str
-    direction: str        # "LONG" | "SHORT"
-    score: float          # 0–100 probability score
+    direction: str          # "LONG" | "SHORT"
+    probability: float      # 0–100 — likelihood of imminent big move
+    current_price: float
     change_24h: float
-    volume_ratio: float   # current vol / avg vol
-    momentum: str         # "strong_up" | "up" | "neutral" | "down" | "strong_down"
-    trigger: str          # what caused the alert
-    entry: float
+    volume_ratio: float     # current volume vs 20-period avg
+    signals: list[str]      # list of triggered early-warning signals
+    key_level: float | None  # breakout level to watch
     stop_loss: float
     take_profit: float
     risk_reward: str
+    alert_type: str         # "squeeze" | "accumulation" | "breakout" | "reversal"
 
 
 class ScannerResponse(BaseModel):
-    results: list[ScannerResult]
+    results: list[ScanSignal]
     scanned: int
+    style: str
     generated_at: int
 
 
-def _simple_rsi(closes: list[float], period: int = 14) -> float:
-    """Simplified RSI."""
-    if len(closes) < period + 1:
-        return 50.0
-    gains, losses = [], []
-    for i in range(1, period + 1):
-        diff = closes[-period + i] - closes[-period + i - 1]
-        if diff > 0:
-            gains.append(diff)
-            losses.append(0)
-        else:
-            gains.append(0)
-            losses.append(abs(diff))
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
+# ── Math helpers ───────────────────────────────────────────────────────────────
 
 def _ema(values: list[float], period: int) -> float:
-    """Latest EMA value."""
     if len(values) < period:
         return values[-1] if values else 0.0
     k = 2 / (period + 1)
-    ema = sum(values[:period]) / period
+    e = sum(values[:period]) / period
     for v in values[period:]:
-        ema = v * k + ema * (1 - k)
-    return ema
+        e = v * k + e * (1 - k)
+    return e
 
 
-def _score_symbol(
+def _stddev(values: list[float]) -> float:
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / len(values)
+    return math.sqrt(sum((v - mean) ** 2 for v in values) / len(values))
+
+
+def _rsi(closes: list[float], period: int = 14) -> float:
+    if len(closes) < period + 1:
+        return 50.0
+    gains, losses = [], []
+    for i in range(len(closes) - period, len(closes)):
+        d = closes[i] - closes[i - 1]
+        gains.append(max(d, 0))
+        losses.append(max(-d, 0))
+    ag = sum(gains) / period
+    al = sum(losses) / period
+    return 100 - (100 / (1 + ag / al)) if al > 0 else 100.0
+
+
+def _atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float:
+    trs = []
+    for i in range(1, min(period + 1, len(closes))):
+        tr = max(highs[-i] - lows[-i],
+                 abs(highs[-i] - closes[-i - 1]),
+                 abs(lows[-i] - closes[-i - 1]))
+        trs.append(tr)
+    return sum(trs) / len(trs) if trs else closes[-1] * 0.02
+
+
+# ── Core scoring ──────────────────────────────────────────────────────────────
+
+def _analyze(
     symbol: str,
-    closes: list[float],
-    volumes: list[float],
     opens: list[float],
     highs: list[float],
     lows: list[float],
+    closes: list[float],
+    volumes: list[float],
     change_24h: float,
-) -> Optional[ScannerResult]:
-    """Score a single symbol and return result if score > threshold."""
-    if len(closes) < 25:
+) -> ScanSignal | None:
+    if len(closes) < 30:
         return None
 
+    price = closes[-1]
+    signals: list[str] = []
     score = 0.0
-    triggers = []
+    alert_type = "accumulation"
     direction = "LONG"
 
-    last_close = closes[-1]
-    last_open = opens[-1]
-    last_vol = volumes[-1]
-    avg_vol = sum(volumes[-20:-1]) / 19 if len(volumes) >= 20 else last_vol
-    vol_ratio = last_vol / avg_vol if avg_vol > 0 else 1.0
+    # ── 1. Volatility Squeeze (Bollinger Band) ─────────────────────────────────
+    # Low BB width = coiling = potential explosion soon
+    bb_period = 20
+    bb_closes = closes[-bb_period:]
+    bb_mid = sum(bb_closes) / bb_period
+    bb_std = _stddev(bb_closes)
+    bb_width = (bb_std * 4) / bb_mid if bb_mid > 0 else 1.0  # (2σ range) / price
 
-    # 1. Volume spike
-    if vol_ratio > 5:
+    if bb_width < 0.04:  # < 4% width = very tight squeeze
         score += 25
-        triggers.append(f"Vol spike {vol_ratio:.1f}x")
-    elif vol_ratio > 3:
+        signals.append(f"🔵 BB Squeeze {bb_width*100:.1f}% — ready to explode")
+        alert_type = "squeeze"
+    elif bb_width < 0.07:
+        score += 12
+        signals.append(f"BB tightening {bb_width*100:.1f}%")
+
+    # ── 2. Volume Accumulation — rising volume, price flat/down ───────────────
+    # Smart money quietly buying before the move
+    avg_vol_20 = sum(volumes[-21:-1]) / 20
+    last_vol = volumes[-1]
+    vol_ratio = last_vol / avg_vol_20 if avg_vol_20 > 0 else 1.0
+
+    # Volume trend over last 5 candles
+    vol5 = volumes[-5:]
+    vol_slope = (vol5[-1] - vol5[0]) / vol5[0] if vol5[0] > 0 else 0
+    price_slope = (closes[-1] - closes[-5]) / closes[-5] if closes[-5] > 0 else 0
+
+    if vol_slope > 0.3 and abs(price_slope) < 0.05:
+        # Volume rising 30%+ but price flat — accumulation
+        score += 22
+        signals.append(f"📦 Accumulation: vol +{vol_slope*100:.0f}% price flat")
+        alert_type = "accumulation"
+    elif vol_slope > 0.15 and price_slope < 0:
+        # Volume rising while price drops = hidden strength
         score += 18
-        triggers.append(f"Vol surge {vol_ratio:.1f}x")
-    elif vol_ratio > 2:
-        score += 10
-        triggers.append(f"Vol {vol_ratio:.1f}x avg")
+        signals.append(f"💪 Vol rising on dip (smart money)")
+    elif vol_ratio > 1.5 and abs(price_slope) < 0.03:
+        score += 12
+        signals.append(f"Vol {vol_ratio:.1f}x avg with flat price")
 
-    # 2. RSI momentum
-    rsi = _simple_rsi(closes)
-    if rsi < 30:
-        score += 20
-        direction = "LONG"
-        triggers.append(f"RSI oversold {rsi:.0f}")
-    elif rsi > 70:
-        score += 20
-        direction = "SHORT"
-        triggers.append(f"RSI overbought {rsi:.0f}")
-    elif 40 <= rsi <= 60:
-        score += 5
-
-    # 3. EMA trend
-    ema9 = _ema(closes, 9)
-    ema21 = _ema(closes, 21)
-    ema50 = _ema(closes, 50) if len(closes) >= 50 else ema21
-
-    if ema9 > ema21 > ema50:
-        score += 15
-        direction = "LONG"
-        triggers.append("EMA9>21>50 aligned")
-    elif ema9 < ema21 < ema50:
-        score += 15
-        direction = "SHORT"
-        triggers.append("EMA9<21<50 aligned")
-    elif ema9 > ema21:
-        score += 8
-        direction = "LONG"
-
-    # 4. 24h momentum
-    abs_change = abs(change_24h)
-    if abs_change > 20:
-        score += 15
-        direction = "LONG" if change_24h > 0 else "SHORT"
-        triggers.append(f"{'+' if change_24h > 0 else ''}{change_24h:.1f}% 24h")
-    elif abs_change > 10:
-        score += 8
-        direction = "LONG" if change_24h > 0 else "SHORT"
-
-    # 5. Last candle pattern
-    body = abs(last_close - last_open)
-    candle_range = highs[-1] - lows[-1]
-    if candle_range > 0:
-        body_ratio = body / candle_range
-        if body_ratio > 0.7 and last_vol > avg_vol:
-            if last_close > last_open:
-                score += 10
-                triggers.append("Strong bull candle")
-                direction = "LONG"
-            else:
-                score += 10
-                triggers.append("Strong bear candle")
-                direction = "SHORT"
-
-    # 6. Price near recent high/low breakout
+    # ── 3. Near Key Resistance (Breakout Zone) ─────────────────────────────────
     recent_high = max(highs[-20:])
     recent_low = min(lows[-20:])
-    if last_close > recent_high * 0.99 and change_24h > 0:
-        score += 12
-        triggers.append("Near 20-period high")
+    range_size = recent_high - recent_low
+
+    dist_to_high = (recent_high - price) / price
+    dist_to_low = (price - recent_low) / price
+
+    if 0 < dist_to_high < 0.02:  # within 2% of 20-period high
+        score += 20
+        signals.append(f"🎯 Near breakout: ${recent_high:.4g} resistance")
+        alert_type = "breakout"
         direction = "LONG"
-    elif last_close < recent_low * 1.01 and change_24h < 0:
+    elif 0 < dist_to_low < 0.02:  # within 2% of 20-period low (potential reversal)
+        score += 15
+        signals.append(f"🎯 Near support: ${recent_low:.4g} — reversal zone")
+        alert_type = "reversal"
+
+    # ── 4. RSI Coiling in 40–60 zone (neutral = energy building) ─────────────
+    rsi = _rsi(closes)
+    if 35 <= rsi <= 50:
         score += 12
-        triggers.append("Near 20-period low")
+        signals.append(f"RSI {rsi:.0f} — building energy (oversold recovery)")
+        direction = "LONG"
+    elif 50 <= rsi <= 65:
+        score += 8
+        signals.append(f"RSI {rsi:.0f} — momentum building")
+    elif rsi < 30:
+        score += 15
+        signals.append(f"RSI {rsi:.0f} oversold — reversal imminent")
+        direction = "LONG"
+        alert_type = "reversal"
+    elif rsi > 75:
+        score -= 10  # already extended, less likely to break out higher
+
+    # ── 5. EMA Compression (EMAs converging = breakout coming) ────────────────
+    ema9  = _ema(closes, 9)
+    ema21 = _ema(closes, 21)
+    ema50 = _ema(closes, 50) if len(closes) >= 50 else ema21
+    ema_spread = abs(ema9 - ema21) / price if price > 0 else 0
+
+    if ema_spread < 0.005:  # EMAs within 0.5% = compressed
+        score += 15
+        signals.append(f"⚡ EMA compression (9/21 gap {ema_spread*100:.2f}%)")
+        alert_type = "squeeze"
+    elif ema9 > ema21 and ema21 > ema50:
+        score += 8
+        signals.append("EMA bullish alignment (9>21>50)")
+        direction = "LONG"
+    elif ema9 < ema21 and ema21 < ema50:
+        score += 8
+        signals.append("EMA bearish alignment")
         direction = "SHORT"
 
-    if score < 20:
+    # ── 6. Buy pressure shift (last 5 candles more bullish than prior 5) ──────
+    def _bull_vol_pct(o_list, c_list, v_list):
+        bull = sum(v for o, c, v in zip(o_list, c_list, v_list) if c >= o)
+        total = sum(v_list) or 1
+        return bull / total
+
+    if len(opens) >= 10:
+        bp_recent = _bull_vol_pct(opens[-5:], closes[-5:], volumes[-5:])
+        bp_prior  = _bull_vol_pct(opens[-10:-5], closes[-10:-5], volumes[-10:-5])
+        if bp_recent > bp_prior + 0.15:
+            score += 15
+            signals.append(f"🟢 Buy pressure rising ({bp_recent*100:.0f}% vs {bp_prior*100:.0f}%)")
+        elif bp_recent < bp_prior - 0.15:
+            score += 10
+            signals.append(f"🔴 Sell pressure rising ({bp_recent*100:.0f}%)")
+            direction = "SHORT"
+
+    # ── 7. Candle body shrinking (indecision = breakout coming) ───────────────
+    bodies = [abs(c - o) for o, c in zip(opens[-6:], closes[-6:])]
+    if len(bodies) >= 4:
+        body_slope = (bodies[-1] - bodies[0]) / (bodies[0] + 1e-10)
+        if body_slope < -0.5:  # bodies getting smaller = energy compressing
+            score += 10
+            signals.append("Candle bodies shrinking (coiling)")
+
+    # ── 8. Already pumped penalty — avoid "late" entries ─────────────────────
+    # If already up big in 24h, less potential remaining
+    if abs(change_24h) > 20:
+        score -= 20
+        signals.append(f"⚠️ Already moved {change_24h:+.1f}% (late)")
+    elif abs(change_24h) > 10:
+        score -= 8
+
+    # Not enough signals
+    if score < 30 or len(signals) < 2:
         return None
 
-    # Momentum label
-    if change_24h > 15:
-        momentum = "strong_up"
-    elif change_24h > 5:
-        momentum = "up"
-    elif change_24h < -15:
-        momentum = "strong_down"
-    elif change_24h < -5:
-        momentum = "down"
-    else:
-        momentum = "neutral"
+    # ── Direction from preponderance of signals ────────────────────────────────
+    long_signals = sum(1 for s in signals if any(k in s for k in ["bullish", "LONG", "oversold", "Buy", "rising"]))
+    short_signals = sum(1 for s in signals if any(k in s for k in ["bearish", "SHORT", "Sell", "sell pressure"]))
+    if short_signals > long_signals:
+        direction = "SHORT"
 
-    # ATR-based SL/TP
-    atr = sum(h - l for h, l in zip(highs[-14:], lows[-14:])) / min(14, len(highs))
-
+    # ── SL / TP ────────────────────────────────────────────────────────────────
+    atr = _atr(highs, lows, closes)
     if direction == "LONG":
-        sl = last_close - atr * 1.5
-        tp = last_close + atr * 4.5
+        sl = price - atr * 1.5
+        tp = price + atr * 4.5
+        key_level = recent_high
     else:
-        sl = last_close + atr * 1.5
-        tp = last_close - atr * 4.5
+        sl = price + atr * 1.5
+        tp = price - atr * 4.5
+        key_level = recent_low
 
-    risk = abs(last_close - sl)
-    reward = abs(tp - last_close)
+    risk = abs(price - sl)
+    reward = abs(tp - price)
     rr = f"1:{reward/risk:.1f}" if risk > 0 else "1:3.0"
 
-    return ScannerResult(
+    return ScanSignal(
         symbol=symbol,
         direction=direction,
-        score=round(min(score, 100), 1),
+        probability=round(min(score, 99), 1),
+        current_price=round(price, 8),
         change_24h=round(change_24h, 2),
         volume_ratio=round(vol_ratio, 2),
-        momentum=momentum,
-        trigger=" | ".join(triggers[:3]),
-        entry=round(last_close, 8),
+        signals=signals[:4],  # top 4 signals
+        key_level=round(key_level, 8),
         stop_loss=round(sl, 8),
         take_profit=round(tp, 8),
         risk_reward=rr,
+        alert_type=alert_type,
     )
 
 
-async def _fetch_klines_fast(
-    client: httpx.AsyncClient, symbol: str, interval: str = "1h", limit: int = 60
-) -> list:
+# ── Fetch helpers ──────────────────────────────────────────────────────────────
+
+async def _klines(client: httpx.AsyncClient, symbol: str, interval: str, limit: int) -> list:
     try:
-        r = await client.get(
-            fapi(f"/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}")
-        )
+        r = await client.get(fapi(f"/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"))
         if r.status_code == 200:
-            data = r.json()
-            if isinstance(data, list) and data:
-                return data
+            d = r.json()
+            if isinstance(d, list) and d:
+                return d
     except Exception:
         pass
     return []
 
 
-@router.get("/scanner/scan", response_model=ScannerResponse)
-async def scan_market() -> ScannerResponse:
-    """Scan all USDT futures for high-probability setups. Results cached 5 min."""
-    now = int(time.time())
-    if _cache["data"] and now - _cache["ts"] < CACHE_TTL:
-        return _cache["data"]
+# ── Endpoint ──────────────────────────────────────────────────────────────────
 
-    # Step 1: Get all tickers
+@router.get("/scanner/scan", response_model=ScannerResponse)
+async def scan_market(
+    style: str = Query(default="4h", description="Candle timeframe: 15m | 1h | 4h | 1d"),
+    limit: int = Query(default=100, description="Candles to analyze"),
+) -> ScannerResponse:
+    """
+    Scan USDT futures for early-warning breakout setups.
+    Detects coins about to move BEFORE the big candle.
+    """
+    cache_key = f"{style}_{limit}"
+    now = int(time.time())
+    if cache_key in _cache and now - _cache[cache_key].get("ts", 0) < CACHE_TTL:
+        return _cache[cache_key]["data"]
+
+    # Step 1: get all tickers, pick top 100 by volume (active coins)
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(fapi("/fapi/v1/ticker/24hr"))
         if r.status_code != 200:
-            return ScannerResponse(results=[], scanned=0, generated_at=now)
-        tickers = r.json()
+            return ScannerResponse(results=[], scanned=0, style=style, generated_at=now)
+        tickers = [t for t in r.json() if str(t.get("symbol", "")).endswith("USDT")]
 
-    usdt_tickers = [t for t in tickers if t.get("symbol", "").endswith("USDT")]
+    # Sort by quote volume (most active = best signals)
+    tickers.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
+    candidates = tickers[:100]
 
-    # Step 2: Pick top candidates by volume + absolute change
-    def _priority(t: dict) -> float:
-        vol = float(t.get("quoteVolume", 0))
-        chg = abs(float(t.get("priceChangePercent", 0)))
-        count = int(t.get("count", 0))
-        return vol * 0.4 + chg * 1000 + count * 0.001
-
-    candidates = sorted(usdt_tickers, key=_priority, reverse=True)[:80]
-
-    # Step 3: Fetch 1H klines concurrently for top candidates
-    async with httpx.AsyncClient(timeout=20) as client:
-        klines_results = await asyncio.gather(
-            *[_fetch_klines_fast(client, t["symbol"], "1h", 60) for t in candidates],
+    # Step 2: fetch klines for all candidates concurrently
+    async with httpx.AsyncClient(timeout=25) as client:
+        kline_results = await asyncio.gather(
+            *[_klines(client, t["symbol"], style, limit) for t in candidates],
             return_exceptions=True,
         )
 
-    results: list[ScannerResult] = []
-    for ticker, klines in zip(candidates, klines_results):
-        if isinstance(klines, Exception) or not klines:
+    # Step 3: score each
+    results: list[ScanSignal] = []
+    for ticker, kdata in zip(candidates, kline_results):
+        if isinstance(kdata, Exception) or not kdata:
             continue
         try:
-            opens  = [float(k[1]) for k in klines]
-            highs  = [float(k[2]) for k in klines]
-            lows   = [float(k[3]) for k in klines]
-            closes = [float(k[4]) for k in klines]
-            vols   = [float(k[5]) for k in klines]
+            opens  = [float(k[1]) for k in kdata]
+            highs  = [float(k[2]) for k in kdata]
+            lows   = [float(k[3]) for k in kdata]
+            closes = [float(k[4]) for k in kdata]
+            vols   = [float(k[5]) for k in kdata]
             change = float(ticker.get("priceChangePercent", 0))
 
-            result = _score_symbol(ticker["symbol"], closes, vols, opens, highs, lows, change)
-            if result:
-                results.append(result)
+            sig = _analyze(ticker["symbol"], opens, highs, lows, closes, vols, change)
+            if sig:
+                results.append(sig)
         except Exception:
             continue
 
-    # Sort by score desc, then keep top 20
-    results.sort(key=lambda r: r.score, reverse=True)
-    results = results[:20]
+    # Sort by probability, top 25
+    results.sort(key=lambda r: r.probability, reverse=True)
+    results = results[:25]
 
     response = ScannerResponse(
         results=results,
         scanned=len(candidates),
+        style=style,
         generated_at=now,
     )
-    _cache["data"] = response
-    _cache["ts"] = now
-
-    logger.info("scanner_done", found=len(results), scanned=len(candidates))
+    _cache[cache_key] = {"data": response, "ts": now}
+    logger.info("scanner_done", found=len(results), scanned=len(candidates), style=style)
     return response

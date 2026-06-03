@@ -3,173 +3,265 @@ import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
-interface ScannerResult {
+interface ScanSignal {
   symbol: string;
   direction: string;
-  score: number;
+  probability: number;
+  current_price: number;
   change_24h: number;
   volume_ratio: number;
-  momentum: string;
-  trigger: string;
-  entry: number;
+  signals: string[];
+  key_level: number | null;
   stop_loss: number;
   take_profit: number;
   risk_reward: string;
+  alert_type: string;
 }
 
 interface ScannerData {
-  results: ScannerResult[];
+  results: ScanSignal[];
   scanned: number;
+  style: string;
   generated_at: number;
 }
 
-const MOMENTUM_COLORS: Record<string, string> = {
-  strong_up: "text-green-500 font-bold",
-  up: "text-green-400",
-  neutral: "text-neutral-400",
-  down: "text-red-400",
-  strong_down: "text-red-500 font-bold",
-};
-
-const MOMENTUM_LABELS: Record<string, string> = {
-  strong_up: "🚀 Strong Up", up: "↑ Up",
-  neutral: "→ Neutral", down: "↓ Down", strong_down: "💥 Strong Down",
-};
-
-const fmtPrice = (p: number) =>
-  p < 0.001 ? p.toFixed(6) : p < 1 ? p.toFixed(4) : p.toLocaleString(undefined, { maximumFractionDigits: 2 });
-
 interface ScannerWidgetProps { fullPage?: boolean; }
 
-export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
-  const [data, setData] = useState<ScannerData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<"ALL" | "LONG" | "SHORT">("ALL");
+const ALERT_COLORS: Record<string, string> = {
+  squeeze:      "border-purple-500/40 bg-purple-950/20",
+  accumulation: "border-teal-500/40 bg-teal-950/20",
+  breakout:     "border-yellow-500/40 bg-yellow-950/20",
+  reversal:     "border-blue-500/40 bg-blue-950/20",
+};
 
-  const fetchData = useCallback(async () => {
+const ALERT_BADGES: Record<string, string> = {
+  squeeze:      "bg-purple-600",
+  accumulation: "bg-teal-600",
+  breakout:     "bg-yellow-600",
+  reversal:     "bg-blue-600",
+};
+
+const ALERT_LABELS: Record<string, string> = {
+  squeeze:      "⚡ Squeeze",
+  accumulation: "📦 Accum",
+  breakout:     "🎯 Breakout",
+  reversal:     "↩ Reversal",
+};
+
+const TIMEFRAMES = [
+  { key: "15m", label: "15m" },
+  { key: "1h",  label: "1H"  },
+  { key: "4h",  label: "4H"  },
+  { key: "1d",  label: "1D"  },
+];
+
+const fmtPrice = (p: number) =>
+  p < 0.001 ? p.toFixed(6) : p < 1 ? p.toFixed(4) : p.toLocaleString(undefined, { maximumFractionDigits: 4 });
+
+const probColor = (p: number) =>
+  p >= 70 ? "text-green-400" : p >= 50 ? "text-yellow-400" : "text-neutral-400";
+
+const probBar = (p: number) =>
+  p >= 70 ? "bg-green-500" : p >= 50 ? "bg-yellow-500" : "bg-neutral-500";
+
+export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
+  const [data, setData]       = useState<ScannerData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter]   = useState<"ALL" | "LONG" | "SHORT">("ALL");
+  const [tf, setTf]           = useState("4h");
+
+  const fetchData = useCallback(async (timeframe: string) => {
     try {
       setLoading(true);
-      const r = await fetch("/api/v1/scanner/scan");
+      const r = await fetch(`/api/v1/scanner/scan?style=${timeframe}&limit=100`);
       setData(await r.json());
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
-    void fetchData();
-    const t = setInterval(() => void fetchData(), 5 * 60 * 1000);
+    void fetchData(tf);
+    const t = setInterval(() => void fetchData(tf), 5 * 60 * 1000);
     return () => clearInterval(t);
-  }, [fetchData]);
+  }, [fetchData, tf]);
+
+  const handleTfChange = (newTf: string) => {
+    setTf(newTf);
+    void fetchData(newTf);
+  };
 
   const filtered = data?.results.filter(r => filter === "ALL" || r.direction === filter) ?? [];
-  const timeAgo = data ? Math.floor((Date.now() / 1000 - data.generated_at) / 60) : 0;
+  const timeAgo  = data ? Math.floor((Date.now() / 1000 - data.generated_at) / 60) : 0;
+  const longCount  = data?.results.filter(r => r.direction === "LONG").length ?? 0;
+  const shortCount = data?.results.filter(r => r.direction === "SHORT").length ?? 0;
 
   return (
-    <Card className="border-0 bg-gradient-to-b from-neutral-950 to-neutral-900 text-white">
+    <Card className="border-0 bg-neutral-950 text-white">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">🤖</span>
-            <span className="text-base font-bold">24H Scanner Agent</span>
-            {loading && <span className="animate-spin w-3 h-3 border-2 border-primarygreen border-t-transparent rounded-full" />}
+        <CardTitle className="space-y-3">
+          {/* Title row */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🔭</span>
+              <div>
+                <p className="text-sm font-bold leading-tight">Early Breakout Scanner</p>
+                <p className="text-[10px] text-neutral-500 font-normal">Detects coiling, accumulation & breakout zones</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {loading && <span className="animate-spin w-3 h-3 border-2 border-teal-400 border-t-transparent rounded-full" />}
+              {data && !loading && (
+                <span className="text-[10px] text-neutral-500">
+                  {data.scanned} scanned · {timeAgo === 0 ? "just now" : `${timeAgo}m ago`}
+                </span>
+              )}
+              <button onClick={() => void fetchData(tf)}
+                className="text-xs bg-neutral-800 hover:bg-neutral-700 px-2 py-1 rounded-lg transition-colors text-neutral-300">
+                ↻
+              </button>
+            </div>
           </div>
+
+          {/* Timeframe selector */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] text-neutral-500 uppercase tracking-wider">Timeframe</span>
+            <div className="flex bg-neutral-900 rounded-lg p-0.5 gap-0.5">
+              {TIMEFRAMES.map(t => (
+                <button key={t.key} onClick={() => handleTfChange(t.key)}
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold transition-colors ${
+                    tf === t.key ? "bg-teal-600 text-white" : "text-neutral-400 hover:text-white"
+                  }`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Direction filter + stats */}
           <div className="flex items-center gap-2">
-            {data && (
-              <span className="text-xs text-neutral-500">
-                {data.scanned} scanned · {timeAgo === 0 ? "just now" : `${timeAgo}m ago`}
-              </span>
-            )}
-            <button onClick={() => void fetchData()}
-              className="text-xs bg-neutral-800 hover:bg-neutral-700 px-2 py-1 rounded-lg transition-colors">
-              ↻ Refresh
-            </button>
+            {(["ALL", "LONG", "SHORT"] as const).map(f => (
+              <button key={f} onClick={() => setFilter(f)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                  filter === f
+                    ? f === "LONG"  ? "bg-green-600 text-white"
+                    : f === "SHORT" ? "bg-red-600 text-white"
+                    : "bg-teal-600 text-white"
+                    : "bg-neutral-800 text-neutral-400 hover:text-white"
+                }`}>
+                {f === "ALL"   ? `All (${data?.results.length ?? 0})`
+                : f === "LONG" ? `▲ Long (${longCount})`
+                :                `▼ Short (${shortCount})`}
+              </button>
+            ))}
           </div>
         </CardTitle>
-
-        {/* Filter */}
-        <div className="flex gap-1">
-          {(["ALL", "LONG", "SHORT"] as const).map(f => (
-            <button key={f} onClick={() => setFilter(f)}
-              className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
-                filter === f
-                  ? f === "LONG" ? "bg-green-600 text-white" : f === "SHORT" ? "bg-red-600 text-white" : "bg-primarygreen text-white"
-                  : "bg-neutral-800 text-neutral-400 hover:text-white"
-              }`}>
-              {f} {f !== "ALL" && data ? `(${data.results.filter(r => r.direction === f).length})` : ""}
-            </button>
-          ))}
-        </div>
       </CardHeader>
 
       <CardContent className="pt-0">
+        {/* Legend */}
+        {fullPage && (
+          <div className="flex gap-3 mb-3 flex-wrap text-[10px] text-neutral-500">
+            {Object.entries(ALERT_LABELS).map(([key, label]) => (
+              <span key={key} className="flex items-center gap-1">
+                <span className={`w-2 h-2 rounded-full ${ALERT_BADGES[key]}`} />
+                {label}
+              </span>
+            ))}
+            <span className="ml-auto">Probability bar = chance of big move soon</span>
+          </div>
+        )}
+
         {loading && !data && (
-          <div className="py-8 text-center text-neutral-500 text-sm">
-            <p className="animate-pulse">Scanning 598 pairs...</p>
+          <div className="py-10 text-center text-neutral-500 text-sm">
+            <div className="animate-pulse space-y-1">
+              <p>🔭 Scanning 100 most active pairs...</p>
+              <p className="text-[10px]">Detecting coils, accumulation & breakout zones</p>
+            </div>
           </div>
         )}
 
         {!loading && filtered.length === 0 && (
-          <p className="text-center text-neutral-500 text-sm py-6">No setups found for current filter</p>
+          <p className="text-center text-neutral-500 text-sm py-8">
+            No early-warning setups found on {tf.toUpperCase()} timeframe
+          </p>
         )}
 
         {filtered.length > 0 && (
           <div className={fullPage ? "grid grid-cols-1 md:grid-cols-2 gap-2" : "space-y-2"}>
             {filtered.map((r) => {
-              const base = r.symbol.replace("USDT", "");
-              const isLong = r.direction === "LONG";
-              const scoreColor = r.score >= 75 ? "text-green-400" : r.score >= 55 ? "text-yellow-400" : "text-neutral-400";
+              const base    = r.symbol.replace("USDT", "");
+              const isLong  = r.direction === "LONG";
+              const cardBg  = ALERT_COLORS[r.alert_type] ?? "border-neutral-800 bg-neutral-900/30";
+              const badgeBg = ALERT_BADGES[r.alert_type] ?? "bg-neutral-700";
 
               return (
                 <div key={r.symbol}
-                  className={`rounded-xl p-3 border transition-all hover:border-primarygreen/50 cursor-pointer ${
-                    isLong ? "bg-green-950/30 border-green-900/50" : "bg-red-950/30 border-red-900/50"
-                  }`}>
-                  <div className="flex items-center justify-between gap-2">
-                    {/* Symbol + direction */}
+                  className={`rounded-xl p-3 border transition-all hover:brightness-110 ${cardBg}`}>
+
+                  {/* Header row */}
+                  <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${
                         isLong ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
                       }`}>
-                        {base.slice(0, 3)}
+                        {base.slice(0, 4)}
                       </div>
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-sm text-white">{base}</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-sm text-white">{base}/USDT</span>
                           <Badge className={`text-[10px] px-1.5 py-0 font-bold ${
-                            isLong ? "bg-green-600 text-white" : "bg-red-600 text-white"
+                            isLong ? "bg-green-600" : "bg-red-600"
                           }`}>
                             {isLong ? "▲ LONG" : "▼ SHORT"}
                           </Badge>
-                          <span className={`text-[10px] font-bold ${r.change_24h >= 0 ? "text-green-400" : "text-red-400"}`}>
-                            {r.change_24h >= 0 ? "+" : ""}{r.change_24h}%
-                          </span>
+                          <Badge className={`text-[10px] px-1.5 py-0 ${badgeBg}`}>
+                            {ALERT_LABELS[r.alert_type]}
+                          </Badge>
                         </div>
-                        <p className="text-[10px] text-neutral-500 truncate max-w-[180px]">{r.trigger}</p>
+                        <p className="text-xs font-mono text-neutral-400 mt-0.5">${fmtPrice(r.current_price)}</p>
                       </div>
                     </div>
 
-                    {/* Score + price */}
+                    {/* Probability */}
                     <div className="text-right flex-shrink-0">
-                      <div className="flex items-center gap-1 justify-end">
-                        <span className={`text-base font-black ${scoreColor}`}>{r.score}</span>
-                        <span className="text-[10px] text-neutral-500">pts</span>
-                      </div>
-                      <p className="text-xs font-mono text-neutral-300">${fmtPrice(r.entry)}</p>
+                      <p className={`text-xl font-black leading-tight ${probColor(r.probability)}`}>
+                        {r.probability.toFixed(0)}
+                        <span className="text-xs font-normal text-neutral-500">%</span>
+                      </p>
+                      <p className="text-[10px] text-neutral-500">probability</p>
                     </div>
                   </div>
 
-                  {/* Details row */}
-                  <div className="mt-2 flex items-center justify-between text-[10px] text-neutral-400">
-                    <div className="flex gap-3">
-                      <span>Vol <strong className="text-neutral-300">{r.volume_ratio}x</strong></span>
-                      <span className={MOMENTUM_COLORS[r.momentum] ?? "text-neutral-400"}>
-                        {MOMENTUM_LABELS[r.momentum] ?? r.momentum}
+                  {/* Probability bar */}
+                  <div className="w-full bg-neutral-800 rounded-full h-1 mb-2">
+                    <div className={`h-full rounded-full transition-all ${probBar(r.probability)}`}
+                      style={{ width: `${r.probability}%` }} />
+                  </div>
+
+                  {/* Signals */}
+                  <div className="space-y-0.5 mb-2">
+                    {r.signals.map((s, i) => (
+                      <p key={i} className="text-[10px] text-neutral-300 leading-relaxed">{s}</p>
+                    ))}
+                  </div>
+
+                  {/* Key level + stats */}
+                  <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1.5 border-t border-neutral-700/50">
+                    <div className="flex gap-2">
+                      {r.key_level && (
+                        <span>
+                          Watch: <strong className="text-yellow-400">${fmtPrice(r.key_level)}</strong>
+                        </span>
+                      )}
+                      <span className={r.change_24h >= 0 ? "text-green-400" : "text-red-400"}>
+                        {r.change_24h >= 0 ? "+" : ""}{r.change_24h}%
                       </span>
+                      <span>Vol <strong className="text-neutral-300">{r.volume_ratio}x</strong></span>
                     </div>
                     <div className="flex gap-2">
                       <span>SL <strong className="text-red-400">${fmtPrice(r.stop_loss)}</strong></span>
                       <span>TP <strong className="text-green-400">${fmtPrice(r.take_profit)}</strong></span>
-                      <span className="text-primarygreen font-bold">{r.risk_reward}</span>
+                      <span className="text-teal-400 font-bold">{r.risk_reward}</span>
                     </div>
                   </div>
                 </div>
