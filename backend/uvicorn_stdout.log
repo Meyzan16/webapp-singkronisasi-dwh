@@ -1,1331 +1,408 @@
-2026-06-02 23:00:53 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764604853119 timeframe=1w
-INFO:     127.0.0.1:64348 - "GET /health HTTP/1.1" 200 OK
-2026-06-02 23:00:55 [info     ] backfilled_klines              count=26 pair=BTCUSDT timeframe=1w
-2026-06-02 23:00:55 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764604853119 timeframe=1d
-2026-06-02 23:00:56 [info     ] backfilled_klines              count=183 pair=BTCUSDT timeframe=1d
-2026-06-02 23:00:56 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764604853119 timeframe=4h
-2026-06-02 23:00:57 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64364 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:00:58 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779019200000 timeframe=4h
-2026-06-02 23:00:58 [info     ] backfilled_klines              count=1098 pair=BTCUSDT timeframe=4h
-2026-06-02 23:00:58 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764604853119 timeframe=1h
-2026-06-02 23:01:00 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768208400000 timeframe=1h
-2026-06-02 23:01:01 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771808400000 timeframe=1h
-2026-06-02 23:01:02 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63480 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:02 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775408400000 timeframe=1h
-2026-06-02 23:01:04 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779008400000 timeframe=1h
-2026-06-02 23:01:05 [info     ] backfilled_klines              count=4392 pair=BTCUSDT timeframe=1h
-2026-06-02 23:01:05 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764604853119 timeframe=15m
-2026-06-02 23:01:06 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1765505700000 timeframe=15m
-2026-06-02 23:01:07 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62189 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:07 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1766405700000 timeframe=15m
-2026-06-02 23:01:09 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1767305700000 timeframe=15m
-2026-06-02 23:01:10 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768205700000 timeframe=15m
-2026-06-02 23:01:11 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1769105700000 timeframe=15m
-2026-06-02 23:01:12 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:59799 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:12 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770005700000 timeframe=15m
-2026-06-02 23:01:14 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770905700000 timeframe=15m
-2026-06-02 23:01:16 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771805700000 timeframe=15m
-INFO:     127.0.0.1:59820 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:01:18 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57910 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:18 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1772705700000 timeframe=15m
-2026-06-02 23:01:20 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1773605700000 timeframe=15m
-2026-06-02 23:01:23 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1774505700000 timeframe=15m
-2026-06-02 23:01:24 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:49384 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:25 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:49385 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:01:25 [info     ] spot_positions_fetched         count=4 total_usdt=474.83
-INFO:     127.0.0.1:49383 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:25 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775405700000 timeframe=15m
-2026-06-02 23:01:27 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1776305700000 timeframe=15m
-2026-06-02 23:01:28 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57643 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:29 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1777205700000 timeframe=15m
-2026-06-02 23:01:31 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1778105700000 timeframe=15m
-2026-06-02 23:01:32 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779005700000 timeframe=15m
-2026-06-02 23:01:33 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62888 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:34 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779905700000 timeframe=15m
-2026-06-02 23:01:35 [info     ] backfilled_klines              count=17568 pair=BTCUSDT timeframe=15m
-2026-06-02 23:01:35 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764604853119 timeframe=1w
-2026-06-02 23:01:36 [info     ] backfilled_klines              count=26 pair=ETHUSDT timeframe=1w
-2026-06-02 23:01:36 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764604853119 timeframe=1d
-2026-06-02 23:01:36 [info     ] backfilled_klines              count=183 pair=ETHUSDT timeframe=1d
-2026-06-02 23:01:36 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764604853119 timeframe=4h
-2026-06-02 23:01:38 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:59741 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:38 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779019200000 timeframe=4h
-2026-06-02 23:01:39 [info     ] backfilled_klines              count=1098 pair=ETHUSDT timeframe=4h
-2026-06-02 23:01:39 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764604853119 timeframe=1h
-2026-06-02 23:01:40 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768208400000 timeframe=1h
-2026-06-02 23:01:43 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771808400000 timeframe=1h
-2026-06-02 23:01:44 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58547 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:44 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775408400000 timeframe=1h
-2026-06-02 23:01:47 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779008400000 timeframe=1h
-2026-06-02 23:01:48 [info     ] backfilled_klines              count=4392 pair=ETHUSDT timeframe=1h
-2026-06-02 23:01:48 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764604853119 timeframe=15m
-2026-06-02 23:01:48 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63829 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:49 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1765505700000 timeframe=15m
-2026-06-02 23:01:51 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1766405700000 timeframe=15m
-2026-06-02 23:01:54 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1767305700000 timeframe=15m
-2026-06-02 23:01:55 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58845 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:55 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:58846 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:01:56 [info     ] spot_positions_fetched         count=4 total_usdt=474.59
-INFO:     127.0.0.1:58844 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:56 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768205700000 timeframe=15m
-2026-06-02 23:01:58 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1769105700000 timeframe=15m
-2026-06-02 23:01:59 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:59615 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:01:59 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770005700000 timeframe=15m
-2026-06-02 23:02:01 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770905700000 timeframe=15m
-2026-06-02 23:02:03 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771805700000 timeframe=15m
-2026-06-02 23:02:04 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62208 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:05 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1772705700000 timeframe=15m
-2026-06-02 23:02:07 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1773605700000 timeframe=15m
-2026-06-02 23:02:08 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:56063 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:09 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1774505700000 timeframe=15m
-2026-06-02 23:02:10 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775405700000 timeframe=15m
-2026-06-02 23:02:13 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1776305700000 timeframe=15m
-2026-06-02 23:02:14 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58879 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:14 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1777205700000 timeframe=15m
-2026-06-02 23:02:17 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1778105700000 timeframe=15m
-2026-06-02 23:02:18 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53548 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:18 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779005700000 timeframe=15m
-2026-06-02 23:02:20 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779905700000 timeframe=15m
-2026-06-02 23:02:24 [info     ] backfilled_klines              count=17568 pair=ETHUSDT timeframe=15m
-2026-06-02 23:02:24 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764604853119 timeframe=1w
-2026-06-02 23:02:24 [info     ] backfilled_klines              count=26 pair=SOLUSDT timeframe=1w
-2026-06-02 23:02:24 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764604853119 timeframe=1d
-2026-06-02 23:02:25 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63368 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:25 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:63369 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:02:25 [info     ] backfilled_klines              count=183 pair=SOLUSDT timeframe=1d
-2026-06-02 23:02:25 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764604853119 timeframe=4h
-2026-06-02 23:02:25 [info     ] spot_positions_fetched         count=4 total_usdt=474.83
-INFO:     127.0.0.1:63365 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:27 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779019200000 timeframe=4h
-2026-06-02 23:02:28 [info     ] backfilled_klines              count=1098 pair=SOLUSDT timeframe=4h
-2026-06-02 23:02:28 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764604853119 timeframe=1h
-2026-06-02 23:02:28 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:49727 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:29 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768208400000 timeframe=1h
-2026-06-02 23:02:31 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771808400000 timeframe=1h
-2026-06-02 23:02:33 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775408400000 timeframe=1h
-2026-06-02 23:02:33 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61163 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:34 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779008400000 timeframe=1h
-2026-06-02 23:02:35 [info     ] backfilled_klines              count=4392 pair=SOLUSDT timeframe=1h
-2026-06-02 23:02:35 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764604853119 timeframe=15m
-2026-06-02 23:02:38 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1765505700000 timeframe=15m
-2026-06-02 23:02:39 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55342 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:39 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1766405700000 timeframe=15m
-2026-06-02 23:02:42 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1767305700000 timeframe=15m
-2026-06-02 23:02:44 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54313 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:44 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768205700000 timeframe=15m
-2026-06-02 23:02:46 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1769105700000 timeframe=15m
-2026-06-02 23:02:47 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770005700000 timeframe=15m
-2026-06-02 23:02:48 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55293 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:49 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770905700000 timeframe=15m
-2026-06-02 23:02:51 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771805700000 timeframe=15m
-2026-06-02 23:02:54 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1772705700000 timeframe=15m
-2026-06-02 23:02:55 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50446 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:55 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:50448 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:02:55 [info     ] spot_positions_fetched         count=4 total_usdt=475.41
-INFO:     127.0.0.1:50445 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:02:56 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1773605700000 timeframe=15m
-INFO:     127.0.0.1:58953 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57540 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57538 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53425 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53423 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55530 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55529 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53922 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53923 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58468 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
-2026-06-02 23:02:59 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1774505700000 timeframe=15m
-2026-06-02 23:03:01 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63934 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:02 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:63935 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:03:02 [info     ] spot_positions_fetched         count=4 total_usdt=475.43
-INFO:     127.0.0.1:63931 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:04 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775405700000 timeframe=15m
-2026-06-02 23:03:05 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62069 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:07 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:53556 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:03:07 [info     ] spot_positions_fetched         count=4 total_usdt=475.55
-INFO:     127.0.0.1:53549 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:07 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1776305700000 timeframe=15m
-2026-06-02 23:03:08 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62576 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:09 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1777205700000 timeframe=15m
-2026-06-02 23:03:11 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54690 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:11 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1778105700000 timeframe=15m
-2026-06-02 23:03:13 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779005700000 timeframe=15m
-2026-06-02 23:03:14 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53373 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:15 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779905700000 timeframe=15m
-2026-06-02 23:03:16 [info     ] backfilled_klines              count=17568 pair=SOLUSDT timeframe=15m
-2026-06-02 23:03:16 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764604853119 timeframe=1w
-2026-06-02 23:03:17 [info     ] backfilled_klines              count=26 pair=BNBUSDT timeframe=1w
-2026-06-02 23:03:17 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764604853119 timeframe=1d
-2026-06-02 23:03:18 [info     ] backfilled_klines              count=183 pair=BNBUSDT timeframe=1d
-2026-06-02 23:03:18 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764604853119 timeframe=4h
-2026-06-02 23:03:19 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52268 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:19 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779019200000 timeframe=4h
-2026-06-02 23:03:20 [info     ] backfilled_klines              count=1098 pair=BNBUSDT timeframe=4h
-2026-06-02 23:03:20 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764604853119 timeframe=1h
-2026-06-02 23:03:22 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1768208400000 timeframe=1h
-2026-06-02 23:03:23 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1771808400000 timeframe=1h
-2026-06-02 23:03:25 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60308 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:25 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1775408400000 timeframe=1h
-2026-06-02 23:03:29 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779008400000 timeframe=1h
-2026-06-02 23:03:30 [info     ] backfilled_klines              count=4392 pair=BNBUSDT timeframe=1h
-2026-06-02 23:03:30 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764604853119 timeframe=15m
-2026-06-02 23:03:30 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:59744 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:31 [info     ] spot_positions_fetched         count=4 total_usdt=475.12
-INFO:     127.0.0.1:59746 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:31 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:59747 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:03:33 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1765505700000 timeframe=15m
-2026-06-02 23:03:34 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:49823 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:35 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1766405700000 timeframe=15m
-2026-06-02 23:03:36 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1767305700000 timeframe=15m
-2026-06-02 23:03:38 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1768205700000 timeframe=15m
-2026-06-02 23:03:39 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58348 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:40 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1769105700000 timeframe=15m
-2026-06-02 23:03:41 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1770005700000 timeframe=15m
-2026-06-02 23:03:43 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1770905700000 timeframe=15m
-2026-06-02 23:03:44 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62361 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:45 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1771805700000 timeframe=15m
-2026-06-02 23:03:46 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1772705700000 timeframe=15m
-2026-06-02 23:03:48 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1773605700000 timeframe=15m
-2026-06-02 23:03:49 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64278 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:50 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1774505700000 timeframe=15m
-2026-06-02 23:03:53 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1775405700000 timeframe=15m
-2026-06-02 23:03:55 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58221 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:03:55 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:53697 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:03:55 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1776305700000 timeframe=15m
-2026-06-02 23:03:56 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1777205700000 timeframe=15m
-2026-06-02 23:03:59 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1778105700000 timeframe=15m
-2026-06-02 23:04:02 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779005700000 timeframe=15m
-2026-06-02 23:04:02 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:56568 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:03 [info     ] spot_positions_fetched         count=4 total_usdt=475.54999999999995
-INFO:     127.0.0.1:56567 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61501 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61502 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:04:05 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779905700000 timeframe=15m
-2026-06-02 23:04:06 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52975 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54353 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:04:06 [info     ] backfilled_klines              count=17568 pair=BNBUSDT timeframe=15m
-2026-06-02 23:04:06 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764604853119 timeframe=1w
-INFO:     127.0.0.1:52345 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:04:07 [info     ] backfilled_klines              count=26 pair=SUIUSDT timeframe=1w
-2026-06-02 23:04:07 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764604853119 timeframe=1d
-2026-06-02 23:04:08 [info     ] backfilled_klines              count=183 pair=SUIUSDT timeframe=1d
-2026-06-02 23:04:08 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764604853119 timeframe=4h
-2026-06-02 23:04:09 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779019200000 timeframe=4h
-2026-06-02 23:04:10 [info     ] backfilled_klines              count=1098 pair=SUIUSDT timeframe=4h
-2026-06-02 23:04:10 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764604853119 timeframe=1h
-2026-06-02 23:04:12 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1768208400000 timeframe=1h
-2026-06-02 23:04:13 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1771808400000 timeframe=1h
-2026-06-02 23:04:15 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1775408400000 timeframe=1h
-2026-06-02 23:04:16 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779008400000 timeframe=1h
-2026-06-02 23:04:18 [info     ] backfilled_klines              count=4392 pair=SUIUSDT timeframe=1h
-2026-06-02 23:04:18 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764604853119 timeframe=15m
-2026-06-02 23:04:19 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1765505700000 timeframe=15m
-2026-06-02 23:04:21 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1766405700000 timeframe=15m
-2026-06-02 23:04:22 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1767305700000 timeframe=15m
-2026-06-02 23:04:24 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1768205700000 timeframe=15m
-2026-06-02 23:04:27 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1769105700000 timeframe=15m
-2026-06-02 23:04:28 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62850 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:29 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:62852 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:04:29 [info     ] spot_positions_fetched         count=4 total_usdt=475.95
-INFO:     127.0.0.1:62848 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:31 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1770005700000 timeframe=15m
-2026-06-02 23:04:32 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62877 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:33 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:63831 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:04:33 [info     ] spot_positions_fetched         count=4 total_usdt=476.09999999999997
-INFO:     127.0.0.1:63829 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:33 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1770905700000 timeframe=15m
-2026-06-02 23:04:35 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54164 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:35 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1771805700000 timeframe=15m
-2026-06-02 23:04:38 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62804 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:38 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1772705700000 timeframe=15m
-INFO:     127.0.0.1:50399 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50400 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:04:42 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1773605700000 timeframe=15m
-2026-06-02 23:04:43 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50429 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57843 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57851 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:04:44 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1774505700000 timeframe=15m
-2026-06-02 23:04:46 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1775405700000 timeframe=15m
-2026-06-02 23:04:47 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57588 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:47 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1776305700000 timeframe=15m
-2026-06-02 23:04:49 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1777205700000 timeframe=15m
-2026-06-02 23:04:50 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1778105700000 timeframe=15m
-2026-06-02 23:04:54 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779005700000 timeframe=15m
-2026-06-02 23:04:55 [info     ] spot_positions_fetched         count=4 total_usdt=476.39
-INFO:     127.0.0.1:65494 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:55 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:65498 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:04:55 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:65497 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:57 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779905700000 timeframe=15m
-2026-06-02 23:04:58 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64880 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:59 [info     ] spot_positions_fetched         count=4 total_usdt=476.35
-INFO:     127.0.0.1:53171 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:04:59 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:50564 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:04:59 [info     ] backfilled_klines              count=17568 pair=SUIUSDT timeframe=15m
-2026-06-02 23:04:59 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:05:00 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:05:00 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:05:01 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:05:01 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:05:01 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55197 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:02 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:05:02 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:05:03 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:05:03 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:05:03 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57204 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:03 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:05:03 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:05:04 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:05:04 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:05:04 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:05:04 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:05:05 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:05:05 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:05:05 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:05:05 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:05:06 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:05:06 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:05:07 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:05:07 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:05:07 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:05:07 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:05:08 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:05:08 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:05:08 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52651 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:08 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:05:08 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:05:10 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:05:10 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:05:10 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:05:10 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:05:11 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:05:11 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-INFO:     127.0.0.1:64332 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64334 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:05:13 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:05:13 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:05:13 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:05:13 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-INFO:     127.0.0.1:59757 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:05:14 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:05:14 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:05:14 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60882 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52031 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:05:16 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:05:16 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:05:17 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:05:17 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:05:17 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:05:17 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:05:17 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52786 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:18 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:52788 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:05:18 [info     ] spot_positions_fetched         count=4 total_usdt=476.3
-INFO:     127.0.0.1:52785 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:18 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:05:20 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:05:20 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-2026-06-02 23:05:21 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55719 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:21 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:51728 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:05:21 [info     ] spot_positions_fetched         count=4 total_usdt=476.42
-INFO:     127.0.0.1:51729 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:22 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62599 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:26 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64749 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:31 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63559 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:36 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63991 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:41 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63514 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:48 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50914 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:49 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:50913 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:05:49 [info     ] spot_positions_fetched         count=4 total_usdt=476.86
-INFO:     127.0.0.1:50910 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:52 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57293 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:05:57 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:56733 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:02 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62782 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:07 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51722 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:11 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55954 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:18 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61112 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:19 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:61115 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:06:19 [info     ] spot_positions_fetched         count=4 total_usdt=476.17
-INFO:     127.0.0.1:61116 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:21 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:06:22 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52212 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:23 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:06:23 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:06:23 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:06:23 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:06:26 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:06:26 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:06:26 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:06:26 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:06:27 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:06:27 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:06:27 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51819 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:27 [info     ] spot_positions_fetched         count=4 total_usdt=476.33
-INFO:     127.0.0.1:51816 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:27 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:06:27 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:06:28 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:06:28 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:06:28 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:51820 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:06:28 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:06:28 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:06:29 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:06:29 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:06:29 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:06:29 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:06:30 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:06:30 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:06:30 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:06:30 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:06:31 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:06:31 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:06:32 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:06:32 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:06:32 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:06:32 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:06:32 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57128 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:33 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:06:33 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:06:33 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:06:33 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:06:34 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:06:34 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:06:36 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:06:36 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:06:36 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:06:36 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:06:37 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61159 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:37 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:06:37 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-INFO:     127.0.0.1:58650 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58649 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:06:38 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:06:41 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:06:41 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:06:41 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-INFO:     127.0.0.1:49881 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61828 - "GET /api/v1/coin/USELESSUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59279 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:06:43 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53027 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61829 - "GET /api/v1/coin/USELESSUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:06:43 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:06:43 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:06:44 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-INFO:     127.0.0.1:53146 - "GET /api/v1/coin/USELESSUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62063 - "GET /api/v1/coin/USELESSUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54510 - "GET /api/v1/coin/USELESSUSDT/klines?interval=4h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59419 - "GET /api/v1/coin/USELESSUSDT/klines?interval=15m&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:06:50 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57548 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55828 - "GET /api/v1/coin/USELESSUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53943 - "GET /api/v1/coin/USELESSUSDT/klines?interval=1d&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49984 - "GET /api/v1/coin/USELESSUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:06:53 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58115 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60223 - "GET /api/v1/coin/USELESSUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59013 - "GET /api/v1/coin/USELESSUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:06:59 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:63414 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:06:59 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63413 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:06:59 [info     ] spot_positions_fetched         count=4 total_usdt=476.4
-INFO:     127.0.0.1:63412 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58386 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58388 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55772 - "GET /api/v1/coin/USELESSUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:07:03 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60452 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64617 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58800 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:07:06 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60812 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:11 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51958 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:16 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:56580 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:21 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64880 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59364 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:07:29 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:52598 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:07:29 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52597 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:29 [info     ] spot_positions_fetched         count=4 total_usdt=476.14
-INFO:     127.0.0.1:52596 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59366 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61216 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58853 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:07:41 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62940 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:41 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:62941 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:07:41 [info     ] spot_positions_fetched         count=4 total_usdt=476.28
-INFO:     127.0.0.1:62937 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:44 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62963 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:44 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:62973 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:07:44 [info     ] spot_positions_fetched         count=4 total_usdt=476.85
-INFO:     127.0.0.1:62972 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:44 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:07:46 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:59086 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:46 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:07:46 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:07:47 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:07:47 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:07:48 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:07:48 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:07:49 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:07:49 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:07:49 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:07:49 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:07:49 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58895 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:50 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:07:50 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:07:50 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:07:50 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:07:51 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:07:51 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:07:51 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:07:51 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:07:52 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:07:52 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:07:52 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:07:52 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:07:53 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:07:53 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:07:54 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:07:54 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:07:54 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:07:54 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:07:54 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58453 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:07:55 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:07:55 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:07:55 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:07:55 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:07:56 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:07:56 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:07:57 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:07:57 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:07:57 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:07:57 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:07:58 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:07:58 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:07:59 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:07:59 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:07:59 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:07:59 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:07:59 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51206 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:08:00 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:08:00 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:08:02 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:08:02 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:08:03 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-INFO:     127.0.0.1:59754 - "GET /api/v1/coin/SUIUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59756 - "GET /api/v1/coin/SUIUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:08:06 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61290 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61223 - "GET /api/v1/coin/SUIUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61224 - "GET /api/v1/coin/SUIUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:08:12 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55135 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:08:13 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:55137 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55438 - "GET /api/v1/coin/SUIUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:08:13 [info     ] spot_positions_fetched         count=4 total_usdt=477.43
-INFO:     127.0.0.1:55012 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:49680 - "GET /api/v1/coin/SUIUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:08:16 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:49912 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63832 - "GET /api/v1/coin/SUIUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63834 - "GET /api/v1/coin/SUIUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63570 - "GET /api/v1/coin/ICPUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:08:21 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51411 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63572 - "GET /api/v1/coin/ICPUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56987 - "GET /api/v1/coin/ICPUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61242 - "GET /api/v1/coin/DOTUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:08:25 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52024 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:52709 - "GET /api/v1/coin/ICPUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61243 - "GET /api/v1/coin/DOTUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56618 - "GET /api/v1/coin/DOTUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:50700 - "GET /api/v1/coin/DOTUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:08:29 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60223 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:08:34 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58644 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58326 - "GET /api/v1/coin/ICPUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58327 - "GET /api/v1/coin/ICPUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:08:45 [info     ] futures_positions_fetched      count=0
-2026-06-02 23:08:45 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64943 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:08:45 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:64944 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:08:46 [info     ] futures_market_fetched         count=598
-2026-06-02 23:08:46 [info     ] spot_positions_fetched         count=4 total_usdt=477.18
-INFO:     127.0.0.1:64942 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:08:46 [info     ] spot_positions_fetched         count=4 total_usdt=477.20000000000005
-2026-06-02 23:08:47 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50398 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:08:51 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:59267 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:08:56 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51626 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:01 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53440 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:03 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:09:06 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:09:06 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:09:06 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60398 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:06 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:09:06 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:09:07 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:09:07 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:09:07 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:09:07 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:09:08 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:09:08 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:09:08 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:09:08 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:09:09 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:09:09 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:09:11 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:09:11 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:09:12 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:09:12 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:09:12 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:09:12 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:09:12 [info     ] futures_positions_fetched      count=0
-2026-06-02 23:09:14 [info     ] futures_market_fetched         count=598
-2026-06-02 23:09:14 [info     ] spot_positions_fetched         count=4 total_usdt=476.95
-2026-06-02 23:09:14 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:09:14 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:09:15 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:09:15 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:09:15 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:09:15 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:09:15 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50210 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:16 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:50212 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:09:16 [info     ] spot_positions_fetched         count=4 total_usdt=477.06
-INFO:     127.0.0.1:50209 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:16 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:09:16 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:09:16 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:09:16 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:09:17 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:09:17 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:09:17 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:09:17 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:09:18 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:09:18 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:09:19 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:09:19 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:09:20 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:09:20 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:09:20 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:09:20 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:09:20 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50470 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:21 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:09:21 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:09:21 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:09:21 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:09:22 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:09:22 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:09:22 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-2026-06-02 23:09:25 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57197 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:32 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58618 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:35 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:49389 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:40 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52384 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:46 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53349 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:46 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:53351 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:09:47 [info     ] spot_positions_fetched         count=4 total_usdt=477.51
-INFO:     127.0.0.1:53348 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:49 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63057 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:55 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62990 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:59 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60295 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:09:59 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:60297 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:10:00 [info     ] spot_positions_fetched         count=4 total_usdt=477.46
-INFO:     127.0.0.1:60293 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:04 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:65009 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:09 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61176 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:14 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62462 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:19 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60410 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:23 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:10:24 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62913 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:25 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:10:25 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:10:25 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:10:25 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:10:26 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:10:26 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:10:26 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:10:26 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:10:27 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:10:27 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:10:29 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:10:29 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:10:30 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:10:30 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:10:30 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:10:30 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:10:31 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50760 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:31 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:10:31 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:10:31 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:50761 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:10:31 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:10:31 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:10:32 [info     ] spot_positions_fetched         count=4 total_usdt=477.55
-INFO:     127.0.0.1:50757 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:32 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:10:32 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:10:33 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:10:33 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:10:33 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:10:33 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:10:34 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:10:34 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:10:34 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54605 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:34 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:10:34 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:10:35 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:10:35 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:10:35 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:10:35 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:10:36 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:10:36 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:10:36 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:10:36 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:10:37 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:10:37 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:10:38 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:10:38 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:10:38 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:10:38 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:10:39 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51120 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:39 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:10:39 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:10:39 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:10:39 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:10:40 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-2026-06-02 23:10:44 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55262 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:50 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51322 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:10:58 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54085 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:00 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:60863 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:11:00 [info     ] spot_positions_fetched         count=4 total_usdt=477.65000000000003
-INFO:     127.0.0.1:60861 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:01 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64071 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:04 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54968 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:08 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64578 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:14 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53970 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57041 - "GET /api/v1/coin/SOLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:11:19 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:65287 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57043 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:54995 - "GET /api/v1/coin/SOLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53751 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:11:24 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55970 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:30 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:65233 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:30 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:65234 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:11:31 [info     ] spot_positions_fetched         count=4 total_usdt=477.48
-INFO:     127.0.0.1:65231 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:34 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64336 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:39 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:49379 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:40 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:11:42 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:11:42 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:11:43 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:11:43 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:11:43 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:11:43 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:11:44 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:11:44 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:11:44 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60763 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:44 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:11:44 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:11:45 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:11:45 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:11:45 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:11:45 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:11:46 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:11:46 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:11:46 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:11:46 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:11:47 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:11:47 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:11:48 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:11:48 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:11:48 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:11:48 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:11:49 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51213 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:49 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:11:49 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:11:49 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:11:49 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:11:50 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:11:50 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:11:50 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:11:51 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:11:51 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:11:51 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:11:52 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:11:52 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:11:52 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:11:52 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:11:53 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:11:53 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:11:53 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:11:53 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:11:54 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:11:54 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50608 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:11:54 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:11:55 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:11:55 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:11:55 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:11:55 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:11:56 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-2026-06-02 23:12:00 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52806 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:00 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:52807 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:12:01 [info     ] spot_positions_fetched         count=4 total_usdt=478.43
-INFO:     127.0.0.1:52803 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:04 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50606 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64961 - "GET /api/v1/coin/RESOLVUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:12:10 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61264 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64963 - "GET /api/v1/coin/RESOLVUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:12:14 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50706 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:19 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58349 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:24 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63902 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:30 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51328 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:30 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:51330 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:12:31 [info     ] spot_positions_fetched         count=4 total_usdt=478.87
-INFO:     127.0.0.1:51327 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:34 [info     ] futures_positions_fetched      count=0
+2026-06-03 08:30:45 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764639045890 timeframe=1w
+2026-06-03 08:30:48 [info     ] backfilled_klines              count=26 pair=BTCUSDT timeframe=1w
+2026-06-03 08:30:48 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764639045890 timeframe=1d
+INFO:     127.0.0.1:64487 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:64489 - "GET /api/v1/coin/SOLUSDT/analyze?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:30:49 [info     ] backfilled_klines              count=183 pair=BTCUSDT timeframe=1d
+2026-06-03 08:30:49 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764639045890 timeframe=4h
+INFO:     127.0.0.1:56512 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:30:51 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779048000000 timeframe=4h
+2026-06-03 08:30:51 [info     ] backfilled_klines              count=1098 pair=BTCUSDT timeframe=4h
+2026-06-03 08:30:51 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764639045890 timeframe=1h
+2026-06-03 08:30:53 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768240800000 timeframe=1h
+2026-06-03 08:30:54 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771840800000 timeframe=1h
+INFO:     127.0.0.1:55726 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:30:55 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775440800000 timeframe=1h
+2026-06-03 08:30:56 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779040800000 timeframe=1h
+2026-06-03 08:30:57 [info     ] backfilled_klines              count=4392 pair=BTCUSDT timeframe=1h
+2026-06-03 08:30:57 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1764639045890 timeframe=15m
+2026-06-03 08:30:59 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1765539900000 timeframe=15m
+INFO:     127.0.0.1:56168 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:00 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1766439900000 timeframe=15m
+2026-06-03 08:31:01 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1767339900000 timeframe=15m
+2026-06-03 08:31:02 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1768239900000 timeframe=15m
+2026-06-03 08:31:04 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1769139900000 timeframe=15m
+INFO:     127.0.0.1:64314 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:05 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770039900000 timeframe=15m
+2026-06-03 08:31:06 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1770939900000 timeframe=15m
+2026-06-03 08:31:07 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1771839900000 timeframe=15m
+2026-06-03 08:31:08 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1772739900000 timeframe=15m
+2026-06-03 08:31:09 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1773639900000 timeframe=15m
+INFO:     127.0.0.1:51780 - "GET /api/v1/market/spot-positions HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:51781 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:10 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1774539900000 timeframe=15m
+2026-06-03 08:31:10 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:51783 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:31:12 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1775439900000 timeframe=15m
+2026-06-03 08:31:13 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1776339900000 timeframe=15m
+INFO:     127.0.0.1:56712 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:15 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1777239900000 timeframe=15m
+2026-06-03 08:31:16 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1778139900000 timeframe=15m
+2026-06-03 08:31:17 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779039900000 timeframe=15m
+2026-06-03 08:31:18 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1779939900000 timeframe=15m
+2026-06-03 08:31:18 [info     ] backfilled_klines              count=17568 pair=BTCUSDT timeframe=15m
+2026-06-03 08:31:18 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764639045890 timeframe=1w
+2026-06-03 08:31:19 [info     ] backfilled_klines              count=26 pair=ETHUSDT timeframe=1w
+2026-06-03 08:31:19 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764639045890 timeframe=1d
+INFO:     127.0.0.1:62290 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:19 [info     ] backfilled_klines              count=183 pair=ETHUSDT timeframe=1d
+2026-06-03 08:31:19 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764639045890 timeframe=4h
+2026-06-03 08:31:21 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779048000000 timeframe=4h
+2026-06-03 08:31:21 [info     ] backfilled_klines              count=1098 pair=ETHUSDT timeframe=4h
+2026-06-03 08:31:21 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764639045890 timeframe=1h
+2026-06-03 08:31:23 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768240800000 timeframe=1h
+2026-06-03 08:31:24 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771840800000 timeframe=1h
+INFO:     127.0.0.1:55748 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:25 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775440800000 timeframe=1h
+2026-06-03 08:31:27 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779040800000 timeframe=1h
+2026-06-03 08:31:29 [info     ] backfilled_klines              count=4392 pair=ETHUSDT timeframe=1h
+2026-06-03 08:31:29 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1764639045890 timeframe=15m
+INFO:     127.0.0.1:65355 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:31 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1765539900000 timeframe=15m
+2026-06-03 08:31:32 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1766439900000 timeframe=15m
+2026-06-03 08:31:34 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1767339900000 timeframe=15m
+INFO:     127.0.0.1:58670 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:36 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1768239900000 timeframe=15m
+2026-06-03 08:31:37 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1769139900000 timeframe=15m
+2026-06-03 08:31:40 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770039900000 timeframe=15m
+INFO:     127.0.0.1:58928 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:58927 - "GET /api/v1/market/spot-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:42 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:57450 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:31:42 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1770939900000 timeframe=15m
+2026-06-03 08:31:44 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1771839900000 timeframe=15m
+INFO:     127.0.0.1:50398 - "GET /api/v1/market/futures-positions HTTP/1.1" 401 Unauthorized
+2026-06-03 08:31:46 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1772739900000 timeframe=15m
+2026-06-03 08:31:48 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1773639900000 timeframe=15m
+2026-06-03 08:31:49 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1774539900000 timeframe=15m
+2026-06-03 08:31:50 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:49893 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:31:51 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1775439900000 timeframe=15m
+2026-06-03 08:31:52 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1776339900000 timeframe=15m
+2026-06-03 08:31:54 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1777239900000 timeframe=15m
+2026-06-03 08:31:55 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:54378 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:31:56 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1778139900000 timeframe=15m
+2026-06-03 08:31:57 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779039900000 timeframe=15m
+2026-06-03 08:31:59 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1779939900000 timeframe=15m
+2026-06-03 08:32:00 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:51110 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:03 [info     ] backfilled_klines              count=17568 pair=ETHUSDT timeframe=15m
+2026-06-03 08:32:03 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764639045890 timeframe=1w
+INFO:     127.0.0.1:64665 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57202 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57200 - "GET /api/v1/klines/BTCUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50062 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50064 - "GET /api/v1/klines/ETHUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50242 - "GET /api/v1/klines/SOLUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50241 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61686 - "GET /api/v1/klines/BNBUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61687 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65483 - "GET /api/v1/klines/SUIUSDT/1d?limit=1 HTTP/1.1" 200 OK
+2026-06-03 08:32:04 [info     ] backfilled_klines              count=26 pair=SOLUSDT timeframe=1w
+2026-06-03 08:32:04 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764639045890 timeframe=1d
+2026-06-03 08:32:05 [info     ] backfilled_klines              count=183 pair=SOLUSDT timeframe=1d
+2026-06-03 08:32:05 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764639045890 timeframe=4h
+2026-06-03 08:32:05 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:56790 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:06 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:56791 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:32:06 [info     ] spot_positions_fetched         count=4 total_usdt=472.27
+INFO:     127.0.0.1:56787 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:08 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779048000000 timeframe=4h
+2026-06-03 08:32:09 [info     ] backfilled_klines              count=1098 pair=SOLUSDT timeframe=4h
+2026-06-03 08:32:09 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764639045890 timeframe=1h
+2026-06-03 08:32:09 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:61552 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:10 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:53127 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:32:11 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768240800000 timeframe=1h
+2026-06-03 08:32:11 [info     ] spot_positions_fetched         count=4 total_usdt=472.32
+INFO:     127.0.0.1:59153 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:12 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55748 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:14 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771840800000 timeframe=1h
+2026-06-03 08:32:15 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:63654 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:16 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775440800000 timeframe=1h
+2026-06-03 08:32:17 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779040800000 timeframe=1h
+2026-06-03 08:32:18 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:53967 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:18 [info     ] backfilled_klines              count=4392 pair=SOLUSDT timeframe=1h
+2026-06-03 08:32:18 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1764639045890 timeframe=15m
+2026-06-03 08:32:20 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1765539900000 timeframe=15m
+2026-06-03 08:32:24 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1766439900000 timeframe=15m
+2026-06-03 08:32:24 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:62788 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49356 - "GET /api/v1/coin/MRVLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49358 - "GET /api/v1/coin/MRVLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:32:28 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1767339900000 timeframe=15m
+INFO:     127.0.0.1:56556 - "GET /api/v1/coin/MRVLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:32:29 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:56557 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56559 - "GET /api/v1/coin/MRVLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:32:29 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1768239900000 timeframe=15m
+2026-06-03 08:32:34 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1769139900000 timeframe=15m
+2026-06-03 08:32:35 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:49893 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:32:35 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:49891 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:35 [info     ] spot_positions_fetched         count=4 total_usdt=471.87
+INFO:     127.0.0.1:49888 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:35 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770039900000 timeframe=15m
+2026-06-03 08:32:37 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1770939900000 timeframe=15m
+2026-06-03 08:32:38 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55778 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:39 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1771839900000 timeframe=15m
+2026-06-03 08:32:40 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1772739900000 timeframe=15m
+2026-06-03 08:32:42 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1773639900000 timeframe=15m
+2026-06-03 08:32:43 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55657 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:45 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1774539900000 timeframe=15m
+INFO:     127.0.0.1:57165 - "GET /api/v1/coin/LITUSDT/info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57164 - "GET /api/v1/coin/LITUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:32:48 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1775439900000 timeframe=15m
+2026-06-03 08:32:50 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:63680 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:50 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1776339900000 timeframe=15m
+INFO:     127.0.0.1:56250 - "GET /api/v1/coin/LITUSDT/info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50204 - "GET /api/v1/coin/LITUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:32:52 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1777239900000 timeframe=15m
+2026-06-03 08:32:53 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:54787 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:54 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1778139900000 timeframe=15m
+2026-06-03 08:32:57 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779039900000 timeframe=15m
+2026-06-03 08:32:58 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:53363 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:32:59 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1779939900000 timeframe=15m
+2026-06-03 08:33:01 [info     ] backfilled_klines              count=17568 pair=SOLUSDT timeframe=15m
+2026-06-03 08:33:01 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764639045890 timeframe=1w
+2026-06-03 08:33:02 [info     ] backfilled_klines              count=26 pair=BNBUSDT timeframe=1w
+2026-06-03 08:33:02 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764639045890 timeframe=1d
+2026-06-03 08:33:06 [info     ] backfilled_klines              count=183 pair=BNBUSDT timeframe=1d
+2026-06-03 08:33:06 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764639045890 timeframe=4h
+2026-06-03 08:33:07 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:51214 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:07 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:51213 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:33:07 [info     ] spot_positions_fetched         count=4 total_usdt=471.89000000000004
+INFO:     127.0.0.1:51210 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:08 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779048000000 timeframe=4h
+2026-06-03 08:33:09 [info     ] backfilled_klines              count=1098 pair=BNBUSDT timeframe=4h
+2026-06-03 08:33:09 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764639045890 timeframe=1h
+2026-06-03 08:33:12 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1768240800000 timeframe=1h
+2026-06-03 08:33:13 [info     ] futures_positions_fetched      count=0
+2026-06-03 08:33:17 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1771840800000 timeframe=1h
+2026-06-03 08:33:18 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:60912 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:33:18 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:60911 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:18 [info     ] spot_positions_fetched         count=4 total_usdt=471.93
+INFO:     127.0.0.1:60904 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:18 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1775440800000 timeframe=1h
+2026-06-03 08:33:21 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779040800000 timeframe=1h
+2026-06-03 08:33:22 [info     ] backfilled_klines              count=4392 pair=BNBUSDT timeframe=1h
+2026-06-03 08:33:22 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1764639045890 timeframe=15m
+2026-06-03 08:33:25 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1765539900000 timeframe=15m
+2026-06-03 08:33:26 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1766439900000 timeframe=15m
+2026-06-03 08:33:27 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:63250 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:28 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1767339900000 timeframe=15m
+2026-06-03 08:33:32 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1768239900000 timeframe=15m
+INFO:     127.0.0.1:60495 - "GET /api/v1/coin/SOLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:33:34 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:49961 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60497 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:33:35 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1769139900000 timeframe=15m
+INFO:     127.0.0.1:50258 - "GET /api/v1/coin/SOLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:33:37 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:64647 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63165 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:33:38 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1770039900000 timeframe=15m
+2026-06-03 08:33:41 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1770939900000 timeframe=15m
+2026-06-03 08:33:41 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:59046 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:42 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1771839900000 timeframe=15m
+2026-06-03 08:33:47 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1772739900000 timeframe=15m
+2026-06-03 08:33:49 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:58031 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:49 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:64954 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:33:49 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1773639900000 timeframe=15m
+2026-06-03 08:33:49 [info     ] spot_positions_fetched         count=4 total_usdt=471.78000000000003
+INFO:     127.0.0.1:58029 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:51 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1774539900000 timeframe=15m
+2026-06-03 08:33:52 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:52889 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:52 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1775439900000 timeframe=15m
+2026-06-03 08:33:54 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1776339900000 timeframe=15m
+2026-06-03 08:33:57 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1777239900000 timeframe=15m
+2026-06-03 08:33:58 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55709 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:33:59 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1778139900000 timeframe=15m
+2026-06-03 08:34:01 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779039900000 timeframe=15m
+2026-06-03 08:34:02 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:60457 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:02 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1779939900000 timeframe=15m
+2026-06-03 08:34:04 [info     ] backfilled_klines              count=17568 pair=BNBUSDT timeframe=15m
+2026-06-03 08:34:04 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764639045890 timeframe=1w
+2026-06-03 08:34:06 [info     ] backfilled_klines              count=26 pair=SUIUSDT timeframe=1w
+2026-06-03 08:34:06 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764639045890 timeframe=1d
+2026-06-03 08:34:07 [info     ] backfilled_klines              count=183 pair=SUIUSDT timeframe=1d
+2026-06-03 08:34:07 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764639045890 timeframe=4h
+INFO:     127.0.0.1:51704 - "GET /api/v1/coin/SOLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:34:08 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:59091 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51706 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:34:09 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779048000000 timeframe=4h
+INFO:     127.0.0.1:56902 - "GET /api/v1/coin/SOLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:34:10 [info     ] backfilled_klines              count=1098 pair=SUIUSDT timeframe=4h
+2026-06-03 08:34:10 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764639045890 timeframe=1h
+INFO:     127.0.0.1:58575 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:34:11 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:50269 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:12 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1768240800000 timeframe=1h
+2026-06-03 08:34:14 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1771840800000 timeframe=1h
+2026-06-03 08:34:17 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1775440800000 timeframe=1h
+2026-06-03 08:34:18 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:51301 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:18 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:61455 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:34:19 [info     ] spot_positions_fetched         count=4 total_usdt=471.13
+INFO:     127.0.0.1:51302 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:19 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779040800000 timeframe=1h
+2026-06-03 08:34:20 [info     ] backfilled_klines              count=4392 pair=SUIUSDT timeframe=1h
+2026-06-03 08:34:20 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1764639045890 timeframe=15m
+2026-06-03 08:34:21 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:60895 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:22 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1765539900000 timeframe=15m
+2026-06-03 08:34:24 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1766439900000 timeframe=15m
+2026-06-03 08:34:26 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1767339900000 timeframe=15m
+2026-06-03 08:34:27 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:63133 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:28 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1768239900000 timeframe=15m
+2026-06-03 08:34:30 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1769139900000 timeframe=15m
+2026-06-03 08:34:31 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:54357 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:32 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1770039900000 timeframe=15m
+2026-06-03 08:34:35 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1770939900000 timeframe=15m
+2026-06-03 08:34:37 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:50449 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:37 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1771839900000 timeframe=15m
+2026-06-03 08:34:39 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1772739900000 timeframe=15m
+2026-06-03 08:34:41 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1773639900000 timeframe=15m
+2026-06-03 08:34:42 [info     ] futures_positions_fetched      count=0
 INFO:     127.0.0.1:50062 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:39 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52839 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57374 - "GET /api/v1/coin/RESOLVUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:57372 - "GET /api/v1/coin/RESOLVUSDT/klines?interval=15m&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:12:45 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:56895 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59210 - "GET /api/v1/coin/RESOLVUSDT/klines?interval=15m&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:12:48 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:51447 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59207 - "GET /api/v1/coin/RESOLVUSDT/klines?interval=1d&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:59209 - "GET /api/v1/coin/RESOLVUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:12:55 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:56270 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:12:56 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-INFO:     127.0.0.1:54647 - "GET /api/v1/coin/RESOLVUSDT/klines?interval=1d&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:12:59 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:12:59 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:12:59 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:12:59 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:12:59 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61875 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:00 [info     ] spot_positions_fetched         count=4 total_usdt=479.05
-INFO:     127.0.0.1:61873 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:00 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:61877 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:13:00 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:13:00 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:13:00 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:13:00 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:13:01 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:13:01 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:13:02 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:13:02 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:13:03 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:13:03 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:13:03 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:13:03 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:13:03 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:56535 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:04 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:13:04 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:13:04 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:13:04 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:13:05 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:13:05 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:13:05 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:13:05 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:13:06 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:13:06 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:13:06 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:13:06 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:13:07 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:13:07 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:13:07 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:13:07 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:13:08 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:13:08 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:13:08 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64525 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:08 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:13:08 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:13:09 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:13:09 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:13:09 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:13:09 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:13:10 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:13:10 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:13:10 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:13:11 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:13:11 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:13:11 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:13:12 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:13:12 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:13:13 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-2026-06-02 23:13:13 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52425 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:18 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53858 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:24 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52308 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:29 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58968 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:30 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:58966 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:13:30 [info     ] spot_positions_fetched         count=4 total_usdt=479.62
-INFO:     127.0.0.1:56760 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:33 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57452 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:38 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54083 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:44 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61145 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:49 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52359 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:13:54 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58613 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:63969 - "GET /api/v1/coin/BTCDOMUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:14:04 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:64098 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:14:04 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64097 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:04 [info     ] spot_positions_fetched         count=4 total_usdt=479.65000000000003
-INFO:     127.0.0.1:64094 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:53355 - "GET /api/v1/coin/BTCDOMUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60409 - "GET /api/v1/coin/BTCDOMUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:14:06 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55048 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55049 - "GET /api/v1/coin/BTCDOMUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:14:09 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52269 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:13 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:14:14 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62641 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:15 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:14:15 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:14:15 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:14:15 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:14:16 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:14:16 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:14:16 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:14:16 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:14:17 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:14:17 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:14:18 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:14:18 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:14:18 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:14:18 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:14:19 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:59035 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:19 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:14:19 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:14:19 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:14:20 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:14:20 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:14:20 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:14:21 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:14:21 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:14:21 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:14:21 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:14:22 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:14:22 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:14:23 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:14:23 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:14:23 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:14:23 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:14:24 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:14:24 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:14:24 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:55663 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:24 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:14:24 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:14:25 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:14:25 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:14:25 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:14:25 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:14:26 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:14:26 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:14:26 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:14:27 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:14:27 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:14:27 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:14:29 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:14:29 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:14:30 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:14:30 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:14:30 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-2026-06-02 23:14:30 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:65418 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:31 [info     ] spot_positions_fetched         count=4 total_usdt=480.02000000000004
-INFO:     127.0.0.1:65417 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:31 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:65419 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:14:34 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61740 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:39 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:56512 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:43 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63196 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:48 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60711 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:50 [error    ] analysis_failed                error="'WyckoffState' object has no attribute 'confidence'" symbol=BTCDOMUSDT
-INFO:     127.0.0.1:64493 - "GET /api/v1/coin/BTCDOMUSDT/analyze?interval=1h&limit=200 HTTP/1.1" 500 Internal Server Error
-2026-06-02 23:14:57 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52398 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:14:58 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:52400 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:14:58 [info     ] spot_positions_fetched         count=4 total_usdt=479.90000000000003
-INFO:     127.0.0.1:52397 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:00 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64262 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:01 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:51851 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:15:01 [info     ] spot_positions_fetched         count=4 total_usdt=479.89
-INFO:     127.0.0.1:51849 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:02 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54854 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:06 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63829 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:12 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63697 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60777 - "GET /api/v1/coin/BTCUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60778 - "GET /api/v1/coin/BTCUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55333 - "GET /api/v1/coin/BTCUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:15:16 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64593 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61445 - "GET /api/v1/coin/BTCUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:51995 - "GET /api/v1/coin/BTCUSDT/klines?interval=15m&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:64489 - "GET /api/v1/coin/BTCUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:55208 - "GET /api/v1/coin/BTCUSDT/klines?interval=15m&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:15:23 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:54953 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61440 - "GET /api/v1/coin/BTCUSDT/klines?interval=1d&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61442 - "GET /api/v1/coin/BTCUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:15:27 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58132 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:28 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:58130 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58019 - "GET /api/v1/coin/BTCUSDT/klines?interval=1d&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:15:28 [info     ] spot_positions_fetched         count=4 total_usdt=480.47
-INFO:     127.0.0.1:62759 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:30 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:15:31 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61474 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:32 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:15:32 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:15:33 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:15:33 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:15:33 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:15:33 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:15:34 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:15:34 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:15:35 [info     ] polled_klines                  count=2 pair=BTCUSDT timeframe=15m
-2026-06-02 23:15:35 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:15:35 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:15:35 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:15:36 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:15:36 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64176 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:36 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:15:36 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:15:36 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:15:37 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:15:37 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:15:37 [info     ] polled_klines                  count=2 pair=ETHUSDT timeframe=15m
-2026-06-02 23:15:37 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:15:38 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:15:38 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:15:38 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:15:38 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:15:39 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:15:39 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:15:40 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:15:40 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:15:40 [info     ] polled_klines                  count=2 pair=SOLUSDT timeframe=15m
-2026-06-02 23:15:40 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:15:41 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:15:41 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:15:41 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62966 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:41 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:15:41 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:15:42 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:15:42 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:15:43 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:15:43 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:15:43 [info     ] polled_klines                  count=2 pair=BNBUSDT timeframe=15m
-2026-06-02 23:15:43 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:15:45 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:15:45 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:15:45 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:15:45 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:15:46 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:15:46 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:15:46 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53962 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:46 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:15:46 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=15m
-2026-06-02 23:15:47 [info     ] polled_klines                  count=2 pair=SUIUSDT timeframe=15m
-2026-06-02 23:15:51 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57814 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:57 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60913 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:15:58 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:60915 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:15:58 [info     ] spot_positions_fetched         count=4 total_usdt=479.85
-INFO:     127.0.0.1:60914 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:01 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64699 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:06 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:57507 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:11 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:49680 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:16 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:61253 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:21 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:60288 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:30 [info     ] futures_positions_fetched      count=0
-2026-06-02 23:16:30 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:64001 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:31 [info     ] spot_positions_fetched         count=4 total_usdt=479.81
-2026-06-02 23:16:31 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:64003 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:16:31 [info     ] futures_market_fetched         count=598
-2026-06-02 23:16:31 [info     ] spot_positions_fetched         count=4 total_usdt=479.78000000000003
-INFO:     127.0.0.1:64000 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:33 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53563 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56252 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:56254 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61702 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-2026-06-02 23:16:39 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:50235 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:58956 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:16:43 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:52504 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:47 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:16:48 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:53016 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:16:49 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
-2026-06-02 23:16:49 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:16:49 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
-2026-06-02 23:16:49 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:16:50 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
-2026-06-02 23:16:50 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:16:50 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
-2026-06-02 23:16:50 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780416900000 timeframe=15m
-2026-06-02 23:16:51 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
-2026-06-02 23:16:51 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:16:51 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
-2026-06-02 23:16:51 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:16:52 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
-2026-06-02 23:16:52 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:16:52 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
-2026-06-02 23:16:52 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:16:53 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
-2026-06-02 23:16:53 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780416900000 timeframe=15m
-2026-06-02 23:16:53 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
-2026-06-02 23:16:53 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:16:54 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
-2026-06-02 23:16:54 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:16:54 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
-2026-06-02 23:16:54 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:16:55 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
-2026-06-02 23:16:55 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:16:55 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
-2026-06-02 23:16:55 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780416900000 timeframe=15m
-2026-06-02 23:16:58 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
-2026-06-02 23:16:58 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:16:58 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
-2026-06-02 23:16:58 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:16:59 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
-2026-06-02 23:16:59 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:16:59 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:58232 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:17:00 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:58233 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:17:00 [info     ] spot_positions_fetched         count=4 total_usdt=480.39000000000004
-INFO:     127.0.0.1:58229 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:17:00 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
-2026-06-02 23:17:01 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:17:02 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
-2026-06-02 23:17:02 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780416900000 timeframe=15m
-2026-06-02 23:17:02 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
-2026-06-02 23:17:02 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
-2026-06-02 23:17:02 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:65089 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:17:03 [info     ] spot_positions_fetched         count=4 total_usdt=480.36
-INFO:     127.0.0.1:49745 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
-2026-06-02 23:17:03 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
-2026-06-02 23:17:03 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780358400000 timeframe=1d
-2026-06-02 23:17:04 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
-2026-06-02 23:17:04 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=4h
-2026-06-02 23:17:04 [info     ] futures_market_fetched         count=598
-INFO:     127.0.0.1:49747 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
-2026-06-02 23:17:04 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
-2026-06-02 23:17:04 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416000000 timeframe=1h
-2026-06-02 23:17:05 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
-2026-06-02 23:17:05 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780416900000 timeframe=15m
-2026-06-02 23:17:05 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:62448 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-2026-06-02 23:17:05 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
-2026-06-02 23:17:08 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:59065 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62488 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:62490 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:17:14 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63034 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
-INFO:     127.0.0.1:60065 - "GET /api/v1/coin/USUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
-INFO:     127.0.0.1:61641 - "GET /api/v1/coin/USUSDT/info HTTP/1.1" 200 OK
-2026-06-02 23:17:18 [info     ] futures_positions_fetched      count=0
-INFO:     127.0.0.1:63706 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:43 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1774539900000 timeframe=15m
+2026-06-03 08:34:47 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1775439900000 timeframe=15m
+2026-06-03 08:34:48 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:53359 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:48 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:57815 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:34:48 [info     ] spot_positions_fetched         count=4 total_usdt=471.15999999999997
+INFO:     127.0.0.1:53357 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:34:48 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1776339900000 timeframe=15m
+2026-06-03 08:34:52 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1777239900000 timeframe=15m
+2026-06-03 08:34:53 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:49361 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55992 - "GET /api/v1/coin/MRVLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63554 - "GET /api/v1/coin/MRVLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:34:56 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1778139900000 timeframe=15m
+2026-06-03 08:34:57 [error    ] analysis_failed                error="'TriggerSignal' object has no attribute 'candle_pattern'" symbol=MRVLUSDT
+INFO:     127.0.0.1:54665 - "GET /api/v1/coin/MRVLUSDT/analyze?interval=1h&limit=200 HTTP/1.1" 500 Internal Server Error
+2026-06-03 08:34:58 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:58865 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54568 - "GET /api/v1/coin/MRVLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62309 - "GET /api/v1/coin/MRVLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:34:58 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779039900000 timeframe=15m
+2026-06-03 08:35:01 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1779939900000 timeframe=15m
+2026-06-03 08:35:02 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:51854 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:03 [info     ] backfilled_klines              count=17568 pair=SUIUSDT timeframe=15m
+2026-06-03 08:35:03 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780272000000 timeframe=1w
+2026-06-03 08:35:03 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1w
+2026-06-03 08:35:03 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780444800000 timeframe=1d
+2026-06-03 08:35:04 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1d
+2026-06-03 08:35:04 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780444800000 timeframe=4h
+2026-06-03 08:35:04 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=4h
+2026-06-03 08:35:04 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780448400000 timeframe=1h
+2026-06-03 08:35:07 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=1h
+2026-06-03 08:35:07 [info     ] fetching_klines                limit=1000 pair=BTCUSDT since=1780450200000 timeframe=15m
+2026-06-03 08:35:07 [info     ] polled_klines                  count=1 pair=BTCUSDT timeframe=15m
+2026-06-03 08:35:07 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780272000000 timeframe=1w
+2026-06-03 08:35:07 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:49679 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:08 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1w
+2026-06-03 08:35:08 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780444800000 timeframe=1d
+2026-06-03 08:35:08 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1d
+2026-06-03 08:35:08 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780444800000 timeframe=4h
+2026-06-03 08:35:09 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=4h
+2026-06-03 08:35:09 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780448400000 timeframe=1h
+2026-06-03 08:35:09 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=1h
+2026-06-03 08:35:09 [info     ] fetching_klines                limit=1000 pair=ETHUSDT since=1780450200000 timeframe=15m
+2026-06-03 08:35:11 [info     ] polled_klines                  count=1 pair=ETHUSDT timeframe=15m
+2026-06-03 08:35:12 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780272000000 timeframe=1w
+2026-06-03 08:35:13 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1w
+2026-06-03 08:35:13 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780444800000 timeframe=1d
+2026-06-03 08:35:13 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1d
+2026-06-03 08:35:13 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780444800000 timeframe=4h
+INFO:     127.0.0.1:61976 - "GET /api/v1/coin/SOLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:35:14 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:56798 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+INFO:     127.0.0.1:61977 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53090 - "GET /api/v1/coin/SOLUSDT/analyze?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:35:18 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=4h
+2026-06-03 08:35:18 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780448400000 timeframe=1h
+2026-06-03 08:35:18 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=1h
+2026-06-03 08:35:18 [info     ] fetching_klines                limit=1000 pair=SOLUSDT since=1780450200000 timeframe=15m
+INFO:     127.0.0.1:55523 - "GET /api/v1/coin/SOLUSDT/klines?interval=1h&limit=200 HTTP/1.1" 200 OK
+2026-06-03 08:35:19 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:51874 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:19 [info     ] polled_klines                  count=1 pair=SOLUSDT timeframe=15m
+2026-06-03 08:35:19 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780272000000 timeframe=1w
+INFO:     127.0.0.1:50721 - "GET /api/v1/coin/SOLUSDT/info HTTP/1.1" 200 OK
+2026-06-03 08:35:19 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:57807 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:35:20 [info     ] spot_positions_fetched         count=4 total_usdt=471.33000000000004
+INFO:     127.0.0.1:57875 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:20 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1w
+2026-06-03 08:35:20 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780444800000 timeframe=1d
+2026-06-03 08:35:20 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1d
+2026-06-03 08:35:20 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780444800000 timeframe=4h
+2026-06-03 08:35:21 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=4h
+2026-06-03 08:35:21 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:52603 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:21 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780448400000 timeframe=1h
+2026-06-03 08:35:22 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=1h
+2026-06-03 08:35:22 [info     ] fetching_klines                limit=1000 pair=BNBUSDT since=1780450200000 timeframe=15m
+2026-06-03 08:35:22 [info     ] polled_klines                  count=1 pair=BNBUSDT timeframe=15m
+2026-06-03 08:35:22 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780272000000 timeframe=1w
+2026-06-03 08:35:23 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1w
+2026-06-03 08:35:23 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780444800000 timeframe=1d
+2026-06-03 08:35:23 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1d
+2026-06-03 08:35:23 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780444800000 timeframe=4h
+2026-06-03 08:35:24 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=4h
+2026-06-03 08:35:24 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780448400000 timeframe=1h
+2026-06-03 08:35:24 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=1h
+2026-06-03 08:35:24 [info     ] fetching_klines                limit=1000 pair=SUIUSDT since=1780450200000 timeframe=15m
+2026-06-03 08:35:25 [info     ] polled_klines                  count=1 pair=SUIUSDT timeframe=15m
+2026-06-03 08:35:26 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55680 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:31 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:60313 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:36 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55336 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:41 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:60324 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:47 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:56529 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:48 [info     ] futures_market_fetched         count=598
+INFO:     127.0.0.1:64574 - "GET /api/v1/market/futures-market HTTP/1.1" 200 OK
+2026-06-03 08:35:48 [info     ] spot_positions_fetched         count=4 total_usdt=470.90000000000003
+INFO:     127.0.0.1:56528 - "GET /api/v1/market/spot-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:52 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:50599 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:35:57 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:50683 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK
+2026-06-03 08:36:02 [info     ] futures_positions_fetched      count=0
+INFO:     127.0.0.1:55399 - "GET /api/v1/market/futures-positions HTTP/1.1" 200 OK

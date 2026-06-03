@@ -192,24 +192,29 @@ async def quick_analysis(
         wyckoff = detect_wyckoff_phase(highs, lows, closes, vols, "sideways")
         if wyckoff:
             layers.append(TALayer(name="T0 Wyckoff", status="passed",
-                                  signal=wyckoff.phase.value, detail=f"Confidence: {wyckoff.confidence:.0f}%"))
+                                  signal=wyckoff.phase.value,
+                                  detail=f"Strength: {wyckoff.strength:.0f}% | {wyckoff.description}"))
         else:
             layers.append(TALayer(name="T0 Wyckoff", status="failed", detail="Cannot determine phase"))
 
         # T1 Trend
         trend = analyze_trend(opens, highs, lows, closes)
         if trend:
+            tl_info = f" | Trendline: {trend.trendline.num_touches} touches" if trend.trendline and trend.trendline.is_valid else ""
             layers.append(TALayer(name="T1 Trend", status="passed",
                                   signal=trend.direction,
-                                  detail=f"EMA13={trend.ema_13:.2f} EMA21={trend.ema_21:.2f}"))
+                                  detail=f"EMA13={trend.ema_13:.4f} | EMA21={trend.ema_21:.4f}{tl_info}"))
         else:
             layers.append(TALayer(name="T1 Trend", status="failed", detail="Insufficient data for EMA"))
 
         # T2 S/R
         sr = detect_support_resistance(highs, lows, closes, lookback_days=30)
         if sr:
-            sup = f"Support: ${sr.strongest_support.midpoint:.2f}" if sr.strongest_support else "No support"
-            res = f"Resist: ${sr.strongest_resistance.midpoint:.2f}" if sr.strongest_resistance else "No resistance"
+            sup = (f"Support ${sr.strongest_support.midpoint:.4f} "
+                   f"({sr.strongest_support.num_bounces} bounces, "
+                   f"str={sr.strongest_support.strength:.0f})") if sr.strongest_support else "No support"
+            res = (f"Resist ${sr.strongest_resistance.midpoint:.4f} "
+                   f"({sr.strongest_resistance.num_bounces} bounces)") if sr.strongest_resistance else "No resistance"
             layers.append(TALayer(name="T2 S/R Zones", status="passed", detail=f"{sup} | {res}"))
         else:
             layers.append(TALayer(name="T2 S/R Zones", status="failed", detail="No clear S/R found"))
@@ -217,19 +222,26 @@ async def quick_analysis(
         # T3 Pattern
         pattern = detect_patterns(highs, lows)
         structure = analyze_market_structure(highs, lows)
-        pat_name = pattern.value if pattern else "No pattern"
+        pat_name = pattern.pattern_type.value if pattern else "No chart pattern"
+        breakout = f" → {pattern.potential_breakout}" if pattern else ""
+        strength_str = f" ({pattern.formation_strength:.0f}%)" if pattern else ""
         bias = structure.structure.value if structure else "Unknown"
+        hh = structure.hh_count if structure else 0
+        ll = structure.ll_count if structure else 0
         layers.append(TALayer(name="T3 Pattern", status="passed" if pattern else "skipped",
-                               signal=pat_name, detail=f"Bias: {bias}"))
+                               signal=f"{pat_name}{breakout}",
+                               detail=f"Bias: {bias} | HH:{hh} LL:{ll}{strength_str}"))
 
         # T4 Trigger
         trigger = detect_trigger(opens, highs, lows, closes, vols)
         if trigger:
+            candle = trigger.candle_pattern.value if trigger.candle_pattern else "N/A"
+            stoch = trigger.stochastic_signal or "N/A"
             layers.append(TALayer(name="T4 Trigger", status="passed",
-                                  signal=trigger.direction,
-                                  detail=f"Candle: {trigger.candle_pattern.value if trigger.candle_pattern else 'N/A'} | Stoch: {trigger.stoch_signal or 'N/A'} | Confidence: {trigger.confidence:.0f}%"))
+                                  signal=trigger.direction.upper(),
+                                  detail=f"Candle: {candle} | Stoch: {stoch} | Confidence: {trigger.confidence:.0f}%"))
         else:
-            layers.append(TALayer(name="T4 Trigger", status="failed", detail="No trigger signal"))
+            layers.append(TALayer(name="T4 Trigger", status="failed", detail="No trigger signal detected"))
 
         # Run full pipeline for final decision
         pipeline = SignalPipeline(sym, interval)
