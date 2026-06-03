@@ -254,27 +254,32 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
                     ))}
                   </div>
 
-                  {/* Style note */}
-                  <p className="text-[10px] text-neutral-600 mb-1.5">{r.style_note}</p>
+                  {/* SL / TP with method */}
+                  <div className="grid grid-cols-2 gap-1.5 mb-2">
+                    <div className="bg-black/20 rounded-lg px-2.5 py-1.5">
+                      <p className="text-[9px] text-red-400 font-bold uppercase tracking-wide mb-0.5">Stop Loss</p>
+                      <p className="text-xs font-bold text-red-300 font-mono">${fmtPrice(r.stop_loss)}</p>
+                      <p className="text-[9px] text-neutral-500 truncate">{r.sl_method}</p>
+                    </div>
+                    <div className="bg-black/20 rounded-lg px-2.5 py-1.5">
+                      <p className="text-[9px] text-green-400 font-bold uppercase tracking-wide mb-0.5">Take Profit</p>
+                      <p className="text-xs font-bold text-green-300 font-mono">${fmtPrice(r.take_profit)}</p>
+                      <p className="text-[9px] text-neutral-500 truncate">{r.tp_method}</p>
+                    </div>
+                  </div>
 
                   {/* Key level + stats */}
                   <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1.5 border-t border-neutral-700/50">
                     <div className="flex gap-2">
                       {r.key_level && (
-                        <span>
-                          Watch: <strong className="text-yellow-400">${fmtPrice(r.key_level)}</strong>
-                        </span>
+                        <span>Watch: <strong className="text-yellow-400">${fmtPrice(r.key_level)}</strong></span>
                       )}
                       <span className={r.change_24h >= 0 ? "text-green-400" : "text-red-400"}>
                         {r.change_24h >= 0 ? "+" : ""}{r.change_24h}%
                       </span>
                       <span>Vol <strong className="text-neutral-300">{r.volume_ratio}x</strong></span>
                     </div>
-                    <div className="flex gap-2">
-                      <span>SL <strong className="text-red-400">${fmtPrice(r.stop_loss)}</strong></span>
-                      <span>TP <strong className="text-green-400">${fmtPrice(r.take_profit)}</strong></span>
-                      <span className="text-teal-400 font-bold">{r.risk_reward}</span>
-                    </div>
+                    <span className="text-teal-400 font-bold text-sm">{r.risk_reward}</span>
                   </div>
                 </div>
               );

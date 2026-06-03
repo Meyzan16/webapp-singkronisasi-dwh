@@ -129,7 +129,9 @@ class ScanSignal(BaseModel):
     take_profit: float
     risk_reward: str
     alert_type: str
-    style_note: str      # e.g. "Swing setup | 4H candle | SL×1.5 ATR"
+    sl_method: str       # how SL was determined
+    tp_method: str       # how TP was determined
+    style_note: str
 
 
 class ScannerResponse(BaseModel):
@@ -181,6 +183,239 @@ def _atr(highs: list[float], lows: list[float], closes: list[float], period: int
                  abs(lows[-i] - closes[-i - 1]))
         trs.append(tr)
     return sum(trs) / len(trs) if trs else closes[-1] * 0.02
+
+
+def _find_sr_zones(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    lookback: int = 30,
+) -> tuple[list[float], list[float]]:
+    """
+    Find support and resistance zones using swing pivot clustering.
+
+    Method:
+    1. Find swing highs (local maxima) → resistance candidates
+    2. Find swing lows  (local minima) → support candidates
+    3. Cluster nearby levels (within 0.5%) → zones
+    4. Sort by number of touches (strongest first)
+
+    Returns (support_levels, resistance_levels) sorted strongest first.
+    """
+    n = min(lookback, len(closes))
+    h = highs[-n:]
+    l = lows[-n:]
+    price = closes[-1]
+
+    swing_highs: list[float] = []
+    swing_lows:  list[float] = []
+
+    for i in range(2, n - 2):
+        # Swing high: higher than 2 bars each side
+        if h[i] > h[i-1] and h[i] > h[i-2] and h[i] > h[i+1] and h[i] > h[i+2]:
+            swing_highs.append(h[i])
+        # Swing low: lower than 2 bars each side
+        if l[i] < l[i-1] and l[i] < l[i-2] and l[i] < l[i+1] and l[i] < l[i+2]:
+            swing_lows.append(l[i])
+
+    def _cluster(levels: list[float], tolerance: float = 0.005) -> list[float]:
+        """Merge levels within tolerance into single zone (average)."""
+        if not levels:
+            return []
+        sorted_lvls = sorted(levels)
+        clusters: list[list[float]] = [[sorted_lvls[0]]]
+        for lvl in sorted_lvls[1:]:
+            if abs(lvl - clusters[-1][-1]) / clusters[-1][-1] < tolerance:
+                clusters[-1].append(lvl)
+            else:
+                clusters.append([lvl])
+        # Return cluster midpoints sorted by touch count (most touches = strongest)
+        return [sum(c) / len(c) for c in sorted(clusters, key=len, reverse=True)]
+
+    supports    = [z for z in _cluster(swing_lows)  if z < price]
+    resistances = [z for z in _cluster(swing_highs) if z > price]
+
+    return supports, resistances
+
+
+def _fibonacci_sl_tp(
+    entry: float,
+    direction: str,
+    swing_high: float,
+    swing_low: float,
+) -> tuple[float, list[float]]:
+    """
+    Calculate SL and TP targets using Fibonacci levels.
+
+    For LONG:
+      SL  = entry − (swing_high − swing_low) × 0.618  → Fib retracement 61.8%
+      TP1 = entry + (swing_high − swing_low) × 1.272  → Fib extension 127.2%
+      TP2 = entry + (swing_high − swing_low) × 1.618  → Golden ratio extension
+      TP3 = entry + (swing_high − swing_low) × 2.618  → 261.8% extension
+
+    For SHORT: mirror logic (SL above entry, TP below).
+
+    These are the standard Fibonacci extension levels used by institutional traders.
+    """
+    swing_range = swing_high - swing_low
+    if swing_range <= 0:
+        return entry * 0.98 if direction == "LONG" else entry * 1.02, []
+
+    if direction == "LONG":
+        sl   = entry - swing_range * 0.618
+        tps  = [
+            entry + swing_range * 1.272,
+            entry + swing_range * 1.618,
+            entry + swing_range * 2.618,
+        ]
+    else:
+        sl   = entry + swing_range * 0.618
+        tps  = [
+            entry - swing_range * 1.272,
+            entry - swing_range * 1.618,
+            entry - swing_range * 2.618,
+        ]
+    return sl, tps
+
+
+def _calc_sl_tp(
+    entry: float,
+    direction: str,
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    cfg: "StyleConfig",
+) -> tuple[float, float, float, str, str]:
+    """
+    Calculate SL and TP using TA hierarchy:
+
+    SL Priority:
+      1. Below nearest support zone (LONG) / above resistance (SHORT)
+         + buffer = 0.3% below the zone
+      2. Below recent swing low (structural SL)
+      3. Fibonacci 0.618 retracement of last swing
+      4. Fallback: ATR × style multiplier
+
+    TP Priority:
+      1. Next resistance zone (LONG) / support zone (SHORT) — if R:R ≥ 1:2
+      2. Fibonacci 1.618 extension — if R:R ≥ 1:2
+      3. Fallback: ATR × style multiplier
+
+    Returns (sl, tp, rr_ratio, sl_method, tp_method)
+    """
+    atr = _atr(highs, lows, closes)
+    lb = min(cfg.lookback + 10, len(closes))
+    supports, resistances = _find_sr_zones(highs, lows, closes, lookback=lb)
+
+    # ── Stop Loss ──────────────────────────────────────────────────────────────
+    sl = None
+    sl_method = ""
+
+    if direction == "LONG":
+        # 1. Nearest support zone below entry
+        candidates = [z for z in supports if z < entry]
+        if candidates:
+            nearest_sup = max(candidates)  # highest support below entry
+            sl = nearest_sup * (1 - 0.003)  # 0.3% below support
+            sl_method = f"S/R Zone ${nearest_sup:.4g} −0.3%"
+
+        # 2. Structural swing low
+        if sl is None or (entry - sl) / entry > 0.08:  # if SL too far, use swing low
+            lb_lows = lows[-lb:]
+            swing_low = min(lb_lows)
+            structural_sl = swing_low * 0.997
+            if sl is None or structural_sl > sl:  # tighter is better
+                sl = structural_sl
+                sl_method = f"Swing Low ${swing_low:.4g} −0.3%"
+
+    else:  # SHORT
+        candidates = [z for z in resistances if z > entry]
+        if candidates:
+            nearest_res = min(candidates)
+            sl = nearest_res * 1.003
+            sl_method = f"S/R Zone ${nearest_res:.4g} +0.3%"
+
+        if sl is None or (sl - entry) / entry > 0.08:
+            lb_highs = highs[-lb:]
+            swing_high = max(lb_highs)
+            structural_sl = swing_high * 1.003
+            if sl is None or structural_sl < sl:
+                sl = structural_sl
+                sl_method = f"Swing High ${swing_high:.4g} +0.3%"
+
+    # 3. Fibonacci 0.618 retracement fallback
+    if sl is None:
+        recent_swing_high = max(highs[-lb:])
+        recent_swing_low  = min(lows[-lb:])
+        swing_range = recent_swing_high - recent_swing_low
+        if direction == "LONG":
+            fib_sl = entry - swing_range * 0.618
+            sl = fib_sl
+            sl_method = f"Fib 0.618 retracement"
+        else:
+            fib_sl = entry + swing_range * 0.618
+            sl = fib_sl
+            sl_method = f"Fib 0.618 retracement"
+
+    # 4. ATR fallback (if SL unreasonably far)
+    atr_sl = entry - atr * cfg.atr_sl_mult if direction == "LONG" else entry + atr * cfg.atr_sl_mult
+    if sl is None:
+        sl = atr_sl
+        sl_method = f"ATR×{cfg.atr_sl_mult}"
+    else:
+        # Validate SL is not too far (max 8% away)
+        dist_pct = abs(entry - sl) / entry
+        if dist_pct > 0.08:
+            sl = atr_sl
+            sl_method = f"ATR×{cfg.atr_sl_mult} (capped 8%)"
+
+    # ── Take Profit ────────────────────────────────────────────────────────────
+    risk = abs(entry - sl)
+    tp = None
+    tp_method = ""
+
+    if direction == "LONG":
+        # 1. Next resistance zone with R:R ≥ 1:2
+        tp_candidates = [z for z in resistances if z > entry]
+        for res_zone in tp_candidates[:3]:
+            if (res_zone - entry) / risk >= 2.0:
+                tp = res_zone
+                tp_method = f"Resistance zone ${res_zone:.4g}"
+                break
+
+        # 2. Fibonacci 1.618 extension
+        if tp is None:
+            recent_swing_low = min(lows[-lb:])
+            fib_tp = entry + (entry - recent_swing_low) * 1.618
+            if (fib_tp - entry) / risk >= 2.0:
+                tp = fib_tp
+                tp_method = "Fib 1.618 extension"
+
+    else:  # SHORT
+        tp_candidates = [z for z in supports if z < entry]
+        for sup_zone in reversed(tp_candidates[-3:]):
+            if (entry - sup_zone) / risk >= 2.0:
+                tp = sup_zone
+                tp_method = f"Support zone ${sup_zone:.4g}"
+                break
+
+        if tp is None:
+            recent_swing_high = max(highs[-lb:])
+            fib_tp = entry - (recent_swing_high - entry) * 1.618
+            if (entry - fib_tp) / risk >= 2.0:
+                tp = fib_tp
+                tp_method = "Fib 1.618 extension"
+
+    # 3. ATR fallback for TP
+    if tp is None:
+        tp = entry + atr * cfg.atr_tp_mult if direction == "LONG" else entry - atr * cfg.atr_tp_mult
+        tp_method = f"ATR×{cfg.atr_tp_mult}"
+
+    reward = abs(tp - entry)
+    rr_float = reward / risk if risk > 0 else 0
+    rr = f"1:{rr_float:.1f}"
+
+    return sl, tp, rr_float, sl_method, tp_method
 
 
 # ── Core scoring ──────────────────────────────────────────────────────────────
@@ -347,23 +582,20 @@ def _analyze(
     if short_hints > long_hints:
         direction = "SHORT"
 
-    # ── SL / TP ────────────────────────────────────────────────────────────────
-    atr = _atr(highs, lows, closes)
-    if direction == "LONG":
-        sl = price - atr * cfg.atr_sl_mult
-        tp = price + atr * cfg.atr_tp_mult
-        key_level = recent_high
-    else:
-        sl = price + atr * cfg.atr_sl_mult
-        tp = price - atr * cfg.atr_tp_mult
-        key_level = recent_low
+    # ── SL / TP via TA hierarchy ───────────────────────────────────────────────
+    sl, tp, rr_float, sl_method, tp_method = _calc_sl_tp(
+        price, direction, highs, lows, closes, cfg
+    )
 
-    risk = abs(price - sl)
-    reward = abs(tp - price)
-    rr = f"1:{reward/risk:.1f}" if risk > 0 else "1:3.0"
+    # Filter out low R:R signals (< 1:1.5 not worth trading)
+    if rr_float < 1.5:
+        return None
+
+    rr = f"1:{rr_float:.1f}"
+    key_level = recent_high if direction == "LONG" else recent_low
 
     info = STYLE_LABELS[style]
-    style_note = f"{info['label']} | {info['tf']} candle | SL ×{cfg.atr_sl_mult} ATR"
+    style_note = f"{info['label']} | {info['tf']} | SL: {sl_method}"
 
     return ScanSignal(
         symbol=symbol,
@@ -378,6 +610,8 @@ def _analyze(
         take_profit=round(tp, 8),
         risk_reward=rr,
         alert_type=alert_type,
+        sl_method=sl_method,
+        tp_method=tp_method,
         style_note=style_note,
     )
 

@@ -234,7 +234,7 @@ const STYLE_CONFIGS = [
 
 export default function ScannerPage() {
   const [expanded, setExpanded]   = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<"signals" | "styles">("styles");
+  const [activeTab, setActiveTab] = useState<"signals" | "styles" | "sltp">("styles");
   const [showDocs, setShowDocs]   = useState(true);
 
   return (
@@ -267,19 +267,17 @@ export default function ScannerPage() {
 
           {/* Tab switcher */}
           <div className="flex items-center gap-3">
-            <div className="flex bg-white border rounded-xl p-1 gap-1">
-              <button onClick={() => setActiveTab("styles")}
-                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                  activeTab === "styles" ? "bg-neutral-900 text-white" : "text-neutral-500 hover:text-black"
-                }`}>
-                🎯 Config per Trading Style
-              </button>
-              <button onClick={() => setActiveTab("signals")}
-                className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
-                  activeTab === "signals" ? "bg-neutral-900 text-white" : "text-neutral-500 hover:text-black"
-                }`}>
-                📐 7 Early-Warning Signals
-              </button>
+            <div className="flex bg-white border rounded-xl p-1 gap-1 flex-wrap">
+              {(["styles","signals","sltp"] as const).map((tab) => (
+                <button key={tab} onClick={() => setActiveTab(tab as typeof activeTab)}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors ${
+                    activeTab === tab ? "bg-neutral-900 text-white" : "text-neutral-500 hover:text-black"
+                  }`}>
+                  {tab === "styles" ? "🎯 Config per Trading Style"
+                   : tab === "signals" ? "📐 7 Early-Warning Signals"
+                   : "📏 Rumus SL & TP"}
+                </button>
+              ))}
             </div>
             <div className="flex-1 h-px bg-neutral-200" />
           </div>
@@ -425,6 +423,216 @@ export default function ScannerPage() {
               </div>
             </div>
           )}
+
+          {/* ── Tab: SL & TP Formulas ─────────────────────────────────────── */}
+          {activeTab === "sltp" && (
+            <div className="space-y-4">
+              {/* Overview */}
+              <div className="bg-neutral-900 text-white rounded-xl p-5">
+                <p className="font-bold text-teal-400 mb-1">📏 Bagaimana SL & TP Ditentukan?</p>
+                <p className="text-sm text-neutral-400 leading-relaxed">
+                  Scanner menggunakan <strong className="text-white">hierarki TA</strong> — bukan asal pakai ATR.
+                  Setiap SL/TP dicoba dari metode terkuat (S/R Zone) dulu, baru fallback ke Fibonacci, baru ATR.
+                  Hanya setup dengan R:R ≥ 1:1.5 yang masuk hasil scanner.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* SL Card */}
+                <div className="bg-white border-2 border-red-200 rounded-xl overflow-hidden">
+                  <div className="bg-red-50 px-4 py-3 border-b border-red-200">
+                    <p className="font-bold text-red-700">⛔ Stop Loss — Prioritas Urutan</p>
+                    <p className="text-xs text-red-500 mt-0.5">Diambil dari metode tertinggi yang valid</p>
+                  </div>
+                  <div className="p-4 space-y-4">
+
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">1</div>
+                      <div>
+                        <p className="font-semibold text-sm">S/R Zone (Support/Resistance)</p>
+                        <pre className="text-[11px] font-mono bg-neutral-900 text-green-400 p-2.5 rounded-lg mt-1.5 whitespace-pre-wrap">{`Deteksi swing highs/lows (2 bar kiri-kanan)
+Cluster level dalam 0.5% → zona
+
+LONG:  SL = NearestSupport × (1 − 0.003)
+         = Support terdekat di bawah entry − 0.3% buffer
+SHORT: SL = NearestResistance × (1 + 0.003)
+         = Resistance terdekat di atas entry + 0.3% buffer
+
+Kenapa 0.3% buffer?
+Hindari stop-hunt (market maker gerakkan harga
+sejenak menyentuh support sebelum naik)`}</pre>
+                        <p className="text-xs text-neutral-500 mt-1">✅ Paling akurat — berbasis struktur market nyata</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">2</div>
+                      <div>
+                        <p className="font-semibold text-sm">Structural Swing Low/High</p>
+                        <pre className="text-[11px] font-mono bg-neutral-900 text-green-400 p-2.5 rounded-lg mt-1.5 whitespace-pre-wrap">{`LONG:  SL = Min(Low[-lookback:]) × 0.997
+SHORT: SL = Max(High[-lookback:]) × 1.003
+
+Dipakai jika S/R zone tidak ditemukan,
+atau S/R zone terlalu jauh (> 8% dari entry)`}</pre>
+                        <p className="text-xs text-neutral-500 mt-1">✅ Berbasis struktur swing market</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-red-400 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">3</div>
+                      <div>
+                        <p className="font-semibold text-sm">Fibonacci Retracement 0.618</p>
+                        <pre className="text-[11px] font-mono bg-neutral-900 text-green-400 p-2.5 rounded-lg mt-1.5 whitespace-pre-wrap">{`Swing Range = SwingHigh − SwingLow
+
+LONG:  SL = Entry − SwingRange × 0.618
+SHORT: SL = Entry + SwingRange × 0.618
+
+Golden ratio (0.618) = level retracement terkuat
+di mana harga sering berbalik arah`}</pre>
+                        <p className="text-xs text-neutral-500 mt-1">✅ Level institusional — banyak order di sini</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-neutral-400 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">4</div>
+                      <div>
+                        <p className="font-semibold text-sm">ATR Fallback</p>
+                        <pre className="text-[11px] font-mono bg-neutral-900 text-green-400 p-2.5 rounded-lg mt-1.5 whitespace-pre-wrap">{`ATR(14) = Avg(TrueRange[-14:])
+TrueRange = max(H−L, |H−Close_prev|, |L−Close_prev|)
+
+LONG:  SL = Entry − ATR × style_multiplier
+SHORT: SL = Entry + ATR × style_multiplier
+
+Multiplier per style:
+  Scalping  → ×1.0  (tight, fast exit)
+  Day Trade → ×1.2
+  Swing     → ×1.5  (lebih ruang untuk noise)
+  Position  → ×2.0  (banyak ruang)`}</pre>
+                        <p className="text-xs text-neutral-500 mt-1">⚠️ Dipakai hanya jika semua metode di atas gagal</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* TP Card */}
+                <div className="bg-white border-2 border-green-200 rounded-xl overflow-hidden">
+                  <div className="bg-green-50 px-4 py-3 border-b border-green-200">
+                    <p className="font-bold text-green-700">🎯 Take Profit — Prioritas Urutan</p>
+                    <p className="text-xs text-green-500 mt-0.5">Minimum R:R 1:1.5 wajib terpenuhi</p>
+                  </div>
+                  <div className="p-4 space-y-4">
+
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-green-600 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">1</div>
+                      <div>
+                        <p className="font-semibold text-sm">Resistance/Support Zone Berikutnya</p>
+                        <pre className="text-[11px] font-mono bg-neutral-900 text-green-400 p-2.5 rounded-lg mt-1.5 whitespace-pre-wrap">{`LONG:  Cari resistance zone di atas entry
+         Pilih yang memberikan R:R ≥ 1:2
+SHORT: Cari support zone di bawah entry
+         Pilih yang memberikan R:R ≥ 1:2
+
+Kenapa R:R ≥ 1:2?
+Minimum reward harus 2× risiko agar
+profitable secara statistik (win rate 40% cukup)`}</pre>
+                        <p className="text-xs text-neutral-500 mt-1">✅ Paling realistic — target di mana harga pernah terhenti</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">2</div>
+                      <div>
+                        <p className="font-semibold text-sm">Fibonacci Extension 1.618</p>
+                        <pre className="text-[11px] font-mono bg-neutral-900 text-green-400 p-2.5 rounded-lg mt-1.5 whitespace-pre-wrap">{`Digunakan saat tidak ada resistance zone
+yang memberikan R:R ≥ 1:2
+
+LONG:  TP = Entry + (Entry − SwingLow) × 1.618
+SHORT: TP = Entry − (SwingHigh − Entry) × 1.618
+
+Level Fibonacci extension standar:
+  1.272 = conservative target
+  1.618 = golden ratio (paling sering tercapai) ← dipakai
+  2.618 = aggressive target`}</pre>
+                        <p className="text-xs text-neutral-500 mt-1">✅ Level institusional — banyak profit-taking di sini</p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-neutral-400 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">3</div>
+                      <div>
+                        <p className="font-semibold text-sm">ATR Fallback</p>
+                        <pre className="text-[11px] font-mono bg-neutral-900 text-green-400 p-2.5 rounded-lg mt-1.5 whitespace-pre-wrap">{`LONG:  TP = Entry + ATR × style_multiplier
+SHORT: TP = Entry − ATR × style_multiplier
+
+Multiplier per style:
+  Scalping  → ×2.5
+  Day Trade → ×3.0
+  Swing     → ×4.5
+  Position  → ×7.0`}</pre>
+                        <p className="text-xs text-neutral-500 mt-1">⚠️ Dipakai hanya jika S/R dan Fibonacci tidak valid</p>
+                      </div>
+                    </div>
+
+                    {/* RR validation box */}
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-xs font-bold text-amber-700 mb-2">⚖️ Validasi R:R — Filter Otomatis</p>
+                      <pre className="text-[11px] font-mono text-amber-800 whitespace-pre-wrap">{`Risk   = |Entry − SL|
+Reward = |TP − Entry|
+R:R    = Reward / Risk
+
+Scanner HANYA tampilkan setup dengan:
+  R:R ≥ 1:1.5 (minimum)
+  Ideal: R:R ≥ 1:2 atau lebih
+
+Artinya: untuk setiap $1 risiko,
+kamu harus bisa dapat minimal $1.50 profit`}</pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary flowchart */}
+              <div className="bg-neutral-900 text-white rounded-xl p-5">
+                <p className="font-bold text-teal-400 mb-3">🔄 Alur Keputusan SL/TP</p>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  {[
+                    { step: "Entry Price", color: "bg-neutral-600" },
+                    { step: "→", color: "" },
+                    { step: "Cari S/R Zone", color: "bg-blue-700" },
+                    { step: "→ valid?", color: "" },
+                    { step: "Pakai S/R", color: "bg-green-700" },
+                    { step: "→ tidak?", color: "" },
+                    { step: "Cari Swing Low/High", color: "bg-blue-600" },
+                    { step: "→ tidak?", color: "" },
+                    { step: "Fib 0.618 (SL)", color: "bg-yellow-700" },
+                    { step: "→ fallback", color: "" },
+                    { step: "ATR × mult", color: "bg-neutral-600" },
+                  ].map((item, i) => (
+                    item.color
+                      ? <span key={i} className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${item.color}`}>{item.step}</span>
+                      : <span key={i} className="text-neutral-500 text-xs">{item.step}</span>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-sm mt-2">
+                  {[
+                    { step: "TP:", color: "bg-neutral-600" },
+                    { step: "→", color: "" },
+                    { step: "Cari S/R R:R≥1:2", color: "bg-blue-700" },
+                    { step: "→ tidak?", color: "" },
+                    { step: "Fib 1.618 ext", color: "bg-yellow-700" },
+                    { step: "→ tidak?", color: "" },
+                    { step: "ATR × mult", color: "bg-neutral-600" },
+                    { step: "→ filter", color: "" },
+                    { step: "R:R < 1:1.5? Buang", color: "bg-red-800" },
+                  ].map((item, i) => (
+                    item.color
+                      ? <span key={i} className={`px-2.5 py-1 rounded-lg text-xs font-semibold ${item.color}`}>{item.step}</span>
+                      : <span key={i} className="text-neutral-500 text-xs">{item.step}</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
