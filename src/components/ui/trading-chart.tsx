@@ -54,21 +54,62 @@ export function TradingChart({ candles, height = 420, entryPrice, stopLoss, take
     volSeries.setData(sorted.map(c => ({ time: c.time as any, value: c.volume, color: c.close >= c.open ? "#14b8a640" : "#ef444440" })));
 
     // ── Trade levels ──────────────────────────────────────────────────────────
+    const t0 = sorted[0].time as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+    const t1 = sorted[sorted.length - 1].time as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
     if (entryPrice && sorted.length) {
-      const entryLine = chart.addSeries(LineSeries, { color: "#facc15", lineWidth: 1, lineStyle: 2, priceScaleId: "right" });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      entryLine.setData([{ time: sorted[0].time as any, value: entryPrice }, { time: sorted[sorted.length - 1].time as any, value: entryPrice }]);
+      // Entry zone: shaded band ±0.3% around entry (thick line approximation)
+      const entryBuf = entryPrice * 0.003;
+      const entryTop = chart.addSeries(LineSeries, {
+        color: "#facc1540", lineWidth: 8, lineStyle: 0, priceScaleId: "right",
+        lastValueVisible: false, priceLineVisible: false,
+      });
+      entryTop.setData([{ time: t0, value: entryPrice + entryBuf }, { time: t1, value: entryPrice + entryBuf }]);
+
+      const entryBot = chart.addSeries(LineSeries, {
+        color: "#facc1540", lineWidth: 8, lineStyle: 0, priceScaleId: "right",
+        lastValueVisible: false, priceLineVisible: false,
+      });
+      entryBot.setData([{ time: t0, value: entryPrice - entryBuf }, { time: t1, value: entryPrice - entryBuf }]);
+
+      // Entry center line (solid)
+      const entryLine = chart.addSeries(LineSeries, {
+        color: "#facc15", lineWidth: 2, lineStyle: 0, priceScaleId: "right",
+        lastValueVisible: true, title: "Entry",
+      });
+      entryLine.setData([{ time: t0, value: entryPrice }, { time: t1, value: entryPrice }]);
     }
+
     if (stopLoss && sorted.length) {
-      const slLine = chart.addSeries(LineSeries, { color: "#ef4444", lineWidth: 1, lineStyle: 2, priceScaleId: "right" });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      slLine.setData([{ time: sorted[0].time as any, value: stopLoss }, { time: sorted[sorted.length - 1].time as any, value: stopLoss }]);
+      // SL zone band
+      const slBuf = Math.abs(entryPrice ? (entryPrice - stopLoss) * 0.1 : stopLoss * 0.003);
+      const slTop = chart.addSeries(LineSeries, {
+        color: "#ef444430", lineWidth: 6, lineStyle: 0, priceScaleId: "right",
+        lastValueVisible: false, priceLineVisible: false,
+      });
+      slTop.setData([{ time: t0, value: stopLoss + slBuf }, { time: t1, value: stopLoss + slBuf }]);
+      const slBot = chart.addSeries(LineSeries, {
+        color: "#ef444430", lineWidth: 6, lineStyle: 0, priceScaleId: "right",
+        lastValueVisible: false, priceLineVisible: false,
+      });
+      slBot.setData([{ time: t0, value: stopLoss - slBuf }, { time: t1, value: stopLoss - slBuf }]);
+
+      const slLine = chart.addSeries(LineSeries, {
+        color: "#ef4444", lineWidth: 2, lineStyle: 2, priceScaleId: "right",
+        lastValueVisible: true, title: "SL",
+      });
+      slLine.setData([{ time: t0, value: stopLoss }, { time: t1, value: stopLoss }]);
     }
-    takeProfits?.forEach(tp => {
+
+    takeProfits?.forEach((tp, idx) => {
       if (!sorted.length) return;
-      const tpLine = chart.addSeries(LineSeries, { color: "#22c55e", lineWidth: 1, lineStyle: 2, priceScaleId: "right" });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tpLine.setData([{ time: sorted[0].time as any, value: tp.price }, { time: sorted[sorted.length - 1].time as any, value: tp.price }]);
+      const tpColors = ["#22c55e", "#16a34a", "#14532d"];
+      const color = tpColors[idx] ?? "#22c55e";
+      const tpLine = chart.addSeries(LineSeries, {
+        color, lineWidth: 1, lineStyle: 2, priceScaleId: "right",
+        lastValueVisible: true, title: `TP${tp.level}`,
+      });
+      tpLine.setData([{ time: t0, value: tp.price }, { time: t1, value: tp.price }]);
     });
 
     chart.timeScale().fitContent();

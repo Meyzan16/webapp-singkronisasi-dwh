@@ -41,14 +41,16 @@ class StyleConfig:
     candle_limit: int
     rsi_period: int
     bb_period: int
-    lookback: int       # recent high/low window
-    squeeze_threshold: float   # BB width % trigger
-    vol_slope_min: float       # vol accumulation min slope
-    atr_sl_mult: float         # SL = ATR × this
-    atr_tp_mult: float         # TP = ATR × this
+    lookback: int
+    squeeze_threshold: float
+    vol_slope_min: float
+    atr_sl_mult: float
+    atr_tp_mult: float
     min_score: float
-    pump_penalty_pct: float    # penalize if already moved this much %
-    # Signal weights multipliers
+    pump_penalty_pct: float
+    min_sl_pct: float   # minimum SL distance from entry (%)
+    min_rr: float       # minimum R:R to show signal
+    # Signal weights
     w_squeeze: float
     w_accumulation: float
     w_breakout: float
@@ -62,46 +64,46 @@ STYLE_CONFIGS: dict[str, StyleConfig] = {
     "scalping": StyleConfig(
         timeframe="15m", candle_limit=100,
         rsi_period=9, bb_period=14, lookback=10,
-        squeeze_threshold=0.03,   # tighter squeeze trigger
-        vol_slope_min=0.20,
+        squeeze_threshold=0.03, vol_slope_min=0.20,
         atr_sl_mult=1.0, atr_tp_mult=2.5,
-        min_score=25,
-        pump_penalty_pct=5,        # penalize already +5% on 15m
+        min_score=25, pump_penalty_pct=5,
+        min_sl_pct=0.008,   # SL minimum 0.8% dari entry
+        min_rr=1.5,
         w_squeeze=1.0, w_accumulation=0.7, w_breakout=1.5,
-        w_rsi=2.0,     w_ema=1.2,  w_pressure=1.8, w_candle=1.5,
+        w_rsi=2.0, w_ema=1.2, w_pressure=1.8, w_candle=1.5,
     ),
     "daytrading": StyleConfig(
         timeframe="1h", candle_limit=100,
         rsi_period=14, bb_period=20, lookback=15,
-        squeeze_threshold=0.045,
-        vol_slope_min=0.25,
+        squeeze_threshold=0.045, vol_slope_min=0.25,
         atr_sl_mult=1.2, atr_tp_mult=3.0,
-        min_score=28,
-        pump_penalty_pct=8,
+        min_score=28, pump_penalty_pct=8,
+        min_sl_pct=0.012,   # SL minimum 1.2%
+        min_rr=1.8,
         w_squeeze=1.2, w_accumulation=1.2, w_breakout=1.3,
-        w_rsi=1.5,     w_ema=1.3,  w_pressure=1.5, w_candle=1.2,
+        w_rsi=1.5, w_ema=1.3, w_pressure=1.5, w_candle=1.2,
     ),
     "swing": StyleConfig(
         timeframe="4h", candle_limit=100,
         rsi_period=14, bb_period=20, lookback=20,
-        squeeze_threshold=0.06,
-        vol_slope_min=0.30,
+        squeeze_threshold=0.06, vol_slope_min=0.30,
         atr_sl_mult=1.5, atr_tp_mult=4.5,
-        min_score=30,
-        pump_penalty_pct=12,
+        min_score=30, pump_penalty_pct=12,
+        min_sl_pct=0.020,   # SL minimum 2.0% dari entry
+        min_rr=2.0,
         w_squeeze=1.8, w_accumulation=2.0, w_breakout=1.5,
-        w_rsi=1.0,     w_ema=1.0,  w_pressure=1.2, w_candle=0.8,
+        w_rsi=1.0, w_ema=1.0, w_pressure=1.2, w_candle=0.8,
     ),
     "position": StyleConfig(
         timeframe="1d", candle_limit=120,
         rsi_period=21, bb_period=30, lookback=50,
-        squeeze_threshold=0.08,
-        vol_slope_min=0.40,
+        squeeze_threshold=0.08, vol_slope_min=0.40,
         atr_sl_mult=2.0, atr_tp_mult=7.0,
-        min_score=35,
-        pump_penalty_pct=20,
+        min_score=35, pump_penalty_pct=20,
+        min_sl_pct=0.030,   # SL minimum 3.0%
+        min_rr=2.5,
         w_squeeze=2.0, w_accumulation=2.5, w_breakout=1.8,
-        w_rsi=0.8,     w_ema=1.5,  w_pressure=1.0, w_candle=0.5,
+        w_rsi=0.8, w_ema=1.5, w_pressure=1.0, w_candle=0.5,
     ),
 }
 
@@ -363,11 +365,21 @@ def _calc_sl_tp(
         sl = atr_sl
         sl_method = f"ATR×{cfg.atr_sl_mult}"
     else:
-        # Validate SL is not too far (max 8% away)
         dist_pct = abs(entry - sl) / entry
         if dist_pct > 0.08:
             sl = atr_sl
             sl_method = f"ATR×{cfg.atr_sl_mult} (capped 8%)"
+
+    # ── Enforce minimum SL distance per style ─────────────────────────────────
+    # Prevents SL being too tight (stop-hunt zone)
+    min_dist = entry * cfg.min_sl_pct
+    current_dist = abs(entry - sl)
+    if current_dist < min_dist:
+        if direction == "LONG":
+            sl = entry - min_dist
+        else:
+            sl = entry + min_dist
+        sl_method = f"{sl_method} (min {cfg.min_sl_pct*100:.1f}% enforced)"
 
     # ── Take Profit ────────────────────────────────────────────────────────────
     risk = abs(entry - sl)
@@ -587,8 +599,8 @@ def _analyze(
         price, direction, highs, lows, closes, cfg
     )
 
-    # Filter out low R:R signals (< 1:1.5 not worth trading)
-    if rr_float < 1.5:
+    # Filter: R:R must meet per-style minimum
+    if rr_float < cfg.min_rr:
         return None
 
     rr = f"1:{rr_float:.1f}"

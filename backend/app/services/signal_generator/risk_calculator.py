@@ -23,6 +23,23 @@ class RiskCalculation:
     reasoning: str  # Explanation of SL/TP placement
 
 
+MIN_SL_PCT = {
+    "long":  0.015,   # minimum 1.5% from entry for any long SL
+    "short": 0.015,   # minimum 1.5% from entry for any short SL
+}
+
+
+def _enforce_min_sl(entry: float, sl: float, direction: str, min_pct: float = 0.015) -> float:
+    """Ensure SL is at least min_pct away from entry to avoid stop-hunt zone."""
+    dist = abs(entry - sl) / entry
+    if dist < min_pct:
+        if direction == "long":
+            return entry * (1 - min_pct)
+        else:
+            return entry * (1 + min_pct)
+    return sl
+
+
 def calculate_stop_loss(
     entry_price: float,
     direction: str,  # "long" or "short"
@@ -30,9 +47,10 @@ def calculate_stop_loss(
     resistance_level: Optional[float] = None,
     sr_zone: Optional[tuple[float, float]] = None,
     fib_level: Optional[float] = None,
+    min_sl_pct: float = 0.015,   # minimum SL distance from entry
 ) -> float:
     """
-    Calculate stop loss placement using priority order.
+    Calculate stop loss using priority order with minimum distance enforcement.
 
     Priority:
     1. Below strongest support area (most bounces) for long
@@ -40,60 +58,46 @@ def calculate_stop_loss(
     3. Below Fibonacci 0.618 level
     4. Default: 2% below entry for long, 2% above for short
 
-    Args:
-        entry_price: Entry price
-        direction: "long" or "short"
-        support_level: Support level price
-        resistance_level: Resistance level price
-        sr_zone: Tuple of (zone_low, zone_high)
-        fib_level: Fibonacci retracement level
-
-    Returns:
-        Stop loss price
+    Always enforces minimum SL distance (default 1.5%) to prevent
+    stop-hunt zone placement.
     """
     if direction == "long":
         candidates = []
 
-        # 1. Support level (below entry for long)
         if support_level and support_level < entry_price:
-            candidates.append(("support", support_level * 0.995))  # 0.5% below support
+            candidates.append(("support", support_level * 0.995))
 
-        # 2. S/R zone bottom
         if sr_zone:
             candidates.append(("sr_zone", sr_zone[0] * 0.995))
 
-        # 3. Fibonacci level
         if fib_level and fib_level < entry_price:
             candidates.append(("fibonacci", fib_level * 0.995))
 
-        # Return highest SL (closest to entry = tightest risk)
         if candidates:
-            return max(candidates, key=lambda x: x[1])[1]
+            sl = max(candidates, key=lambda x: x[1])[1]
+        else:
+            sl = entry_price * 0.98
 
-        # Default: 2% below entry
-        return entry_price * 0.98
+        return _enforce_min_sl(entry_price, sl, "long", min_sl_pct)
 
     else:  # short
         candidates = []
 
-        # 1. Resistance level (above entry for short)
         if resistance_level and resistance_level > entry_price:
-            candidates.append(("resistance", resistance_level * 1.005))  # 0.5% above resistance
+            candidates.append(("resistance", resistance_level * 1.005))
 
-        # 2. S/R zone top
         if sr_zone:
             candidates.append(("sr_zone", sr_zone[1] * 1.005))
 
-        # 3. Fibonacci level
         if fib_level and fib_level > entry_price:
             candidates.append(("fibonacci", fib_level * 1.005))
 
-        # Return lowest SL (closest to entry)
         if candidates:
-            return min(candidates, key=lambda x: x[1])[1]
+            sl = min(candidates, key=lambda x: x[1])[1]
+        else:
+            sl = entry_price * 1.02
 
-        # Default: 2% above entry
-        return entry_price * 1.02
+        return _enforce_min_sl(entry_price, sl, "short", min_sl_pct)
 
 
 def calculate_take_profit(
