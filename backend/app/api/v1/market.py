@@ -1,5 +1,6 @@
 """Market data endpoints — spot positions, futures positions, futures 24h ranking."""
 
+import asyncio
 import hashlib
 import hmac
 import time
@@ -39,11 +40,16 @@ class SpotAsset(BaseModel):
     free: float
     locked: float
     total: float
+    current_price: float
     usdt_value: float
+    avg_buy_price: float | None   # weighted avg from trade history
+    pnl_usdt: float | None        # unrealized P&L in USDT
+    pnl_percent: float | None     # unrealized P&L %
 
 class SpotPositionsResponse(BaseModel):
     assets: list[SpotAsset]
     total_usdt_value: float
+    total_pnl_usdt: float
 
 class FuturesPosition(BaseModel):
     symbol: str
@@ -87,54 +93,128 @@ def _auth_headers(api_key: str) -> dict:
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+async def _fetch_avg_buy_price(
+    client: httpx.AsyncClient,
+    asset: str,
+    total_held: float,
+    api_key: str,
+    api_secret: str,
+) -> float | None:
+    """
+    Calculate weighted average buy price from trade history.
+    Fetches last 500 trades and works backwards to cover current holding.
+    Returns None if USDT pair not found or no trades.
+    """
+    if asset == "USDT":
+        return 1.0
+    symbol = f"{asset}USDT"
+    try:
+        qs = _signed_url(f"/api/v3/myTrades", api_secret, {"symbol": symbol, "limit": 500})
+        trades = await client.get(spot(f"/api/v3/myTrades?{qs}"), headers=_auth_headers(api_key))
+        if trades.status_code != 200:
+            return None
+        trade_list = trades.json()
+        if not trade_list or not isinstance(trade_list, list):
+            return None
+
+        # Work backwards through trades to find avg cost of current holding
+        remaining = total_held
+        total_cost = 0.0
+        for t in reversed(trade_list):
+            qty = float(t.get("qty", 0))
+            price = float(t.get("price", 0))
+            is_buyer = t.get("isBuyer", False)
+
+            if is_buyer:
+                take = min(qty, remaining)
+                total_cost += take * price
+                remaining -= take
+                if remaining <= 0:
+                    break
+            else:
+                # Sold some — add back to remaining (we need more buys to cover)
+                remaining += qty
+
+        if remaining > total_held * 0.5:
+            # Not enough trade history, use simple average of all buys
+            buys = [t for t in trade_list if t.get("isBuyer")]
+            if not buys:
+                return None
+            total_qty = sum(float(t["qty"]) for t in buys)
+            total_val = sum(float(t["qty"]) * float(t["price"]) for t in buys)
+            return total_val / total_qty if total_qty > 0 else None
+
+        return total_cost / total_held if total_held > 0 else None
+    except Exception:
+        return None
+
+
 @router.get("/market/spot-positions", response_model=SpotPositionsResponse)
 async def get_spot_positions() -> SpotPositionsResponse:
-    """Fetch all non-zero spot holdings with USDT value."""
+    """Fetch all non-zero spot holdings with current price, avg buy price, and P&L."""
     s = get_settings()
     if not s.binance_api_key:
         raise HTTPException(status_code=400, detail="API key not configured")
 
     qs = _signed_url("/api/v3/account", s.binance_api_secret)
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        # Get account balances
+    async with httpx.AsyncClient(timeout=20) as client:
         account = await _get(client, spot(f"/api/v3/account?{qs}"), _auth_headers(s.binance_api_key))
-
-        # Get all spot prices in one call
         prices_raw: list = await _get(client, spot("/api/v3/ticker/price"))
         prices = {p["symbol"]: float(p["price"]) for p in prices_raw}
 
+        # Build initial asset list
+        raw_assets = []
+        for b in account["balances"]:
+            free = float(b["free"])
+            locked = float(b["locked"])
+            total = free + locked
+            if total < 0.00001:
+                continue
+            asset = b["asset"]
+            cur_price = 1.0 if asset == "USDT" else prices.get(f"{asset}USDT", 0.0)
+            usdt_val = total * cur_price
+            if usdt_val < 0.01:
+                continue
+            raw_assets.append((asset, free, locked, total, cur_price, usdt_val))
+
+        # Fetch avg buy price concurrently for all assets
+        avg_prices = await asyncio.gather(*[
+            _fetch_avg_buy_price(client, a[0], a[3], s.binance_api_key, s.binance_api_secret)
+            for a in raw_assets
+        ])
+
     assets: list[SpotAsset] = []
-    for b in account["balances"]:
-        free = float(b["free"])
-        locked = float(b["locked"])
-        total = free + locked
-        if total < 0.00001:
-            continue
-
-        asset = b["asset"]
-        if asset == "USDT":
-            usdt_val = total
-        else:
-            price = prices.get(f"{asset}USDT", 0.0)
-            usdt_val = total * price
-
-        if usdt_val < 0.01:
-            continue
+    for (asset, free, locked, total, cur_price, usdt_val), avg_buy in zip(raw_assets, avg_prices):
+        pnl_usdt = None
+        pnl_pct = None
+        if avg_buy and avg_buy > 0 and asset != "USDT":
+            cost_basis = avg_buy * total
+            pnl_usdt = round(usdt_val - cost_basis, 2)
+            pnl_pct = round((cur_price - avg_buy) / avg_buy * 100, 2)
 
         assets.append(SpotAsset(
             asset=asset,
             free=round(free, 8),
             locked=round(locked, 8),
             total=round(total, 8),
+            current_price=round(cur_price, 8),
             usdt_value=round(usdt_val, 2),
+            avg_buy_price=round(avg_buy, 8) if avg_buy else None,
+            pnl_usdt=pnl_usdt,
+            pnl_percent=pnl_pct,
         ))
 
     assets.sort(key=lambda a: a.usdt_value, reverse=True)
     total_usdt = sum(a.usdt_value for a in assets)
+    total_pnl = sum(a.pnl_usdt for a in assets if a.pnl_usdt is not None)
 
     logger.info("spot_positions_fetched", count=len(assets), total_usdt=total_usdt)
-    return SpotPositionsResponse(assets=assets, total_usdt_value=round(total_usdt, 2))
+    return SpotPositionsResponse(
+        assets=assets,
+        total_usdt_value=round(total_usdt, 2),
+        total_pnl_usdt=round(total_pnl, 2),
+    )
 
 
 @router.get("/market/futures-positions", response_model=FuturesPositionsResponse)
