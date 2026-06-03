@@ -123,6 +123,11 @@ class ScanSignal(BaseModel):
     direction: str
     probability: float
     current_price: float
+    entry: float                  # optimal entry (at support/resistance zone)
+    entry_zone_low: float | None  # zone lower bound
+    entry_zone_high: float | None # zone upper bound
+    entry_type: str               # "at_zone" | "wait_pullback" | "wait_rally" | "market"
+    entry_note: str
     change_24h: float
     volume_ratio: float
     signals: list[str]
@@ -131,8 +136,8 @@ class ScanSignal(BaseModel):
     take_profit: float
     risk_reward: str
     alert_type: str
-    sl_method: str       # how SL was determined
-    tp_method: str       # how TP was determined
+    sl_method: str
+    tp_method: str
     style_note: str
 
 
@@ -594,9 +599,60 @@ def _analyze(
     if short_hints > long_hints:
         direction = "SHORT"
 
-    # ── SL / TP via TA hierarchy ───────────────────────────────────────────────
+    # ── Zone-based entry (support for LONG, resistance for SHORT) ─────────────
+    lb = min(cfg.lookback + 10, len(closes))
+    supports, resistances = _find_sr_zones(highs, lows, closes, lookback=lb)
+
+    entry_price    = price
+    entry_zone_low: float | None  = None
+    entry_zone_high: float | None = None
+    entry_type     = "market"
+    entry_note     = ""
+
+    if direction == "LONG" and supports:
+        zone_mid = max(z for z in supports if z < price)  # strongest support below price
+        dist = (price - zone_mid) / zone_mid
+        # Estimate zone width (±1% of zone mid as approximation)
+        entry_zone_low  = zone_mid * 0.99
+        entry_zone_high = zone_mid * 1.01
+
+        if dist <= 0.015:
+            entry_price = price
+            entry_type  = "at_zone"
+            entry_note  = f"Harga sudah di area support ${zone_mid:.4g} — entry sekarang valid"
+        elif dist <= 0.06:
+            entry_price = zone_mid
+            entry_type  = "wait_pullback"
+            entry_note  = f"Tunggu pullback ke support ${zone_mid:.4g} (harga sekarang {dist*100:.1f}% di atas) — pasang limit buy"
+        else:
+            entry_price = zone_mid
+            entry_type  = "wait_pullback"
+            entry_note  = f"Harga terlalu jauh dari support ${zone_mid:.4g} ({dist*100:.1f}%) — tunggu pullback signifikan"
+
+    elif direction == "SHORT" and resistances:
+        zone_mid = min(z for z in resistances if z > price)  # strongest resistance above price
+        dist = (zone_mid - price) / zone_mid
+        entry_zone_low  = zone_mid * 0.99
+        entry_zone_high = zone_mid * 1.01
+
+        if dist <= 0.015:
+            entry_price = price
+            entry_type  = "at_zone"
+            entry_note  = f"Harga sudah di area resistance ${zone_mid:.4g} — entry SHORT sekarang valid"
+        elif dist <= 0.06:
+            entry_price = zone_mid
+            entry_type  = "wait_rally"
+            entry_note  = f"Tunggu rally ke resistance ${zone_mid:.4g} (harga sekarang {dist*100:.1f}% di bawah) — pasang limit sell"
+        else:
+            entry_price = zone_mid
+            entry_type  = "wait_rally"
+            entry_note  = f"Harga terlalu jauh dari resistance ${zone_mid:.4g} ({dist*100:.1f}%) — tunggu rally"
+    else:
+        entry_note = "Tidak ada S/R zone yang jelas — entry di market price"
+
+    # ── SL / TP dihitung dari entry zone, bukan current price ─────────────────
     sl, tp, rr_float, sl_method, tp_method = _calc_sl_tp(
-        price, direction, highs, lows, closes, cfg
+        entry_price, direction, highs, lows, closes, cfg
     )
 
     # Filter: R:R must meet per-style minimum
@@ -607,13 +663,18 @@ def _analyze(
     key_level = recent_high if direction == "LONG" else recent_low
 
     info = STYLE_LABELS[style]
-    style_note = f"{info['label']} | {info['tf']} | SL: {sl_method}"
+    style_note = f"{info['label']} | {info['tf']} | {entry_type}"
 
     return ScanSignal(
         symbol=symbol,
         direction=direction,
         probability=round(min(score, 99), 1),
         current_price=round(price, 8),
+        entry=round(entry_price, 8),
+        entry_zone_low=round(entry_zone_low, 8) if entry_zone_low else None,
+        entry_zone_high=round(entry_zone_high, 8) if entry_zone_high else None,
+        entry_type=entry_type,
+        entry_note=entry_note,
         change_24h=round(change_24h, 2),
         volume_ratio=round(vol_ratio, 2),
         signals=[s for s in signals if not s.startswith("⚠️")][:4],

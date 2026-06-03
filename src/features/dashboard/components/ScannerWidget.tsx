@@ -8,6 +8,11 @@ interface ScanSignal {
   direction: string;
   probability: number;
   current_price: number;
+  entry: number;
+  entry_zone_low: number | null;
+  entry_zone_high: number | null;
+  entry_type: string;   // "at_zone" | "wait_pullback" | "wait_rally" | "market"
+  entry_note: string;
   change_24h: number;
   volume_ratio: number;
   signals: string[];
@@ -254,26 +259,47 @@ export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
                     ))}
                   </div>
 
-                  {/* SL / TP with method */}
-                  <div className="grid grid-cols-2 gap-1.5 mb-2">
-                    <div className="bg-black/20 rounded-lg px-2.5 py-1.5">
-                      <p className="text-[9px] text-red-400 font-bold uppercase tracking-wide mb-0.5">Stop Loss</p>
-                      <p className="text-xs font-bold text-red-300 font-mono">${fmtPrice(r.stop_loss)}</p>
-                      <p className="text-[9px] text-neutral-500 truncate">{r.sl_method}</p>
+                  {/* Entry zone note */}
+                  {r.entry_note && (
+                    <div className={`rounded-lg px-2.5 py-1.5 mb-1.5 text-[10px] leading-relaxed ${
+                      r.entry_type === "at_zone"
+                        ? "bg-green-900/40 text-green-300"
+                        : "bg-amber-900/30 text-amber-300"
+                    }`}>
+                      {r.entry_note}
                     </div>
-                    <div className="bg-black/20 rounded-lg px-2.5 py-1.5">
-                      <p className="text-[9px] text-green-400 font-bold uppercase tracking-wide mb-0.5">Take Profit</p>
+                  )}
+
+                  {/* Entry + SL + TP */}
+                  <div className="grid grid-cols-3 gap-1.5 mb-2">
+                    <div className={`rounded-lg px-2 py-1.5 ${
+                      r.entry_type === "at_zone" ? "bg-green-900/40" : "bg-amber-900/30"
+                    }`}>
+                      <p className="text-[9px] text-neutral-400 font-bold uppercase mb-0.5">
+                        {r.entry_type === "at_zone" ? "✅ Entry" : "⏳ Limit"}
+                      </p>
+                      <p className="text-xs font-bold text-white font-mono">${fmtPrice(r.entry)}</p>
+                      {r.entry_zone_low && (
+                        <p className="text-[9px] text-neutral-500">
+                          {fmtPrice(r.entry_zone_low)}–{fmtPrice(r.entry_zone_high!)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="bg-black/20 rounded-lg px-2 py-1.5">
+                      <p className="text-[9px] text-red-400 font-bold uppercase mb-0.5">⛔ SL</p>
+                      <p className="text-xs font-bold text-red-300 font-mono">${fmtPrice(r.stop_loss)}</p>
+                      <p className="text-[9px] text-neutral-500 truncate">{r.sl_method.split("(")[0]}</p>
+                    </div>
+                    <div className="bg-black/20 rounded-lg px-2 py-1.5">
+                      <p className="text-[9px] text-green-400 font-bold uppercase mb-0.5">🎯 TP</p>
                       <p className="text-xs font-bold text-green-300 font-mono">${fmtPrice(r.take_profit)}</p>
-                      <p className="text-[9px] text-neutral-500 truncate">{r.tp_method}</p>
+                      <p className="text-[9px] text-neutral-500 truncate">{r.tp_method.split("$")[0]}</p>
                     </div>
                   </div>
 
-                  {/* Key level + stats */}
+                  {/* Stats row */}
                   <div className="flex items-center justify-between text-[10px] text-neutral-400 pt-1.5 border-t border-neutral-700/50">
                     <div className="flex gap-2">
-                      {r.key_level && (
-                        <span>Watch: <strong className="text-yellow-400">${fmtPrice(r.key_level)}</strong></span>
-                      )}
                       <span className={r.change_24h >= 0 ? "text-green-400" : "text-red-400"}>
                         {r.change_24h >= 0 ? "+" : ""}{r.change_24h}%
                       </span>
