@@ -190,24 +190,31 @@ class SignalPipeline:
         return signal
 
     def _validate_t0_t1_alignment(self, trend_direction: str, wyckoff_phase: str) -> bool:
-        """Gate: Trend must align with Wyckoff phase."""
-        # Accumulation allows uptrend
-        if wyckoff_phase == "Accumulation" and trend_direction == "uptrend":
-            return True
-        # Mark up requires uptrend
-        if wyckoff_phase == "Mark Up" and trend_direction == "uptrend":
-            return True
-        # Mark down requires downtrend
-        if wyckoff_phase == "Mark Down" and trend_direction == "downtrend":
-            return True
-        # Distribution allows downtrend
-        if wyckoff_phase == "Distribution" and trend_direction == "downtrend":
-            return True
-        # Sideways can be anything
-        if trend_direction == "sideways":
+        """
+        Gate: Wyckoff phase must be compatible with trend direction.
+
+        Wyckoff theory — phases happen DURING these conditions:
+        - Accumulation: occurs DURING downtrend/sideways → LONG setup forming
+        - Mark Up:       occurs DURING uptrend → LONG continuation
+        - Distribution:  occurs DURING uptrend/sideways → SHORT setup forming
+        - Mark Down:     occurs DURING downtrend → SHORT continuation
+        - Sideways:      ambiguous, allow all
+        """
+        # LONG-biased phases (Accumulation, Mark Up)
+        if wyckoff_phase in ("Accumulation", "Mark Up"):
+            # Valid for uptrend (confirmed) or downtrend (early reversal) or sideways
+            return trend_direction in ("uptrend", "downtrend", "sideways")
+
+        # SHORT-biased phases (Distribution, Mark Down)
+        if wyckoff_phase in ("Distribution", "Mark Down"):
+            return trend_direction in ("uptrend", "downtrend", "sideways")
+
+        # Sideways phase — allow all
+        if wyckoff_phase == "Sideways":
             return True
 
-        return False
+        # Default: allow sideways trend, block clear contradictions
+        return trend_direction == "sideways"
 
     def _validate_entry_with_sr(self, current_price: float, sr_analysis, direction: str) -> Tuple[bool, str]:
         """Gate: Entry price must be valid for direction."""

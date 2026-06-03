@@ -16,7 +16,7 @@ interface Analysis {
   direction: string | null; entry: number | null; stop_loss: number | null;
   sl_basis: string | null; take_profits: TakeProfit[];
   risk_reward: string | null; confidence: number | null;
-  skip_reason: string | null; layers: TALayer[];
+  skip_reason: string | null; stop_explanation: string | null; layers: TALayer[];
   timeframes: Record<string, string>;
   style: string;
 }
@@ -409,11 +409,24 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
                       </>
                     ) : (
                       <>
-                        <p className="text-3xl font-black text-neutral-500">⏸ NO SIGNAL</p>
-                        <p className="text-xs text-muted-foreground mt-2 px-4">{analysis.skip_reason}</p>
+                        <p className="text-2xl font-black text-neutral-500">⏸ NO SIGNAL</p>
+                        <p className="text-xs text-orange-600 font-semibold mt-1 font-mono">{analysis.skip_reason}</p>
                       </>
                     )}
                   </div>
+
+                  {/* Stop explanation — shown when no signal */}
+                  {!analysis.direction && analysis.stop_explanation && (
+                    <div className="bg-amber-50 border-t border-amber-200 px-5 py-4">
+                      <div className="flex gap-2 items-start">
+                        <span className="text-lg flex-shrink-0">💡</span>
+                        <div>
+                          <p className="text-xs font-bold text-amber-800 mb-1 uppercase tracking-wide">Kenapa berhenti di sini?</p>
+                          <p className="text-sm text-amber-900 leading-relaxed">{analysis.stop_explanation}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Trade levels — only when signal */}
                   {analysis.direction && (
