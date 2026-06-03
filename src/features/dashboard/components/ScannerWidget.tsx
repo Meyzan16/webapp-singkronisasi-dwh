@@ -39,7 +39,9 @@ const MOMENTUM_LABELS: Record<string, string> = {
 const fmtPrice = (p: number) =>
   p < 0.001 ? p.toFixed(6) : p < 1 ? p.toFixed(4) : p.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
-export function ScannerWidget() {
+interface ScannerWidgetProps { fullPage?: boolean; }
+
+export function ScannerWidget({ fullPage = false }: ScannerWidgetProps) {
   const [data, setData] = useState<ScannerData | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"ALL" | "LONG" | "SHORT">("ALL");
@@ -111,7 +113,7 @@ export function ScannerWidget() {
         )}
 
         {filtered.length > 0 && (
-          <div className="space-y-2">
+          <div className={fullPage ? "grid grid-cols-1 md:grid-cols-2 gap-2" : "space-y-2"}>
             {filtered.map((r) => {
               const base = r.symbol.replace("USDT", "");
               const isLong = r.direction === "LONG";
