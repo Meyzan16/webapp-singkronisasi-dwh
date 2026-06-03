@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
-import { CandlestickChart } from "./CandlestickChart";
+import { CandlestickChart } from "@/components/ui/candlestick-chart";
 
 interface Candle { time: number; open: number; high: number; low: number; close: number; volume: number; }
 interface CoinInfo {
@@ -10,23 +10,68 @@ interface CoinInfo {
   quote_volume_24h: number; open_interest: number; funding_rate: number;
   next_funding_time: number; count_24h: number;
 }
-interface TALayer { name: string; status: string; signal?: string; detail?: string; }
+interface TALayer { name: string; timeframe: string; status: string; signal?: string; detail?: string; }
 interface Analysis {
   direction: string | null; entry: number | null; stop_loss: number | null;
   take_profit: number | null; risk_reward: string | null; confidence: number | null;
   skip_reason: string | null; layers: TALayer[];
+  timeframes: Record<string, string>;
+  style: string;
 }
 
-const INTERVALS = ["15m", "1h", "4h", "1d"] as const;
-type Interval = typeof INTERVALS[number];
+// ── Trading styles ────────────────────────────────────────────────────────────
+const STYLES = [
+  {
+    key: "scalping",
+    label: "Scalping",
+    icon: "⚡",
+    desc: "Minutes–Hours",
+    tfs: "T0:4H → T1:1H → T2:1H → T3:15M → T4:15M",
+    color: "from-yellow-500 to-orange-500",
+  },
+  {
+    key: "daytrading",
+    label: "Day Trade",
+    icon: "📅",
+    desc: "Intraday",
+    tfs: "T0:1D → T1:4H → T2:4H → T3:1H → T4:1H",
+    color: "from-blue-500 to-indigo-500",
+  },
+  {
+    key: "swing",
+    label: "Swing",
+    icon: "🌊",
+    desc: "Days–Weeks",
+    tfs: "T0:1W → T1:1D → T2:1D → T3:4H → T4:4H",
+    color: "from-primarygreen to-teal-500",
+  },
+  {
+    key: "position",
+    label: "Position",
+    icon: "🏔",
+    desc: "Weeks–Months",
+    tfs: "T0:1W → T1:1W → T2:1D → T3:1D → T4:1D",
+    color: "from-purple-500 to-violet-500",
+  },
+] as const;
+
+type StyleKey = typeof STYLES[number]["key"];
 
 const PIPELINE_STEPS = [
-  { key: "T0 Wyckoff",   icon: "🌀", label: "T0", desc: "Wyckoff Phase",      color: "purple"  },
-  { key: "T1 Trend",     icon: "📈", label: "T1", desc: "EMA Trend",          color: "blue"    },
-  { key: "T2 S/R Zones", icon: "🏔", label: "T2", desc: "Support/Resistance", color: "orange"  },
-  { key: "T3 Pattern",   icon: "🔷", label: "T3", desc: "Chart Pattern",      color: "teal"    },
-  { key: "T4 Trigger",   icon: "⚡", label: "T4", desc: "Entry Trigger",      color: "green"   },
+  { layer: "T0", name: "T0 Wyckoff",   icon: "🌀", desc: "Phase"    },
+  { layer: "T1", name: "T1 Trend",     icon: "📈", desc: "EMA Trend" },
+  { layer: "T2", name: "T2 S/R Zones", icon: "🏔", desc: "S/R Zones" },
+  { layer: "T3", name: "T3 Pattern",   icon: "🔷", desc: "Pattern"   },
+  { layer: "T4", name: "T4 Trigger",   icon: "⚡", desc: "Trigger"   },
 ];
+
+// Chart timeframe matches the T4 trigger timeframe per style
+const STYLE_CHART_TF: Record<StyleKey, string> = {
+  scalping:   "15m",
+  daytrading: "1h",
+  swing:      "4h",
+  position:   "1d",
+};
 
 type PipelineStatus = "idle" | "running" | "done" | "error";
 
@@ -34,26 +79,30 @@ interface CoinModalProps { symbol: string; onClose: () => void; }
 
 export function CoinModal({ symbol, onClose }: CoinModalProps) {
   const [tab, setTab] = useState<"chart" | "info" | "analysis">("chart");
-  const [interval, setInterval] = useState<Interval>("1h");
+  const [style, setStyle] = useState<StyleKey>("swing");
   const [candles, setCandles] = useState<Candle[]>([]);
   const [info, setInfo] = useState<CoinInfo | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>("idle");
-  const [visibleLayers, setVisibleLayers] = useState<number>(0);
+  const [visibleLayers, setVisibleLayers] = useState(0);
   const [loadingCandles, setLoadingCandles] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const base = symbol.replace("USDT", "");
+  const chartTf = STYLE_CHART_TF[style];
 
-  const fetchCandles = useCallback(async (iv: Interval) => {
+  const fetchCandles = useCallback(async (tf: string) => {
     setLoadingCandles(true);
     try {
-      const r = await fetch(`/api/v1/coin/${symbol}/klines?interval=${iv}&limit=200`);
+      const limit = tf === "15m" ? 200 : tf === "1h" ? 150 : tf === "4h" ? 120 : 100;
+      const r = await fetch(`/api/v1/coin/${symbol}/klines?interval=${tf}&limit=${limit}`);
       const d = await r.json();
       setCandles(d.candles ?? []);
     } catch { /* silent */ }
     finally { setLoadingCandles(false); }
   }, [symbol]);
+
+  useEffect(() => { void fetchCandles(chartTf); }, [chartTf, fetchCandles]);
 
   const fetchInfo = useCallback(async () => {
     try {
@@ -62,21 +111,22 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
     } catch { /* silent */ }
   }, [symbol]);
 
-  useEffect(() => { void fetchCandles(interval); void fetchInfo(); }, [symbol, interval, fetchCandles, fetchInfo]);
+  useEffect(() => { void fetchInfo(); }, [fetchInfo]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const runAnalysis = async (iv: Interval) => {
+  const runAnalysis = async (s: StyleKey) => {
     setPipelineStatus("running");
     setAnalysis(null);
     setVisibleLayers(0);
     setError(null);
 
     try {
-      const r = await fetch(`/api/v1/coin/${symbol}/analyze?interval=${iv}&limit=200`);
+      const r = await fetch(`/api/v1/coin/${symbol}/analyze?style=${s}`);
       const data: Analysis & { detail?: string } = await r.json();
 
       if (!r.ok || data.detail) {
@@ -85,13 +135,12 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
         return;
       }
 
-      // Animate pipeline layers one by one
+      // Animate layers one by one
       const layers = data.layers ?? [];
       for (let i = 0; i < layers.length; i++) {
-        await new Promise(res => setTimeout(res, 600));
+        await new Promise(res => setTimeout(res, 550));
         setVisibleLayers(i + 1);
       }
-
       await new Promise(res => setTimeout(res, 400));
       setAnalysis(data);
       setPipelineStatus("done");
@@ -111,73 +160,69 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
     : status === "failed" ? "bg-red-50 border-red-300 text-red-800"
     : "bg-neutral-50 border-neutral-200 text-neutral-600";
 
-  const layerIcon = (status: string) =>
-    status === "passed" ? "✓" : status === "failed" ? "✗" : "~";
-
-  // Match pipeline step to layer data
-  const getLayerData = (key: string) =>
-    analysis?.layers?.find(l => l.name.startsWith(key.split(" ")[0] + " ") || l.name === key);
+  const getLayer = (name: string) => analysis?.layers?.find(l => l.name === name);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[93vh] flex flex-col overflow-hidden">
 
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden">
-
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between px-6 py-4 border-b bg-gradient-to-r from-primarygreen to-teal-500 text-white flex-shrink-0">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-primarygreen to-teal-500 text-white flex-shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-bold text-sm">
+            <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs">
               {base.slice(0, 3)}
             </div>
             <div>
-              <h2 className="text-xl font-bold">{base}/USDT</h2>
-              <p className="text-xs opacity-80">Binance Futures Perpetual</p>
+              <h2 className="text-lg font-bold leading-tight">{base}/USDT</h2>
+              <p className="text-xs opacity-70">Futures Perpetual</p>
             </div>
           </div>
           {info && (
             <div className="text-right">
-              <p className="text-2xl font-bold">${fmtPrice(info.last_price)}</p>
-              <p className={`text-sm font-semibold ${info.change_24h >= 0 ? "text-green-200" : "text-red-200"}`}>
+              <p className="text-xl font-bold">${fmtPrice(info.last_price)}</p>
+              <p className={`text-xs font-semibold ${info.change_24h >= 0 ? "text-green-200" : "text-red-200"}`}>
                 {info.change_24h >= 0 ? "▲" : "▼"} {Math.abs(info.change_24h).toFixed(2)}%
               </p>
             </div>
           )}
-          <button onClick={onClose} className="ml-4 w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-white font-bold text-lg">×</button>
+          <button onClick={onClose} className="ml-3 w-7 h-7 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center text-lg">×</button>
         </div>
 
-        {/* ── Tabs ── */}
-        <div className="flex border-b px-6 bg-neutral-50 flex-shrink-0">
+        {/* Tabs */}
+        <div className="flex border-b px-5 bg-neutral-50 flex-shrink-0">
           {(["chart", "info", "analysis"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-3 text-sm font-semibold capitalize border-b-2 transition-colors ${tab === t ? "border-primarygreen text-primarygreen" : "border-transparent text-muted-foreground hover:text-black"}`}>
-              {t === "chart" ? "📈 Chart" : t === "info" ? "📊 Market Info" : "🤖 TA Analysis"}
+              className={`px-4 py-2.5 text-sm font-semibold capitalize border-b-2 transition-colors ${tab === t ? "border-primarygreen text-primarygreen" : "border-transparent text-muted-foreground hover:text-black"}`}>
+              {t === "chart" ? "📈 Chart" : t === "info" ? "📊 Info" : "🤖 TA Analysis"}
             </button>
           ))}
         </div>
 
-        {/* ── Content ── */}
-        <div className="flex-1 overflow-y-auto p-6">
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-5">
 
-          {/* CHART */}
+          {/* ── CHART ── */}
           {tab === "chart" && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                {INTERVALS.map((iv) => (
-                  <button key={iv} onClick={() => { setInterval(iv); void fetchCandles(iv); }}
-                    className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${interval === iv ? "bg-primarygreen text-white" : "bg-neutral-100 hover:bg-neutral-200"}`}>
-                    {iv.toUpperCase()}
-                  </button>
-                ))}
-                {loadingCandles && <span className="text-xs text-muted-foreground animate-pulse ml-2">Loading...</span>}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2">
+                  {(["15m","1h","4h","1d","1w"] as const).map((tf) => (
+                    <button key={tf} onClick={() => void fetchCandles(tf)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors ${chartTf === tf ? "bg-primarygreen text-white" : "bg-neutral-100 hover:bg-neutral-200"}`}>
+                      {tf.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                {loadingCandles && <span className="text-xs text-muted-foreground animate-pulse">Loading...</span>}
               </div>
-              {candles.length > 0 && !loadingCandles && <CandlestickChart candles={candles} height={360} />}
+              {candles.length > 0 && !loadingCandles && <CandlestickChart candles={candles} height={350} />}
             </div>
           )}
 
-          {/* MARKET INFO */}
+          {/* ── MARKET INFO ── */}
           {tab === "info" && info && (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               {[
                 { label: "Last Price",    value: `$${fmtPrice(info.last_price)}` },
                 { label: "Mark Price",    value: `$${fmtPrice(info.mark_price)}` },
@@ -185,121 +230,135 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
                 { label: "24h Change",    value: `${info.change_24h >= 0 ? "+" : ""}${info.change_24h.toFixed(2)}%`, color: info.change_24h >= 0 ? "text-green-600" : "text-red-500" },
                 { label: "24h High",      value: `$${fmtPrice(info.high_24h)}`, color: "text-green-600" },
                 { label: "24h Low",       value: `$${fmtPrice(info.low_24h)}`, color: "text-red-500" },
-                { label: "Volume (coin)", value: info.volume_24h.toLocaleString() },
                 { label: "Volume (USDT)", value: fmtVol(info.quote_volume_24h) },
                 { label: "Open Interest", value: info.open_interest.toLocaleString() },
                 { label: "Funding Rate",  value: `${info.funding_rate}%`, color: info.funding_rate >= 0 ? "text-green-600" : "text-red-500" },
                 { label: "Trades (24h)",  value: info.count_24h.toLocaleString() },
                 { label: "Next Funding",  value: info.next_funding_time ? new Date(info.next_funding_time).toLocaleTimeString() : "—" },
+                { label: "Volume (coin)", value: info.volume_24h.toLocaleString() },
               ].map(({ label, value, color }) => (
-                <div key={label} className="bg-neutral-50 rounded-xl p-4 border">
+                <div key={label} className="bg-neutral-50 rounded-xl p-3 border">
                   <p className="text-xs text-muted-foreground mb-1">{label}</p>
-                  <p className={`text-lg font-bold ${color ?? ""}`}>{value}</p>
+                  <p className={`text-base font-bold ${color ?? ""}`}>{value}</p>
                 </div>
               ))}
             </div>
           )}
 
-          {/* TA ANALYSIS */}
+          {/* ── TA ANALYSIS ── */}
           {tab === "analysis" && (
-            <div className="space-y-5">
+            <div className="space-y-4">
 
-              {/* Controls */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-sm font-semibold text-muted-foreground">Timeframe:</span>
-                {INTERVALS.map((iv) => (
-                  <button key={iv} onClick={() => setInterval(iv)}
-                    className={`px-3 py-1 rounded-lg text-sm font-medium ${interval === iv ? "bg-primarygreen text-white" : "bg-neutral-100"}`}>
-                    {iv.toUpperCase()}
-                  </button>
-                ))}
-                <button
-                  onClick={() => void runAnalysis(interval)}
-                  disabled={pipelineStatus === "running"}
-                  className="ml-auto px-5 py-2 bg-primarygreen text-white rounded-lg font-semibold text-sm hover:bg-teal-600 disabled:opacity-50 flex items-center gap-2"
-                >
-                  {pipelineStatus === "running"
-                    ? <><span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />Analyzing...</>
-                    : "▶ Run Analysis (T0→T4)"}
-                </button>
+              {/* Trading Style selector */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider">Trading Style</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {STYLES.map((s) => (
+                    <button key={s.key}
+                      onClick={() => { setStyle(s.key); setPipelineStatus("idle"); setAnalysis(null); setVisibleLayers(0); }}
+                      className={`p-3 rounded-xl border-2 text-left transition-all ${
+                        style === s.key
+                          ? "border-primarygreen bg-primarygreen/5 shadow-sm"
+                          : "border-neutral-200 hover:border-neutral-300 bg-white"
+                      }`}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-lg">{s.icon}</span>
+                        <span className="font-bold text-sm">{s.label}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">{s.desc}</p>
+                      <p className="text-[10px] text-muted-foreground mt-1 font-mono opacity-70 truncate">{s.tfs}</p>
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* IDLE state */}
+              {/* Run button */}
+              <button
+                onClick={() => void runAnalysis(style)}
+                disabled={pipelineStatus === "running"}
+                className="w-full py-3 bg-primarygreen text-white rounded-xl font-bold text-sm hover:bg-teal-600 disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
+              >
+                {pipelineStatus === "running"
+                  ? <><span className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />Analyzing {base} ({STYLES.find(s => s.key === style)?.label})...</>
+                  : `▶ Run ${STYLES.find(s => s.key === style)?.label} Analysis — ${base}/USDT`}
+              </button>
+
+              {/* Idle */}
               {pipelineStatus === "idle" && (
-                <div className="text-center py-10 text-muted-foreground">
-                  <p className="text-5xl mb-3">🤖</p>
-                  <p className="font-semibold text-base">Click &quot;Run Analysis&quot; to analyze {base}/USDT</p>
-                  <p className="text-sm mt-2 opacity-70">T0 Wyckoff &#8594; T1 Trend &#8594; T2 S/R &#8594; T3 Pattern &#8594; T4 Trigger</p>
+                <div className="text-center py-8 text-muted-foreground">
+                  <p className="text-4xl mb-2">🤖</p>
+                  <p className="font-semibold">Select a trading style and click Run</p>
+                  <p className="text-xs mt-1 opacity-70">Each style uses different timeframes for T0→T4</p>
                 </div>
               )}
 
-              {/* ERROR */}
+              {/* Error */}
               {pipelineStatus === "error" && error && (
                 <div className="bg-red-50 border border-red-300 rounded-xl p-4 text-red-800 text-sm">
                   <strong>Error:</strong> {error}
                 </div>
               )}
 
-              {/* PIPELINE ANIMATION */}
+              {/* Pipeline animation */}
               {(pipelineStatus === "running" || pipelineStatus === "done") && (
                 <div className="space-y-3">
-                  <p className="text-sm font-semibold text-muted-foreground">Pipeline Progress</p>
 
-                  {/* Step-by-step pipeline */}
-                  <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-2">
+                  {/* Step bubbles */}
+                  <div className="flex items-center justify-between px-2">
                     {PIPELINE_STEPS.map((step, i) => {
-                      const layerData = getLayerData(step.key);
+                      const layer = getLayer(step.name);
                       const isVisible = i < visibleLayers;
                       const isCurrent = i === visibleLayers && pipelineStatus === "running";
-                      const status = layerData?.status ?? (isCurrent ? "running" : "idle");
+                      const status = layer?.status ?? (isCurrent ? "running" : "idle");
+                      const tf = analysis?.timeframes?.[`t${i}`] ?? "";
 
                       return (
-                        <div key={step.key} className="flex items-center gap-1 flex-shrink-0">
-                          {/* Step bubble */}
-                          <div className={`flex flex-col items-center transition-all duration-500 ${isVisible ? "opacity-100 scale-100" : "opacity-30 scale-95"}`}>
-                            <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl border-2 transition-all duration-300 ${
+                        <div key={step.name} className="flex items-center gap-0">
+                          <div className={`flex flex-col items-center transition-all duration-500 ${isVisible ? "opacity-100" : "opacity-25"}`}>
+                            <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg border-2 transition-all duration-300 ${
                               isCurrent ? "border-primarygreen bg-primarygreen/10 animate-pulse"
                               : status === "passed" ? "border-green-500 bg-green-50"
                               : status === "failed" ? "border-red-400 bg-red-50"
                               : status === "skipped" ? "border-neutral-300 bg-neutral-50"
                               : "border-neutral-200 bg-white"
                             }`}>
-                              {isCurrent
-                                ? <span className="animate-spin text-primarygreen text-base">⟳</span>
-                                : status === "passed" ? <span className="text-green-600">✓</span>
-                                : status === "failed" ? <span className="text-red-500">✗</span>
+                              {isCurrent ? <span className="text-primarygreen animate-spin inline-block">⟳</span>
+                                : status === "passed" ? <span className="text-green-600 font-bold text-base">✓</span>
+                                : status === "failed" ? <span className="text-red-500 font-bold text-base">✗</span>
                                 : <span>{step.icon}</span>}
                             </div>
-                            <p className="text-xs font-bold mt-1">{step.label}</p>
-                            <p className="text-[10px] text-muted-foreground text-center w-16 leading-tight">{step.desc}</p>
+                            <p className="text-xs font-bold mt-1">{step.layer}</p>
+                            {tf && <span className="text-[10px] bg-neutral-100 px-1.5 py-0.5 rounded font-mono text-neutral-500 mt-0.5">{tf.toUpperCase()}</span>}
+                            <p className="text-[10px] text-muted-foreground">{step.desc}</p>
                           </div>
-
-                          {/* Arrow between steps */}
                           {i < PIPELINE_STEPS.length - 1 && (
-                            <div className={`w-6 h-0.5 flex-shrink-0 mt-[-16px] transition-all duration-300 ${isVisible && i + 1 < visibleLayers ? "bg-primarygreen" : "bg-neutral-200"}`} />
+                            <div className={`w-8 h-0.5 mx-1 mb-6 transition-all duration-500 ${isVisible && i + 1 < visibleLayers ? "bg-primarygreen" : "bg-neutral-200"}`} />
                           )}
                         </div>
                       );
                     })}
                   </div>
 
-                  {/* Layer detail cards — reveal one by one */}
+                  {/* Layer cards */}
                   <div className="space-y-2">
                     {PIPELINE_STEPS.map((step, i) => {
-                      const layer = getLayerData(step.key);
+                      const layer = getLayer(step.name);
                       if (i >= visibleLayers || !layer) return null;
                       return (
-                        <div key={step.key}
-                          className={`p-3 rounded-xl border flex items-start gap-3 transition-all duration-300 animate-in fade-in slide-in-from-top-2 ${layerBg(layer.status)}`}>
-                          <span className="text-lg font-bold w-6 text-center flex-shrink-0">{layerIcon(layer.status)}</span>
+                        <div key={step.name}
+                          className={`p-3 rounded-xl border flex items-start gap-3 ${layerBg(layer.status)}`}>
+                          <span className="font-bold w-5 text-center flex-shrink-0 text-sm">
+                            {layer.status === "passed" ? "✓" : layer.status === "failed" ? "✗" : "~"}
+                          </span>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-semibold text-sm">{layer.name}</span>
+                              <Badge variant="outline" className="text-[10px] font-mono px-1.5 py-0">{layer.timeframe}</Badge>
                               {layer.signal && layer.signal !== "No chart pattern" && (
                                 <Badge variant="outline" className="text-xs">{layer.signal}</Badge>
                               )}
                             </div>
-                            {layer.detail && <p className="text-xs mt-0.5 opacity-80">{layer.detail}</p>}
+                            {layer.detail && <p className="text-xs mt-0.5 opacity-80 leading-relaxed">{layer.detail}</p>}
                           </div>
                         </div>
                       );
@@ -308,47 +367,42 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
                 </div>
               )}
 
-              {/* FINAL RESULT */}
+              {/* Final result */}
               {pipelineStatus === "done" && analysis && (
-                <div className={`p-5 rounded-2xl border-2 text-center mt-4 transition-all duration-500 ${
+                <div className={`p-5 rounded-2xl border-2 text-center ${
                   analysis.direction === "LONG" ? "bg-green-50 border-green-400"
                   : analysis.direction === "SHORT" ? "bg-red-50 border-red-400"
                   : "bg-neutral-50 border-neutral-300"
                 }`}>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Final Signal</p>
-
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground mb-2 font-semibold">
+                    {STYLES.find(s => s.key === analysis.style)?.label} Signal
+                  </p>
                   {analysis.direction ? (
                     <>
                       <p className={`text-4xl font-black mb-2 ${analysis.direction === "LONG" ? "text-green-600" : "text-red-500"}`}>
                         {analysis.direction === "LONG" ? "🟢 BUY" : "🔴 SELL"}
                       </p>
-                      <p className="text-sm text-muted-foreground mb-4">
-                        Confidence: <strong>{analysis.confidence?.toFixed(0)}%</strong>
-                      </p>
-                      <div className="grid grid-cols-3 gap-3 text-left">
+                      <p className="text-sm text-muted-foreground mb-4">Confidence: <strong>{analysis.confidence?.toFixed(0)}%</strong></p>
+                      <div className="grid grid-cols-3 gap-3 text-left mb-3">
                         <div className="bg-white rounded-xl p-3 border shadow-sm">
-                          <p className="text-xs text-muted-foreground">Entry Price</p>
-                          <p className="font-bold text-base">${fmtPrice(analysis.entry!)}</p>
+                          <p className="text-xs text-muted-foreground">Entry</p>
+                          <p className="font-bold">${fmtPrice(analysis.entry!)}</p>
                         </div>
                         <div className="bg-white rounded-xl p-3 border border-red-200 shadow-sm">
                           <p className="text-xs text-red-500">Stop Loss</p>
-                          <p className="font-bold text-base text-red-600">${fmtPrice(analysis.stop_loss!)}</p>
+                          <p className="font-bold text-red-600">${fmtPrice(analysis.stop_loss!)}</p>
                         </div>
                         <div className="bg-white rounded-xl p-3 border border-green-200 shadow-sm">
                           <p className="text-xs text-green-600">Take Profit</p>
-                          <p className="font-bold text-base text-green-600">${fmtPrice(analysis.take_profit!)}</p>
+                          <p className="font-bold text-green-600">${fmtPrice(analysis.take_profit!)}</p>
                         </div>
                       </div>
-                      <p className="text-sm mt-3 text-muted-foreground">
-                        Risk:Reward = <strong className="text-primarygreen text-base">{analysis.risk_reward}</strong>
-                      </p>
+                      <p className="text-sm text-muted-foreground">R:R = <strong className="text-primarygreen text-base">{analysis.risk_reward}</strong></p>
                     </>
                   ) : (
                     <>
                       <p className="text-3xl font-black text-neutral-500 mb-2">⏸ NO SIGNAL</p>
-                      <p className="text-sm text-muted-foreground bg-white/70 rounded-lg px-4 py-2 inline-block">
-                        {analysis.skip_reason}
-                      </p>
+                      <p className="text-sm text-muted-foreground bg-white/70 rounded-lg px-4 py-2 inline-block mt-1">{analysis.skip_reason}</p>
                     </>
                   )}
                 </div>
