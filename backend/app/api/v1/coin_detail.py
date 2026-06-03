@@ -13,12 +13,15 @@ router = APIRouter(tags=["coin_detail"])
 logger = structlog.get_logger(__name__)
 
 FAPI_BASE = "https://fapi.binance.com"
+BH_BASE = "https://www.binance.bh"          # accessible from Indonesia without VPN
 VISION_BASE = "https://data-api.binance.vision"
 
 # Fallback URLs per endpoint type
 async def _fetch_klines_with_fallback(client: httpx.AsyncClient, symbol: str, interval: str, limit: int) -> list:
-    """Try fapi first, fallback to vision for klines."""
+    """Try binance.bh first (accessible from Indonesia), then fapi, then vision."""
     urls = [
+        f"{BH_BASE}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}",
+        f"{BH_BASE}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
         f"{FAPI_BASE}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}",
         f"{VISION_BASE}/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
     ]

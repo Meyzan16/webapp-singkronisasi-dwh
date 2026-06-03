@@ -17,6 +17,7 @@ logger = structlog.get_logger(__name__)
 
 SPOT_BASE = "https://api.binance.com"
 FAPI_BASE = "https://fapi.binance.com"
+BH_BASE   = "https://www.binance.bh"   # accessible from Indonesia without VPN
 
 
 def _sign(secret: str, query_string: str) -> str:
@@ -148,11 +149,11 @@ async def get_futures_positions() -> FuturesPositionsResponse:
     qs = _signed_url("/fapi/v2/positionRisk", s.binance_api_secret)
 
     async with httpx.AsyncClient(timeout=15) as client:
-        raw: list = await _get(
-            client,
-            f"{FAPI_BASE}/fapi/v2/positionRisk?{qs}",
-            _auth_headers(s.binance_api_key),
-        )
+        # Try binance.bh first for Indonesia access
+        try:
+            raw: list = await _get(client, f"{BH_BASE}/fapi/v2/positionRisk?{qs}", _auth_headers(s.binance_api_key))
+        except Exception:
+            raw = await _get(client, f"{FAPI_BASE}/fapi/v2/positionRisk?{qs}", _auth_headers(s.binance_api_key))
 
     positions: list[FuturesPosition] = []
     for p in raw:
@@ -190,8 +191,14 @@ async def get_futures_positions() -> FuturesPositionsResponse:
 @router.get("/market/futures-market", response_model=FuturesMarketResponse)
 async def get_futures_market() -> FuturesMarketResponse:
     """Fetch all USDT futures pairs sorted by 24h change (highest first)."""
+    # Try binance.bh first (accessible from Indonesia), fallback to fapi
     async with httpx.AsyncClient(timeout=15) as client:
-        raw: list = await _get(client, f"{FAPI_BASE}/fapi/v1/ticker/24hr")
+        try:
+            raw: list = await _get(client, f"{BH_BASE}/fapi/v1/ticker/24hr")
+            if not raw:
+                raise ValueError("empty")
+        except Exception:
+            raw = await _get(client, f"{FAPI_BASE}/fapi/v1/ticker/24hr")
 
     tickers: list[FuturesTicker] = []
     for t in raw:
