@@ -13,12 +13,17 @@ interface CoinInfo {
 interface TALayer { name: string; timeframe: string; status: string; signal?: string; detail?: string; }
 interface TakeProfit { level: number; price: number; rr: string; basis: string; }
 interface Analysis {
-  direction: string | null; entry: number | null; stop_loss: number | null;
-  sl_basis: string | null; take_profits: TakeProfit[];
+  direction: string | null;
+  entry: number | null;
+  entry_zone_low: number | null; entry_zone_high: number | null;
+  entry_type: string | null;   // "at_zone" | "wait_pullback" | "wait_rally" | "market"
+  entry_note: string | null;
+  stop_loss: number | null; sl_basis: string | null;
+  take_profits: TakeProfit[];
   risk_reward: string | null; confidence: number | null;
-  skip_reason: string | null; stop_explanation: string | null; layers: TALayer[];
-  timeframes: Record<string, string>;
-  style: string;
+  skip_reason: string | null; stop_explanation: string | null;
+  layers: TALayer[];
+  timeframes: Record<string, string>; style: string;
 }
 
 // ── Trading styles ────────────────────────────────────────────────────────────
@@ -232,6 +237,8 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
                   candles={candles}
                   height={380}
                   entryPrice={analysis?.entry ?? undefined}
+                  entryZoneLow={analysis?.entry_zone_low ?? undefined}
+                  entryZoneHigh={analysis?.entry_zone_high ?? undefined}
                   stopLoss={analysis?.stop_loss ?? undefined}
                   takeProfits={analysis?.take_profits?.map(tp => ({ price: tp.price, level: tp.level })) ?? undefined}
                 />
@@ -439,14 +446,42 @@ export function CoinModal({ symbol, onClose }: CoinModalProps) {
                   {/* Trade levels — only when signal */}
                   {analysis.direction && (
                     <div className="bg-white px-5 py-4 space-y-3">
-                      {/* Entry + SL row */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-neutral-50 rounded-xl p-3 border">
-                          <p className="text-xs text-muted-foreground">Entry Price</p>
-                          <p className="font-bold text-base">${fmtPrice(analysis.entry!)}</p>
+
+                      {/* Entry zone note */}
+                      {analysis.entry_note && (
+                        <div className={`rounded-xl px-3 py-2.5 text-xs leading-relaxed ${
+                          analysis.entry_type === "at_zone"
+                            ? "bg-green-50 border border-green-200 text-green-800"
+                            : analysis.entry_type === "wait_pullback" || analysis.entry_type === "wait_rally"
+                            ? "bg-amber-50 border border-amber-200 text-amber-800"
+                            : "bg-neutral-50 border text-neutral-600"
+                        }`}>
+                          {analysis.entry_note}
                         </div>
+                      )}
+
+                      {/* Entry Zone + SL row */}
+                      <div className="grid grid-cols-2 gap-3">
+                        {/* Entry */}
+                        <div className={`rounded-xl p-3 border ${
+                          analysis.entry_type === "at_zone" ? "bg-green-50 border-green-300" : "bg-amber-50 border-amber-200"
+                        }`}>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            <p className="text-xs font-semibold text-neutral-600">
+                              {analysis.entry_type === "at_zone" ? "✅ Entry Sekarang" : "⏳ Entry Ideal (Limit)"}
+                            </p>
+                          </div>
+                          <p className="font-bold text-base">${fmtPrice(analysis.entry!)}</p>
+                          {analysis.entry_zone_low && analysis.entry_zone_high && (
+                            <p className="text-[10px] text-neutral-500 mt-0.5">
+                              Zona: ${fmtPrice(analysis.entry_zone_low)} – ${fmtPrice(analysis.entry_zone_high)}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* SL */}
                         <div className="bg-red-50 rounded-xl p-3 border border-red-200">
-                          <p className="text-xs text-red-500">Stop Loss ⛔</p>
+                          <p className="text-xs font-semibold text-red-500">⛔ Stop Loss</p>
                           <p className="font-bold text-base text-red-600">${fmtPrice(analysis.stop_loss!)}</p>
                           {analysis.sl_basis && <p className="text-[10px] text-red-400 mt-0.5">{analysis.sl_basis}</p>}
                         </div>

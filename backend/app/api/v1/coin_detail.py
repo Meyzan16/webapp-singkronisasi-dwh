@@ -80,14 +80,18 @@ class TakeProfit(BaseModel):
 class QuickAnalysisResponse(BaseModel):
     symbol: str; style: str; timeframes: dict[str, str]
     direction: str | None
-    entry: float | None
+    entry: float | None               # optimal entry price (at support/resistance zone)
+    entry_zone_low: float | None      # support/resistance zone lower bound
+    entry_zone_high: float | None     # support/resistance zone upper bound
+    entry_type: str | None            # "at_zone" | "wait_pullback" | "wait_rally"
+    entry_note: str | None            # human readable entry instruction
     stop_loss: float | None
     sl_basis: str | None
     take_profits: list[TakeProfit]
     risk_reward: str | None
     confidence: float | None
     skip_reason: str | None
-    stop_explanation: str | None   # human-readable: why it stopped + what to watch for
+    stop_explanation: str | None
     layers: list[TALayer]
 
 
@@ -298,7 +302,9 @@ async def quick_analysis(
                     layer.status = "blocked"
         return QuickAnalysisResponse(
             symbol=sym, style=style, timeframes=tfs,
-            direction=None, entry=None, stop_loss=None, sl_basis=None,
+            direction=None, entry=None, entry_zone_low=None, entry_zone_high=None,
+            entry_type=None, entry_note=None,
+            stop_loss=None, sl_basis=None,
             take_profits=[], risk_reward=None, confidence=None,
             skip_reason=reason, stop_explanation=explanation,
             layers=layers,
@@ -550,40 +556,135 @@ async def quick_analysis(
                 detail="Insufficient data for order flow",
             ))
 
-        # ── Risk Management ────────────────────────────────────────────────────
+        # ── Risk Management — Zone-Based Entry ────────────────────────────────
         current_price = c4[-1]
         direction_str = "long" if trade_direction == "uptrend" else "short"
         direction_out = "LONG" if direction_str == "long" else "SHORT"
 
-        support_level = sr_data.strongest_support.midpoint if sr_data.strongest_support else None
+        # Collect S/R zone data
+        support_level    = sr_data.strongest_support.midpoint    if sr_data.strongest_support    else None
         resistance_level = sr_data.strongest_resistance.midpoint if sr_data.strongest_resistance else None
-        sr_zone = (
-            (sr_data.strongest_support.price_low, sr_data.strongest_support.price_high)
-            if sr_data.strongest_support else None
-        )
+        sup_zone_low  = sr_data.strongest_support.price_low    if sr_data.strongest_support    else None
+        sup_zone_high = sr_data.strongest_support.price_high   if sr_data.strongest_support    else None
+        res_zone_low  = sr_data.strongest_resistance.price_low  if sr_data.strongest_resistance else None
+        res_zone_high = sr_data.strongest_resistance.price_high if sr_data.strongest_resistance else None
 
+        # ── Determine entry based on direction ─────────────────────────────────
+        # LONG  → ideal entry AT strongest support zone
+        # SHORT → ideal entry AT strongest resistance zone
+        entry_zone_low: float | None  = None
+        entry_zone_high: float | None = None
+        entry_type: str = "market"
+        entry_note: str = ""
+
+        if direction_str == "long" and support_level:
+            zone_mid = support_level
+            dist_to_zone = (current_price - zone_mid) / zone_mid  # + means above support
+
+            if dist_to_zone <= 0.015:
+                # Price AT or very near support — enter now
+                entry_price   = current_price
+                entry_zone_low  = sup_zone_low
+                entry_zone_high = sup_zone_high
+                entry_type  = "at_zone"
+                entry_note  = (
+                    f"✅ Harga sudah di area support ${zone_mid:.4g} "
+                    f"(zona {sup_zone_low:.4g}–{sup_zone_high:.4g}). "
+                    "Entry sekarang valid."
+                )
+            elif dist_to_zone <= 0.06:
+                # Price slightly above support — ideal entry at support zone
+                entry_price   = zone_mid
+                entry_zone_low  = sup_zone_low
+                entry_zone_high = sup_zone_high
+                entry_type  = "wait_pullback"
+                entry_note  = (
+                    f"⏳ Tunggu pullback ke support ${zone_mid:.4g} "
+                    f"(zona {sup_zone_low:.4g}–{sup_zone_high:.4g}). "
+                    f"Harga sekarang ${current_price:.4g} ({dist_to_zone*100:.1f}% di atas support). "
+                    "Pasang limit buy di zona support."
+                )
+            else:
+                # Price too far above support
+                entry_price   = zone_mid
+                entry_zone_low  = sup_zone_low
+                entry_zone_high = sup_zone_high
+                entry_type  = "wait_pullback"
+                entry_note  = (
+                    f"⚠️ Harga ${current_price:.4g} terlalu jauh dari support ${zone_mid:.4g} "
+                    f"({dist_to_zone*100:.1f}%). "
+                    "Tunggu pullback signifikan sebelum entry. "
+                    "Setup masih valid, timing belum tepat."
+                )
+
+        elif direction_str == "short" and resistance_level:
+            zone_mid = resistance_level
+            dist_to_zone = (zone_mid - current_price) / zone_mid  # + means below resistance
+
+            if dist_to_zone <= 0.015:
+                entry_price   = current_price
+                entry_zone_low  = res_zone_low
+                entry_zone_high = res_zone_high
+                entry_type  = "at_zone"
+                entry_note  = (
+                    f"✅ Harga sudah di area resistance ${zone_mid:.4g} "
+                    f"(zona {res_zone_low:.4g}–{res_zone_high:.4g}). "
+                    "Entry SHORT sekarang valid."
+                )
+            elif dist_to_zone <= 0.06:
+                entry_price   = zone_mid
+                entry_zone_low  = res_zone_low
+                entry_zone_high = res_zone_high
+                entry_type  = "wait_rally"
+                entry_note  = (
+                    f"⏳ Tunggu rally ke resistance ${zone_mid:.4g} "
+                    f"(zona {res_zone_low:.4g}–{res_zone_high:.4g}). "
+                    f"Harga sekarang ${current_price:.4g} ({dist_to_zone*100:.1f}% di bawah resistance). "
+                    "Pasang limit sell di zona resistance."
+                )
+            else:
+                entry_price   = zone_mid
+                entry_zone_low  = res_zone_low
+                entry_zone_high = res_zone_high
+                entry_type  = "wait_rally"
+                entry_note  = (
+                    f"⚠️ Harga ${current_price:.4g} terlalu jauh dari resistance ${zone_mid:.4g} "
+                    f"({dist_to_zone*100:.1f}%). "
+                    "Tunggu rally ke resistance sebelum entry SHORT."
+                )
+        else:
+            # No S/R zone found — use current price
+            entry_price = current_price
+            entry_type  = "market"
+            entry_note  = "No strong S/R zone found — entry at market price"
+
+        # ── SL from entry zone (not current price) ─────────────────────────────
+        sr_zone_tuple = (
+            (sup_zone_low, sup_zone_high) if direction_str == "long" and sup_zone_low else None
+        )
         stop_loss_price = calculate_stop_loss(
-            entry_price=current_price,
+            entry_price=entry_price,
             direction=direction_str,
             support_level=support_level if direction_str == "long" else resistance_level,
             resistance_level=resistance_level if direction_str == "short" else support_level,
-            sr_zone=sr_zone,
+            sr_zone=sr_zone_tuple,
+            min_sl_pct=0.015,
         )
-        risk_amount = abs(current_price - stop_loss_price)
-        take_profit_price = calculate_take_profit(current_price, direction_str, risk_amount, 3.0)
-        risk_calc = calculate_risk_metrics(current_price, stop_loss_price, take_profit_price, direction_str)
+
+        risk_amount = abs(entry_price - stop_loss_price)
+        take_profit_price = calculate_take_profit(entry_price, direction_str, risk_amount, 3.0)
+        risk_calc = calculate_risk_metrics(entry_price, stop_loss_price, take_profit_price, direction_str)
 
         if not risk_calc.is_valid:
             return _no_signal(
                 f"Gate Risk: R:R {risk_calc.risk_reward_ratio:.1f} < 1:3 minimum",
                 f"Semua layer lolos! Tapi R:R hanya 1:{risk_calc.risk_reward_ratio:.1f}. "
-                "Sistem membutuhkan minimum 1:3 (reward = 3x risiko). "
-                f"Entry: ${current_price:.4g} | SL: ${stop_loss_price:.4g} | TP: ${take_profit_price:.4g}. "
-                "Coba style dengan timeframe lebih besar untuk SL yang lebih jauh dari noise.",
+                "Sistem membutuhkan minimum 1:3. "
+                "Coba style dengan timeframe lebih besar.",
                 "T4 Trigger",
             )
 
-        # ── Build multi-TP ─────────────────────────────────────────────────────
+        # ── Multi-TP ───────────────────────────────────────────────────────────
         res_prices: list[float] = []
         sup_prices: list[float] = []
         for zone in getattr(sr_data, "resistance_zones", []):
@@ -595,31 +696,42 @@ async def quick_analysis(
         if sr_data.strongest_support:
             sup_prices.insert(0, float(sr_data.strongest_support.midpoint))
 
-        take_profits = _calc_multi_tp(current_price, stop_loss_price, direction_out, res_prices, sup_prices)
-        sl_basis = "Below strongest support zone" if direction_out == "LONG" else "Above strongest resistance zone"
+        take_profits = _calc_multi_tp(entry_price, stop_loss_price, direction_out, res_prices, sup_prices)
+        sl_basis = (
+            f"Below support zone ${support_level:.4g}" if direction_out == "LONG"
+            else f"Above resistance zone ${resistance_level:.4g}"
+        )
         best_tp = take_profits[1] if len(take_profits) >= 2 else (take_profits[0] if take_profits else None)
 
-        # Confidence: weighted average of layer signals (T0-T5)
+        # ── Confidence ─────────────────────────────────────────────────────────
         of_score = 0.0
         if order_flow:
             of_map = {"strong_buy": 90, "buy": 70, "neutral": 50, "sell": 30, "strong_sell": 10}
             of_raw = of_map.get(order_flow.signal, 50)
             if trade_direction == "downtrend":
-                of_raw = 100 - of_raw  # invert for shorts
+                of_raw = 100 - of_raw
             of_score = of_raw
+
+        # Bonus confidence if already at zone
+        zone_bonus = 15 if entry_type == "at_zone" else (5 if entry_type in ("wait_pullback", "wait_rally") else 0)
 
         confidence = min(99.0, (
             wyckoff.strength * 0.15 +
-            trigger.confidence * 0.30 +
+            trigger.confidence * 0.25 +
             (pattern.formation_strength if pattern else 50) * 0.15 +
             risk_calc.risk_reward_ratio * 5 * 0.15 +
-            of_score * 0.25
+            of_score * 0.20 +
+            zone_bonus * 0.10
         ))
 
         return QuickAnalysisResponse(
             symbol=sym, style=style, timeframes=tfs,
             direction=direction_out,
-            entry=round(current_price, 8),
+            entry=round(entry_price, 8),
+            entry_zone_low=round(entry_zone_low, 8) if entry_zone_low else None,
+            entry_zone_high=round(entry_zone_high, 8) if entry_zone_high else None,
+            entry_type=entry_type,
+            entry_note=entry_note,
             stop_loss=round(stop_loss_price, 8),
             sl_basis=sl_basis,
             take_profits=take_profits,

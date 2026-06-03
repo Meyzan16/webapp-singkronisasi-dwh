@@ -10,11 +10,13 @@ interface TradingChartProps {
   candles: Candle[];
   height?: number;
   entryPrice?: number;
+  entryZoneLow?: number;
+  entryZoneHigh?: number;
   stopLoss?: number;
   takeProfits?: { price: number; level: number }[];
 }
 
-export function TradingChart({ candles, height = 420, entryPrice, stopLoss, takeProfits }: TradingChartProps) {
+export function TradingChart({ candles, height = 420, entryPrice, entryZoneLow, entryZoneHigh, stopLoss, takeProfits }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [tool, setTool] = useState<DrawTool>("none");
@@ -58,21 +60,35 @@ export function TradingChart({ candles, height = 420, entryPrice, stopLoss, take
     const t1 = sorted[sorted.length - 1].time as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
     if (entryPrice && sorted.length) {
-      // Entry zone: shaded band ±0.3% around entry (thick line approximation)
-      const entryBuf = entryPrice * 0.003;
-      const entryTop = chart.addSeries(LineSeries, {
-        color: "#facc1540", lineWidth: 8, lineStyle: 0, priceScaleId: "right",
+      // Entry ZONE band — use actual S/R zone if available, else ±0.3% buffer
+      const zoneTop = entryZoneHigh ?? entryPrice * 1.003;
+      const zoneBot = entryZoneLow  ?? entryPrice * 0.997;
+      const midStep = (zoneTop - zoneBot) / 8;
+
+      // Fill band with multiple semi-transparent lines
+      for (let i = 0; i <= 8; i++) {
+        const lvl = zoneBot + midStep * i;
+        const band = chart.addSeries(LineSeries, {
+          color: "#facc1520", lineWidth: 2, lineStyle: 0, priceScaleId: "right",
+          lastValueVisible: false, priceLineVisible: false,
+        });
+        band.setData([{ time: t0, value: lvl }, { time: t1, value: lvl }]);
+      }
+
+      // Zone boundary lines
+      const zoneTopLine = chart.addSeries(LineSeries, {
+        color: "#facc1580", lineWidth: 1, lineStyle: 3, priceScaleId: "right",
         lastValueVisible: false, priceLineVisible: false,
       });
-      entryTop.setData([{ time: t0, value: entryPrice + entryBuf }, { time: t1, value: entryPrice + entryBuf }]);
+      zoneTopLine.setData([{ time: t0, value: zoneTop }, { time: t1, value: zoneTop }]);
 
-      const entryBot = chart.addSeries(LineSeries, {
-        color: "#facc1540", lineWidth: 8, lineStyle: 0, priceScaleId: "right",
+      const zoneBotLine = chart.addSeries(LineSeries, {
+        color: "#facc1580", lineWidth: 1, lineStyle: 3, priceScaleId: "right",
         lastValueVisible: false, priceLineVisible: false,
       });
-      entryBot.setData([{ time: t0, value: entryPrice - entryBuf }, { time: t1, value: entryPrice - entryBuf }]);
+      zoneBotLine.setData([{ time: t0, value: zoneBot }, { time: t1, value: zoneBot }]);
 
-      // Entry center line (solid)
+      // Entry midpoint (solid bright)
       const entryLine = chart.addSeries(LineSeries, {
         color: "#facc15", lineWidth: 2, lineStyle: 0, priceScaleId: "right",
         lastValueVisible: true, title: "Entry",
@@ -117,7 +133,7 @@ export function TradingChart({ candles, height = 420, entryPrice, stopLoss, take
     const handleResize = () => { if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth }); };
     window.addEventListener("resize", handleResize);
     return () => { window.removeEventListener("resize", handleResize); chart.remove(); chartRef.current = null; };
-  }, [candles, height, entryPrice, stopLoss, takeProfits]);
+  }, [candles, height, entryPrice, entryZoneLow, entryZoneHigh, stopLoss, takeProfits]);
 
   // Click to draw horizontal line
   const handleChartClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
