@@ -50,6 +50,15 @@ async def force_check() -> dict:
     return {"closed": closed, "message": f"{closed} trade(s) closed"}
 
 
+@router.get("/history/daily-pnl", dependencies=[_db])
+async def get_daily_pnl(days: int = Query(30, description="Number of days to include")) -> dict:
+    """
+    Daily PnL aggregation for calendar view.
+    Returns one entry per day with total PnL, wins, losses, and trade count.
+    """
+    return await paper_trader.get_daily_pnl(days=days)
+
+
 @router.delete("/history/all", dependencies=[_db])
 async def clear_all_trades() -> dict:
     """Delete all paper trades — hard reset. Used when changing scoring rules."""

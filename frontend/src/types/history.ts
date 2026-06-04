@@ -40,3 +40,17 @@ export interface EquityPoint {
   ts: number;
   pnl: number;
 }
+
+export interface DayPnL {
+  date: string;   // "YYYY-MM-DD"
+  pnl: number;    // net in R units
+  wins: number;
+  losses: number;
+  trades: number;
+}
+
+export interface DailyPnLData {
+  days: DayPnL[];
+  total_pnl: number;
+  period_days: number;
+}

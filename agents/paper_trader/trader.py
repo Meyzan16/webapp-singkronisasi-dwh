@@ -312,6 +312,59 @@ async def get_stats() -> dict:
     }
 
 
+async def get_daily_pnl(days: int = 30) -> dict:
+    """
+    Aggregate closed trades by calendar day.
+    Returns one entry per day with: date, net_pnl, wins, losses, trades.
+    Used for the PnL calendar heatmap on the history page.
+    """
+    _require_db()
+    import datetime as dt
+
+    cutoff = time.time() - days * 86400
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PaperTrade)
+            .where(
+                PaperTrade.status.in_(["tp", "sl"]),
+                PaperTrade.closed_at >= cutoff,
+            )
+            .order_by(PaperTrade.closed_at)
+        )
+        closed = result.scalars().all()
+
+    # Group by calendar date (local UTC date from timestamp)
+    daily: dict[str, dict] = {}
+    for t in closed:
+        if t.closed_at is None:
+            continue
+        day = dt.datetime.utcfromtimestamp(t.closed_at).strftime("%Y-%m-%d")
+        if day not in daily:
+            daily[day] = {"date": day, "pnl": 0.0, "wins": 0, "losses": 0, "trades": 0}
+        daily[day]["trades"] += 1
+        if t.status == "tp":
+            daily[day]["wins"] += 1
+            try:
+                rr = float(t.risk_reward.split(":")[1])
+            except Exception:
+                rr = 1.0
+            daily[day]["pnl"] = round(daily[day]["pnl"] + rr, 2)
+        else:
+            daily[day]["losses"] += 1
+            daily[day]["pnl"]    = round(daily[day]["pnl"] - 1.0, 2)
+
+    # Fill in empty days so the calendar has a full grid
+    result_days = []
+    now = dt.datetime.utcnow()
+    for i in range(days - 1, -1, -1):
+        d = (now - dt.timedelta(days=i)).strftime("%Y-%m-%d")
+        result_days.append(daily.get(d, {"date": d, "pnl": 0.0, "wins": 0, "losses": 0, "trades": 0}))
+
+    total_pnl = round(sum(d["pnl"] for d in result_days), 2)
+    return {"days": result_days, "total_pnl": total_pnl, "period_days": days}
+
+
 async def get_equity_curve() -> list[dict]:
     _require_db()
 

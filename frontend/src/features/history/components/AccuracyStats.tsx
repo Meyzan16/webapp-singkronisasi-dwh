@@ -7,15 +7,27 @@ const STYLE_META: Record<string, { icon: string; label: string; color: string; b
   position:   { icon: "🏔", label: "Position",  color: "from-purple-500/20 to-violet-500/20 border-purple-400/40", badge: "bg-purple-500" },
 };
 
-interface AccuracyStatsProps { stats: HistoryStats; }
+interface AccuracyStatsProps {
+  stats: HistoryStats | null;
+  loading?: boolean;
+}
 
-export function AccuracyStats({ stats }: AccuracyStatsProps) {
+export function AccuracyStats({ stats, loading }: AccuracyStatsProps) {
+  if (!stats) {
+    // Skeleton state — always show the section structure
+    return (
+      <div className="space-y-3 animate-pulse">
+        <div className="bg-neutral-900 rounded-2xl h-40" />
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          {[1,2,3,4].map(i => <div key={i} className="rounded-xl bg-neutral-100 h-44" />)}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-3">
-      {/* Overall */}
       <OverallCard stats={stats} />
-
-      {/* Per style */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
         {Object.entries(STYLE_META).map(([key, meta]) => {
           const s = stats.by_style[key];
