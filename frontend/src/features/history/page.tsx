@@ -73,8 +73,9 @@ export default function HistoryPage() {
     return () => { clearInterval(pollTimer); clearInterval(tickTimer); };
   }, [fetchAll, isLive]);
 
-  const openCount   = trades.filter(t => t.status === "open").length;
-  const closedCount = trades.filter(t => t.status !== "open").length;
+  const pendingCount = trades.filter(t => t.status === "pending").length;
+  const openCount    = trades.filter(t => t.status === "open").length;
+  const closedCount  = trades.filter(t => t.status === "tp" || t.status === "sl").length;
 
   return (
     <div className="space-y-6">
@@ -163,8 +164,11 @@ export default function HistoryPage() {
         <CardHeader>
           <CardTitle className="flex items-center justify-between text-base flex-wrap gap-2">
             <span>📋 Riwayat Trade</span>
-            <span className="text-xs font-normal text-neutral-400">
-              {trades.length} total · {openCount} open · {closedCount} closed
+            <span className="text-xs font-normal text-neutral-400 flex items-center gap-2">
+              <span>{trades.length} total</span>
+              {pendingCount > 0 && <span className="text-amber-500">· {pendingCount} pending</span>}
+              <span className="text-blue-500">· {openCount} open</span>
+              <span>· {closedCount} closed</span>
             </span>
           </CardTitle>
         </CardHeader>

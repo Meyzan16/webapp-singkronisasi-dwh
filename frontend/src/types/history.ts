@@ -1,4 +1,4 @@
-export type TradeStatus = "open" | "tp" | "sl";
+export type TradeStatus = "pending" | "open" | "tp" | "sl";
 
 export interface PaperTrade {
   id: number;
@@ -27,6 +27,7 @@ export interface StyleStats {
   wins: number;
   losses: number;
   open: number;
+  pending: number;
   win_rate: number;
   avg_pnl_pct: number;
 }

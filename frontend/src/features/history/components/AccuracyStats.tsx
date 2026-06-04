@@ -59,7 +59,10 @@ function OverallCard({ stats }: { stats: HistoryStats }) {
             <div className="text-sm space-y-1 mb-1">
               <p><span className="text-green-400 font-bold">{s.wins}</span> <span className="text-neutral-400">TP hit</span></p>
               <p><span className="text-red-400 font-bold">{s.losses}</span> <span className="text-neutral-400">SL hit</span></p>
-              <p><span className="text-neutral-300 font-bold">{s.open}</span> <span className="text-neutral-400">open</span></p>
+              <p><span className="text-blue-400 font-bold">{s.open}</span> <span className="text-neutral-400">open</span></p>
+              {(s.pending ?? 0) > 0 && (
+                <p><span className="text-amber-400 font-bold">{s.pending}</span> <span className="text-neutral-400">pending entry</span></p>
+              )}
             </div>
           </div>
         </div>
@@ -111,9 +114,12 @@ function StyleCard({ meta, stats: s }: { meta: typeof STYLE_META[string]; stats:
 
       <div className="space-y-1 text-xs">
         <Row label="Total"   value={String(s.total)} />
-        <Row label="TP hit"  value={String(s.wins)}    color="text-green-600" />
-        <Row label="SL hit"  value={String(s.losses)}  color="text-red-500"   />
-        <Row label="Open"    value={String(s.open)}    color="text-neutral-500" />
+        <Row label="TP hit"  value={String(s.wins)}          color="text-green-600" />
+        <Row label="SL hit"  value={String(s.losses)}        color="text-red-500"   />
+        <Row label="Open"    value={String(s.open)}          color="text-blue-600"  />
+        {(s.pending ?? 0) > 0 && (
+          <Row label="Pending" value={String(s.pending)}     color="text-amber-600" />
+        )}
         <Row
           label="Avg PnL"
           value={`${s.avg_pnl_pct >= 0 ? "+" : ""}${s.avg_pnl_pct.toFixed(2)}%`}

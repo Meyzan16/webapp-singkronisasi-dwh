@@ -1,23 +1,26 @@
 """
-Paper Trading Service — PostgreSQL-backed.
+Paper Trading Agent — PostgreSQL-backed.
 
-Purpose: measure win rate per trading style.
-Each style is tracked independently so win rate stats are style-specific.
+Purpose: measure win rate per trading style by simulating scanner signals.
+
+Trade lifecycle:
+  pending  → scanner signal recorded, waiting for entry price to be hit
+              (only for limit orders: wait_pullback / wait_rally)
+  open     → entry price reached, position is "active"
+              (market/at_zone entries start here directly)
+  tp       → take profit hit ✅
+  sl       → stop loss hit 🛑
+
+This mirrors real trading:
+  - Market entry (at_zone): your order fills immediately → open
+  - Limit entry (wait_pullback/wait_rally): order placed, waiting for
+    price to pull back/rally to entry zone → pending first, then open
 
 Rules:
-  1. R:R >= MIN_RR (1:3) — only quality setups get logged
-  2. Dedup per coin+style: skip only if that coin already has an OPEN trade
-     in the same style. Cross-style duplicates are allowed (scalping BTCUSDT
-     and daytrading BTCUSDT are separate data points for different styles).
-  3. Limit orders (wait_pullback / wait_rally): TP/SL only checked after fill
-  4. MIN_HOLD_SEC: 5-min grace before first TP/SL evaluation (no instant-TP)
-
-DB unavailability:
-  log_signals_batch()     → returns 0 silently
-  check_and_close_trades()→ returns 0 silently
-  get_all_trades()        → raises 503
-  get_stats()             → raises 503
-  get_equity_curve()      → raises 503
+  1. R:R >= MIN_RR (1:3) — only quality setups
+  2. Dedup per coin+style: skip if coin already has pending OR open trade
+     in this style (mirrors "you can only have one order per instrument")
+  3. After close (tp/sl): slot is free for next signal
 """
 
 import json
@@ -30,8 +33,6 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
-# These imports work whether running inside backend or as standalone agent
-# (both cases share the same Python path in this monorepo)
 from app.database import AsyncSessionLocal, is_db_available
 from app.models.paper_trade import PaperTrade
 from app.services.binance_urls import fapi
@@ -39,57 +40,60 @@ from app.services.binance_urls import fapi
 logger = structlog.get_logger(__name__)
 
 _last_check_ts: float = 0.0
-_CHECK_INTERVAL = 60      # rate-limit: check at most once per minute
-MIN_RR          = 3.0     # minimum R:R ratio to log (1:3)
-MIN_HOLD_SEC    = 5 * 60  # 5 min grace before first TP/SL evaluation
+_CHECK_INTERVAL = 60   # price check at most once per minute
+MIN_RR          = 3.0  # minimum R:R to log (1:3)
+
+# Limit orders: entry types that require waiting for fill
+LIMIT_ENTRY_TYPES = {"wait_pullback", "wait_rally"}
 
 
-# ── Internal helpers ───────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _require_db() -> None:
     if not is_db_available():
-        raise HTTPException(
-            status_code=503,
-            detail="Database unavailable — paper trading history requires PostgreSQL.",
-        )
+        raise HTTPException(status_code=503,
+            detail="Database unavailable — paper trading requires PostgreSQL.")
 
 
 def _parse_rr(rr_str: str) -> float:
-    """Parse '1:2.5' → 2.5. Returns 0.0 on failure."""
     try:
         return float(str(rr_str).split(":")[1])
     except (IndexError, ValueError):
         return 0.0
 
 
+def _initial_status(entry_type: str) -> str:
+    """
+    Market/at_zone → "open" immediately (entry filled at scan time).
+    Limit (wait_pullback/wait_rally) → "pending" (waiting for fill).
+    """
+    return "pending" if entry_type in LIMIT_ENTRY_TYPES else "open"
+
+
 # ── Write operations ───────────────────────────────────────────────────────────
 
 async def log_signal(signal: dict, style: str) -> bool:
-    """Single signal insert — kept for compatibility."""
     return bool(await log_signals_batch([signal], style))
 
 
 async def log_signals_batch(signals: list[dict], style: str) -> int:
     """
-    Batch-insert scanner signals for the given style.
+    Batch-insert scanner signals.
 
-    Rules:
-    • R:R >= MIN_RR (1:3) — quality filter
-    • Dedup per coin+style: skip only if that exact coin already has an OPEN
-      trade in this style. After TP/SL, the slot is free for the next signal.
-      Scalping and daytrading on the same coin are separate rows (different styles).
-    • Returns number of trades actually inserted.
+    • R:R >= MIN_RR filter (cheap, no DB)
+    • Dedup: skip coin if it already has pending OR open trade in this style
+    • Market entry  → status = "open"   (position is live immediately)
+    • Limit entry   → status = "pending" (waiting for entry zone to be hit)
     """
     if not is_db_available() or not signals:
         return 0
 
-    # ── 1. R:R filter ─────────────────────────────────────────────────────────
+    # 1. R:R filter
     qualifying = [s for s in signals if _parse_rr(s.get("risk_reward", "1:0")) >= MIN_RR]
     skipped_rr = len(signals) - len(qualifying)
     if not qualifying:
         if skipped_rr:
-            logger.info("paper_trades_all_rr_filtered",
-                        style=style, total=len(signals), min_rr=MIN_RR)
+            logger.info("paper_trades_rr_filtered", style=style, total=len(signals))
         return 0
 
     try:
@@ -97,20 +101,21 @@ async def log_signals_batch(signals: list[dict], style: str) -> int:
         now     = time.time()
 
         async with AsyncSessionLocal() as session:
-            # ── 2. Dedup: one OPEN trade per coin per style ────────────────────
-            existing_result = await session.execute(
+            # 2. Dedup: one active slot per coin+style (pending or open)
+            existing = await session.execute(
                 select(PaperTrade.symbol).where(
                     PaperTrade.symbol.in_(symbols),
-                    PaperTrade.style  == style,
-                    PaperTrade.status == "open",
+                    PaperTrade.style.in_([style]),
+                    PaperTrade.status.in_(["pending", "open"]),
                 )
             )
-            open_symbols = {row[0] for row in existing_result.fetchall()}
+            active_symbols = {row[0] for row in existing.fetchall()}
 
             new_trades = []
             for sig in qualifying:
-                if sig["symbol"] in open_symbols:
+                if sig["symbol"] in active_symbols:
                     continue
+                entry_type = sig.get("entry_type", "market")
                 new_trades.append(PaperTrade(
                     symbol       = sig["symbol"],
                     direction    = sig["direction"],
@@ -124,18 +129,19 @@ async def log_signals_batch(signals: list[dict], style: str) -> int:
                     sl_method    = sig.get("sl_method", ""),
                     tp_method    = sig.get("tp_method", ""),
                     signals_json = json.dumps(sig.get("signals", [])),
-                    entry_type   = sig.get("entry_type", "market"),
+                    entry_type   = entry_type,
                     entry_at     = now,
-                    status       = "open",
+                    status       = _initial_status(entry_type),
                 ))
 
             if new_trades:
                 session.add_all(new_trades)
                 await session.commit()
 
-        logger.info("paper_trades_batch_logged",
-                    style=style,
-                    inserted=len(new_trades),
+        pending_n = sum(1 for t in new_trades if t.status == "pending")
+        open_n    = len(new_trades) - pending_n
+        logger.info("paper_trades_logged",
+                    style=style, open=open_n, pending=pending_n,
                     skipped_dup=len(qualifying) - len(new_trades),
                     skipped_rr=skipped_rr)
         return len(new_trades)
@@ -147,13 +153,10 @@ async def log_signals_batch(signals: list[dict], style: str) -> int:
 
 async def check_and_close_trades() -> int:
     """
-    Evaluate open trades against current Binance prices.
+    1. Pending → Open: if limit order entry zone is now reached
+    2. Open   → TP/SL: if take profit or stop loss is hit
 
-    Rules per trade:
-    • Skip trades younger than MIN_HOLD_SEC — prevents instant-TP artifacts.
-    • For limit orders (wait_pullback / wait_rally): skip TP/SL until
-      the current price actually reaches the entry zone (order filled).
-    • Then evaluate TP/SL normally.
+    Called at most once per _CHECK_INTERVAL seconds.
     """
     global _last_check_ts
 
@@ -162,20 +165,21 @@ async def check_and_close_trades() -> int:
 
     try:
         async with AsyncSessionLocal() as session:
-            result      = await session.execute(select(PaperTrade).where(PaperTrade.status == "open"))
-            open_trades = result.scalars().all()
+            result = await session.execute(
+                select(PaperTrade).where(PaperTrade.status.in_(["pending", "open"]))
+            )
+            active_trades = result.scalars().all()
     except SQLAlchemyError:
         return 0
 
-    if not open_trades:
+    if not active_trades:
         return 0
 
     now = time.time()
 
-    # Fetch current prices from Binance Futures
-    symbols = list({t.symbol for t in open_trades})
+    # Fetch Binance prices for all active symbols
+    symbols = list({t.symbol for t in active_trades})
     prices: dict[str, float] = {}
-
     async with httpx.AsyncClient(timeout=10) as client:
         for sym in symbols:
             try:
@@ -185,74 +189,78 @@ async def check_and_close_trades() -> int:
             except Exception:
                 pass
 
+    filled = 0
     closed = 0
 
     try:
         async with AsyncSessionLocal() as session:
-            for trade in open_trades:
+            for trade in active_trades:
                 price = prices.get(trade.symbol)
                 if price is None:
                     continue
-
-                # ── Rule 1: minimum hold time ──────────────────────────────────
-                age_sec = now - trade.entry_at
-                if age_sec < MIN_HOLD_SEC:
-                    continue
-
-                # ── Rule 2: limit-order fill check ────────────────────────────
-                # wait_pullback (LONG limit at support): filled when price drops to entry
-                # wait_rally   (SHORT limit at resistance): filled when price rises to entry
-                entry_type = trade.entry_type or "market"
-                if entry_type == "wait_pullback" and trade.direction == "LONG":
-                    if price > trade.entry_price:
-                        continue  # not yet filled
-                elif entry_type == "wait_rally" and trade.direction == "SHORT":
-                    if price < trade.entry_price:
-                        continue  # not yet filled
-
-                # ── Rule 3: TP / SL evaluation ────────────────────────────────
-                if trade.direction == "LONG":
-                    hit_sl = price <= trade.stop_loss
-                    hit_tp = price >= trade.take_profit
-                else:
-                    hit_sl = price >= trade.stop_loss
-                    hit_tp = price <= trade.take_profit
-
-                if not (hit_tp or hit_sl):
-                    continue
-
-                close_price = trade.take_profit if hit_tp else trade.stop_loss
-                pnl = (
-                    (close_price - trade.entry_price) / trade.entry_price * 100
-                    if trade.direction == "LONG"
-                    else (trade.entry_price - close_price) / trade.entry_price * 100
-                )
 
                 db_trade = await session.get(PaperTrade, trade.id)
                 if db_trade is None:
                     continue
 
-                db_trade.status      = "tp" if hit_tp else "sl"
-                db_trade.closed_at   = now
-                db_trade.close_price = close_price
-                db_trade.pnl_pct     = round(pnl, 4)
-                closed += 1
+                # ── Step 1: Pending → Open (limit order fill check) ───────────
+                if db_trade.status == "pending":
+                    entry_type = db_trade.entry_type or "market"
+                    if entry_type == "wait_pullback" and db_trade.direction == "LONG":
+                        filled_now = price <= db_trade.entry_price
+                    elif entry_type == "wait_rally" and db_trade.direction == "SHORT":
+                        filled_now = price >= db_trade.entry_price
+                    else:
+                        filled_now = True  # fallback: treat as filled
 
-                logger.info("paper_trade_closed",
-                            symbol=trade.symbol, status=db_trade.status,
-                            pnl_pct=round(pnl, 2), age_min=round(age_sec / 60, 1))
+                    if filled_now:
+                        db_trade.status  = "open"
+                        db_trade.entry_at = now  # reset entry time when filled
+                        filled += 1
+                        logger.info("paper_trade_filled",
+                                    symbol=db_trade.symbol, direction=db_trade.direction,
+                                    entry=db_trade.entry_price, price=price)
+                    continue  # don't evaluate TP/SL on same tick as fill
+
+                # ── Step 2: Open → TP/SL ─────────────────────────────────────
+                if db_trade.status == "open":
+                    if db_trade.direction == "LONG":
+                        hit_sl = price <= db_trade.stop_loss
+                        hit_tp = price >= db_trade.take_profit
+                    else:
+                        hit_sl = price >= db_trade.stop_loss
+                        hit_tp = price <= db_trade.take_profit
+
+                    if not (hit_tp or hit_sl):
+                        continue
+
+                    close_price = db_trade.take_profit if hit_tp else db_trade.stop_loss
+                    pnl = (
+                        (close_price - db_trade.entry_price) / db_trade.entry_price * 100
+                        if db_trade.direction == "LONG"
+                        else (db_trade.entry_price - close_price) / db_trade.entry_price * 100
+                    )
+                    db_trade.status      = "tp" if hit_tp else "sl"
+                    db_trade.closed_at   = now
+                    db_trade.close_price = close_price
+                    db_trade.pnl_pct     = round(pnl, 4)
+                    closed += 1
+                    logger.info("paper_trade_closed",
+                                symbol=db_trade.symbol, status=db_trade.status,
+                                pnl_pct=round(pnl, 2))
 
             await session.commit()
 
     except SQLAlchemyError as exc:
-        logger.warning("check_trades_db_error", error=str(exc)[:120])
+        logger.warning("check_trades_error", error=str(exc)[:120])
 
     _last_check_ts = now
+    if filled or closed:
+        logger.info("price_check_done", filled=filled, closed=closed)
     return closed
 
 
 async def maybe_check_trades() -> None:
-    """Rate-limited wrapper — at most once per _CHECK_INTERVAL seconds."""
     global _last_check_ts
     if is_db_available() and time.time() - _last_check_ts > _CHECK_INTERVAL:
         await check_and_close_trades()
@@ -267,32 +275,26 @@ async def get_all_trades(
 ) -> list[dict]:
     _require_db()
     cutoff = time.time() - (days or 14) * 86400
-
     async with AsyncSessionLocal() as session:
         q = select(PaperTrade).where(PaperTrade.entry_at >= cutoff)
-        if style:
-            q = q.where(PaperTrade.style == style)
-        if status:
-            q = q.where(PaperTrade.status == status)
+        if style:  q = q.where(PaperTrade.style == style)
+        if status: q = q.where(PaperTrade.status == status)
         q = q.order_by(PaperTrade.entry_at.desc())
-        result = await session.execute(q)
-        rows   = result.scalars().all()
-
+        rows = (await session.execute(q)).scalars().all()
     return [_to_dict(r) for r in rows]
 
 
 async def get_stats() -> dict:
     _require_db()
-
     async with AsyncSessionLocal() as session:
-        result     = await session.execute(select(PaperTrade))
-        all_trades = result.scalars().all()
+        rows = (await session.execute(select(PaperTrade))).scalars().all()
 
     def _calc(subset: list) -> dict:
         closed  = [t for t in subset if t.status in ("tp", "sl")]
         wins    = [t for t in closed  if t.status == "tp"]
         losses  = [t for t in closed  if t.status == "sl"]
         open_t  = [t for t in subset  if t.status == "open"]
+        pending = [t for t in subset  if t.status == "pending"]
         wr      = len(wins) / len(closed) * 100 if closed else 0.0
         pnls    = [t.pnl_pct for t in closed if t.pnl_pct is not None]
         avg_pnl = sum(pnls) / len(pnls) if pnls else 0.0
@@ -301,43 +303,32 @@ async def get_stats() -> dict:
             "wins":        len(wins),
             "losses":      len(losses),
             "open":        len(open_t),
+            "pending":     len(pending),
             "win_rate":    round(wr, 1),
             "avg_pnl_pct": round(avg_pnl, 2),
         }
 
     styles = ["scalping", "daytrading", "swing", "position"]
     return {
-        "overall":  _calc(all_trades),
-        "by_style": {s: _calc([t for t in all_trades if t.style == s]) for s in styles},
+        "overall":  _calc(rows),
+        "by_style": {s: _calc([t for t in rows if t.style == s]) for s in styles},
     }
 
 
 async def get_daily_pnl(days: int = 30) -> dict:
-    """
-    Aggregate closed trades by calendar day.
-    Returns one entry per day with: date, net_pnl, wins, losses, trades.
-    Used for the PnL calendar heatmap on the history page.
-    """
     _require_db()
     import datetime as dt
-
     cutoff = time.time() - days * 86400
-
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
+        closed = (await session.execute(
             select(PaperTrade)
-            .where(
-                PaperTrade.status.in_(["tp", "sl"]),
-                PaperTrade.closed_at >= cutoff,
-            )
+            .where(PaperTrade.status.in_(["tp", "sl"]), PaperTrade.closed_at >= cutoff)
             .order_by(PaperTrade.closed_at)
-        )
-        closed = result.scalars().all()
+        )).scalars().all()
 
-    # Group by calendar date (local UTC date from timestamp)
     daily: dict[str, dict] = {}
     for t in closed:
-        if t.closed_at is None:
+        if not t.closed_at:
             continue
         day = dt.datetime.utcfromtimestamp(t.closed_at).strftime("%Y-%m-%d")
         if day not in daily:
@@ -345,55 +336,42 @@ async def get_daily_pnl(days: int = 30) -> dict:
         daily[day]["trades"] += 1
         if t.status == "tp":
             daily[day]["wins"] += 1
-            try:
-                rr = float(t.risk_reward.split(":")[1])
-            except Exception:
-                rr = 1.0
+            try: rr = float(t.risk_reward.split(":")[1])
+            except: rr = 1.0
             daily[day]["pnl"] = round(daily[day]["pnl"] + rr, 2)
         else:
             daily[day]["losses"] += 1
             daily[day]["pnl"]    = round(daily[day]["pnl"] - 1.0, 2)
 
-    # Fill in empty days so the calendar has a full grid
-    result_days = []
     now = dt.datetime.utcnow()
-    for i in range(days - 1, -1, -1):
-        d = (now - dt.timedelta(days=i)).strftime("%Y-%m-%d")
-        result_days.append(daily.get(d, {"date": d, "pnl": 0.0, "wins": 0, "losses": 0, "trades": 0}))
-
-    total_pnl = round(sum(d["pnl"] for d in result_days), 2)
-    return {"days": result_days, "total_pnl": total_pnl, "period_days": days}
+    result_days = [
+        daily.get((now - dt.timedelta(days=i)).strftime("%Y-%m-%d"),
+                  {"date": (now - dt.timedelta(days=i)).strftime("%Y-%m-%d"),
+                   "pnl": 0.0, "wins": 0, "losses": 0, "trades": 0})
+        for i in range(days - 1, -1, -1)
+    ]
+    return {"days": result_days, "total_pnl": round(sum(d["pnl"] for d in result_days), 2), "period_days": days}
 
 
 async def get_equity_curve() -> list[dict]:
     _require_db()
-
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(PaperTrade)
-            .where(PaperTrade.status.in_(["tp", "sl"]))
-            .order_by(PaperTrade.closed_at)
-        )
-        closed = result.scalars().all()
+        closed = (await session.execute(
+            select(PaperTrade).where(PaperTrade.status.in_(["tp", "sl"])).order_by(PaperTrade.closed_at)
+        )).scalars().all()
 
-    RISK       = 1.0
+    RISK = 1.0
     cumulative = 0.0
-    start_ts   = int((time.time() - 86400 * 14) * 1000)
-    points: list[dict] = [{"ts": start_ts, "pnl": 0.0}]
-
+    points: list[dict] = [{"ts": int((time.time() - 86400 * 14) * 1000), "pnl": 0.0}]
     for t in closed:
         if t.status == "tp":
-            try:
-                rr = float(t.risk_reward.split(":")[1])
-            except Exception:
-                rr = 1.0
+            try: rr = float(t.risk_reward.split(":")[1])
+            except: rr = 1.0
             gain = RISK * rr
         else:
             gain = -RISK
-
         cumulative = round(cumulative + gain, 2)
         points.append({"ts": int((t.closed_at or 0) * 1000), "pnl": cumulative})
-
     return points
 
 

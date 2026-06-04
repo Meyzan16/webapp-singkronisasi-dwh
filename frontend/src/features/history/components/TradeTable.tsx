@@ -16,9 +16,10 @@ const STYLE_META: Record<string, { icon: string; label: string; badge: string }>
 };
 
 const STATUS_CONFIG: Record<TradeStatus, { label: string; color: string; bg: string }> = {
-  open: { label: "⏳ Open", color: "text-neutral-600",  bg: "bg-neutral-100"  },
-  tp:   { label: "✅ TP",   color: "text-green-700",    bg: "bg-green-100"    },
-  sl:   { label: "🛑 SL",   color: "text-red-700",      bg: "bg-red-100"      },
+  pending: { label: "🕐 Pending", color: "text-amber-700",   bg: "bg-amber-100"   },
+  open:    { label: "📈 Open",    color: "text-blue-700",     bg: "bg-blue-100"    },
+  tp:      { label: "✅ TP",      color: "text-green-700",    bg: "bg-green-100"   },
+  sl:      { label: "🛑 SL",      color: "text-red-700",      bg: "bg-red-100"     },
 };
 
 const ENTRY_TYPE_META: Record<string, { label: string; badge: string; tip: string }> = {
@@ -28,7 +29,7 @@ const ENTRY_TYPE_META: Record<string, { label: string; badge: string; tip: strin
   market:       { label: "Market",  badge: "bg-green-100 text-green-700 border-green-200",  tip: "Entry di harga pasar"                                      },
 };
 
-type FilterTab = "ALL" | "open" | "tp" | "sl";
+type FilterTab = "ALL" | "pending" | "open" | "tp" | "sl";
 
 interface TradeTableProps {
   trades: PaperTrade[];
@@ -61,10 +62,11 @@ export function TradeTable({ trades, loading }: TradeTableProps) {
   const startIndex = (page - 1) * PAGE_SIZE;
 
   const counts = {
-    ALL:  trades.length,
-    open: trades.filter(t => t.status === "open").length,
-    tp:   trades.filter(t => t.status === "tp").length,
-    sl:   trades.filter(t => t.status === "sl").length,
+    ALL:     trades.length,
+    pending: trades.filter(t => t.status === "pending").length,
+    open:    trades.filter(t => t.status === "open").length,
+    tp:      trades.filter(t => t.status === "tp").length,
+    sl:      trades.filter(t => t.status === "sl").length,
   };
 
   return (
@@ -105,20 +107,22 @@ export function TradeTable({ trades, loading }: TradeTableProps) {
       <div className="flex flex-wrap items-center gap-3">
         {/* Status tabs */}
         <div className="flex gap-1.5 flex-wrap">
-          {(["ALL", "open", "tp", "sl"] as FilterTab[]).map(f => (
+          {(["ALL", "pending", "open", "tp", "sl"] as FilterTab[]).map(f => (
             <button key={f} onClick={() => setTab(f)}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
                 tab === f
-                  ? f === "tp"   ? "bg-green-600 text-white"
-                  : f === "sl"   ? "bg-red-600 text-white"
-                  : f === "open" ? "bg-neutral-700 text-white"
-                  :                "bg-teal-600 text-white"
+                  ? f === "tp"      ? "bg-green-600 text-white"
+                  : f === "sl"      ? "bg-red-600 text-white"
+                  : f === "pending" ? "bg-amber-500 text-white"
+                  : f === "open"    ? "bg-blue-600 text-white"
+                  :                   "bg-teal-600 text-white"
                   : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
               }`}>
-              {f === "ALL"  ? `Semua (${counts.ALL})`
-               : f === "open" ? `Open (${counts.open})`
-               : f === "tp"   ? `TP Hit (${counts.tp})`
-               :                `SL Hit (${counts.sl})`}
+              {f === "ALL"     ? `Semua (${counts.ALL})`
+               : f === "pending" ? `Pending (${counts.pending})`
+               : f === "open"    ? `Open (${counts.open})`
+               : f === "tp"      ? `TP Hit (${counts.tp})`
+               :                   `SL Hit (${counts.sl})`}
             </button>
           ))}
         </div>
