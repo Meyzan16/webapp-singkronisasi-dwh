@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/frontend/node_modules
 /.pnp
 .pnp.*
 .yarn/*
@@ -18,9 +19,12 @@ __pycache__/
 # next.js
 /.next/
 /out/
+/frontend/.next/
+/frontend/out/
 
 # production
 /build
+/frontend/build
 
 # misc
 .DS_Store
@@ -35,6 +39,7 @@ yarn-error.log*
 # env files
 .env*
 !.env.example
+!backend/.env.example
 
 # vercel
 .vercel
@@ -42,3 +47,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+/frontend/next-env.d.ts
+
+# logs
+backend/uvicorn_stdout.log
+backend/uvicorn_stderr.log
+next_stdout.log
