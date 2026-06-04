@@ -1,22 +1,8 @@
 "use client";
-
+import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 
-// ── Reusable section components ───────────────────────────────────────────────
-
-function SectionHeader({ icon, title, subtitle }: { icon: string; title: string; subtitle?: string }) {
-  return (
-    <div className="flex items-center gap-3 mb-5">
-      <span className="text-3xl">{icon}</span>
-      <div>
-        <h2 className="text-xl font-bold text-neutral-900">{title}</h2>
-        {subtitle && <p className="text-sm text-neutral-500">{subtitle}</p>}
-      </div>
-    </div>
-  );
-}
-
-function CodeBlock({ children }: { children: string }) {
+function Code({ children }: { children: string }) {
   return (
     <pre className="bg-neutral-900 text-green-400 text-[11px] font-mono p-3 rounded-lg overflow-x-auto leading-relaxed whitespace-pre-wrap">
       {children}
@@ -24,182 +10,382 @@ function CodeBlock({ children }: { children: string }) {
   );
 }
 
-function Tag({ label, color = "bg-teal-100 text-teal-700" }: { label: string; color?: string }) {
+function Badge({ label, color }: { label: string; color: string }) {
   return <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${color}`}>{label}</span>;
 }
 
-function Rule({ label, value }: { label: string; value: string }) {
+function SectionTitle({ icon, title, sub }: { icon: string; title: string; sub?: string }) {
   return (
-    <div className="flex justify-between items-start gap-4 py-1.5 border-b border-neutral-100 last:border-0">
-      <span className="text-sm text-neutral-500 shrink-0">{label}</span>
-      <span className="text-sm font-semibold text-neutral-800 text-right">{value}</span>
+    <div className="flex items-center gap-3 mb-4">
+      <span className="text-2xl">{icon}</span>
+      <div>
+        <h2 className="text-lg font-bold text-neutral-900">{title}</h2>
+        {sub && <p className="text-xs text-neutral-500">{sub}</p>}
+      </div>
     </div>
   );
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+// ── Tabs helper ───────────────────────────────────────────────────────────────
+function Tabs({ tabs, active, onChange }: { tabs: string[]; active: string; onChange: (t: string) => void }) {
+  return (
+    <div className="flex bg-neutral-100 rounded-lg p-0.5 gap-0.5 mb-4">
+      {tabs.map(t => (
+        <button key={t} onClick={() => onChange(t)}
+          className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+            active === t ? "bg-white shadow text-neutral-900" : "text-neutral-500 hover:text-neutral-700"
+          }`}>
+          {t}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function ArchitecturePage() {
+  const [taTab, setTaTab]     = useState("BB Squeeze");
+  const [styleTab, setStyleTab] = useState("Scalping");
+
+  const TA_SIGNALS = {
+    "BB Squeeze": {
+      icon: "🔵", score: "+25 × w_squeeze",
+      formula: `BB Width = (StdDev(close, n) × 4) / BB_mid
+Squeeze    jika Width < threshold  (3–8% tergantung style)
+Tightening jika Width < threshold × 1.5`,
+      why: "Volatilitas menyempit (BB menguncup) = energi terkompresi sebelum breakout besar. Semakin sempit BB, semakin besar potensi pergerakan.",
+    },
+    "Vol Akumulasi": {
+      icon: "📦", score: "+22 × w_accum",
+      formula: `vol_slope  = (vol[-1] − vol[-5]) / vol[-5]
+price_slope = (close[-1] − close[-5]) / close[-5]
+Akumulasi  jika vol_slope > min_vol AND |price_slope| < 4%
+Hidden Str jika vol_slope tinggi AND price_slope < 0`,
+      why: "Volume naik saat harga flat = smart money masuk diam-diam (akumulasi). Volume naik saat harga turun = hidden strength — distribusi sudah selesai.",
+    },
+    "Near Breakout": {
+      icon: "🎯", score: "+20 × w_breakout",
+      formula: `dist_high = (recent_high − price) / price
+dist_low  = (price − recent_low)  / price
+Near breakout  jika 0 < dist_high < 1.5–2.5%
+Near reversal  jika 0 < dist_low  < 1.5–2.5%`,
+      why: "Harga mendekati high/low terakhir = titik keputusan kritis. Bisa breakout (LONG) atau bounce dari support (SHORT reversal).",
+    },
+    "RSI": {
+      icon: "📈", score: "+15 × w_rsi (oversold)",
+      formula: `RSI = 100 − 100 / (1 + AvgGain / AvgLoss)
+Period: 9 (scalping) · 14 (day,swing) · 21 (position)
+
+< 30  = oversold → reversal LONG  (+15 pts)
+30–50 = energy building            (+12 pts)
+50–65 = momentum building           (+8 pts)
+> 75  = overbought → SHORT signal  (−10 + SHORT)`,
+      why: "RSI < 30 = jenuh jual, potensi reversal kuat. RSI > 75 dengan volume yang sudah pump = entry LONG terlambat, justru setup SHORT.",
+    },
+    "EMA": {
+      icon: "⚡", score: "+15 × w_ema (compress)",
+      formula: `EMA(n) = price × k + EMA_prev × (1−k),  k = 2/(n+1)
+Spread   = |EMA9 − EMA21| / price
+Compress jika spread < 0.3% (scalp) / 0.5% (day) / 0.8% (swing)
+Bullish  jika EMA9 > EMA21 > EMA50
+Bearish  jika EMA9 < EMA21 < EMA50`,
+      why: "EMA 9/21 yang bersilangan dan hampir menyatu = kondisi pra-breakout. Alignment EMA9>21>50 konfirmasi trend bullish yang sehat.",
+    },
+    "Pressure Shift": {
+      icon: "🟢", score: "+15 × w_pressure",
+      formula: `bull_ratio = Σ vol[i] (candle hijau) / Σ vol_total (5 candle)
+shift = bull_ratio_now − bull_ratio_prev
+Buy pressure  jika shift > +15%
+Sell pressure jika shift < −15%`,
+      why: "Pergeseran dominasi buyer/seller dalam 5 candle = konfirmasi momentum nyata. Bukan sekadar noise harga.",
+    },
+    "Candle Shrink": {
+      icon: "🕯", score: "+10 × w_candle",
+      formula: `body[i]    = |close[i] − open[i]|
+body_slope = (body[-1] − body[0]) / body[0]  (7 candle)
+Kompresi   jika body_slope < −50%`,
+      why: "Badan candle semakin kecil = kelelahan trend sebelumnya, indecision. Setup ideal untuk breakout berikutnya.",
+    },
+  };
+
+  const STYLES = {
+    "Scalping": {
+      icon: "⚡", tf: "15m", dur: "Menit–Jam",
+      color: "from-yellow-500/10 to-orange-500/10 border-yellow-300",
+      params: { "RSI Period": "9 (responsif cepat)", "BB Period": "14", "BB Squeeze": "< 3% width", "Vol Slope Min": "> 20%", "Min SL": "≥ 0.8% dari entry", "SL Fallback": "ATR × 1.0", "TP Fallback": "ATR × 3.5", "Min Score": "25 pts" },
+      weights: "RSI×2.0 · Pressure×1.8 · Breakout×1.5 · Candle×1.5",
+    },
+    "Day Trade": {
+      icon: "📅", tf: "1H", dur: "Harian",
+      color: "from-blue-500/10 to-indigo-500/10 border-blue-300",
+      params: { "RSI Period": "14 (standar)", "BB Period": "20", "BB Squeeze": "< 4.5% width", "Vol Slope Min": "> 25%", "Min SL": "≥ 1.2% dari entry", "SL Fallback": "ATR × 1.2", "TP Fallback": "ATR × 4.0", "Min Score": "28 pts" },
+      weights: "RSI×1.5 · Pressure×1.5 · Breakout×1.3 · EMA×1.3",
+    },
+    "Swing": {
+      icon: "🌊", tf: "4H", dur: "Hari–Minggu",
+      color: "from-teal-500/10 to-green-500/10 border-teal-300",
+      params: { "RSI Period": "14", "BB Period": "20", "BB Squeeze": "< 6% width", "Vol Slope Min": "> 30%", "Min SL": "≥ 2.0% dari entry", "SL Fallback": "ATR × 1.5", "TP Fallback": "ATR × 5.0", "Min Score": "30 pts" },
+      weights: "Accumulation×2.0 · Squeeze×1.8 · Breakout×1.5",
+    },
+    "Position": {
+      icon: "🏔", tf: "1D", dur: "Minggu–Bulan",
+      color: "from-purple-500/10 to-violet-500/10 border-purple-300",
+      params: { "RSI Period": "21 (smooth)", "BB Period": "30", "BB Squeeze": "< 8% width", "Vol Slope Min": "> 40%", "Min SL": "≥ 3.0% dari entry", "SL Fallback": "ATR × 2.0", "TP Fallback": "ATR × 7.0", "Min Score": "35 pts" },
+      weights: "Accumulation×2.5 · Squeeze×2.0 · EMA×1.5",
+    },
+  };
+
+  const activeSig   = TA_SIGNALS[taTab as keyof typeof TA_SIGNALS];
+  const activeStyle = STYLES[styleTab as keyof typeof STYLES];
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
 
-      {/* Hero */}
+      {/* ── Hero ──────────────────────────────────────────────────────────── */}
       <Card className="bg-gradient-to-r from-neutral-900 to-neutral-800 text-white border-0">
         <CardContent className="pt-6 pb-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-3xl font-bold mb-1">📐 Arsitektur Aplikasi</h1>
               <p className="text-sm text-neutral-400 max-w-2xl leading-relaxed">
-                Crypto trading agent dengan multi-timeframe TA. Scanner deteksi early breakout di 100 pair USDT futures,
-                hitung entry/SL/TP berbasis S&amp;R + Fibonacci, dan catat hasilnya ke paper-trading history untuk mengukur
-                win rate per trading style.
+                Crypto trading agent — scan 100 pair USDT Futures setiap 15 menit,
+                deteksi early breakout dengan 7 sinyal TA, catat hasil ke paper trading history
+                untuk mengukur win rate per trading style.
               </p>
             </div>
-            <div className="flex flex-col gap-1.5 text-xs text-neutral-400 font-mono">
-              <span>Backend  : FastAPI · Python 3.12</span>
-              <span>Frontend : Next.js 16 · TypeScript</span>
-              <span>DB       : PostgreSQL + Redis</span>
-              <span>Data     : Binance Futures REST</span>
+            <div className="text-xs text-neutral-400 font-mono space-y-1">
+              <div>Frontend  · Next.js 16 · TypeScript</div>
+              <div>Backend   · FastAPI · Python 3.12</div>
+              <div>Agents    · asyncio · structlog</div>
+              <div>Database  · PostgreSQL · Redis</div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* ── 1. Data Flow Overview ─────────────────────────────────────────── */}
+      {/* ── 1. Monorepo Structure ─────────────────────────────────────────── */}
       <Card>
-        <CardContent className="pt-6">
-          <SectionHeader icon="🔄" title="Alur Data Keseluruhan" />
-          <CodeBlock>{`Binance Futures API
-    │
-    ▼  setiap 15 menit (Scheduler)
-┌─────────────────────────────────────────────────────┐
-│  Scanner Engine  ─────────────────────────────────  │
-│  100 pair USDT → filter 7 sinyal TA → scoring      │
-│  → hanya R:R ≥ 1:3 lolos                           │
-│                  ┌──────────────┐                   │
-│                  │  scan_store  │  ← in-memory cache│
-│                  └──────┬───────┘                   │
-└─────────────────────────┼───────────────────────────┘
-                          │
-        ┌─────────────────┼──────────────────┐
-        ▼                 ▼                  ▼
-  Scanner Page       paper_trades DB    History Page
-  (read-only)        (PostgreSQL)       (win rate stats)
-  serve cache        1 tulis per style  per trading style
-                     per koin per cycle`}
-          </CodeBlock>
-
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-            <div className="bg-blue-50 rounded-xl p-3 border border-blue-100">
-              <p className="font-bold text-blue-700 mb-1">🔭 Scanner API</p>
-              <p className="text-neutral-600 text-xs">Read-only — serve cache dari scheduler. Tidak trigger scan baru, tidak tulis ke DB.</p>
-            </div>
-            <div className="bg-teal-50 rounded-xl p-3 border border-teal-100">
-              <p className="font-bold text-teal-700 mb-1">⏱ Scheduler</p>
-              <p className="text-neutral-600 text-xs">Satu-satunya yang scan + log. Jalan tiap 15 menit 24/7, tulis ke scan_store dan paper_trades.</p>
-            </div>
-            <div className="bg-purple-50 rounded-xl p-3 border border-purple-100">
-              <p className="font-bold text-purple-700 mb-1">📊 History</p>
-              <p className="text-neutral-600 text-xs">Baca paper_trades. Monitor TP/SL tiap 60 detik via Binance harga real-time.</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── 2. Scanner Engine ────────────────────────────────────────────── */}
-      <Card>
-        <CardContent className="pt-6">
-          <SectionHeader icon="🔭" title="Scanner Engine — 7 Sinyal TA" subtitle="backend/app/api/v1/scanner.py" />
-
-          <p className="text-sm text-neutral-600 mb-4">
-            Tiap 15 menit, scanner ambil 100 pair USDT futures dengan volume tertinggi dari Binance, fetch klines,
-            lalu jalankan 7 indikator TA. Setiap indikator memberi poin yang dijumlahkan jadi
-            <strong className="text-neutral-800"> Probability Score (0–99)</strong>.
-          </p>
-
-          {/* 7 signals */}
-          <div className="space-y-3">
+        <CardContent className="pt-5">
+          <SectionTitle icon="🗂" title="Struktur Monorepo" sub="3 package terpisah — bisa dikembangkan independen" />
+          <div className="grid md:grid-cols-3 gap-3">
             {[
               {
-                n: 1, name: "Bollinger Band Squeeze", icon: "🔵",
-                formula: "BB Width = (StdDev × 4) / Mid\nSqueeze  jika Width < threshold (3–8% tergantung style)\nTightening jika Width < threshold × 1.5",
-                score: "Squeeze: +25 × w_squeeze | Tightening: +12 × w_squeeze",
-                why: "Volatilitas yang menyempit (BB menguncup) menandakan energi yang dikompresi — sebelum breakout besar harga biasanya diam dulu.",
+                name: "frontend/", icon: "🖥", color: "border-blue-300 bg-blue-50",
+                desc: "Next.js 16 UI — read-only consumer",
+                items: ["Scanner page (baca cache agents)", "History page (baca paper_trades)", "Dashboard (real-time via API)", "Architecture docs"],
+                cmd: "cd frontend && npm run dev",
               },
               {
-                n: 2, name: "Volume Accumulation", icon: "📦",
-                formula: "vol_slope  = (vol[-1] − vol[-5]) / vol[-5]\nprice_slope = (close[-1] − close[-5]) / close[-5]\nAkumulasi   jika vol_slope > min_vol AND |price_slope| < 4%\nHidden Str  jika vol_slope tinggi AND price_slope < 0",
-                score: "Akumulasi: +22 × w_accum | Hidden strength: +18 × w_accum",
-                why: "Volume naik saat harga flat = smart money masuk diam-diam. Volume naik saat harga turun = hidden strength (distribusi selesai).",
+                name: "backend/", icon: "⚙️", color: "border-teal-300 bg-teal-50",
+                desc: "FastAPI — API layer + TA Engine",
+                items: ["scan_market_core() — TA engine", "REST API endpoints", "WebSocket positions", "PostgreSQL + Redis"],
+                cmd: "uvicorn app.main:app --reload",
               },
               {
-                n: 3, name: "Near Breakout / Reversal Zone", icon: "🎯",
-                formula: "dist_high = (recent_high − price) / price\ndist_low  = (price − recent_low)  / price\nNear breakout  jika 0 < dist_high < 1.5–2.5%\nNear reversal  jika 0 < dist_low  < 1.5–2.5%",
-                score: "Breakout: +20 × w_breakout | Reversal: +15 × w_breakout",
-                why: "Harga mendekati high/low terakhir adalah titik keputusan — bisa breakout (LONG) atau bounce (SHORT).",
+                name: "agents/", icon: "🤖", color: "border-purple-300 bg-purple-50",
+                desc: "Autonomous agents — scan + log + learn",
+                items: ["scanner/scheduler.py ← satu-satunya yang log", "paper_trader/trader.py ← monitor TP/SL", "learning/ ← future ML optimizer", "Jalan 24/7 independen dari browser"],
+                cmd: "python -m agents",
               },
-              {
-                n: 4, name: "RSI (Relative Strength Index)", icon: "📈",
-                formula: "RSI = 100 − 100 / (1 + AvgGain / AvgLoss)\nPeriod: 9 (scalping) / 14 (day,swing) / 21 (position)\n< 30 = oversold | 30–50 = energy | 50–65 = momentum | > 75 = overbought SHORT",
-                score: "< 30: +15 × w_rsi | 30–50: +12 | 50–65: +8 | > 75: −10 + SHORT",
-                why: "RSI oversold (< 30) menandakan potensi reversal kuat. RSI > 75 dengan volume sudah pump = entry terlambat untuk LONG, bisa SHORT.",
-              },
-              {
-                n: 5, name: "EMA Compression & Alignment", icon: "⚡",
-                formula: "EMA(n) = price × k + EMA_prev × (1−k),  k = 2/(n+1)\nSpread   = |EMA9 − EMA21| / price\nCompress jika spread < 0.3% (scalp) / 0.5% (day) / 0.8% (swing)\nBullish  jika EMA9 > EMA21 > EMA50\nBearish  jika EMA9 < EMA21 < EMA50",
-                score: "Kompres: +15 × w_ema | Bullish/Bearish alignment: +8 × w_ema",
-                why: "EMA 9/21 yang bersilangan dan hampir menyatu adalah kondisi pra-breakout (coiling). Alignment EMA9>21>50 konfirmasi trend bullish.",
-              },
-              {
-                n: 6, name: "Buy/Sell Pressure Shift", icon: "🟢",
-                formula: "bull_ratio = Σ vol[i] (candle hijau) / Σ vol_total  (5 candle)\nshift = bull_ratio_now − bull_ratio_prev (5 candle lalu)\nBuy pressure   jika shift > +15%\nSell pressure  jika shift < −15%",
-                score: "Buy: +15 × w_pressure | Sell: +12 × w_pressure",
-                why: "Pergeseran dominasi buyer/seller dalam 5 candle terakhir = konfirmasi momentum nyata, bukan sekadar noise harga.",
-              },
-              {
-                n: 7, name: "Candle Body Shrinking", icon: "🕯",
-                formula: "body[i] = |close[i] − open[i]|\nbody_slope = (body[-1] − body[0]) / body[0]  (7 candle)\nCompresi jika body_slope < −50%",
-                score: "+10 × w_candle",
-                why: "Badan candle yang semakin kecil (indecision) adalah tanda kelelahan trend sebelumnya — setup ideal untuk breakout berikutnya.",
-              },
-            ].map(sig => (
-              <div key={sig.n} className="border border-neutral-200 rounded-xl overflow-hidden">
-                <div className="flex items-center gap-3 px-4 py-2.5 bg-neutral-50">
-                  <span className="text-lg">{sig.icon}</span>
-                  <span className="font-bold text-sm text-neutral-800">{sig.n}. {sig.name}</span>
-                  <Tag label={sig.score} color="bg-teal-100 text-teal-700" />
-                </div>
-                <div className="px-4 py-3 grid md:grid-cols-2 gap-3">
-                  <CodeBlock>{sig.formula}</CodeBlock>
-                  <div className="text-xs text-neutral-600 leading-relaxed flex items-start">
-                    <span className="mr-1 text-base">💡</span>
-                    <span>{sig.why}</span>
+            ].map(pkg => (
+              <div key={pkg.name} className={`rounded-xl border p-4 ${pkg.color}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xl">{pkg.icon}</span>
+                  <div>
+                    <p className="font-bold text-sm font-mono">{pkg.name}</p>
+                    <p className="text-[10px] text-neutral-500">{pkg.desc}</p>
                   </div>
                 </div>
+                <ul className="space-y-1 mb-3">
+                  {pkg.items.map(i => (
+                    <li key={i} className="text-xs text-neutral-600 flex items-start gap-1">
+                      <span className="text-neutral-400 mt-0.5">·</span>{i}
+                    </li>
+                  ))}
+                </ul>
+                <code className="text-[10px] bg-neutral-900 text-green-400 px-2 py-1 rounded block">{pkg.cmd}</code>
               </div>
             ))}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ── 2. Alur Data ──────────────────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-5">
+          <SectionTitle icon="🔄" title="Alur Data Lengkap" sub="Dari Binance → Scanner → History" />
+          <Code>{`Binance Futures API (100 pair USDT, volume tertinggi)
+         │
+         ▼  ⏱ setiap 15 menit — agents/scanner/scheduler.py
+   ┌─────────────────────────────────────────────────┐
+   │  SCANNER ENGINE  (backend/app/api/v1/scanner.py) │
+   │  7 sinyal TA → Probability Score 0–99            │
+   │  Filter: R:R < 1:3 → DIBUANG                     │
+   └────────────────────┬────────────────────────────┘
+                        │
+          ┌─────────────┴──────────────┐
+          ▼                            ▼
+   agents/scanner/store.py      paper_trades (PostgreSQL)
+   [in-memory cache]            agents/paper_trader/trader.py
+          │                            │
+          ▼                            ▼
+   Scanner API (read-only)      History API (read-only)
+   GET /api/v1/scanner/scan     GET /api/v1/history/*
+          │                            │
+          ▼                            ▼
+   Scanner Page (frontend)      History Page (frontend)
+   Tampilkan sinyal live        Win rate per style`}
+          </Code>
+
+          <div className="mt-4 grid md:grid-cols-3 gap-3 text-xs">
+            {[
+              { icon: "🤖", title: "agents/ (Satu-satunya yang SCAN + LOG)", color: "bg-purple-50 border-purple-200",
+                items: ["Scheduler loop tiap 15 menit", "scan_market_core() → ambil data Binance + hitung TA", "log_signals_batch() → tulis ke paper_trades", "check_and_close_trades() → cek TP/SL tiap 60 detik", "TIDAK ADA yang boleh log selain agents ini"] },
+              { icon: "⚙️", title: "backend/ (API only — tidak log apapun)", color: "bg-teal-50 border-teal-200",
+                items: ["scan_market_core() = fungsi TA engine (dipanggil agents)", "Scanner API = baca dari agents/scanner/store (cache)", "History API = baca dari paper_trades DB", "Tidak ada side-effect logging di API endpoints"] },
+              { icon: "🖥", title: "frontend/ (Read-only consumer)", color: "bg-blue-50 border-blue-200",
+                items: ["Auto-refresh scanner tiap 5 menit dari cache", "Auto-refresh history tiap 30 detik (LIVE badge)", "Tidak ada logika bisnis — hanya tampilkan data", "WebSocket untuk posisi live (dashboard)"] },
+            ].map(s => (
+              <div key={s.title} className={`rounded-xl border p-3 ${s.color}`}>
+                <p className="font-bold text-neutral-800 mb-2 flex items-center gap-1.5"><span>{s.icon}</span>{s.title}</p>
+                <ul className="space-y-1">
+                  {s.items.map(i => <li key={i} className="text-neutral-600 flex items-start gap-1"><span className="text-neutral-400">·</span>{i}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── 3. Trade Lifecycle ────────────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-5">
+          <SectionTitle icon="📊" title="Siklus Trade — Dari Scanner ke History" sub="Bagaimana scanner output menjadi paper trade" />
+
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Left: lifecycle diagram */}
+            <div>
+              <Code>{`Scanner menemukan signal (R:R ≥ 1:3)
+         │
+         ├── Entry type: "at_zone" / "market"
+         │   Harga SUDAH di area entry sekarang
+         │        │
+         │        ▼
+         │   Status: 🔵 OPEN  (posisi aktif)
+         │        │
+         │        ▼ cek tiap 60 detik (harga Binance)
+         │   ┌────┴────┐
+         │   ▼         ▼
+         │  ✅ TP    🛑 SL
+         │
+         └── Entry type: "wait_pullback" / "wait_rally"
+             Harga BELUM di area entry
+                  │
+                  ▼
+             Status: 🟡 PENDING  (limit order menunggu)
+                  │
+                  ▼ cek tiap 60 detik
+             Harga menyentuh entry zone?
+             ├── Belum → tetap PENDING
+             └── Ya   → Status: 🔵 OPEN
+                              │
+                        ┌─────┴─────┐
+                        ▼           ▼
+                       ✅ TP      🛑 SL`}
+              </Code>
+            </div>
+
+            {/* Right: status explanation */}
+            <div className="space-y-2">
+              <p className="text-sm font-bold text-neutral-800 mb-3">Penjelasan per Status</p>
+              {[
+                { status: "🟡 PENDING", color: "bg-amber-50 border-amber-200", title: "Menunggu Entry",
+                  desc: "Signal limit order — harga belum menyentuh zona entry. Kamu harus pasang Limit Buy/Sell di Binance dan tunggu harga datang ke zona tersebut.",
+                  ex: "BTCUSDT LONG wait_pullback, entry $98K, harga sekarang $100K → tunggu turun" },
+                { status: "🔵 OPEN", color: "bg-blue-50 border-blue-200", title: "Posisi Aktif",
+                  desc: "Entry sudah terpenuhi. Posisi sedang berjalan, TP/SL dimonitor otomatis setiap 60 detik dari harga real Binance Futures.",
+                  ex: "BTCUSDT LONG at_zone, entry $100K langsung open. Atau pending yang sudah kena." },
+                { status: "✅ TP", color: "bg-green-50 border-green-200", title: "Take Profit Hit",
+                  desc: "Harga mencapai target TP. Trade ditutup dengan profit. Dihitung dalam win rate dan PnL kalender.",
+                  ex: "Entry $100K, TP $106K kena → +4% PnL (R:R 1:4 × 1% risk = +4R)" },
+                { status: "🛑 SL", color: "bg-red-50 border-red-200", title: "Stop Loss Hit",
+                  desc: "Harga menyentuh SL. Trade ditutup dengan loss. Dihitung dalam win rate.",
+                  ex: "Entry $100K, SL $98K kena → −1R loss" },
+              ].map(s => (
+                <div key={s.status} className={`rounded-xl border p-3 ${s.color}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-bold text-sm">{s.status}</span>
+                    <span className="text-[10px] font-semibold text-neutral-500">{s.title}</span>
+                  </div>
+                  <p className="text-xs text-neutral-600 mb-1">{s.desc}</p>
+                  <p className="text-[10px] font-mono text-neutral-400">{s.ex}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Key rule */}
+          <div className="mt-4 bg-neutral-900 text-white rounded-xl p-4 text-xs">
+            <p className="font-bold text-teal-400 mb-2">✅ Aturan Pencatatan</p>
+            <div className="grid md:grid-cols-3 gap-4">
+              {[
+                { title: "Semua signal R:R ≥ 1:3 dicatat", desc: "Apapun yang muncul di scanner dengan R:R cukup → masuk history. Tidak ada yang terlewat." },
+                { title: "Satu slot per koin per style", desc: "Scalping BTCUSDT dan Daytrading BTCUSDT adalah dua data berbeda. Tidak bisa double entry per style." },
+                { title: "Win rate dari CLOSED saja", desc: "Pending dan Open tidak masuk win rate. Hanya TP dan SL yang dihitung. Statistik akurat." },
+              ].map(r => (
+                <div key={r.title}>
+                  <p className="font-semibold text-neutral-300 mb-1">{r.title}</p>
+                  <p className="text-neutral-500">{r.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── 4. 7 Sinyal TA (interactive) ─────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-5">
+          <SectionTitle icon="🔭" title="7 Sinyal TA — Scanner Engine" sub="Klik sinyal untuk lihat formula dan penjelasan" />
+          <Tabs tabs={Object.keys(TA_SIGNALS)} active={taTab} onChange={setTaTab} />
+          {activeSig && (
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl">{activeSig.icon}</span>
+                  <div>
+                    <p className="font-bold text-neutral-800">{taTab}</p>
+                    <Badge label={`Score: ${activeSig.score}`} color="bg-teal-100 text-teal-700" />
+                  </div>
+                </div>
+                <Code>{activeSig.formula}</Code>
+              </div>
+              <div className="bg-neutral-50 rounded-xl p-4 border">
+                <p className="text-xs font-bold text-neutral-700 mb-2">💡 Kenapa works?</p>
+                <p className="text-sm text-neutral-600 leading-relaxed">{activeSig.why}</p>
+              </div>
+            </div>
+          )}
 
           {/* Penalty */}
-          <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-4">
-            <p className="font-bold text-red-700 text-sm mb-1">⚠️ Penalty — Sudah Pump/Dump</p>
-            <p className="text-xs text-neutral-600">
-              Jika <code className="font-mono bg-red-100 px-1 rounded">|change_24h| &gt; pump_penalty × 2</code> → <strong>−20 pts</strong>.
-              Jika <code className="font-mono bg-red-100 px-1 rounded">|change_24h| &gt; pump_penalty</code> → <strong>−8 pts</strong>.
-              Ini mencegah entry pada coin yang sudah bergerak terlalu jauh (FOMO).
+          <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-3 text-xs">
+            <p className="font-bold text-red-700 mb-1">⚠️ Penalty — Sudah Pump/Dump</p>
+            <p className="text-neutral-600">
+              <code className="bg-red-100 px-1 rounded">|change_24h| &gt; pump_penalty × 2</code> → <strong>−20 pts</strong> &nbsp;|&nbsp;
+              <code className="bg-red-100 px-1 rounded">|change_24h| &gt; pump_penalty</code> → <strong>−8 pts</strong>.
+              Mencegah FOMO entry pada coin yang sudah bergerak terlalu jauh.
             </p>
           </div>
 
           {/* Score legend */}
-          <div className="mt-4 grid grid-cols-3 gap-3">
+          <div className="mt-3 grid grid-cols-3 gap-3">
             {[
-              { range: "≥ 70", label: "Setup Sangat Kuat", desc: "Multiple signal confirm", color: "bg-green-50 border-green-200 text-green-700" },
-              { range: "50–69", label: "Setup Bagus", desc: "Monitor lebih lanjut", color: "bg-yellow-50 border-yellow-200 text-yellow-700" },
-              { range: "< 50", label: "Early Stage", desc: "Belum cukup konfirmasi", color: "bg-neutral-50 border-neutral-200 text-neutral-500" },
+              { range: "≥ 70", label: "Setup Sangat Kuat", desc: "Multiple signal confirm", cls: "bg-green-50 border-green-200 text-green-700" },
+              { range: "50–69", label: "Setup Bagus", desc: "Monitor lebih lanjut",     cls: "bg-yellow-50 border-yellow-200 text-yellow-700" },
+              { range: "< 50", label: "Early Stage", desc: "Belum cukup konfirmasi",   cls: "bg-neutral-50 border-neutral-200 text-neutral-500" },
             ].map(s => (
-              <div key={s.range} className={`rounded-xl border p-3 text-center ${s.color}`}>
-                <p className="text-2xl font-black">{s.range}</p>
-                <p className="text-xs font-bold mt-0.5">{s.label}</p>
+              <div key={s.range} className={`rounded-xl border p-3 text-center ${s.cls}`}>
+                <p className="text-xl font-black">{s.range}</p>
+                <p className="text-xs font-bold">{s.label}</p>
                 <p className="text-[10px] opacity-70">{s.desc}</p>
               </div>
             ))}
@@ -207,351 +393,210 @@ export default function ArchitecturePage() {
         </CardContent>
       </Card>
 
-      {/* ── 3. Entry / SL / TP Logic ─────────────────────────────────────── */}
+      {/* ── 5. Entry / SL / TP ───────────────────────────────────────────── */}
       <Card>
-        <CardContent className="pt-6">
-          <SectionHeader icon="📐" title="Entry Zone · SL · TP — Hierarki Kalkulasi" subtitle="Berbasis S&R Zones + Fibonacci (bukan hanya ATR)" />
-
-          <div className="grid md:grid-cols-3 gap-4 mb-4">
-            {/* Entry */}
-            <div className="space-y-2">
-              <p className="font-bold text-sm text-neutral-800">📍 Entry Zone</p>
-              <div className="text-xs space-y-1.5 text-neutral-600">
-                <div className="bg-neutral-50 rounded-lg p-2 border">
-                  <p className="font-semibold text-neutral-700 mb-0.5">LONG → Support Zone</p>
-                  <p><span className="font-mono bg-green-100 text-green-700 px-1 rounded">at_zone</span> — harga ≤ 1.5% di atas support → entry sekarang</p>
-                  <p><span className="font-mono bg-amber-100 text-amber-700 px-1 rounded">wait_pullback</span> — 1.5–6% di atas → tunggu turun ke support, pasang limit buy</p>
-                </div>
-                <div className="bg-neutral-50 rounded-lg p-2 border">
-                  <p className="font-semibold text-neutral-700 mb-0.5">SHORT → Resistance Zone</p>
-                  <p><span className="font-mono bg-green-100 text-green-700 px-1 rounded">at_zone</span> — harga ≤ 1.5% di bawah resistance → entry sekarang</p>
-                  <p><span className="font-mono bg-amber-100 text-amber-700 px-1 rounded">wait_rally</span> — 1.5–6% di bawah → tunggu naik ke resistance, pasang limit sell</p>
-                </div>
-              </div>
-            </div>
-
-            {/* SL */}
-            <div className="space-y-2">
-              <p className="font-bold text-sm text-neutral-800">⛔ Stop Loss — Prioritas</p>
-              <div className="text-xs space-y-1 text-neutral-600">
-                {[
-                  ["1. S/R Zone", "0.3% di bawah support (LONG) / 0.3% di atas resistance (SHORT)"],
-                  ["2. Swing Low/High", "Structural SL — min/max harga dalam lookback period"],
-                  ["3. Fibonacci 0.618", "Retracement 61.8% dari swing range terakhir"],
-                  ["4. ATR Fallback", "entry ± ATR × style_multiplier (jika semua di atas terlalu jauh)"],
-                  ["5. Min Distance", "Enforced minimum SL jarak: 0.8% (scalp) → 3.0% (position)"],
-                ].map(([k, v]) => (
-                  <div key={k} className="bg-red-50 border border-red-100 rounded p-1.5">
-                    <span className="font-bold text-red-700">{k}:</span> <span>{v}</span>
+        <CardContent className="pt-5">
+          <SectionTitle icon="📐" title="Entry Zone · SL · TP" sub="Berbasis S/R Zones + Fibonacci — bukan hanya ATR" />
+          <div className="grid md:grid-cols-3 gap-4">
+            <div>
+              <p className="font-bold text-sm text-neutral-800 mb-2">📍 Entry Zone</p>
+              <div className="space-y-1.5">
+                {[["at_zone (Market)","Harga ≤ 1.5% dari S/R → entry sekarang → status OPEN"],["wait_pullback","LONG: tunggu harga turun ke support → status PENDING"],["wait_rally","SHORT: tunggu harga naik ke resistance → status PENDING"]].map(([k,v]) => (
+                  <div key={k} className="rounded-lg p-2 text-xs bg-blue-50 border border-blue-100">
+                    <span className="font-bold text-blue-700">{k}: </span>
+                    <span className="text-neutral-600">{v}</span>
                   </div>
                 ))}
               </div>
             </div>
-
-            {/* TP */}
-            <div className="space-y-2">
-              <p className="font-bold text-sm text-neutral-800">🎯 Take Profit — Prioritas</p>
-              <div className="text-xs space-y-1 text-neutral-600">
-                {[
-                  ["1. Resistance Zone", "Next resistance (LONG) / support (SHORT) yang R:R ≥ 1:2"],
-                  ["2. Fibonacci 1.618", "Extension 161.8% dari swing low ke entry (LONG) / mirror (SHORT)"],
-                  ["3. ATR Fallback", "entry ± ATR × tp_multiplier (3.5–7.0 tergantung style)"],
-                ].map(([k, v]) => (
-                  <div key={k} className="bg-green-50 border border-green-100 rounded p-1.5">
-                    <span className="font-bold text-green-700">{k}:</span> <span>{v}</span>
+            <div>
+              <p className="font-bold text-sm text-neutral-800 mb-2">⛔ Stop Loss</p>
+              <div className="space-y-1.5">
+                {[["1. S/R Zone","0.3% di bawah support (LONG) / di atas resistance (SHORT)"],["2. Swing Low/High","Min/max harga dalam lookback period"],["3. Fib 0.618","Retracement 61.8% dari swing range terakhir"],["4. ATR Fallback","entry ± ATR × style_multiplier"],["5. Min Distance","0.8% (scalp) → 3.0% (position) — anti stop-hunt"]].map(([k,v]) => (
+                  <div key={k} className="rounded-lg p-2 text-xs bg-red-50 border border-red-100">
+                    <span className="font-bold text-red-700">{k}: </span>
+                    <span className="text-neutral-600">{v}</span>
                   </div>
                 ))}
-                <div className="mt-2 bg-teal-50 border border-teal-200 rounded p-2">
-                  <p className="font-bold text-teal-700">Filter Final: R:R ≥ 1:3</p>
-                  <p>Signal dibuang jika reward/risk &lt; 3.0. Ini berlaku di scanner UI maupun paper_trades logging.</p>
-                </div>
+              </div>
+            </div>
+            <div>
+              <p className="font-bold text-sm text-neutral-800 mb-2">🎯 Take Profit</p>
+              <div className="space-y-1.5">
+                {[["1. Resistance Zone","Next resistance dengan R:R ≥ 1:2"],["2. Fib 1.618","Extension 161.8% dari swing low ke entry"],["3. ATR Fallback","entry ± ATR × 3.5–7.0"],["Filter Final","R:R < 1:3 → signal DIBUANG"]].map(([k,v]) => (
+                  <div key={k} className="rounded-lg p-2 text-xs bg-green-50 border border-green-100">
+                    <span className="font-bold text-green-700">{k}: </span>
+                    <span className="text-neutral-600">{v}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
-
-          <CodeBlock>{`Fibonacci Levels yang Digunakan:
+          <div className="mt-4">
+            <Code>{`Fibonacci levels yang digunakan:
 SL  = entry − swing_range × 0.618   (Fib 61.8% retracement)
 TP1 = entry + swing_range × 1.272   (Fib 127.2% extension)
-TP2 = entry + swing_range × 1.618   (Golden ratio extension ← default TP)
+TP2 = entry + swing_range × 1.618   (Golden ratio ← default TP)
 TP3 = entry + swing_range × 2.618   (Fib 261.8% — target jauh)
 
-S/R Zone Detection:
-1. Cari swing highs (local maxima, 2-bar rule) → resistance candidates
-2. Cari swing lows  (local minima, 2-bar rule) → support candidates
-3. Cluster levels yang berdekatan (< 0.5% toleransi) → single zone
-4. Sort by touch count (paling banyak disentuh = paling kuat)`}
-          </CodeBlock>
-        </CardContent>
-      </Card>
-
-      {/* ── 4. Trading Styles ────────────────────────────────────────────── */}
-      <Card>
-        <CardContent className="pt-6">
-          <SectionHeader icon="🎯" title="4 Trading Styles" subtitle="Timeframe & parameter berbeda, min R:R sama: 1:3" />
-
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-            {[
-              {
-                icon: "⚡", name: "Scalping", tf: "15m", dur: "Menit–Jam",
-                color: "from-orange-500/10 to-yellow-500/10 border-orange-300",
-                params: [
-                  ["RSI Period", "9 (responsif)"],
-                  ["BB Period", "14"],
-                  ["BB Squeeze", "< 3% width"],
-                  ["Vol Slope Min", "> 20%"],
-                  ["Min SL Jarak", "≥ 0.8% dari entry"],
-                  ["SL Fallback", "ATR × 1.0"],
-                  ["TP Fallback", "ATR × 3.5"],
-                  ["Min Score", "25 pts"],
-                  ["Min R:R", "≥ 1:3"],
-                ],
-                weights: "RSI×2.0 · Pressure×1.8 · Breakout×1.5 · Candle×1.5",
-              },
-              {
-                icon: "📅", name: "Day Trade", tf: "1H", dur: "Harian",
-                color: "from-blue-500/10 to-indigo-500/10 border-blue-300",
-                params: [
-                  ["RSI Period", "14 (standar)"],
-                  ["BB Period", "20"],
-                  ["BB Squeeze", "< 4.5% width"],
-                  ["Vol Slope Min", "> 25%"],
-                  ["Min SL Jarak", "≥ 1.2% dari entry"],
-                  ["SL Fallback", "ATR × 1.2"],
-                  ["TP Fallback", "ATR × 4.0"],
-                  ["Min Score", "28 pts"],
-                  ["Min R:R", "≥ 1:3"],
-                ],
-                weights: "RSI×1.5 · Pressure×1.5 · Breakout×1.3 · EMA×1.3",
-              },
-              {
-                icon: "🌊", name: "Swing", tf: "4H", dur: "Hari–Minggu",
-                color: "from-teal-500/10 to-green-500/10 border-teal-300",
-                params: [
-                  ["RSI Period", "14"],
-                  ["BB Period", "20"],
-                  ["BB Squeeze", "< 6% width"],
-                  ["Vol Slope Min", "> 30%"],
-                  ["Min SL Jarak", "≥ 2.0% dari entry"],
-                  ["SL Fallback", "ATR × 1.5"],
-                  ["TP Fallback", "ATR × 5.0"],
-                  ["Min Score", "30 pts"],
-                  ["Min R:R", "≥ 1:3"],
-                ],
-                weights: "Accumulation×2.0 · Squeeze×1.8 · Breakout×1.5",
-              },
-              {
-                icon: "🏔", name: "Position", tf: "1D", dur: "Minggu–Bulan",
-                color: "from-purple-500/10 to-violet-500/10 border-purple-300",
-                params: [
-                  ["RSI Period", "21 (smooth)"],
-                  ["BB Period", "30"],
-                  ["BB Squeeze", "< 8% width"],
-                  ["Vol Slope Min", "> 40%"],
-                  ["Min SL Jarak", "≥ 3.0% dari entry"],
-                  ["SL Fallback", "ATR × 2.0"],
-                  ["TP Fallback", "ATR × 7.0"],
-                  ["Min Score", "35 pts"],
-                  ["Min R:R", "≥ 1:3"],
-                ],
-                weights: "Accumulation×2.5 · Squeeze×2.0 · EMA×1.5",
-              },
-            ].map(s => (
-              <div key={s.name} className={`rounded-xl border bg-gradient-to-b p-4 ${s.color}`}>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="text-xl">{s.icon}</span>
-                  <div>
-                    <p className="font-bold text-sm">{s.name}</p>
-                    <p className="text-[10px] text-neutral-500">{s.tf} · {s.dur}</p>
-                  </div>
-                </div>
-                <div className="space-y-1 mb-2">
-                  {s.params.map(([k, v]) => (
-                    <div key={k} className="flex justify-between text-[10px]">
-                      <span className="text-neutral-500">{k}</span>
-                      <span className="font-mono font-semibold text-neutral-800 text-right">{v}</span>
-                    </div>
-                  ))}
-                </div>
-                <div className="bg-white/60 rounded-lg px-2 py-1.5 mt-1">
-                  <p className="text-[9px] text-neutral-500 font-bold uppercase mb-0.5">Bobot Aktif</p>
-                  <p className="text-[10px] font-mono leading-relaxed text-neutral-700">{s.weights}</p>
-                </div>
-              </div>
-            ))}
+S/R Zone detection:
+  1. Swing highs (local maxima, 2-bar rule) → resistance
+  2. Swing lows  (local minima, 2-bar rule) → support
+  3. Cluster levels berdekatan (< 0.5% toleransi) → single zone
+  4. Sort by touch count (paling banyak disentuh = paling kuat)`}
+            </Code>
           </div>
         </CardContent>
       </Card>
 
-      {/* ── 5. Paper Trading / History ───────────────────────────────────── */}
+      {/* ── 6. 4 Trading Styles ───────────────────────────────────────────── */}
       <Card>
-        <CardContent className="pt-6">
-          <SectionHeader icon="📊" title="Paper Trading History" subtitle="Tujuan: mengukur win rate per trading style" />
-
-          <p className="text-sm text-neutral-600 mb-4">
-            Setiap rekomendasi scanner yang lolos filter dicatat sebagai paper trade. Harga TP/SL dipantau
-            otomatis via Binance. Win rate per style dihitung dari rasio TP:SL yang ter-close.
-          </p>
-
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <p className="font-bold text-sm text-neutral-800 mb-2">Aturan Logging</p>
-              <div className="space-y-2 text-xs">
-                {[
-                  ["R:R Minimum", "≥ 1:3 — signal dengan reward lebih kecil dari 3× risk dibuang"],
-                  ["Dedup per coin+style", "Jika scalping BTCUSDT sudah open, skip. Scalping & daytrading BTCUSDT = data BERBEDA (terpisah per style)"],
-                  ["Re-entry bebas", "Setelah trade tutup (TP/SL), slot koin+style langsung bebas — boleh masuk lagi saat sinyal baru muncul"],
-                  ["Satu sumber logging", "HANYA scheduler yang menulis ke paper_trades. Scanner API bersifat read-only"],
-                ].map(([k, v]) => (
-                  <div key={k} className="bg-neutral-50 border border-neutral-200 rounded-lg p-2">
-                    <span className="font-bold text-neutral-700">{k}: </span>
-                    <span className="text-neutral-600">{v}</span>
+        <CardContent className="pt-5">
+          <SectionTitle icon="🎯" title="4 Trading Styles" sub="Semua min R:R 1:3 — parameter dan timeframe berbeda" />
+          <Tabs tabs={Object.keys(STYLES)} active={styleTab} onChange={setStyleTab} />
+          {activeStyle && (
+            <div className={`rounded-xl border bg-gradient-to-b p-4 ${activeStyle.color}`}>
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-3xl">{activeStyle.icon}</span>
+                <div>
+                  <p className="font-bold text-lg">{styleTab}</p>
+                  <p className="text-xs text-neutral-500">{activeStyle.tf} · {activeStyle.dur}</p>
+                </div>
+                <div className="ml-auto bg-white/70 rounded-lg px-3 py-1.5 text-[10px] font-mono text-neutral-700">
+                  {activeStyle.weights}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {Object.entries(activeStyle.params).map(([k, v]) => (
+                  <div key={k} className="bg-white/60 rounded-lg px-3 py-2">
+                    <p className="text-[10px] text-neutral-500 font-semibold mb-0.5">{k}</p>
+                    <p className="text-xs font-bold text-neutral-800">{v}</p>
                   </div>
                 ))}
+                <div className="bg-teal-100 rounded-lg px-3 py-2 border border-teal-300">
+                  <p className="text-[10px] text-teal-600 font-semibold mb-0.5">Min R:R</p>
+                  <p className="text-xs font-bold text-teal-800">≥ 1:3</p>
+                </div>
               </div>
             </div>
-
-            <div>
-              <p className="font-bold text-sm text-neutral-800 mb-2">Aturan TP/SL Check</p>
-              <div className="space-y-2 text-xs">
-                {[
-                  ["Min Hold", "5 menit grace period setelah entry — tidak ada cek TP/SL sebelum ini (mencegah instant-TP artifact)"],
-                  ["Limit Fill Check", "Untuk entry wait_pullback (LONG): cek TP/SL hanya jika current_price ≤ entry_price (order sudah terisi)"],
-                  ["Limit Fill Check SHORT", "Untuk wait_rally (SHORT): cek TP/SL hanya jika current_price ≥ entry_price"],
-                  ["Rate Limit", "Check_and_close_trades() dipanggil max 1× per menit (rate-limited via _CHECK_INTERVAL)"],
-                ].map(([k, v]) => (
-                  <div key={k} className="bg-neutral-50 border border-neutral-200 rounded-lg p-2">
-                    <span className="font-bold text-neutral-700">{k}: </span>
-                    <span className="text-neutral-600">{v}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4"><CodeBlock>{`Equity Curve Calculation:
-  Risk per trade = 1% modal (konstant)
-  TP hit → gain = 1% × RR_ratio  (misal R:R 1:4 → +4%)
-  SL hit → loss = −1%
-  Cumulative PnL = Σ gain/loss semua closed trades (urut waktu)`}
-          </CodeBlock></div>
+          )}
         </CardContent>
       </Card>
 
-      {/* ── 6. Dashboard — Run Analysis ──────────────────────────────────── */}
+      {/* ── 7. Dashboard — Run Analysis ──────────────────────────────────── */}
       <Card>
-        <CardContent className="pt-6">
-          <SectionHeader icon="🏠" title="Dashboard — Run Analysis" subtitle="Analisis mendalam per koin, dijalankan manual" />
+        <CardContent className="pt-5">
+          <SectionTitle icon="🏠" title="Dashboard — Run Analysis" sub="Deep-dive satu koin, pipeline T0→T4 lengkap" />
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-2">
+              <p className="text-sm text-neutral-600 mb-3">
+                Klik koin di Dashboard → <strong>CoinModal</strong> dengan 3 tab:
+              </p>
+              {[
+                { tab: "📈 Chart", desc: "Candlestick + EMA 9/21/50 + S/R zones + entry/SL/TP markers. Timeframe otomatis sesuai style." },
+                { tab: "ℹ️ Info", desc: "Harga real-time, volume 24H, change %, data Binance Futures." },
+                { tab: "🧠 Run Analysis", desc: "Pipeline TA lengkap T0→T4 untuk satu koin. Pilih style, klik Run, lihat hasil per layer animasi." },
+              ].map(t => (
+                <div key={t.tab} className="bg-neutral-50 border rounded-xl p-3">
+                  <p className="font-bold text-sm mb-0.5">{t.tab}</p>
+                  <p className="text-xs text-neutral-600">{t.desc}</p>
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="font-bold text-sm mb-3">Pipeline T0→T4 per Layer</p>
+              <div className="space-y-1.5">
+                {[
+                  ["T0 Wyckoff", "bg-neutral-600", "Accumulation / Markup / Distribution / Markdown"],
+                  ["T1 Trend", "bg-blue-600", "EMA 13/21 — Up / Down / Sideways"],
+                  ["T2 S/R Zones", "bg-teal-600", "Swing pivot clustering — support & resistance"],
+                  ["T3 Pattern", "bg-purple-600", "Double bottom/top, H&S, wedge, flag, triangle"],
+                  ["T4 Trigger", "bg-yellow-600", "Candlestick + Stochastic 5,3,3 + volume confirm"],
+                  ["Output", "bg-green-600", "Entry, SL, TP, R:R, probability, entry_type"],
+                ].map(([layer, color, desc]) => (
+                  <div key={layer as string} className="flex items-start gap-2">
+                    <span className={`text-[10px] text-white font-bold px-2 py-0.5 rounded shrink-0 mt-0.5 ${color}`}>{layer}</span>
+                    <span className="text-xs text-neutral-600">{desc}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs">
+                <p className="font-bold text-amber-700 mb-1">Perbedaan vs Scanner</p>
+                <p className="text-neutral-600"><strong>Scanner</strong> = broad 100 pair, tiap 15 menit otomatis.<br />
+                <strong>Run Analysis</strong> = deep-dive satu koin, manual on-demand, pipeline T0→T4 penuh.</p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
+      {/* ── 8. History — Win Rate Purpose ────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-5">
+          <SectionTitle icon="📊" title="History — Tujuan & Cara Kerja" sub="Mengukur trading style mana yang paling profitable" />
           <div className="grid md:grid-cols-2 gap-6">
             <div>
               <p className="text-sm text-neutral-600 mb-3">
-                Di Dashboard, klik koin manapun untuk membuka <strong>CoinModal</strong> dengan 3 tab:
+                History bukan sekadar log — ini adalah <strong>dataset untuk mengukur kualitas sinyal per style</strong>.
+                Setelah data terkumpul 2+ minggu, kamu bisa lihat:
               </p>
-              <div className="space-y-2 text-sm">
+              <div className="space-y-2 text-xs">
                 {[
-                  { tab: "📈 Chart", desc: "Candlestick chart dengan EMA 9/21/50, S/R zones, entry/SL/TP markers. Timeframe otomatis sesuai style yang dipilih (15m/1H/4H/1D)." },
-                  { tab: "ℹ️ Info", desc: "Harga real-time, volume 24H, perubahan harga, data market dari Binance Futures." },
-                  { tab: "🧠 Run Analysis", desc: "Jalankan pipeline TA lengkap untuk koin tersebut. Pilih style (Scalping/Day/Swing/Position), klik Run, lihat hasil per layer secara animasi." },
-                ].map(t => (
-                  <div key={t.tab} className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
-                    <p className="font-bold text-neutral-800 text-sm mb-0.5">{t.tab}</p>
-                    <p className="text-xs text-neutral-600">{t.desc}</p>
+                  ["Win Rate per Style", "Scalping 68% vs Day Trade 91% → Day Trade lebih konsisten"],
+                  ["Avg PnL per Trade", "Swing +16% avg → reward besar meski jarang masuk"],
+                  ["PnL Kalender", "Hari mana yang konsisten profit, hari mana yang loss"],
+                  ["Equity Curve", "Apakah modal tumbuh stabil atau volatile?"],
+                ].map(([k, v]) => (
+                  <div key={k} className="bg-neutral-50 border rounded-lg p-2">
+                    <p className="font-bold text-neutral-700">{k}</p>
+                    <p className="text-neutral-500">{v}</p>
                   </div>
                 ))}
               </div>
             </div>
-
             <div>
-              <p className="font-bold text-sm text-neutral-800 mb-2">Pipeline Analysis — Layer by Layer</p>
-              <p className="text-xs text-neutral-500 mb-3">
-                Endpoint: <code className="font-mono bg-neutral-100 px-1 rounded">GET /api/v1/coin/&#123;symbol&#125;/analyze?style=&#123;style&#125;</code>
-              </p>
-              <div className="space-y-1.5 text-xs">
-                {[
-                  ["T0 Wyckoff", "Phase detection — Accumulation / Markup / Distribution / Markdown"],
-                  ["T1 Trend", "EMA 13/21 trendline — Up / Down / Sideways"],
-                  ["T2 S/R Zones", "Swing pivot clustering — support & resistance zones"],
-                  ["T3 Pattern", "Double bottom/top, H&S, wedge, flag, triangle detection"],
-                  ["T4 Trigger", "Candlestick patterns + Stochastic 5,3,3 + volume confirmation"],
-                  ["Signal Output", "Entry, SL, TP, R:R, probability, entry_type"],
-                ].map(([k, v], i) => (
-                  <div key={k} className="flex gap-2 items-start">
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0 mt-0.5 ${
-                      ["bg-neutral-500","bg-blue-500","bg-teal-500","bg-purple-500","bg-yellow-500","bg-green-500"][i]
-                    }`}>{i+1}</span>
-                    <div>
-                      <span className="font-bold text-neutral-700">{k}: </span>
-                      <span className="text-neutral-600">{v}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <Code>{`Equity Curve (1% risk per trade):
+  TP hit → gain = 1% × RR_ratio
+           (R:R 1:4 = +4%, R:R 1:7 = +7%)
+  SL hit → loss = −1%
+
+  Contoh 10 trade:
+  7 TP × 1:4 = +28%
+  3 SL × 1   = − 3%
+  Net         = +25% dari modal
+
+Win Rate formula:
+  WR = TP_count / (TP_count + SL_count) × 100
+  Pending & Open → TIDAK dihitung
+  Hanya closed trades yang masuk statistik
+
+Live refresh:
+  Price check  → tiap 60 detik (pending→open, open→tp/sl)
+  History page → auto-poll tiap 30 detik
+  Scanner cache → diperbarui tiap 15 menit oleh scheduler`}
+              </Code>
             </div>
           </div>
-
-          <div className="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-neutral-700">
-            <p className="font-bold text-amber-700 mb-1">ℹ️ Perbedaan Run Analysis vs Scanner</p>
-            <p>
-              <strong>Scanner</strong> = broad scan 100 pair, cepat, optimized untuk speed, dijalankan tiap 15 menit oleh scheduler.<br />
-              <strong>Run Analysis</strong> = deep dive satu koin, pakai pipeline T0→T4 lengkap, dijalankan manual on-demand, hasil lebih detail.
-              Scanner tidak memanggil Run Analysis — keduanya independen.
-            </p>
-          </div>
         </CardContent>
       </Card>
 
-      {/* ── 7. Futures Market & Scanner Widget di Dashboard ──────────────── */}
+      {/* ── 9. Tech Stack ─────────────────────────────────────────────────── */}
       <Card>
-        <CardContent className="pt-6">
-          <SectionHeader icon="📋" title="Komponen Dashboard Lainnya" />
-          <div className="grid md:grid-cols-3 gap-3 text-sm">
-            {[
-              {
-                icon: "🏦", name: "Futures Market",
-                desc: "Tabel semua pair USDT futures dengan harga, change 24H, volume, open interest. Klik koin → buka CoinModal.",
-                source: "GET /api/v1/market/futures-market",
-              },
-              {
-                icon: "💰", name: "Spot Positions",
-                desc: "Posisi spot aktif di akun Binance. Menampilkan balance per asset, nilai USDT, dan perubahan harga.",
-                source: "GET /api/v1/market/spot-positions",
-              },
-              {
-                icon: "📡", name: "Live Positions (WebSocket)",
-                desc: "Stream real-time posisi futures aktif via WebSocket. Update harga dan unrealized PnL setiap 2 detik.",
-                source: "WS /ws/positions → PositionManager",
-              },
-            ].map(c => (
-              <div key={c.name} className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-xl">{c.icon}</span>
-                  <p className="font-bold text-neutral-800">{c.name}</p>
-                </div>
-                <p className="text-xs text-neutral-600 mb-2">{c.desc}</p>
-                <code className="text-[10px] font-mono bg-neutral-900 text-green-400 px-2 py-1 rounded block">{c.source}</code>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── 8. Tech Stack ────────────────────────────────────────────────── */}
-      <Card>
-        <CardContent className="pt-6">
-          <SectionHeader icon="⚙️" title="Tech Stack" />
+        <CardContent className="pt-5">
+          <SectionTitle icon="⚙️" title="Tech Stack" />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
             {[
               { layer: "Backend", items: ["FastAPI + Python 3.12", "SQLAlchemy async", "asyncpg / PostgreSQL", "Redis (cache & pub/sub)", "HTTPX (Binance REST)", "Structlog"] },
-              { layer: "TA Engine", items: ["RSI (Wilder, period 9/14/21)", "Bollinger Bands (SMA + 2σ)", "EMA (9 / 21 / 50)", "ATR (True Range avg)", "Fibonacci (0.618/1.272/1.618/2.618)", "S/R Swing Pivot Clustering"] },
-              { layer: "Frontend", items: ["Next.js 16 (App Router)", "TypeScript", "Tailwind CSS v4", "Recharts (equity curve)", "Lightweight Charts (candles)", "Poppins font"] },
-              { layer: "Infra / Data", items: ["Binance Futures REST API", "Docker Compose (local dev)", "TimescaleDB (klines)", "WatchFiles hot-reload", "Scheduler (asyncio loop)", "scan_store (in-memory cache)"] },
+              { layer: "TA Engine", items: ["RSI (Wilder, 9/14/21)", "Bollinger Bands (SMA+2σ)", "EMA (9/21/50)", "ATR (True Range avg)", "Fibonacci (0.618/1.618/2.618)", "S/R Swing Pivot Clustering"] },
+              { layer: "Frontend", items: ["Next.js 16 (App Router)", "TypeScript", "Tailwind CSS v4", "Recharts (equity/calendar)", "Lightweight Charts (candles)", "Poppins font"] },
+              { layer: "Agents & Infra", items: ["asyncio background loop", "scan_store (in-memory)", "PostgreSQL 16 (TimescaleDB)", "Redis 7 (pub/sub)", "Docker Compose (local)", "WatchFiles hot-reload"] },
             ].map(s => (
-              <div key={s.layer} className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
-                <p className="font-bold text-neutral-700 mb-2 border-b border-neutral-200 pb-1">{s.layer}</p>
+              <div key={s.layer} className="bg-neutral-50 border rounded-xl p-3">
+                <p className="font-bold text-neutral-700 mb-2 pb-1 border-b">{s.layer}</p>
                 <ul className="space-y-1">
                   {s.items.map(i => (
                     <li key={i} className="flex items-start gap-1 text-neutral-600">
-                      <span className="text-teal-500 mt-0.5">·</span> {i}
+                      <span className="text-teal-500 mt-0.5">·</span>{i}
                     </li>
                   ))}
                 </ul>
