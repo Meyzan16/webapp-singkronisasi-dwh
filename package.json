@@ -2,14 +2,11 @@
   "name": "agents-trading-monorepo",
   "version": "1.0.0",
   "private": true,
-  "workspaces": [
-    "frontend"
-  ],
   "scripts": {
-    "dev":      "cd frontend && npm run dev",
-    "build":    "cd frontend && npm run build",
-    "lint":     "cd frontend && npm run lint",
-    "backend":  "cd backend && .venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
-    "agents":   "cd backend && .venv/Scripts/python.exe -m agents"
+    "dev":     "npm run dev --prefix frontend",
+    "build":   "npm run build --prefix frontend",
+    "lint":    "npm run lint --prefix frontend",
+    "backend": "cd backend && .venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+    "agents":  "cd backend && .venv/Scripts/python.exe -m agents"
   }
 }

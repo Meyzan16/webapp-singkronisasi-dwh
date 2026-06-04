@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
         destination: "http://localhost:8000/api/v1/:path*",
       },
       {
+        source: "/health",
+        destination: "http://localhost:8000/health",
+      },
+      {
         source: "/ws/:path*",
         destination: "http://localhost:8000/ws/:path*",
       },
