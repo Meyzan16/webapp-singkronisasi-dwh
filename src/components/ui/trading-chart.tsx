@@ -100,12 +100,12 @@ export function TradingChart({ candles, height = 420, entryPrice, entryZoneLow, 
       // SL zone band
       const slBuf = Math.abs(entryPrice ? (entryPrice - stopLoss) * 0.1 : stopLoss * 0.003);
       const slTop = chart.addSeries(LineSeries, {
-        color: "#ef444430", lineWidth: 6, lineStyle: 0, priceScaleId: "right",
+        color: "#ef444430", lineWidth: 4, lineStyle: 0, priceScaleId: "right",
         lastValueVisible: false, priceLineVisible: false,
       });
       slTop.setData([{ time: t0, value: stopLoss + slBuf }, { time: t1, value: stopLoss + slBuf }]);
       const slBot = chart.addSeries(LineSeries, {
-        color: "#ef444430", lineWidth: 6, lineStyle: 0, priceScaleId: "right",
+        color: "#ef444430", lineWidth: 4, lineStyle: 0, priceScaleId: "right",
         lastValueVisible: false, priceLineVisible: false,
       });
       slBot.setData([{ time: t0, value: stopLoss - slBuf }, { time: t1, value: stopLoss - slBuf }]);
@@ -140,7 +140,7 @@ export function TradingChart({ candles, height = 420, entryPrice, entryZoneLow, 
     if (tool === "none" || !chartRef.current || !containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const y = e.clientY - rect.top;
-    const price = chartRef.current.priceScale("right").coordinateToPrice(y);
+    const price = candleSeriesRef.current?.coordinateToPrice(y) ?? null;
     if (!price || !candleSeriesRef.current) return;
 
     if (tool === "hline") {

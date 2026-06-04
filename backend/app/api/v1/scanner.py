@@ -29,8 +29,9 @@ from app.services.binance_urls import fapi
 router = APIRouter(tags=["scanner"])
 logger = structlog.get_logger(__name__)
 
+
 _cache: dict[str, dict] = {}
-CACHE_TTL = 300  # 5 min
+CACHE_TTL = 300  # 5 min — local live-scan cache (fallback only)
 
 
 # ── Style configs ──────────────────────────────────────────────────────────────
@@ -65,10 +66,10 @@ STYLE_CONFIGS: dict[str, StyleConfig] = {
         timeframe="15m", candle_limit=100,
         rsi_period=9, bb_period=14, lookback=10,
         squeeze_threshold=0.03, vol_slope_min=0.20,
-        atr_sl_mult=1.0, atr_tp_mult=2.5,
+        atr_sl_mult=1.0, atr_tp_mult=3.5,
         min_score=25, pump_penalty_pct=5,
-        min_sl_pct=0.008,   # SL minimum 0.8% dari entry
-        min_rr=1.5,
+        min_sl_pct=0.008,
+        min_rr=3.0,
         w_squeeze=1.0, w_accumulation=0.7, w_breakout=1.5,
         w_rsi=2.0, w_ema=1.2, w_pressure=1.8, w_candle=1.5,
     ),
@@ -76,10 +77,10 @@ STYLE_CONFIGS: dict[str, StyleConfig] = {
         timeframe="1h", candle_limit=100,
         rsi_period=14, bb_period=20, lookback=15,
         squeeze_threshold=0.045, vol_slope_min=0.25,
-        atr_sl_mult=1.2, atr_tp_mult=3.0,
+        atr_sl_mult=1.2, atr_tp_mult=4.0,
         min_score=28, pump_penalty_pct=8,
-        min_sl_pct=0.012,   # SL minimum 1.2%
-        min_rr=1.8,
+        min_sl_pct=0.012,
+        min_rr=3.0,
         w_squeeze=1.2, w_accumulation=1.2, w_breakout=1.3,
         w_rsi=1.5, w_ema=1.3, w_pressure=1.5, w_candle=1.2,
     ),
@@ -87,10 +88,10 @@ STYLE_CONFIGS: dict[str, StyleConfig] = {
         timeframe="4h", candle_limit=100,
         rsi_period=14, bb_period=20, lookback=20,
         squeeze_threshold=0.06, vol_slope_min=0.30,
-        atr_sl_mult=1.5, atr_tp_mult=4.5,
+        atr_sl_mult=1.5, atr_tp_mult=5.0,
         min_score=30, pump_penalty_pct=12,
-        min_sl_pct=0.020,   # SL minimum 2.0% dari entry
-        min_rr=2.0,
+        min_sl_pct=0.020,
+        min_rr=3.0,
         w_squeeze=1.8, w_accumulation=2.0, w_breakout=1.5,
         w_rsi=1.0, w_ema=1.0, w_pressure=1.2, w_candle=0.8,
     ),
@@ -100,8 +101,8 @@ STYLE_CONFIGS: dict[str, StyleConfig] = {
         squeeze_threshold=0.08, vol_slope_min=0.40,
         atr_sl_mult=2.0, atr_tp_mult=7.0,
         min_score=35, pump_penalty_pct=20,
-        min_sl_pct=0.030,   # SL minimum 3.0%
-        min_rr=2.5,
+        min_sl_pct=0.030,
+        min_rr=3.0,
         w_squeeze=2.0, w_accumulation=2.5, w_breakout=1.8,
         w_rsi=0.8, w_ema=1.5, w_pressure=1.0, w_candle=0.5,
     ),
@@ -703,29 +704,17 @@ async def _klines(client: httpx.AsyncClient, symbol: str, interval: str, limit: 
     return []
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────────
+# ── Core scan logic (called by scheduler — single source of truth) ─────────────
 
-@router.get("/scanner/scan", response_model=ScannerResponse)
-async def scan_market(
-    style: str = Query(default="swing", description="scalping | daytrading | swing | position"),
-) -> ScannerResponse:
+async def scan_market_core(style: str) -> ScannerResponse:
     """
-    Scan 100 most-active USDT futures for early breakout setups.
-    Each trading style uses different timeframe, scoring weights, and SL/TP sizing.
+    Run a full Binance scan for the given style. Pure computation — no DB writes.
+    Called exclusively by the scheduler. Results are cached in scan_store.
     """
-    style = style.lower()
-    if style not in STYLE_CONFIGS:
-        style = "swing"
-
-    cache_key = style
-    now = int(time.time())
-    if cache_key in _cache and now - _cache[cache_key].get("ts", 0) < CACHE_TTL:
-        return _cache[cache_key]["data"]
-
-    cfg = STYLE_CONFIGS[style]
+    cfg  = STYLE_CONFIGS[style]
     info = STYLE_LABELS[style]
+    now  = int(time.time())
 
-    # Fetch all tickers
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(fapi("/fapi/v1/ticker/24hr"))
         if r.status_code != 200:
@@ -736,7 +725,6 @@ async def scan_market(
     tickers.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
     candidates = tickers[:100]
 
-    # Fetch klines concurrently
     async with httpx.AsyncClient(timeout=25) as client:
         kline_results = await asyncio.gather(
             *[_klines(client, t["symbol"], cfg.timeframe, cfg.candle_limit) for t in candidates],
@@ -754,8 +742,7 @@ async def scan_market(
             closes = [float(k[4]) for k in kdata]
             vols   = [float(k[5]) for k in kdata]
             change = float(ticker.get("priceChangePercent", 0))
-
-            sig = _analyze(ticker["symbol"], opens, highs, lows, closes, vols, change, cfg, style)
+            sig    = _analyze(ticker["symbol"], opens, highs, lows, closes, vols, change, cfg, style)
             if sig:
                 results.append(sig)
         except Exception:
@@ -772,6 +759,38 @@ async def scan_market(
         timeframe=info["tf"],
         generated_at=now,
     )
-    _cache[cache_key] = {"data": response, "ts": now}
     logger.info("scanner_done", style=style, tf=cfg.timeframe, found=len(results))
+    return response
+
+
+# ── API Endpoint (read-only — serves scheduler cache) ─────────────────────────
+
+@router.get("/scanner/scan", response_model=ScannerResponse)
+async def scan_market(
+    style: str = Query(default="swing", description="scalping | daytrading | swing | position"),
+) -> ScannerResponse:
+    """
+    Return scanner results. Serves the scheduler's cached results when available.
+    Falls back to a live scan (read-only, no DB logging) if cache is empty.
+    """
+    from app.services.scheduler import scan_store
+
+    style = style.lower()
+    if style not in STYLE_CONFIGS:
+        style = "swing"
+
+    # ── 1. Serve scheduler cache (preferred) ──────────────────────────────────
+    cached = scan_store.get_result(style)
+    if cached is not None:
+        return cached
+
+    # ── 2. Fallback: live scan if scheduler hasn't run yet ────────────────────
+    #    (first few minutes after startup, before first scheduler cycle)
+    now       = int(time.time())
+    cache_key = style
+    if cache_key in _cache and now - _cache[cache_key].get("ts", 0) < CACHE_TTL:
+        return _cache[cache_key]["data"]
+
+    response = await scan_market_core(style)
+    _cache[cache_key] = {"data": response, "ts": now}
     return response

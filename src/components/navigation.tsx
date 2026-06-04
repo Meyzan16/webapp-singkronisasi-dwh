@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsIcon, LogOut, BarChart3, TrendingUp, Zap, Grid2X2, LineChart, BookOpen } from "lucide-react";
+import { SettingsIcon, LogOut, BarChart3, Grid2X2, BookOpen, History } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useContext } from "react";
 import Link from "next/link";
@@ -8,57 +8,19 @@ import DottedSeparator from "./ui/dotted-separator";
 import { GlobalContext } from "@/app/context";
 
 const routes = [
-  {
-    label: "Dashboard",
-    href: "/dashboards",
-    icon: Grid2X2,
-    activeIcon: Grid2X2,
-  },
-  {
-    label: "Scanner",
-    href: "/scanner",
-    icon: BarChart3,
-    activeIcon: BarChart3,
-  },
-  {
-    label: "Signal Feed",
-    href: "/signals",
-    icon: Zap,
-    activeIcon: Zap,
-  },
-  {
-    label: "Charts",
-    href: "/charts",
-    icon: LineChart,
-    activeIcon: LineChart,
-  },
-  {
-    label: "Backtest",
-    href: "/backtest",
-    icon: TrendingUp,
-    activeIcon: TrendingUp,
-  },
-  {
-    label: "Architecture",
-    href: "/architecture",
-    icon: BookOpen,
-    activeIcon: BookOpen,
-  },
-  {
-    label: "Settings",
-    href: "/settings",
-    icon: SettingsIcon,
-    activeIcon: SettingsIcon,
-  },
+  { label: "Dashboard",  href: "/dashboards", icon: Grid2X2   },
+  { label: "Scanner",    href: "/scanner",    icon: BarChart3  },
+  { label: "History",    href: "/history",    icon: History    },
+  { label: "Architecture", href: "/architecture", icon: BookOpen },
+  { label: "Settings",   href: "/settings",   icon: SettingsIcon },
 ];
 
 export const Navigation = () => {
   const pathName = usePathname();
-  const router = useRouter();
+  const router   = useRouter();
   const { currentUser, setCurrentUser } = useContext(GlobalContext)!;
 
   const handleSignOut = () => {
-    // TODO: panggil API logout saat sudah terintegrasi
     setCurrentUser(null);
     router.push("/sign-in");
   };
@@ -73,18 +35,16 @@ export const Navigation = () => {
         <div className="mb-2 text-xs font-semibold text-black">Navigation</div>
         {routes.map((item) => {
           const isActive = pathName === item.href;
-          const Icon = isActive ? item.activeIcon : item.icon;
+          const Icon = item.icon;
           return (
             <Link key={item.href} href={item.href}>
-              <div
-                className={`flex items-center gap-3 py-3 rounded-lg font-medium text-sm mb-1 transition-colors ${
-                  isActive
-                    ? "px-2 bg-primarygreen text-white"
-                    : "text-black hover:px-2 hover:bg-neutral-300 hover:text-black"
-                }`}
-              >
+              <div className={`flex items-center gap-3 py-3 rounded-lg font-medium text-sm mb-1 transition-colors ${
+                isActive
+                  ? "px-2 bg-primarygreen text-white"
+                  : "text-black hover:px-2 hover:bg-neutral-300 hover:text-black"
+              }`}>
                 <Icon className="w-5 h-5" />
-                {item.label.split(" (")[0]}
+                {item.label}
               </div>
             </Link>
           );
@@ -114,8 +74,7 @@ export const Navigation = () => {
           <button
             onClick={handleSignOut}
             title="Sign out"
-            className="rounded-full bg-primarygreen p-2 flex-shrink-0 text-white hover:text-red-500 hover:bg-red-50 transition-colors"
-          >
+            className="rounded-full bg-primarygreen p-2 flex-shrink-0 text-white hover:text-red-500 hover:bg-red-50 transition-colors">
             <LogOut className="w-4 h-4" />
           </button>
         </div>
