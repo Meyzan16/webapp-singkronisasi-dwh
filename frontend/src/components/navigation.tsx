@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsIcon, LogOut, BarChart3, Grid2X2, BookOpen, History } from "lucide-react";
+import { SettingsIcon, LogOut, BarChart3, Grid2X2, BookOpen, History, Rocket } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useContext } from "react";
 import Link from "next/link";
@@ -8,11 +8,12 @@ import DottedSeparator from "./ui/dotted-separator";
 import { GlobalContext } from "@/app/context";
 
 const routes = [
-  { label: "Dashboard",  href: "/dashboards", icon: Grid2X2   },
-  { label: "Scanner",    href: "/scanner",    icon: BarChart3  },
-  { label: "History",    href: "/history",    icon: History    },
-  { label: "Architecture", href: "/architecture", icon: BookOpen },
-  { label: "Settings",   href: "/settings",   icon: SettingsIcon },
+  { label: "Dashboard",    href: "/dashboards",   icon: Grid2X2    },
+  { label: "Scanner",      href: "/scanner",      icon: BarChart3  },
+  { label: "Opportunity",  href: "/opportunity",  icon: Rocket     },
+  { label: "History",      href: "/history",      icon: History    },
+  { label: "Architecture", href: "/architecture", icon: BookOpen   },
+  { label: "Settings",     href: "/settings",     icon: SettingsIcon },
 ];
 
 export const Navigation = () => {

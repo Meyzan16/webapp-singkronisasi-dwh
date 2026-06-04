@@ -28,12 +28,14 @@ from app.api.v1.market import router as market_router
 from app.api.v1.coin_detail import router as coin_detail_router
 from app.api.v1.scanner import router as scanner_router
 from app.api.v1.history import router as history_router
+from app.api.v1.opportunity import router as opportunity_router
 from app.models.paper_trade import PaperTrade as _PaperTrade  # noqa: F401 — register table
 from app.config import get_settings
 from app.database import AsyncSessionLocal, create_db_schema, dispose_engine, set_db_available
 from app.services.data_pipeline.binance_client import BinanceClient
 from app.services.data_pipeline.kline_fetcher import KlineFetcher
 from agents.scanner.scheduler import run_scanner_loop, get_state as scheduler_state
+from agents.opportunity.scheduler import run_opportunity_loop
 from app.ws.position_stream import position_stream
 
 logger = structlog.get_logger(__name__)
@@ -85,16 +87,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("poller_skipped", error=str(exc)[:80])
 
     # ── Background scanner scheduler (24/7, all 4 styles, every 15 min) ───────
-    scheduler_task = asyncio.create_task(run_scanner_loop())
+    scheduler_task    = asyncio.create_task(run_scanner_loop())
+    opportunity_task  = asyncio.create_task(run_opportunity_loop())
 
     yield  # ← app is running
 
     # ── Shutdown ───────────────────────────────────────────────────────────────
-    scheduler_task.cancel()
-    try:
-        await scheduler_task
-    except asyncio.CancelledError:
-        pass
+    for task in [scheduler_task, opportunity_task]:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     if poller_task is not None:
         poller_task.cancel()
@@ -130,7 +134,8 @@ app.include_router(backtest_router,    prefix=settings.api_v1_prefix)
 # DB-dependent (return 503 when PostgreSQL is down)
 app.include_router(klines_router,      prefix=settings.api_v1_prefix)
 app.include_router(positions_router,   prefix=settings.api_v1_prefix)
-app.include_router(history_router,     prefix=settings.api_v1_prefix)
+app.include_router(history_router,      prefix=settings.api_v1_prefix)
+app.include_router(opportunity_router,  prefix=settings.api_v1_prefix)
 
 
 @app.websocket("/ws/positions")
