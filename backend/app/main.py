@@ -1,6 +1,15 @@
 import asyncio
+import os
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+
+# Make agents/ importable whether backend is run from:
+#   cd backend && uvicorn app.main:app        ← adds repo root to sys.path
+#   cd agents-trading && python backend/...   ← repo root already in path
+_repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
 
 import structlog
 from fastapi import FastAPI, WebSocket
@@ -24,7 +33,7 @@ from app.config import get_settings
 from app.database import AsyncSessionLocal, create_db_schema, dispose_engine, set_db_available
 from app.services.data_pipeline.binance_client import BinanceClient
 from app.services.data_pipeline.kline_fetcher import KlineFetcher
-from app.services.scheduler.scanner_scheduler import run_scanner_loop, get_state as scheduler_state
+from agents.scanner.scheduler import run_scanner_loop, get_state as scheduler_state
 from app.ws.position_stream import position_stream
 
 logger = structlog.get_logger(__name__)

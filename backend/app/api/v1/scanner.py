@@ -773,7 +773,7 @@ async def scan_market(
     Return scanner results. Serves the scheduler's cached results when available.
     Falls back to a live scan (read-only, no DB logging) if cache is empty.
     """
-    from app.services.scheduler import scan_store
+    from agents.scanner import store as scan_store
 
     style = style.lower()
     if style not in STYLE_CONFIGS:

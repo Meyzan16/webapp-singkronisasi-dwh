@@ -9,7 +9,7 @@ import structlog
 from fastapi import APIRouter, Depends, Query
 
 from app.database import require_db
-from app.services.paper_trader import paper_trader
+from agents.paper_trader import trader as paper_trader
 
 router = APIRouter(tags=["history"])
 logger = structlog.get_logger(__name__)
