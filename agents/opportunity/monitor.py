@@ -41,6 +41,13 @@ logger = structlog.get_logger(__name__)
 INTERVAL_SEC  = 60     # check every minute
 STARTUP_DELAY = 45
 
+# Fee: 0.1% taker per side = 0.2% round trip
+TAKER_FEE     = 0.001   # 0.1% per side
+ROUND_TRIP    = TAKER_FEE * 2  # 0.2% total cost
+
+# Maximum position age in days — close stalled positions
+MAX_AGE_DAYS  = 7
+
 _running      = False
 _cycle_count  = 0
 _last_check:  Optional[float] = None
@@ -146,22 +153,38 @@ def _risk_signal(klines: list, entry_price: float, current_price: float, symbol:
 
 
 async def _fetch_prices(symbols: list[str]) -> dict[str, float]:
-    """Fetch current spot prices for multiple symbols concurrently."""
+    """Fetch current spot prices — batch endpoint to minimize weight usage."""
+    if not symbols:
+        return {}
     prices: dict[str, float] = {}
-    async with httpx.AsyncClient(timeout=10) as client:
-        tasks = {
-            sym: asyncio.create_task(
-                client.get(spot(f"/api/v3/ticker/price?symbol={sym}"))
+    import json as _json
+    # Use batch symbols endpoint: weight=2 for all symbols at once
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            syms_param = _json.dumps(symbols)
+            r = await client.get(
+                spot("/api/v3/ticker/price"),
+                params={"symbols": syms_param},
             )
-            for sym in symbols
-        }
-        for sym, task in tasks.items():
-            try:
-                r = await task
-                if r.status_code == 200:
-                    prices[sym] = float(r.json()["price"])
-            except Exception:
-                pass
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list):
+                    for item in data:
+                        prices[item["symbol"]] = float(item["price"])
+                    return prices
+            # Fallback: individual requests with semaphore
+            _sem = asyncio.Semaphore(10)
+            async def _fetch_one(sym: str) -> None:
+                async with _sem:
+                    try:
+                        resp = await client.get(spot(f"/api/v3/ticker/price?symbol={sym}"))
+                        if resp.status_code == 200:
+                            prices[sym] = float(resp.json()["price"])
+                    except Exception:
+                        pass
+            await asyncio.gather(*[_fetch_one(s) for s in symbols])
+    except Exception:
+        pass
     return prices
 
 
@@ -234,8 +257,16 @@ async def check_positions() -> int:
             close_price: Optional[float] = None
             close_reason: Optional[str]  = None
 
+            # ── Max age check (7 days — avoid dead positions) ────────────────
+            age_days = (time.time() - (trade.entry_at or 0)) / 86400
+            if age_days > MAX_AGE_DAYS:
+                pnl_now = (price - entry) / entry * 100
+                new_status   = "tp" if pnl_now > 0 else "sl"
+                close_price  = round(price, 8)
+                close_reason = "max_age_expired"
+
             # ── Layer 1: Hard exits ──────────────────────────────────────────
-            if price <= sl:
+            elif price <= sl:
                 new_status   = "sl"
                 close_price  = sl
                 close_reason = "sl_hit"
@@ -248,15 +279,17 @@ async def check_positions() -> int:
                 close_price  = tp2
                 close_reason = "tp2_hit"
             elif tp1 and price >= tp1 and not meta.get("tp1_hit"):
-                # TP1 hit — flag + move SL to breakeven
+                # TP1 hit — flag + move SL to breakeven + cover entry fee
+                # New SL = entry × (1 + round_trip_fee) so net P&L ≥ 0 even after fee
+                new_sl = entry * (1 + ROUND_TRIP)
                 meta["tp1_hit"]       = True
                 meta["tp1_hit_price"] = round(price, 8)
                 meta["tp1_hit_at"]    = time.time()
-                meta["current_sl"]    = entry   # SL moved to breakeven
+                meta["current_sl"]    = round(new_sl, 8)
                 trade.signals_json    = json.dumps(meta)
                 updated += 1
                 logger.info("opportunity_tp1_hit", symbol=trade.symbol,
-                            price=price, tp1=tp1, new_sl=entry)
+                            price=price, tp1=tp1, new_sl=round(new_sl, 8))
 
             # ── Layer 2: Risk-adjusted exits ─────────────────────────────────
             if new_status is None:
@@ -277,13 +310,17 @@ async def check_positions() -> int:
 
             # ── Apply close ──────────────────────────────────────────────────
             if new_status and close_price:
-                pnl = (close_price - entry) / entry * 100
-                meta["close_reason"] = close_reason
-                trade.status      = new_status
-                trade.close_price = close_price
-                trade.closed_at   = time.time()
-                trade.pnl_pct     = round(pnl, 2)
-                trade.signals_json = json.dumps(meta)
+                # Fee-aware P&L: deduct 0.1% entry + 0.1% exit = 0.2% round trip
+                pnl_gross = (close_price - entry) / entry * 100
+                pnl_net   = pnl_gross - (ROUND_TRIP * 100)   # in %
+                meta["close_reason"]  = close_reason
+                meta["pnl_gross_pct"] = round(pnl_gross, 2)
+                meta["fee_pct"]       = round(ROUND_TRIP * 100, 2)
+                trade.status          = new_status
+                trade.close_price     = close_price
+                trade.closed_at       = time.time()
+                trade.pnl_pct         = round(pnl_net, 2)   # net after fee
+                trade.signals_json    = json.dumps(meta)
                 closed += 1
                 logger.info(
                     "opportunity_position_closed",
@@ -292,7 +329,9 @@ async def check_positions() -> int:
                     reason=close_reason,
                     entry=entry,
                     close=close_price,
-                    pnl_pct=round(pnl, 2),
+                    pnl_gross=round(pnl_gross, 2),
+                    pnl_net=round(pnl_net, 2),
+                    fee=round(ROUND_TRIP * 100, 2),
                 )
 
         if closed > 0 or updated > 0:

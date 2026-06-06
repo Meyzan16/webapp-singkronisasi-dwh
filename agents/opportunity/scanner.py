@@ -43,9 +43,17 @@ logger = structlog.get_logger(__name__)
 
 TIMEFRAMES        = ["15m", "1h", "4h"]
 CANDLE_LIMIT      = 100
-TOP_N             = 30
-MIN_SCORE         = 40    # minimum untuk direkomendasikan
-AUTO_OPEN_SCORE   = 95    # minimum untuk auto-open tanpa konfirmasi manual
+TOP_N             = 15    # hanya 15 terbaik — kualitas > kuantitas
+MIN_SCORE         = 65    # threshold lebih tinggi = hanya high-conviction
+AUTO_OPEN_SCORE   = 90    # auto-open untuk sinyal sangat kuat
+
+# Fee awareness (Binance spot taker 0.1% per side = 0.2% round-trip)
+TAKER_FEE_PCT     = 0.10  # % per side
+ROUND_TRIP_FEE    = TAKER_FEE_PCT * 2  # 0.20% total cost
+
+# Position sizing (paper trading $1000 balance, 1% risk per trade = $10 risk)
+PAPER_BALANCE     = 1_000.0
+RISK_PER_TRADE    = 0.01   # 1% of balance = $10
 
 
 # ── Math helpers ───────────────────────────────────────────────────────────────
@@ -164,12 +172,24 @@ def _analyze_tf(tf: str, klines: list) -> Optional[TFData]:
 
 def _calc_trade_levels(tf_data: dict[str, TFData], entry: float) -> Optional[dict]:
     """
-    Calculate SPOT position levels: Entry, SL, TP1, TP2, TP3.
+    Risk-adjusted SPOT trade levels — designed for HIGH return in volatile crypto.
 
-    SL  : di bawah swing low 1h (20 candle) dengan buffer 0.5%
-    TP1 : R:R 1:1.5 — profit cepat
-    TP2 : R:R 1:3   — target utama (atau resistance 4h jika lebih tinggi)
-    TP3 : R:R 1:5   — extended target
+    Design philosophy:
+      - SL must be wide enough to survive noise (≥1.5%, ≤5%)
+      - TP must be >> fee cost: TP2 min 6%, TP3 min 10%
+      - R:R to TP2 ≥ 3.5 (not 2.0) — only asymmetric trades
+      - Fee-aware: 0.2% round-trip deducted from net targets
+
+    Position sizing (built into fee math):
+      - Paper balance $1000, risk 1% = $10 per trade
+      - If SL=2% → position = $10/2% = $500 notional
+      - If SL=3% → position = $10/3% = $333 notional
+
+    Levels:
+      SL  : swing low 4h (more stable than 1h) - 0.8% buffer
+      TP1 : entry + 2.5×risk  (must net ≥ 3% after fee)
+      TP2 : max(4×risk, entry+6%) — guaranteed 6% minimum
+      TP3 : max(7×risk, entry+10%) — crypto 10%+ target
     """
     d1h = tf_data.get("1h")
     d4h = tf_data.get("4h")
@@ -177,10 +197,13 @@ def _calc_trade_levels(tf_data: dict[str, TFData], entry: float) -> Optional[dic
     if not d1h or len(d1h.lows) < 10:
         return None
 
-    # SL: below recent swing low on 1h
-    recent_lows = d1h.lows[-20:] if len(d1h.lows) >= 20 else d1h.lows
-    swing_low   = min(recent_lows)
-    sl          = swing_low * 0.995  # 0.5% buffer below swing low
+    # SL: swing low from 4h (more stable) with 0.8% buffer, fallback to 1h
+    if d4h and len(d4h.lows) >= 10:
+        recent_lows = d4h.lows[-20:] if len(d4h.lows) >= 20 else d4h.lows
+    else:
+        recent_lows = d1h.lows[-20:] if len(d1h.lows) >= 20 else d1h.lows
+    swing_low = min(recent_lows)
+    sl        = swing_low * 0.992   # 0.8% buffer below swing low
 
     if sl >= entry:
         return None
@@ -188,48 +211,61 @@ def _calc_trade_levels(tf_data: dict[str, TFData], entry: float) -> Optional[dic
     risk     = entry - sl
     risk_pct = risk / entry * 100
 
-    # Filter: SL too wide (> 8%) or too tight (< 0.4% — too close to noise)
-    if risk_pct > 8.0 or risk_pct < 0.4:
+    # SL must be 1.5%–5%: tight enough for good R:R, wide enough to survive noise
+    if risk_pct > 5.0 or risk_pct < 1.5:
         return None
 
-    # Find resistance for TP2 target
-    resistance = None
-    if d4h and len(d4h.highs) >= 20:
+    # TP1: 2.5×risk — quick partial profit, net ~2.3% after fee on 2% SL
+    tp1 = entry + risk * 2.5
+    tp1_pct = (tp1 - entry) / entry * 100
+
+    # TP2: 4×risk OR 6% minimum — primary target (whichever is HIGHER)
+    tp2_rr    = entry + risk * 4.0
+    tp2_pct_min = entry * 1.06   # min 6% from entry
+    tp2       = max(tp2_rr, tp2_pct_min)
+
+    # Check if 4h resistance is a better/higher TP2
+    if d4h and len(d4h.highs) >= 10:
         highs_4h  = d4h.highs[-30:] if len(d4h.highs) >= 30 else d4h.highs
-        r4h       = max(highs_4h)
+        r4h = max(highs_4h)
         rr_to_res = (r4h - entry) / risk if risk > 0 else 0
-        if r4h > entry * 1.01 and rr_to_res >= 2.0:
-            resistance = r4h
-    if resistance is None and d1h and len(d1h.highs) >= 20:
-        highs_1h  = d1h.highs[-30:] if len(d1h.highs) >= 30 else d1h.highs
-        r1h       = max(highs_1h)
-        rr_to_res = (r1h - entry) / risk if risk > 0 else 0
-        if r1h > entry * 1.01 and rr_to_res >= 2.0:
-            resistance = r1h
+        # Use resistance only if it's ABOVE our minimum TP2 and has good R:R
+        if r4h > tp2 and rr_to_res >= 3.5:
+            tp2 = r4h
 
-    # Calculate TPs
-    tp1 = entry + risk * 1.5
-    tp2 = resistance if resistance else entry + risk * 3.0
-    tp3 = entry + risk * 5.0
+    # TP3: 7×risk OR 10% minimum — extended target for high volatility crypto
+    tp3_rr      = entry + risk * 7.0
+    tp3_pct_min = entry * 1.10   # min 10% from entry
+    tp3         = max(tp3_rr, tp3_pct_min)
 
-    # Final R:R check (must be >= 2.0 to TP2)
+    # R:R check to TP2 (must be ≥ 3.5 — strict asymmetry requirement)
     rr = (tp2 - entry) / risk
-    if rr < 2.0:
+    if rr < 3.5:
         return None
+
+    # Fee-aware net P&L at each TP
+    def net_pct(tp: float) -> float:
+        return round((tp - entry) / entry * 100 - ROUND_TRIP_FEE, 2)
 
     rp = _round_price
 
     return {
-        "entry":    rp(entry, entry),
-        "sl":       rp(sl, entry),
-        "tp1":      rp(tp1, entry),
-        "tp2":      rp(tp2, entry),
-        "tp3":      rp(tp3, entry),
-        "risk_pct": round(risk_pct, 2),
-        "tp1_pct":  round((tp1 - entry) / entry * 100, 2),
-        "tp2_pct":  round((tp2 - entry) / entry * 100, 2),
-        "tp3_pct":  round((tp3 - entry) / entry * 100, 2),
-        "rr_ratio": round(rr, 1),
+        "entry":       rp(entry, entry),
+        "sl":          rp(sl, entry),
+        "tp1":         rp(tp1, entry),
+        "tp2":         rp(tp2, entry),
+        "tp3":         rp(tp3, entry),
+        "risk_pct":    round(risk_pct, 2),
+        "tp1_pct":     round(tp1_pct, 2),
+        "tp2_pct":     round((tp2 - entry) / entry * 100, 2),
+        "tp3_pct":     round((tp3 - entry) / entry * 100, 2),
+        "tp1_net_pct": net_pct(tp1),   # after fee
+        "tp2_net_pct": net_pct(tp2),   # after fee
+        "tp3_net_pct": net_pct(tp3),   # after fee
+        "rr_ratio":    round(rr, 1),
+        # Position sizing info
+        "position_usdt": round(PAPER_BALANCE * RISK_PER_TRADE / (risk_pct / 100), 2),
+        "risk_usdt":     round(PAPER_BALANCE * RISK_PER_TRADE, 2),
     }
 
 
