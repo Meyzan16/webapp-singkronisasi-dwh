@@ -40,6 +40,13 @@ class PaperTrade(Base):
     entry_at:  Mapped[float]        = mapped_column(Float, nullable=False, index=True)
     closed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Futures-specific (nullable so spot trades aren't affected)
+    leverage:      Mapped[int | None]   = mapped_column(Integer,     nullable=True)
+    margin_type:   Mapped[str | None]   = mapped_column(String(10),  nullable=True)
+    regime:        Mapped[str | None]   = mapped_column(String(20),  nullable=True)   # market regime at entry
+    trail_sl:      Mapped[float | None] = mapped_column(Float,       nullable=True)   # current trailed SL
+    trail_active:  Mapped[bool | None]  = mapped_column(nullable=True, default=False) # trailing started
+
     # Outcome
     status:      Mapped[str]         = mapped_column(String(10), nullable=False, default="open", index=True)  # open | tp | sl
     close_price: Mapped[float | None] = mapped_column(Float, nullable=True)

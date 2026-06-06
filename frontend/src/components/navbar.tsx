@@ -7,8 +7,16 @@ const pathnameMap = {
     description: "Portfolio summary & active signals",
   },
   "scanner": {
-    title: "Scanner",
-    description: "Volume heatmap & top movers",
+    title: "⚡ Futures Scanner",
+    description: "Agent 1 (AI Knowledge) + Agent 2 (T0-T4) · 100 USDT-M Perpetual pairs · LONG & SHORT",
+  },
+  "opportunity": {
+    title: "🎯 Spot Opportunity",
+    description: "Spot scanner — BB Squeeze · Accumulation · Breakout · Entry/SL/TP otomatis",
+  },
+  "history": {
+    title: "📋 History",
+    description: "Paper trading history — Spot Scanner · Spot Opportunity · Futures Agent 1+2",
   },
   "signals": {
     title: "Signal Feed",
@@ -22,9 +30,13 @@ const pathnameMap = {
     title: "Backtest",
     description: "Strategy testing against historical data",
   },
+  "system-health": {
+    title: "⚙️ System Health",
+    description: "Real-time monitoring — semua agents, API Binance, database",
+  },
   "architecture": {
-    title: "Architecture",
-    description: "14-step build order & system design",
+    title: "📐 Architecture",
+    description: "6 autonomous agents · 2 sistem independen · Futures AI + T0-T4 · Spot Opportunity",
   },
   "settings": {
     title: "Settings",

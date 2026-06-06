@@ -26,13 +26,12 @@ function SectionTitle({ icon, title, sub }: { icon: string; title: string; sub?:
   );
 }
 
-// ── Tabs helper ───────────────────────────────────────────────────────────────
 function Tabs({ tabs, active, onChange }: { tabs: string[]; active: string; onChange: (t: string) => void }) {
   return (
-    <div className="flex bg-neutral-100 rounded-lg p-0.5 gap-0.5 mb-4">
+    <div className="flex bg-neutral-100 rounded-lg p-0.5 gap-0.5 mb-4 flex-wrap">
       {tabs.map(t => (
         <button key={t} onClick={() => onChange(t)}
-          className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${
+          className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all min-w-[80px] ${
             active === t ? "bg-white shadow text-neutral-900" : "text-neutral-500 hover:text-neutral-700"
           }`}>
           {t}
@@ -43,8 +42,155 @@ function Tabs({ tabs, active, onChange }: { tabs: string[]; active: string; onCh
 }
 
 export default function ArchitecturePage() {
-  const [taTab, setTaTab]     = useState("BB Squeeze");
+  const [taTab, setTaTab]       = useState("BB Squeeze");
   const [styleTab, setStyleTab] = useState("Scalping");
+  const [agentTab, setAgentTab] = useState("Futures Agent 1");
+
+  const AGENTS = {
+    "Futures Agent 1": {
+      icon: "🤖", file: "agents/futures/agent1.py",
+      color: "from-blue-500/10 to-indigo-500/10 border-blue-300",
+      status: "✅ Aktif 24/7", interval: "Setiap 15 menit",
+      group: "⚡ Futures",
+      desc: "AI-based futures scanner — cek kondisi pasar via Funding Rate, Open Interest, Liquidations, dan Support/Resistance. Deteksi setup LONG/SHORT Futures dengan konfirmasi multi-faktor.",
+      pipeline: [
+        "Ambil top-100 pair USDT Futures dari Binance (by volume)",
+        "Fetch funding rate: terlalu tinggi (+) → SHORT bias, terlalu rendah (−) → LONG bias",
+        "Analisis Open Interest: OI naik + harga naik → trend kuat; OI naik + harga turun → short squeeze risk",
+        "Deteksi liquidation zones: area dengan banyak posisi terancam = magnet harga",
+        "Analisis S/R Zones (swing pivot clustering, 20 candle 4H)",
+        "Hitung Entry/SL/TP dengan R:R ≥ 1:3 berbasis ATR + S/R",
+        "Filter: score ≥ threshold, R:R valid → log ke paper_trades (agent='futures_agent1')",
+      ],
+      code: `# agents/futures/scheduler.py → agent1.py
+async def run_agent1_scan(symbols: list[str]) -> list[Signal]:
+    for sym in symbols:
+        funding = await fetch_funding_rate(sym)
+        oi      = await fetch_open_interest(sym)
+        liq     = await fetch_liquidation_zones(sym)
+        sr      = await compute_sr_zones(sym)          # 4H swing pivots
+        signal  = await score_and_decide(funding, oi, liq, sr)
+        if signal.rr >= 1.3:
+            results.append(signal)
+    return results`,
+    },
+    "Futures Agent 2": {
+      icon: "🔭", file: "agents/futures/agent2.py",
+      color: "from-purple-500/10 to-violet-500/10 border-purple-300",
+      status: "✅ Aktif 24/7", interval: "Setiap 15 menit",
+      group: "⚡ Futures",
+      desc: "TA-based futures scanner — pipeline T0–T4 penuh: Wyckoff phase detection, trend analysis, S/R zones, pattern recognition, trigger confirmation. Sama dengan TA Engine backend.",
+      pipeline: [
+        "T0 — Wyckoff: deteksi phase Accumulation/Distribution/Markup/Markdown",
+        "T1 — Trend: EMA alignment (9/21/50), ADX strength, multi-TF confluence",
+        "T2 — S/R: swing pivot clustering, Fibonacci retracement zones",
+        "T3 — Pattern: BB Squeeze, Volume Accumulation, RSI divergence, candle patterns",
+        "T4 — Trigger: final confirmation (EMA cross, pressure shift, volume spike)",
+        "Hitung Entry/SL/TP dengan R:R ≥ 1:3 berbasis S/R + ATR",
+        "Log ke paper_trades (agent='futures_agent2') jika semua filter lolos",
+      ],
+      code: `# agents/futures/agent2.py — T0-T4 pipeline
+async def run_agent2_scan(symbols: list[str]) -> list[Signal]:
+    for sym in symbols:
+        klines = await fetch_multi_tf(sym)   # 15m, 1H, 4H
+        phase  = wyckoff_phase(klines)       # T0
+        trend  = analyze_trend(klines)       # T1
+        zones  = compute_sr(klines)          # T2
+        patt   = detect_patterns(klines)     # T3
+        trig   = check_trigger(klines)       # T4
+        score  = aggregate_score(...)
+        if score >= MIN_SCORE and rr >= 1.3:
+            results.append(build_signal(...))`,
+    },
+    "Futures Monitor": {
+      icon: "👁", file: "agents/futures/monitor.py",
+      color: "from-indigo-500/10 to-blue-500/10 border-indigo-300",
+      status: "✅ Aktif 24/7", interval: "Setiap 60 detik",
+      group: "⚡ Futures",
+      desc: "Monitor semua posisi Futures yang open. Cek harga real-time dari Binance Futures, auto-close saat TP atau SL tercapai, update unrealized PnL di database.",
+      pipeline: [
+        "Query semua paper_trades (type='futures') dengan status='open'",
+        "Batch fetch harga terkini dari Binance Futures markPrice",
+        "Per posisi LONG: harga ≤ SL → sl; harga ≥ TP2 atau TP3 → tp",
+        "Per posisi SHORT: harga ≥ SL → sl; harga ≤ TP2 atau TP3 → tp",
+        "Update unrealized_pnl di database untuk semua posisi terbuka",
+        "Commit perubahan, increment cycle_count",
+      ],
+      code: `# agents/futures/monitor.py
+while True:
+    positions = await get_open_futures_positions()
+    prices    = await batch_fetch_mark_prices(positions)
+    for pos in positions:
+        check_sl_tp(pos, prices[pos.symbol])
+    await asyncio.sleep(60)`,
+    },
+    "Weight Updater": {
+      icon: "🧠", file: "agents/futures/weight_updater.py",
+      color: "from-green-500/10 to-teal-500/10 border-green-300",
+      status: "✅ Aktif 24/7", interval: "Setiap 6 jam",
+      group: "⚡ Futures",
+      desc: "Adaptive learning — auto-tune bobot sinyal berdasarkan win rate historis. Sinyal dengan win rate tinggi mendapat bobot lebih besar di scan berikutnya.",
+      pipeline: [
+        "Ambil semua paper_trades (type='futures') yang sudah closed (tp/sl)",
+        "Hitung win rate per sinyal: BBSqueeze, EMA, Funding, OI, dsb",
+        "Normalisasi bobot: sinyal dengan WR > 60% → weight naik; WR < 40% → turun",
+        "Simpan ke signal_weights table di PostgreSQL",
+        "Agent1 & Agent2 baca weight terbaru di scan berikutnya",
+        "Log weight update ke structlog",
+      ],
+      code: `# agents/futures/weight_updater.py
+while True:
+    win_rates = await compute_signal_win_rates()
+    weights   = normalize_weights(win_rates)
+    await save_weights(weights)           # → signal_weights table
+    logger.info("weights_updated", n=len(weights))
+    await asyncio.sleep(6 * 3600)        # tiap 6 jam`,
+    },
+    "Spot Opp Scanner": {
+      icon: "🚀", file: "agents/opportunity/scheduler.py",
+      color: "from-teal-500/10 to-green-500/10 border-teal-300",
+      status: "✅ Aktif 24/7", interval: "Setiap 15 menit",
+      group: "🎯 Spot",
+      desc: "Scan 100 pair USDT Spot berdasarkan volume. Cari koin dengan potensi naik (BB Squeeze, Akumulasi, Breakout). Broadcast hasil via WebSocket ke frontend.",
+      pipeline: [
+        "Ambil top-100 pair USDT Spot dari Binance (bukan Futures)",
+        "Analisis 3 TF serentak: 15m + 1H + 4H",
+        "9 sinyal: BB Squeeze, Vol Akumulasi, RSI Zone, Buy Pressure, EMA Align, Near Breakout, Momentum 24H, Short-term Mom, Taker Ratio",
+        "Hitung Entry (harga pasar) · SL (swing low −0.5%) · TP1/TP2/TP3 (R:R 1:1.5/3/5)",
+        "Filter: score ≥ 30 · SL max 8% · R:R ke TP2 ≥ 2.0",
+        "Top-30 kandidat disimpan ke opportunity store (in-memory)",
+        "WebSocket broadcast ke semua klien /ws/opportunity",
+      ],
+      code: `# agents/opportunity/scheduler.py
+while True:
+    result = await run_opportunity_scan()   # scan 100 spot pairs
+    opp_store.set_result(result)            # update in-memory cache
+    await broadcast_ws(result)             # push ke frontend via WS
+    await asyncio.sleep(15 * 60)`,
+    },
+    "Spot Monitor": {
+      icon: "📍", file: "agents/opportunity/monitor.py",
+      color: "from-amber-500/10 to-orange-500/10 border-amber-300",
+      status: "✅ Aktif 24/7", interval: "Setiap 60 detik",
+      group: "🎯 Spot",
+      desc: "Monitor semua posisi Opportunity SPOT yang open. Cek harga real-time, auto-close saat TP/SL tercapai, set flag TP1 Hit tanpa menutup posisi.",
+      pipeline: [
+        "Query semua opportunity_spot trades dengan status='open'",
+        "Fetch harga terkini dari Binance Spot (concurrent batch)",
+        "Cek per posisi: harga ≤ SL → tutup status='sl'",
+        "Cek: harga ≥ TP3 atau TP2 → tutup status='tp'",
+        "Cek: harga ≥ TP1 (pertama kali) → set tp1_hit=True, posisi tetap open",
+        "Commit ke DB, broadcast update via WebSocket",
+      ],
+      code: `# agents/opportunity/monitor.py
+while True:
+    n = await check_positions()   # cek semua open spot positions
+    # TP1 hit → flag, posisi tetap open (ride ke TP2)
+    # TP2/TP3 hit → close status='tp'
+    # SL hit     → close status='sl'
+    await asyncio.sleep(60)`,
+    },
+  };
 
   const TA_SIGNALS = {
     "BB Squeeze": {
@@ -60,7 +206,7 @@ Tightening jika Width < threshold × 1.5`,
 price_slope = (close[-1] − close[-5]) / close[-5]
 Akumulasi  jika vol_slope > min_vol AND |price_slope| < 4%
 Hidden Str jika vol_slope tinggi AND price_slope < 0`,
-      why: "Volume naik saat harga flat = smart money masuk diam-diam (akumulasi). Volume naik saat harga turun = hidden strength — distribusi sudah selesai.",
+      why: "Volume naik saat harga flat = smart money masuk diam-diam (akumulasi). Volume naik saat harga turun = hidden strength.",
     },
     "Near Breakout": {
       icon: "🎯", score: "+20 × w_breakout",
@@ -68,7 +214,7 @@ Hidden Str jika vol_slope tinggi AND price_slope < 0`,
 dist_low  = (price − recent_low)  / price
 Near breakout  jika 0 < dist_high < 1.5–2.5%
 Near reversal  jika 0 < dist_low  < 1.5–2.5%`,
-      why: "Harga mendekati high/low terakhir = titik keputusan kritis. Bisa breakout (LONG) atau bounce dari support (SHORT reversal).",
+      why: "Harga mendekati high/low terakhir = titik keputusan kritis. Bisa breakout (LONG) atau bounce dari support.",
     },
     "RSI": {
       icon: "📈", score: "+15 × w_rsi (oversold)",
@@ -79,16 +225,15 @@ Period: 9 (scalping) · 14 (day,swing) · 21 (position)
 30–50 = energy building            (+12 pts)
 50–65 = momentum building           (+8 pts)
 > 75  = overbought → SHORT signal  (−10 + SHORT)`,
-      why: "RSI < 30 = jenuh jual, potensi reversal kuat. RSI > 75 dengan volume yang sudah pump = entry LONG terlambat, justru setup SHORT.",
+      why: "RSI < 30 = jenuh jual, potensi reversal kuat. RSI > 75 dengan volume yang sudah pump = entry LONG terlambat.",
     },
     "EMA": {
       icon: "⚡", score: "+15 × w_ema (compress)",
       formula: `EMA(n) = price × k + EMA_prev × (1−k),  k = 2/(n+1)
 Spread   = |EMA9 − EMA21| / price
-Compress jika spread < 0.3% (scalp) / 0.5% (day) / 0.8% (swing)
-Bullish  jika EMA9 > EMA21 > EMA50
-Bearish  jika EMA9 < EMA21 < EMA50`,
-      why: "EMA 9/21 yang bersilangan dan hampir menyatu = kondisi pra-breakout. Alignment EMA9>21>50 konfirmasi trend bullish yang sehat.",
+Compress jika spread < 0.3% (scalp) / 0.5% (day)
+Bullish  jika EMA9 > EMA21 > EMA50`,
+      why: "EMA 9/21 yang hampir menyatu = kondisi pra-breakout. Alignment EMA9>21>50 konfirmasi trend bullish.",
     },
     "Pressure Shift": {
       icon: "🟢", score: "+15 × w_pressure",
@@ -96,14 +241,25 @@ Bearish  jika EMA9 < EMA21 < EMA50`,
 shift = bull_ratio_now − bull_ratio_prev
 Buy pressure  jika shift > +15%
 Sell pressure jika shift < −15%`,
-      why: "Pergeseran dominasi buyer/seller dalam 5 candle = konfirmasi momentum nyata. Bukan sekadar noise harga.",
+      why: "Pergeseran dominasi buyer/seller dalam 5 candle = konfirmasi momentum nyata.",
     },
     "Candle Shrink": {
       icon: "🕯", score: "+10 × w_candle",
       formula: `body[i]    = |close[i] − open[i]|
 body_slope = (body[-1] − body[0]) / body[0]  (7 candle)
 Kompresi   jika body_slope < −50%`,
-      why: "Badan candle semakin kecil = kelelahan trend sebelumnya, indecision. Setup ideal untuk breakout berikutnya.",
+      why: "Badan candle semakin kecil = kelelahan trend sebelumnya. Setup ideal untuk breakout berikutnya.",
+    },
+    "Taker Ratio": {
+      icon: "🔄", score: "+12 (Spot Opp only)",
+      formula: `taker_ratio = taker_buy_vol / total_vol  (avg 15 candle)
+Binance kline col[9] = taker_buy_base_volume
+Binance kline col[5] = total_volume
+
+> 0.60 = institusi akumulasi diam-diam  (+12 pts)
+0.55–0.60 = lebih banyak pembeli        (+6 pts)
+< 0.45 = seller dominan                 (bearish)`,
+      why: "Taker buy = market order dari pembeli agresif. Jika taker ratio tinggi tanpa lonjakan harga = smart money akumulasi sebelum pump.",
     },
   };
 
@@ -111,31 +267,32 @@ Kompresi   jika body_slope < −50%`,
     "Scalping": {
       icon: "⚡", tf: "15m", dur: "Menit–Jam",
       color: "from-yellow-500/10 to-orange-500/10 border-yellow-300",
-      params: { "RSI Period": "9 (responsif cepat)", "BB Period": "14", "BB Squeeze": "< 3% width", "Vol Slope Min": "> 20%", "Min SL": "≥ 0.8% dari entry", "SL Fallback": "ATR × 1.0", "TP Fallback": "ATR × 3.5", "Min Score": "25 pts" },
+      params: { "RSI Period": "9", "BB Period": "14", "BB Squeeze": "< 3% width", "Vol Slope Min": "> 20%", "Min SL": "≥ 0.8%", "SL Fallback": "ATR × 1.0", "TP Fallback": "ATR × 3.5", "Min Score": "25 pts" },
       weights: "RSI×2.0 · Pressure×1.8 · Breakout×1.5 · Candle×1.5",
     },
     "Day Trade": {
       icon: "📅", tf: "1H", dur: "Harian",
       color: "from-blue-500/10 to-indigo-500/10 border-blue-300",
-      params: { "RSI Period": "14 (standar)", "BB Period": "20", "BB Squeeze": "< 4.5% width", "Vol Slope Min": "> 25%", "Min SL": "≥ 1.2% dari entry", "SL Fallback": "ATR × 1.2", "TP Fallback": "ATR × 4.0", "Min Score": "28 pts" },
+      params: { "RSI Period": "14", "BB Period": "20", "BB Squeeze": "< 4.5% width", "Vol Slope Min": "> 25%", "Min SL": "≥ 1.2%", "SL Fallback": "ATR × 1.2", "TP Fallback": "ATR × 4.0", "Min Score": "28 pts" },
       weights: "RSI×1.5 · Pressure×1.5 · Breakout×1.3 · EMA×1.3",
     },
     "Swing": {
       icon: "🌊", tf: "4H", dur: "Hari–Minggu",
       color: "from-teal-500/10 to-green-500/10 border-teal-300",
-      params: { "RSI Period": "14", "BB Period": "20", "BB Squeeze": "< 6% width", "Vol Slope Min": "> 30%", "Min SL": "≥ 2.0% dari entry", "SL Fallback": "ATR × 1.5", "TP Fallback": "ATR × 5.0", "Min Score": "30 pts" },
+      params: { "RSI Period": "14", "BB Period": "20", "BB Squeeze": "< 6% width", "Vol Slope Min": "> 30%", "Min SL": "≥ 2.0%", "SL Fallback": "ATR × 1.5", "TP Fallback": "ATR × 5.0", "Min Score": "30 pts" },
       weights: "Accumulation×2.0 · Squeeze×1.8 · Breakout×1.5",
     },
     "Position": {
       icon: "🏔", tf: "1D", dur: "Minggu–Bulan",
       color: "from-purple-500/10 to-violet-500/10 border-purple-300",
-      params: { "RSI Period": "21 (smooth)", "BB Period": "30", "BB Squeeze": "< 8% width", "Vol Slope Min": "> 40%", "Min SL": "≥ 3.0% dari entry", "SL Fallback": "ATR × 2.0", "TP Fallback": "ATR × 7.0", "Min Score": "35 pts" },
+      params: { "RSI Period": "21", "BB Period": "30", "BB Squeeze": "< 8% width", "Vol Slope Min": "> 40%", "Min SL": "≥ 3.0%", "SL Fallback": "ATR × 2.0", "TP Fallback": "ATR × 7.0", "Min Score": "35 pts" },
       weights: "Accumulation×2.5 · Squeeze×2.0 · EMA×1.5",
     },
   };
 
   const activeSig   = TA_SIGNALS[taTab as keyof typeof TA_SIGNALS];
   const activeStyle = STYLES[styleTab as keyof typeof STYLES];
+  const activeAgent = AGENTS[agentTab as keyof typeof AGENTS];
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -145,105 +302,217 @@ Kompresi   jika body_slope < −50%`,
         <CardContent className="pt-6 pb-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h1 className="text-3xl font-bold mb-1">📐 Arsitektur Aplikasi</h1>
+              <h1 className="text-3xl font-bold mb-1">📐 Arsitektur Sistem</h1>
               <p className="text-sm text-neutral-400 max-w-2xl leading-relaxed">
-                Crypto trading agent — scan 100 pair USDT Futures setiap 15 menit,
-                deteksi early breakout dengan 7 sinyal TA, catat hasil ke paper trading history
-                untuk mengukur win rate per trading style.
+                Crypto trading agent dengan <strong className="text-white">2 sistem independen</strong>:{" "}
+                <strong className="text-blue-400">Futures Scanner</strong> (AI + T0-T4, auto-log 24/7) dan{" "}
+                <strong className="text-teal-400">Opportunity SPOT</strong> (user-driven, 4 layer).
+                Total <strong className="text-white">6 autonomous agents</strong> berjalan di background.
               </p>
             </div>
-            <div className="text-xs text-neutral-400 font-mono space-y-1">
+            <div className="text-xs text-neutral-400 font-mono space-y-1 shrink-0">
               <div>Frontend  · Next.js 16 · TypeScript</div>
               <div>Backend   · FastAPI · Python 3.12</div>
-              <div>Agents    · asyncio · structlog</div>
-              <div>Database  · PostgreSQL · Redis</div>
+              <div>Agents    · 6 aktif · asyncio · structlog</div>
+              <div>Database  · PostgreSQL 16 · Redis 7</div>
+              <div>Data      · Binance Spot + Futures REST</div>
             </div>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* ── 1. Monorepo Structure ─────────────────────────────────────────── */}
-      <Card>
-        <CardContent className="pt-5">
-          <SectionTitle icon="🗂" title="Struktur Monorepo" sub="3 package terpisah — bisa dikembangkan independen" />
-          <div className="grid md:grid-cols-3 gap-3">
+          {/* Agent pills */}
+          <div className="flex gap-2 mt-5 flex-wrap">
             {[
-              {
-                name: "frontend/", icon: "🖥", color: "border-blue-300 bg-blue-50",
-                desc: "Next.js 16 UI — read-only consumer",
-                items: ["Scanner page (baca cache agents)", "History page (baca paper_trades)", "Dashboard (real-time via API)", "Architecture docs"],
-                cmd: "cd frontend && npm run dev",
-              },
-              {
-                name: "backend/", icon: "⚙️", color: "border-teal-300 bg-teal-50",
-                desc: "FastAPI — API layer + TA Engine",
-                items: ["scan_market_core() — TA engine", "REST API endpoints", "WebSocket positions", "PostgreSQL + Redis"],
-                cmd: "uvicorn app.main:app --reload",
-              },
-              {
-                name: "agents/", icon: "🤖", color: "border-purple-300 bg-purple-50",
-                desc: "Autonomous agents — scan + log + learn",
-                items: ["scanner/scheduler.py ← satu-satunya yang log", "paper_trader/trader.py ← monitor TP/SL", "learning/ ← future ML optimizer", "Jalan 24/7 independen dari browser"],
-                cmd: "python -m agents",
-              },
-            ].map(pkg => (
-              <div key={pkg.name} className={`rounded-xl border p-4 ${pkg.color}`}>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xl">{pkg.icon}</span>
-                  <div>
-                    <p className="font-bold text-sm font-mono">{pkg.name}</p>
-                    <p className="text-[10px] text-neutral-500">{pkg.desc}</p>
-                  </div>
+              { icon: "🤖", label: "Agent 1 — AI",      sub: "Futures · Funding/OI/Liq/S&R", color: "bg-blue-500/20 border-blue-400/30"   },
+              { icon: "🔭", label: "Agent 2 — T0-T4",   sub: "Futures · Wyckoff/Trend/TA",    color: "bg-purple-500/20 border-purple-400/30" },
+              { icon: "👁", label: "Futures Monitor",    sub: "Futures · TP/SL · 60s",         color: "bg-indigo-500/20 border-indigo-400/30" },
+              { icon: "🧠", label: "Weight Updater",     sub: "Learning · 6jam",               color: "bg-green-500/20 border-green-400/30"  },
+              { icon: "🚀", label: "Spot Opp Scanner",   sub: "Spot · 15m",                    color: "bg-teal-500/20 border-teal-400/30"    },
+              { icon: "📍", label: "Spot Monitor",       sub: "Spot · TP/SL · 60s",            color: "bg-amber-500/20 border-amber-400/30"  },
+            ].map(a => (
+              <div key={a.label} className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${a.color}`}>
+                <span className="text-base">{a.icon}</span>
+                <div>
+                  <p className="text-xs font-bold text-white">{a.label}</p>
+                  <p className="text-[9px] text-neutral-400">{a.sub}</p>
                 </div>
-                <ul className="space-y-1 mb-3">
-                  {pkg.items.map(i => (
-                    <li key={i} className="text-xs text-neutral-600 flex items-start gap-1">
-                      <span className="text-neutral-400 mt-0.5">·</span>{i}
-                    </li>
-                  ))}
-                </ul>
-                <code className="text-[10px] bg-neutral-900 text-green-400 px-2 py-1 rounded block">{pkg.cmd}</code>
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse ml-1" />
               </div>
             ))}
           </div>
         </CardContent>
       </Card>
 
-      {/* ── 2. Alur Data ──────────────────────────────────────────────────── */}
+      {/* ── Agents Detail ─────────────────────────────────────────────────── */}
       <Card>
         <CardContent className="pt-5">
-          <SectionTitle icon="🔄" title="Alur Data Lengkap" sub="Dari Binance → Scanner → History" />
-          <Code>{`Binance Futures API (100 pair USDT, volume tertinggi)
-         │
-         ▼  ⏱ setiap 15 menit — agents/scanner/scheduler.py
-   ┌─────────────────────────────────────────────────┐
-   │  SCANNER ENGINE  (backend/app/api/v1/scanner.py) │
-   │  7 sinyal TA → Probability Score 0–99            │
-   │  Filter: R:R < 1:3 → DIBUANG                     │
-   └────────────────────┬────────────────────────────┘
-                        │
-          ┌─────────────┴──────────────┐
-          ▼                            ▼
-   agents/scanner/store.py      paper_trades (PostgreSQL)
-   [in-memory cache]            agents/paper_trader/trader.py
-          │                            │
-          ▼                            ▼
-   Scanner API (read-only)      History API (read-only)
-   GET /api/v1/scanner/scan     GET /api/v1/history/*
-          │                            │
-          ▼                            ▼
-   Scanner Page (frontend)      History Page (frontend)
-   Tampilkan sinyal live        Win rate per style`}
-          </Code>
+          <SectionTitle icon="🤖" title="6 Autonomous Agents" sub="Berjalan 24/7 di background — embedded dalam FastAPI lifespan" />
 
+          {/* Group labels */}
+          <div className="flex gap-2 mb-2 flex-wrap">
+            <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">⚡ Futures:</span>
+            {["Futures Agent 1", "Futures Agent 2", "Futures Monitor", "Weight Updater"].map(t => (
+              <button key={t} onClick={() => setAgentTab(t)}
+                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold transition-all ${
+                  agentTab === t ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-600 hover:bg-blue-100"
+                }`}>{t}</button>
+            ))}
+            <span className="text-[10px] font-black text-teal-600 uppercase tracking-widest ml-2">🎯 Spot:</span>
+            {["Spot Opp Scanner", "Spot Monitor"].map(t => (
+              <button key={t} onClick={() => setAgentTab(t)}
+                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold transition-all ${
+                  agentTab === t ? "bg-teal-600 text-white" : "bg-teal-50 text-teal-600 hover:bg-teal-100"
+                }`}>{t}</button>
+            ))}
+          </div>
+
+          {activeAgent && (
+            <div className={`rounded-xl border bg-gradient-to-b p-4 mt-3 ${activeAgent.color}`}>
+              <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">{activeAgent.icon}</span>
+                  <div>
+                    <p className="font-bold text-lg">{agentTab}</p>
+                    <p className="text-xs text-neutral-500 font-mono">{activeAgent.file}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <Badge label={activeAgent.status}   color="bg-green-100 text-green-700" />
+                  <Badge label={activeAgent.interval} color="bg-neutral-100 text-neutral-600" />
+                  <Badge label={activeAgent.group}    color="bg-neutral-900 text-neutral-200" />
+                </div>
+              </div>
+
+              <p className="text-sm text-neutral-700 mb-4 leading-relaxed">{activeAgent.desc}</p>
+
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs font-bold text-neutral-600 uppercase tracking-wider mb-2">Pipeline per Siklus</p>
+                  <div className="space-y-1.5">
+                    {activeAgent.pipeline.map((step, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs">
+                        <span className="w-5 h-5 rounded-full bg-neutral-700 text-white text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          {i + 1}
+                        </span>
+                        <span className="text-neutral-600">{step}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-neutral-600 uppercase tracking-wider mb-2">Code Snippet</p>
+                  <Code>{activeAgent.code}</Code>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Alur Data ─────────────────────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-5">
+          <SectionTitle icon="🔄" title="Alur Data — 2 Sistem Independen" sub="Futures (auto-log oleh agents) vs Opportunity SPOT (user-driven)" />
+
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Futures System */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                <p className="font-bold text-sm text-blue-700">Sistem 1 — Futures Scanner (2 Agents)</p>
+              </div>
+              <Code>{`Binance Futures API (100 pair USDT)
+         │
+         ▼  ⏱ setiap 15 menit
+  ┌──────┴──────┐
+  │  Agent 1   │  Funding · OI · Liquidation · S/R
+  │  (AI)      │  → score + LONG/SHORT signal
+  └──────┬──────┘
+         │
+  ┌──────┴──────┐
+  │  Agent 2   │  T0-T4 Pipeline: Wyckoff → Trend
+  │  (T0-T4)   │  → S/R → Pattern → Trigger
+  └──────┬──────┘
+         │
+         ▼
+  paper_trades (PostgreSQL)
+  agent='futures_agent1' / 'futures_agent2'
+         │
+         ▼  ⏱ setiap 60 detik
+  Futures Monitor → auto TP/SL
+         │
+         ▼
+  Weight Updater (tiap 6 jam)
+  → signal_weights (adaptive learning)
+         │
+         ▼
+  History — Futures tab · Win rate · P&L`}
+              </Code>
+              <p className="text-xs text-neutral-500 mt-2">📌 Fully automatic — tidak butuh interaksi user</p>
+            </div>
+
+            {/* Spot Opportunity System */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 rounded-full bg-teal-500" />
+                <p className="font-bold text-sm text-teal-700">Sistem 2 — Opportunity SPOT (4 Layer)</p>
+              </div>
+              <Code>{`Binance Spot API (100 pair USDT)
+         │
+         ▼  ⏱ setiap 15 menit
+Layer 1: Spot Opp Scanner
+         │  9 sinyal · top-30 kandidat
+         │  → WS broadcast ke frontend
+         ▼
+Layer 2: Coin Analyzer (on-click user)
+         │  ATR · depth ratio · resistance
+         │  → Entry/SL/TP1/TP2/TP3
+         ▼
+Layer 3: User → "Buka Posisi SPOT"
+         │  validasi entry · 1 pos/koin
+         │  → simpan paper_trades (status=open)
+         ▼
+Layer 3b: Spot Monitor (60s)
+         │  → TP hit → status='tp'
+         │  → SL hit → status='sl'
+         │  → TP1 hit → tp1_hit=True (tetap open)
+         ▼
+Layer 4: History — Spot Opp tab
+         win rate · avg P&L · analytics`}
+              </Code>
+              <p className="text-xs text-neutral-500 mt-2">📌 User memilih koin & buka posisi sendiri</p>
+            </div>
+          </div>
+
+          {/* 3 kolom summary */}
           <div className="mt-4 grid md:grid-cols-3 gap-3 text-xs">
             {[
-              { icon: "🤖", title: "agents/ (Satu-satunya yang SCAN + LOG)", color: "bg-purple-50 border-purple-200",
-                items: ["Scheduler loop tiap 15 menit", "scan_market_core() → ambil data Binance + hitung TA", "log_signals_batch() → tulis ke paper_trades", "check_and_close_trades() → cek TP/SL tiap 60 detik", "TIDAK ADA yang boleh log selain agents ini"] },
-              { icon: "⚙️", title: "backend/ (API only — tidak log apapun)", color: "bg-teal-50 border-teal-200",
-                items: ["scan_market_core() = fungsi TA engine (dipanggil agents)", "Scanner API = baca dari agents/scanner/store (cache)", "History API = baca dari paper_trades DB", "Tidak ada side-effect logging di API endpoints"] },
-              { icon: "🖥", title: "frontend/ (Read-only consumer)", color: "bg-blue-50 border-blue-200",
-                items: ["Auto-refresh scanner tiap 5 menit dari cache", "Auto-refresh history tiap 30 detik (LIVE badge)", "Tidak ada logika bisnis — hanya tampilkan data", "WebSocket untuk posisi live (dashboard)"] },
+              { icon: "🤖", title: "6 Agents (background)", color: "bg-purple-50 border-purple-200",
+                items: [
+                  "Futures Agent 1 — AI (Funding/OI/Liq/S&R)",
+                  "Futures Agent 2 — T0-T4 (Wyckoff→Trigger)",
+                  "Futures Monitor — auto TP/SL setiap 60s",
+                  "Weight Updater — adaptive learning tiap 6jam",
+                  "Spot Opp Scanner — 9 sinyal, top-30, WS",
+                  "Spot Monitor — auto TP/SL, flag TP1",
+                ]},
+              { icon: "⚙️", title: "Backend (API layer)", color: "bg-teal-50 border-teal-200",
+                items: [
+                  "REST: /futures/ · /opportunity/ · /history/",
+                  "REST: /market/binance-status · /market/context",
+                  "WebSocket: /ws/futures · /ws/opportunity",
+                  "TA Engine (T0–T4) untuk deep analysis",
+                  "Adaptive signal weights (signal_weights table)",
+                  "/health endpoint — semua agent status",
+                ]},
+              { icon: "🖥", title: "Frontend (consumer)", color: "bg-blue-50 border-blue-200",
+                items: [
+                  "Dashboard: posisi terbuka + scanner status",
+                  "Futures Scanner: WS live · Agent1+2 results",
+                  "Spot Opportunity: WS live + CoinModal (Layer 2)",
+                  "History: Spot tab + Futures tab + analytics",
+                  "System Health: monitoring real-time semua agent",
+                  "Architecture: docs teknis (halaman ini)",
+                ]},
             ].map(s => (
               <div key={s.title} className={`rounded-xl border p-3 ${s.color}`}>
                 <p className="font-bold text-neutral-800 mb-2 flex items-center gap-1.5"><span>{s.icon}</span>{s.title}</p>
@@ -256,85 +525,72 @@ Kompresi   jika body_slope < −50%`,
         </CardContent>
       </Card>
 
-      {/* ── 3. Trade Lifecycle ────────────────────────────────────────────── */}
+      {/* ── Opportunity SPOT Lifecycle ────────────────────────────────────── */}
       <Card>
         <CardContent className="pt-5">
-          <SectionTitle icon="📊" title="Siklus Trade — Dari Scanner ke History" sub="Bagaimana scanner output menjadi paper trade" />
-
+          <SectionTitle icon="🎯" title="Opportunity SPOT — Siklus Posisi" sub="Dari scanner → analisis → buka → monitor → history" />
           <div className="grid md:grid-cols-2 gap-6">
-            {/* Left: lifecycle diagram */}
             <div>
-              <Code>{`Scanner menemukan signal (R:R ≥ 1:3)
+              <Code>{`Layer 1: Scanner menemukan koin (score ≥ 30)
+         │  BB Squeeze + Vol + RSI + Taker ratio
+         │  Tersimpan di opportunity store (WS)
+         ▼
+Layer 2: User klik koin → Analyzer jalan (~2s)
+         │  ATR-based SL · Resistance-based TP
+         │  Order book depth ratio
+         │  Confidence score 0–99
+         ▼
+Layer 3: User klik "Buka Posisi SPOT"
+         │  Validasi: entry dalam 2% market price
+         │  Validasi: tidak ada posisi koin ini
+         │  Simpan ke paper_trades (status=open)
+         ▼
+Layer 3b: Monitor cek setiap 60 detik
          │
-         ├── Entry type: "at_zone" / "market"
-         │   Harga SUDAH di area entry sekarang
-         │        │
-         │        ▼
-         │   Status: 🔵 OPEN  (posisi aktif)
-         │        │
-         │        ▼ cek tiap 60 detik (harga Binance)
-         │   ┌────┴────┐
-         │   ▼         ▼
-         │  ✅ TP    🛑 SL
+         ├── harga ≤ SL  → status='sl'
+         ├── harga ≥ TP2 → status='tp'
+         ├── harga ≥ TP3 → status='tp' (close=TP3)
+         └── harga ≥ TP1 (pertama) → tp1_hit=True
+                                      posisi tetap OPEN
          │
-         └── Entry type: "wait_pullback" / "wait_rally"
-             Harga BELUM di area entry
-                  │
-                  ▼
-             Status: 🟡 PENDING  (limit order menunggu)
-                  │
-                  ▼ cek tiap 60 detik
-             Harga menyentuh entry zone?
-             ├── Belum → tetap PENDING
-             └── Ya   → Status: 🔵 OPEN
-                              │
-                        ┌─────┴─────┐
-                        ▼           ▼
-                       ✅ TP      🛑 SL`}
+         ▼
+Layer 4: History → Opportunity SPOT tab
+         Win rate · Avg P&L · Per-type analytics
+         Score vs Outcome · Export CSV`}
               </Code>
             </div>
-
-            {/* Right: status explanation */}
             <div className="space-y-2">
-              <p className="text-sm font-bold text-neutral-800 mb-3">Penjelasan per Status</p>
+              <p className="text-sm font-bold text-neutral-800 mb-3">Status Posisi</p>
               {[
-                { status: "🟡 PENDING", color: "bg-amber-50 border-amber-200", title: "Menunggu Entry",
-                  desc: "Signal limit order — harga belum menyentuh zona entry. Kamu harus pasang Limit Buy/Sell di Binance dan tunggu harga datang ke zona tersebut.",
-                  ex: "BTCUSDT LONG wait_pullback, entry $98K, harga sekarang $100K → tunggu turun" },
-                { status: "🔵 OPEN", color: "bg-blue-50 border-blue-200", title: "Posisi Aktif",
-                  desc: "Entry sudah terpenuhi. Posisi sedang berjalan, TP/SL dimonitor otomatis setiap 60 detik dari harga real Binance Futures.",
-                  ex: "BTCUSDT LONG at_zone, entry $100K langsung open. Atau pending yang sudah kena." },
-                { status: "✅ TP", color: "bg-green-50 border-green-200", title: "Take Profit Hit",
-                  desc: "Harga mencapai target TP. Trade ditutup dengan profit. Dihitung dalam win rate dan PnL kalender.",
-                  ex: "Entry $100K, TP $106K kena → +4% PnL (R:R 1:4 × 1% risk = +4R)" },
-                { status: "🛑 SL", color: "bg-red-50 border-red-200", title: "Stop Loss Hit",
-                  desc: "Harga menyentuh SL. Trade ditutup dengan loss. Dihitung dalam win rate.",
-                  ex: "Entry $100K, SL $98K kena → −1R loss" },
+                { s: "🔵 open",    c: "bg-blue-50 border-blue-200",       t: "Posisi Aktif",    d: "User sudah buka, monitor sedang track harga. Unrealized P&L live dari Binance." },
+                { s: "✅ tp",      c: "bg-green-50 border-green-200",     t: "TP Hit",          d: "Harga mencapai TP2 atau TP3. Ditutup otomatis, dihitung sebagai Win." },
+                { s: "🛑 sl",      c: "bg-red-50 border-red-200",         t: "SL Hit",          d: "Harga turun ke level SL. Ditutup otomatis, dihitung sebagai Loss." },
+                { s: "🤚 manual",  c: "bg-neutral-50 border-neutral-200", t: "Tutup Manual",    d: "User menutup sendiri di harga pasar saat itu." },
+                { s: "🟡 tp1_hit", c: "bg-yellow-50 border-yellow-200",   t: "TP1 Tersentuh",   d: "TP1 sudah kena tapi posisi tetap open — ride ke TP2." },
               ].map(s => (
-                <div key={s.status} className={`rounded-xl border p-3 ${s.color}`}>
+                <div key={s.s} className={`rounded-xl border p-3 ${s.c}`}>
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="font-bold text-sm">{s.status}</span>
-                    <span className="text-[10px] font-semibold text-neutral-500">{s.title}</span>
+                    <code className="font-bold text-xs">{s.s}</code>
+                    <span className="text-[10px] text-neutral-500">{s.t}</span>
                   </div>
-                  <p className="text-xs text-neutral-600 mb-1">{s.desc}</p>
-                  <p className="text-[10px] font-mono text-neutral-400">{s.ex}</p>
+                  <p className="text-xs text-neutral-600">{s.d}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Key rule */}
           <div className="mt-4 bg-neutral-900 text-white rounded-xl p-4 text-xs">
-            <p className="font-bold text-teal-400 mb-2">✅ Aturan Pencatatan</p>
-            <div className="grid md:grid-cols-3 gap-4">
+            <p className="font-bold text-teal-400 mb-2">✅ Aturan Posisi Opportunity SPOT</p>
+            <div className="grid md:grid-cols-4 gap-3">
               {[
-                { title: "Semua signal R:R ≥ 1:3 dicatat", desc: "Apapun yang muncul di scanner dengan R:R cukup → masuk history. Tidak ada yang terlewat." },
-                { title: "Satu slot per koin per style", desc: "Scalping BTCUSDT dan Daytrading BTCUSDT adalah dua data berbeda. Tidak bisa double entry per style." },
-                { title: "Win rate dari CLOSED saja", desc: "Pending dan Open tidak masuk win rate. Hanya TP dan SL yang dihitung. Statistik akurat." },
+                { t: "Per-coin rule",     d: "1 posisi open per koin. Koin berbeda boleh bersamaan." },
+                { t: "Entry validation",  d: "Entry tidak boleh > 2% dari harga pasar saat buka posisi." },
+                { t: "R:R minimum",       d: "R:R ke TP2 ≥ 2.0. Koin yang tidak memenuhi dibuang." },
+                { t: "SL max 8%",         d: "Stop loss tidak boleh lebih dari 8% dari entry." },
               ].map(r => (
-                <div key={r.title}>
-                  <p className="font-semibold text-neutral-300 mb-1">{r.title}</p>
-                  <p className="text-neutral-500">{r.desc}</p>
+                <div key={r.t}>
+                  <p className="font-semibold text-neutral-300 mb-1">{r.t}</p>
+                  <p className="text-neutral-500">{r.d}</p>
                 </div>
               ))}
             </div>
@@ -342,10 +598,10 @@ Kompresi   jika body_slope < −50%`,
         </CardContent>
       </Card>
 
-      {/* ── 4. 7 Sinyal TA (interactive) ─────────────────────────────────── */}
+      {/* ── 8 Sinyal TA ──────────────────────────────────────────────────── */}
       <Card>
         <CardContent className="pt-5">
-          <SectionTitle icon="🔭" title="7 Sinyal TA — Scanner Engine" sub="Klik sinyal untuk lihat formula dan penjelasan" />
+          <SectionTitle icon="🔭" title="8 Sinyal TA — Scanner Engine" sub="7 sinyal Futures Scanner + Taker Ratio (Spot Opp only)" />
           <Tabs tabs={Object.keys(TA_SIGNALS)} active={taTab} onChange={setTaTab} />
           {activeSig && (
             <div className="grid md:grid-cols-2 gap-4">
@@ -365,23 +621,11 @@ Kompresi   jika body_slope < −50%`,
               </div>
             </div>
           )}
-
-          {/* Penalty */}
-          <div className="mt-4 bg-red-50 border border-red-200 rounded-xl p-3 text-xs">
-            <p className="font-bold text-red-700 mb-1">⚠️ Penalty — Sudah Pump/Dump</p>
-            <p className="text-neutral-600">
-              <code className="bg-red-100 px-1 rounded">|change_24h| &gt; pump_penalty × 2</code> → <strong>−20 pts</strong> &nbsp;|&nbsp;
-              <code className="bg-red-100 px-1 rounded">|change_24h| &gt; pump_penalty</code> → <strong>−8 pts</strong>.
-              Mencegah FOMO entry pada coin yang sudah bergerak terlalu jauh.
-            </p>
-          </div>
-
-          {/* Score legend */}
-          <div className="mt-3 grid grid-cols-3 gap-3">
+          <div className="mt-4 grid grid-cols-3 gap-3">
             {[
               { range: "≥ 70", label: "Setup Sangat Kuat", desc: "Multiple signal confirm", cls: "bg-green-50 border-green-200 text-green-700" },
-              { range: "50–69", label: "Setup Bagus", desc: "Monitor lebih lanjut",     cls: "bg-yellow-50 border-yellow-200 text-yellow-700" },
-              { range: "< 50", label: "Early Stage", desc: "Belum cukup konfirmasi",   cls: "bg-neutral-50 border-neutral-200 text-neutral-500" },
+              { range: "50–69", label: "Setup Bagus",      desc: "Monitor lebih lanjut",    cls: "bg-yellow-50 border-yellow-200 text-yellow-700" },
+              { range: "30–49", label: "Early Stage",      desc: "Belum cukup konfirmasi",  cls: "bg-neutral-50 border-neutral-200 text-neutral-500" },
             ].map(s => (
               <div key={s.range} className={`rounded-xl border p-3 text-center ${s.cls}`}>
                 <p className="text-xl font-black">{s.range}</p>
@@ -393,66 +637,10 @@ Kompresi   jika body_slope < −50%`,
         </CardContent>
       </Card>
 
-      {/* ── 5. Entry / SL / TP ───────────────────────────────────────────── */}
+      {/* ── 4 Trading Styles ─────────────────────────────────────────────── */}
       <Card>
         <CardContent className="pt-5">
-          <SectionTitle icon="📐" title="Entry Zone · SL · TP" sub="Berbasis S/R Zones + Fibonacci — bukan hanya ATR" />
-          <div className="grid md:grid-cols-3 gap-4">
-            <div>
-              <p className="font-bold text-sm text-neutral-800 mb-2">📍 Entry Zone</p>
-              <div className="space-y-1.5">
-                {[["at_zone (Market)","Harga ≤ 1.5% dari S/R → entry sekarang → status OPEN"],["wait_pullback","LONG: tunggu harga turun ke support → status PENDING"],["wait_rally","SHORT: tunggu harga naik ke resistance → status PENDING"]].map(([k,v]) => (
-                  <div key={k} className="rounded-lg p-2 text-xs bg-blue-50 border border-blue-100">
-                    <span className="font-bold text-blue-700">{k}: </span>
-                    <span className="text-neutral-600">{v}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="font-bold text-sm text-neutral-800 mb-2">⛔ Stop Loss</p>
-              <div className="space-y-1.5">
-                {[["1. S/R Zone","0.3% di bawah support (LONG) / di atas resistance (SHORT)"],["2. Swing Low/High","Min/max harga dalam lookback period"],["3. Fib 0.618","Retracement 61.8% dari swing range terakhir"],["4. ATR Fallback","entry ± ATR × style_multiplier"],["5. Min Distance","0.8% (scalp) → 3.0% (position) — anti stop-hunt"]].map(([k,v]) => (
-                  <div key={k} className="rounded-lg p-2 text-xs bg-red-50 border border-red-100">
-                    <span className="font-bold text-red-700">{k}: </span>
-                    <span className="text-neutral-600">{v}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="font-bold text-sm text-neutral-800 mb-2">🎯 Take Profit</p>
-              <div className="space-y-1.5">
-                {[["1. Resistance Zone","Next resistance dengan R:R ≥ 1:2"],["2. Fib 1.618","Extension 161.8% dari swing low ke entry"],["3. ATR Fallback","entry ± ATR × 3.5–7.0"],["Filter Final","R:R < 1:3 → signal DIBUANG"]].map(([k,v]) => (
-                  <div key={k} className="rounded-lg p-2 text-xs bg-green-50 border border-green-100">
-                    <span className="font-bold text-green-700">{k}: </span>
-                    <span className="text-neutral-600">{v}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="mt-4">
-            <Code>{`Fibonacci levels yang digunakan:
-SL  = entry − swing_range × 0.618   (Fib 61.8% retracement)
-TP1 = entry + swing_range × 1.272   (Fib 127.2% extension)
-TP2 = entry + swing_range × 1.618   (Golden ratio ← default TP)
-TP3 = entry + swing_range × 2.618   (Fib 261.8% — target jauh)
-
-S/R Zone detection:
-  1. Swing highs (local maxima, 2-bar rule) → resistance
-  2. Swing lows  (local minima, 2-bar rule) → support
-  3. Cluster levels berdekatan (< 0.5% toleransi) → single zone
-  4. Sort by touch count (paling banyak disentuh = paling kuat)`}
-            </Code>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── 6. 4 Trading Styles ───────────────────────────────────────────── */}
-      <Card>
-        <CardContent className="pt-5">
-          <SectionTitle icon="🎯" title="4 Trading Styles" sub="Semua min R:R 1:3 — parameter dan timeframe berbeda" />
+          <SectionTitle icon="📊" title="4 Trading Styles — Futures Scanner" sub="Semua min R:R 1:3 — parameter dan timeframe berbeda" />
           <Tabs tabs={Object.keys(STYLES)} active={styleTab} onChange={setStyleTab} />
           {activeStyle && (
             <div className={`rounded-xl border bg-gradient-to-b p-4 ${activeStyle.color}`}>
@@ -483,113 +671,16 @@ S/R Zone detection:
         </CardContent>
       </Card>
 
-      {/* ── 7. Dashboard — Run Analysis ──────────────────────────────────── */}
-      <Card>
-        <CardContent className="pt-5">
-          <SectionTitle icon="🏠" title="Dashboard — Run Analysis" sub="Deep-dive satu koin, pipeline T0→T4 lengkap" />
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <p className="text-sm text-neutral-600 mb-3">
-                Klik koin di Dashboard → <strong>CoinModal</strong> dengan 3 tab:
-              </p>
-              {[
-                { tab: "📈 Chart", desc: "Candlestick + EMA 9/21/50 + S/R zones + entry/SL/TP markers. Timeframe otomatis sesuai style." },
-                { tab: "ℹ️ Info", desc: "Harga real-time, volume 24H, change %, data Binance Futures." },
-                { tab: "🧠 Run Analysis", desc: "Pipeline TA lengkap T0→T4 untuk satu koin. Pilih style, klik Run, lihat hasil per layer animasi." },
-              ].map(t => (
-                <div key={t.tab} className="bg-neutral-50 border rounded-xl p-3">
-                  <p className="font-bold text-sm mb-0.5">{t.tab}</p>
-                  <p className="text-xs text-neutral-600">{t.desc}</p>
-                </div>
-              ))}
-            </div>
-            <div>
-              <p className="font-bold text-sm mb-3">Pipeline T0→T4 per Layer</p>
-              <div className="space-y-1.5">
-                {[
-                  ["T0 Wyckoff", "bg-neutral-600", "Accumulation / Markup / Distribution / Markdown"],
-                  ["T1 Trend", "bg-blue-600", "EMA 13/21 — Up / Down / Sideways"],
-                  ["T2 S/R Zones", "bg-teal-600", "Swing pivot clustering — support & resistance"],
-                  ["T3 Pattern", "bg-purple-600", "Double bottom/top, H&S, wedge, flag, triangle"],
-                  ["T4 Trigger", "bg-yellow-600", "Candlestick + Stochastic 5,3,3 + volume confirm"],
-                  ["Output", "bg-green-600", "Entry, SL, TP, R:R, probability, entry_type"],
-                ].map(([layer, color, desc]) => (
-                  <div key={layer as string} className="flex items-start gap-2">
-                    <span className={`text-[10px] text-white font-bold px-2 py-0.5 rounded shrink-0 mt-0.5 ${color}`}>{layer}</span>
-                    <span className="text-xs text-neutral-600">{desc}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs">
-                <p className="font-bold text-amber-700 mb-1">Perbedaan vs Scanner</p>
-                <p className="text-neutral-600"><strong>Scanner</strong> = broad 100 pair, tiap 15 menit otomatis.<br />
-                <strong>Run Analysis</strong> = deep-dive satu koin, manual on-demand, pipeline T0→T4 penuh.</p>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── 8. History — Win Rate Purpose ────────────────────────────────── */}
-      <Card>
-        <CardContent className="pt-5">
-          <SectionTitle icon="📊" title="History — Tujuan & Cara Kerja" sub="Mengukur trading style mana yang paling profitable" />
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <p className="text-sm text-neutral-600 mb-3">
-                History bukan sekadar log — ini adalah <strong>dataset untuk mengukur kualitas sinyal per style</strong>.
-                Setelah data terkumpul 2+ minggu, kamu bisa lihat:
-              </p>
-              <div className="space-y-2 text-xs">
-                {[
-                  ["Win Rate per Style", "Scalping 68% vs Day Trade 91% → Day Trade lebih konsisten"],
-                  ["Avg PnL per Trade", "Swing +16% avg → reward besar meski jarang masuk"],
-                  ["PnL Kalender", "Hari mana yang konsisten profit, hari mana yang loss"],
-                  ["Equity Curve", "Apakah modal tumbuh stabil atau volatile?"],
-                ].map(([k, v]) => (
-                  <div key={k} className="bg-neutral-50 border rounded-lg p-2">
-                    <p className="font-bold text-neutral-700">{k}</p>
-                    <p className="text-neutral-500">{v}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <Code>{`Equity Curve (1% risk per trade):
-  TP hit → gain = 1% × RR_ratio
-           (R:R 1:4 = +4%, R:R 1:7 = +7%)
-  SL hit → loss = −1%
-
-  Contoh 10 trade:
-  7 TP × 1:4 = +28%
-  3 SL × 1   = − 3%
-  Net         = +25% dari modal
-
-Win Rate formula:
-  WR = TP_count / (TP_count + SL_count) × 100
-  Pending & Open → TIDAK dihitung
-  Hanya closed trades yang masuk statistik
-
-Live refresh:
-  Price check  → tiap 60 detik (pending→open, open→tp/sl)
-  History page → auto-poll tiap 30 detik
-  Scanner cache → diperbarui tiap 15 menit oleh scheduler`}
-              </Code>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── 9. Tech Stack ─────────────────────────────────────────────────── */}
+      {/* ── Tech Stack ───────────────────────────────────────────────────── */}
       <Card>
         <CardContent className="pt-5">
           <SectionTitle icon="⚙️" title="Tech Stack" />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
             {[
-              { layer: "Backend", items: ["FastAPI + Python 3.12", "SQLAlchemy async", "asyncpg / PostgreSQL", "Redis (cache & pub/sub)", "HTTPX (Binance REST)", "Structlog"] },
-              { layer: "TA Engine", items: ["RSI (Wilder, 9/14/21)", "Bollinger Bands (SMA+2σ)", "EMA (9/21/50)", "ATR (True Range avg)", "Fibonacci (0.618/1.618/2.618)", "S/R Swing Pivot Clustering"] },
-              { layer: "Frontend", items: ["Next.js 16 (App Router)", "TypeScript", "Tailwind CSS v4", "Recharts (equity/calendar)", "Lightweight Charts (candles)", "Poppins font"] },
-              { layer: "Agents & Infra", items: ["asyncio background loop", "scan_store (in-memory)", "PostgreSQL 16 (TimescaleDB)", "Redis 7 (pub/sub)", "Docker Compose (local)", "WatchFiles hot-reload"] },
+              { layer: "Backend", items: ["FastAPI + Python 3.12", "SQLAlchemy async", "asyncpg / PostgreSQL 16", "Redis 7 (cache & pub/sub)", "HTTPX (Binance REST)", "Structlog"] },
+              { layer: "TA Engine (T0-T4)", items: ["T0: Wyckoff phase detection", "T1: EMA/ADX trend analysis", "T2: S/R swing pivot zones", "T3: BB/Vol/RSI/candle patterns", "T4: Trigger confirmation", "ATR + Fibonacci fallback"] },
+              { layer: "Frontend", items: ["Next.js 16 (App Router)", "TypeScript + Tailwind v4", "Recharts (equity curve)", "WebSocket live updates", "System Health monitoring", "Browser Notification API"] },
+              { layer: "Agents & Infra", items: ["6 asyncio background agents", "Binance Spot + Futures REST", "Order book depth (Spot)", "Adaptive signal weighting", "Docker Compose (local)", "PostgreSQL 16 + Redis 7"] },
             ].map(s => (
               <div key={s.layer} className="bg-neutral-50 border rounded-xl p-3">
                 <p className="font-bold text-neutral-700 mb-2 pb-1 border-b">{s.layer}</p>

@@ -1,9 +1,20 @@
 "use client";
-import { useCallback, useEffect, useState, useMemo } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import { OpportunityCard, OpportunityResult } from "./components/OpportunityCard";
+import { useCallback, useEffect, useState, useMemo, useRef } from "react";
+import { Card } from "@/components/ui/card";
+import {
+  OpportunityFeatured,
+  OpportunityRow,
+  OpportunityResult,
+} from "./components/OpportunityCard";
+import { CoinModal } from "./components/CoinModal";
+import { MarketIntelBanner } from "@/components/MarketIntelBanner";
 
-const POLL_INTERVAL = 5 * 60 * 1000; // 5 menit
+const WS_URL         = "ws://localhost:8000/ws/opportunity";
+const RECONNECT_MS   = 3000;
+const TOP_FEATURED   = 5;
+const INTERVAL_SEC   = 15 * 60;
+
+type ConnState = "connecting" | "connected" | "reconnecting" | "paused";
 
 const ALERT_FILTERS = [
   { key: "ALL",          label: "Semua" },
@@ -12,38 +23,199 @@ const ALERT_FILTERS = [
   { key: "breakout",     label: "🎯 Breakout" },
 ];
 
-export default function OpportunityPage() {
-  const [results, setResults]     = useState<OpportunityResult[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [lastUpdated, setLast]    = useState<Date | null>(null);
-  const [scanned, setScanned]     = useState(0);
-  const [alertFilter, setAlert]   = useState("ALL");
-  const [search, setSearch]       = useState("");
-  const [minScore, setMinScore]   = useState(30);
-  const [generatedAt, setGen]     = useState(0);
+const CONN_META: Record<ConnState, { dot: string; label: string; color: string }> = {
+  connected:    { dot: "bg-green-400",              label: "LIVE",         color: "text-green-400 border-green-500/40 bg-green-500/10" },
+  connecting:   { dot: "bg-yellow-400 animate-pulse", label: "CONNECTING", color: "text-yellow-400 border-yellow-500/40 bg-yellow-500/10" },
+  reconnecting: { dot: "bg-orange-400 animate-pulse", label: "RECONNECTING", color: "text-orange-400 border-orange-500/40 bg-orange-500/10" },
+  paused:       { dot: "bg-neutral-500",             label: "PAUSED",       color: "text-neutral-400 border-neutral-600 bg-neutral-700/50" },
+};
 
-  const fetchData = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
+function fmtCountdown(secs: number | null): string {
+  if (secs === null) return "--:--";
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function timeAgo(date: Date | null): string {
+  if (!date) return "";
+  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (secs < 10)  return "baru saja";
+  if (secs < 60)  return `${secs} dtk lalu`;
+  const m = Math.floor(secs / 60);
+  if (m < 60) return `${m} mnt lalu`;
+  return `${Math.floor(m / 60)} jam lalu`;
+}
+
+// ── Active positions type (minimal) ──────────────────────────────────────────
+interface ActivePos {
+  id: number; symbol: string; entry: number;
+  current_price: number | null; unrealized_pnl_pct: number | null;
+  tp1_hit: boolean;
+}
+
+export default function OpportunityPage() {
+  const [results, setResults]         = useState<OpportunityResult[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [connState, setConnState]     = useState<ConnState>("connecting");
+  const [scanning, setScanning]       = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [scanned, setScanned]         = useState(0);
+  const [elapsed, setElapsed]         = useState(0);
+  const [alertFilter, setAlert]       = useState("ALL");
+  const [search, setSearch]           = useState("");
+  const [minScore, setMinScore]       = useState(30);
+  const [isLive, setIsLive]           = useState(true);
+  const [newSymbols, setNewSymbols]   = useState<Set<string>>(new Set());
+  const [timeAgoStr, setTimeAgoStr]   = useState("");
+  const [selectedCoin, setSelectedCoin] = useState<OpportunityResult | null>(null);
+
+  // Active positions banner
+  const [activePositions, setActivePositions] = useState<ActivePos[]>([]);
+
+  // Fetch active open positions for the banner (poll every 30s)
+  const fetchActivePositions = useCallback(async () => {
     try {
-      const r = await fetch(`/api/v1/opportunity/scan?min_score=30&limit=50`);
+      const r = await fetch("/api/v1/opportunity/positions");
       if (!r.ok) return;
-      const d = await r.json();
-      setResults(d.results ?? []);
-      setScanned(d.scanned ?? 0);
-      setGen(d.generated_at ?? 0);
-      setLast(new Date());
+      const d = await r.json() as { positions: ActivePos[] };
+      setActivePositions(d.positions.filter(p => (p as unknown as { status: string }).status === "open"));
     } catch { /* silent */ }
-    finally { if (!silent) setLoading(false); }
   }, []);
 
-  useEffect(() => { void fetchData(); }, [fetchData]);
-
-  // Auto-refresh every 5 min
   useEffect(() => {
-    const t = setInterval(() => void fetchData(true), POLL_INTERVAL);
+    void fetchActivePositions();
+    const t = setInterval(() => void fetchActivePositions(), 30_000);
     return () => clearInterval(t);
-  }, [fetchData]);
+  }, [fetchActivePositions]);
 
+  // Countdown uses a ref so the interval never restarts
+  const nextScanInRef = useRef<number | null>(null);
+  const [nextScanDisplay, setNextScanDisplay] = useState<number | null>(null);
+  const prevSymbolsRef = useRef<Set<string>>(new Set());
+
+  // Tick countdown every second
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (nextScanInRef.current !== null && nextScanInRef.current > 0) {
+        nextScanInRef.current--;
+        setNextScanDisplay(nextScanInRef.current);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Update "X min ago" display every 10s
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeAgoStr(prev => {
+        const next = timeAgo(lastUpdated);
+        return next !== prev ? next : prev;
+      });
+    }, 10_000);
+    setTimeAgoStr(timeAgo(lastUpdated));
+    return () => clearInterval(timer);
+  }, [lastUpdated]);
+
+  const applySnapshot = useCallback((data: Record<string, unknown>) => {
+    const raw = (data.results ?? []) as OpportunityResult[];
+
+    const currentSet = new Set(raw.map(r => r.symbol));
+    const prev = prevSymbolsRef.current;
+    const fresh = new Set<string>();
+    if (prev.size > 0) {
+      currentSet.forEach(s => { if (!prev.has(s)) fresh.add(s); });
+    }
+    prevSymbolsRef.current = currentSet;
+
+    setResults(raw);
+    setScanned((data.scanned as number) ?? 0);
+    setElapsed((data.elapsed_sec as number) ?? 0);
+    setLastUpdated(new Date());
+    setTimeAgoStr("baru saja");
+    setLoading(false);
+    setScanning(false);
+
+    if (typeof data.next_scan_in === "number") {
+      nextScanInRef.current = data.next_scan_in;
+      setNextScanDisplay(data.next_scan_in);
+    }
+
+    if (fresh.size > 0) {
+      setNewSymbols(fresh);
+      setTimeout(() => setNewSymbols(new Set()), 8000);
+    }
+  }, []);
+
+  // WebSocket lifecycle
+  useEffect(() => {
+    if (!isLive) {
+      setConnState("paused");
+      return;
+    }
+
+    let mounted = true;
+    let ws: WebSocket;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    function connect() {
+      if (!mounted) return;
+      setConnState("connecting");
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => { if (mounted) setConnState("connected"); };
+
+      ws.onmessage = (e) => {
+        if (!mounted) return;
+        try {
+          const msg = JSON.parse(e.data as string) as Record<string, unknown>;
+          if (msg.type === "snapshot") {
+            applySnapshot(msg);
+          } else if (msg.type === "heartbeat") {
+            setScanning((msg.scanning as boolean) ?? false);
+            if (typeof msg.next_scan_in === "number") {
+              nextScanInRef.current = msg.next_scan_in;
+              setNextScanDisplay(msg.next_scan_in);
+            }
+          } else if (msg.type === "scanning") {
+            setScanning((msg.scanning as boolean) ?? true);
+          } else if (msg.type === "status") {
+            setLoading(false);
+          }
+        } catch { /* ignore bad JSON */ }
+      };
+
+      ws.onclose = () => {
+        if (!mounted) return;
+        setConnState("reconnecting");
+        reconnectTimer = setTimeout(connect, RECONNECT_MS);
+      };
+
+      ws.onerror = () => ws.close();
+    }
+
+    connect();
+
+    return () => {
+      mounted = false;
+      clearTimeout(reconnectTimer);
+      ws?.close();
+    };
+  }, [isLive, applySnapshot]);
+
+  // Trigger fresh scan — backend auto-detects old cache and runs new scan (~25s)
+  const manualScan = useCallback(async () => {
+    setScanning(true);
+    try {
+      const r = await fetch("/api/v1/opportunity/scan?min_score=30&limit=50");
+      if (!r.ok) return;
+      const d = await r.json() as Record<string, unknown>;
+      applySnapshot(d);
+    } catch { /* silent */ }
+    finally { setScanning(false); }
+  }, [applySnapshot]);
+
+  // Filters
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return results.filter(r => {
@@ -54,166 +226,344 @@ export default function OpportunityPage() {
     });
   }, [results, alertFilter, minScore, search]);
 
-  // Counts per alert type
   const counts = useMemo(() => {
     const c: Record<string, number> = { ALL: results.length };
     results.forEach(r => { c[r.alert_type] = (c[r.alert_type] ?? 0) + 1; });
     return c;
   }, [results]);
 
-  const topCount   = results.filter(r => r.opportunity_score >= 70).length;
+  const highCount  = results.filter(r => r.opportunity_score >= 70).length;
   const watchCount = results.filter(r => r.opportunity_score >= 50 && r.opportunity_score < 70).length;
+  const featured   = filtered.slice(0, TOP_FEATURED);
+  const rest       = filtered.slice(TOP_FEATURED);
 
-  const timeAgo = generatedAt
-    ? Math.floor((Date.now() / 1000 - generatedAt) / 60)
-    : null;
+  const cm = CONN_META[connState];
+  const scanProgress = nextScanDisplay !== null
+    ? Math.round(((INTERVAL_SEC - nextScanDisplay) / INTERVAL_SEC) * 100)
+    : 0;
 
   return (
     <div className="space-y-4">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <Card className="bg-gradient-to-r from-neutral-900 to-neutral-800 text-white border-0">
-        <CardContent className="pt-5 pb-4">
+      <div className="rounded-2xl bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 text-white overflow-hidden">
+
+        {/* Scan progress bar */}
+        <div className="h-0.5 bg-neutral-700 w-full">
+          <div
+            className="h-full bg-teal-500 transition-all duration-1000 ease-linear"
+            style={{ width: `${scanProgress}%` }}
+          />
+        </div>
+
+        <div className="p-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
+
+            {/* Left */}
             <div>
               <div className="flex items-center gap-3 mb-1.5">
                 <span className="text-3xl">🚀</span>
                 <div>
-                  <h1 className="text-2xl font-bold">Opportunity Scanner</h1>
-                  <p className="text-xs text-neutral-400">Koin berpotensi naik · Multi-timeframe · Tidak peduli style</p>
+                  <h1 className="text-2xl font-bold leading-tight">Opportunity Scanner</h1>
+                  <p className="text-xs text-neutral-400">Rekomendasi posisi SPOT · Entry · SL · TP · R:R ≥ 2.0</p>
                 </div>
               </div>
-              <p className="text-xs text-neutral-500 max-w-xl leading-relaxed mt-1">
-                Mencari koin seperti <strong className="text-teal-300">OPN, DOGE, PEPE</strong> sebelum pump —
-                BB Squeeze di 2+ timeframe, akumulasi smart money, RSI reset dari oversold.
-                Tidak terikat style tertentu.
+              <p className="text-xs text-neutral-500 max-w-md leading-relaxed ml-12">
+                Deteksi koin seperti <strong className="text-teal-300">OPN, PEPE, DOGE</strong> sebelum bergerak —
+                lengkap dengan level entry, stop loss, dan take profit yang siap dieksekusi.
               </p>
+
+              {/* Legend pills */}
+              <div className="flex gap-2 mt-3 ml-12 flex-wrap">
+                {[
+                  { dot: "bg-red-400",   label: "SL · swing low -0.5%" },
+                  { dot: "bg-green-400", label: "TP2 · target utama (R:R 1:3)" },
+                  { dot: "bg-green-200", label: "TP3 · extended (R:R 1:5)" },
+                ].map(l => (
+                  <span key={l.label} className="flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2.5 py-1 rounded-full border border-white/10">
+                    <span className={`w-1.5 h-1.5 rounded-full ${l.dot}`} />
+                    {l.label}
+                  </span>
+                ))}
+              </div>
             </div>
-            <div className="text-right space-y-1.5">
-              {/* Summary badges */}
-              <div className="flex gap-2 justify-end">
-                <div className="bg-green-500/20 border border-green-500/30 rounded-lg px-3 py-1.5 text-center">
-                  <p className="text-green-400 font-black text-lg leading-tight">{topCount}</p>
-                  <p className="text-[9px] text-green-500">🔥 High (≥70)</p>
+
+            {/* Right */}
+            <div className="flex flex-col items-end gap-3">
+
+              {/* Connection + scanning status */}
+              <div className="flex items-center gap-2 flex-wrap justify-end">
+                <button
+                  onClick={() => setIsLive(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all ${cm.color}`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${cm.dot}`} />
+                  {cm.label}
+                </button>
+
+                {scanning && (
+                  <span className="flex items-center gap-1.5 text-[11px] text-teal-300 bg-teal-500/10 border border-teal-500/30 px-3 py-1.5 rounded-full">
+                    <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />
+                    Scanning 100 pairs...
+                  </span>
+                )}
+
+                {!scanning && nextScanDisplay !== null && connState === "connected" && (
+                  <span className="text-[11px] text-neutral-400 font-mono tabular-nums">
+                    next scan <strong className="text-neutral-200">{fmtCountdown(nextScanDisplay)}</strong>
+                  </span>
+                )}
+              </div>
+
+              {/* Stats */}
+              <div className="flex gap-2">
+                <div className="bg-green-500/15 border border-green-500/25 rounded-xl px-3.5 py-2 text-center min-w-[60px]">
+                  <p className="text-green-400 font-black text-2xl leading-tight">{highCount}</p>
+                  <p className="text-[9px] text-green-500/80 mt-0.5">🔥 HIGH</p>
                 </div>
-                <div className="bg-yellow-500/20 border border-yellow-500/30 rounded-lg px-3 py-1.5 text-center">
-                  <p className="text-yellow-400 font-black text-lg leading-tight">{watchCount}</p>
-                  <p className="text-[9px] text-yellow-500">⚡ Watch</p>
+                <div className="bg-yellow-500/15 border border-yellow-500/25 rounded-xl px-3.5 py-2 text-center min-w-[60px]">
+                  <p className="text-yellow-400 font-black text-2xl leading-tight">{watchCount}</p>
+                  <p className="text-[9px] text-yellow-500/80 mt-0.5">⚡ WATCH</p>
                 </div>
-                <div className="bg-neutral-700/50 border border-neutral-600 rounded-lg px-3 py-1.5 text-center">
-                  <p className="text-neutral-300 font-black text-lg leading-tight">{scanned}</p>
-                  <p className="text-[9px] text-neutral-500">pair scan</p>
+                <div className="bg-neutral-700/50 border border-neutral-600/50 rounded-xl px-3.5 py-2 text-center min-w-[60px]">
+                  <p className="text-neutral-200 font-black text-2xl leading-tight">{scanned}</p>
+                  <p className="text-[9px] text-neutral-500 mt-0.5">pairs</p>
                 </div>
               </div>
-              {lastUpdated && (
-                <p className="text-[10px] text-neutral-500">
-                  {timeAgo === 0 ? "baru saja" : `${timeAgo}m lalu`} · refresh tiap 5 menit
-                </p>
-              )}
-              <button onClick={() => void fetchData()} disabled={loading}
-                className="text-xs bg-teal-600 hover:bg-teal-500 disabled:opacity-50 px-3 py-1.5 rounded-lg transition-colors font-semibold">
-                {loading ? "Scanning..." : "🔄 Scan Sekarang"}
-              </button>
+
+              {/* Last updated + scan button */}
+              <div className="flex items-center gap-2">
+                {lastUpdated && (
+                  <div className="text-right">
+                    <p className="text-[10px] text-neutral-400 tabular-nums">
+                      {lastUpdated.toLocaleTimeString()}
+                      {elapsed > 0 && <span className="text-neutral-600"> · {elapsed.toFixed(1)}s</span>}
+                    </p>
+                    <p className="text-[10px] text-neutral-600">{timeAgoStr}</p>
+                  </div>
+                )}
+                <button
+                  onClick={() => void manualScan()}
+                  disabled={scanning}
+                  className="text-xs bg-teal-600 hover:bg-teal-500 disabled:opacity-40 px-3 py-1.5 rounded-lg transition-colors font-semibold whitespace-nowrap"
+                >
+                  {scanning ? (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Scanning...
+                    </span>
+                  ) : "⚡ Scan Sekarang"}
+                </button>
+              </div>
+
             </div>
           </div>
-
-          {/* How it works */}
-          <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-            {[
-              { icon: "⚡", text: "BB Squeeze 2+ TF → explosive move" },
-              { icon: "📦", text: "Volume naik, harga flat → smart money" },
-              { icon: "🔄", text: "RSI reset dari oversold → energy recharge" },
-              { icon: "🎯", text: "Near breakout level → satu push lagi" },
-            ].map(c => (
-              <div key={c.icon} className="bg-white/5 rounded-lg px-3 py-2 flex items-center gap-2">
-                <span>{c.icon}</span>
-                <span className="text-neutral-400">{c.text}</span>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ── Filters ────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-3">
-        {/* Alert type */}
-        <div className="flex gap-1.5 flex-wrap">
-          {ALERT_FILTERS.map(f => (
-            <button key={f.key} onClick={() => setAlert(f.key)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
-                alertFilter === f.key
-                  ? "bg-teal-600 text-white"
-                  : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200"
-              }`}>
-              {f.label} {counts[f.key] !== undefined ? `(${counts[f.key] ?? 0})` : ""}
-            </button>
-          ))}
         </div>
-
-        {/* Min score */}
-        <select value={minScore} onChange={e => setMinScore(Number(e.target.value))}
-          className="px-2.5 py-1.5 bg-white border border-neutral-200 rounded-lg text-xs text-neutral-700 cursor-pointer">
-          <option value={30}>Score ≥ 30</option>
-          <option value={50}>Score ≥ 50</option>
-          <option value={70}>Score ≥ 70 (🔥)</option>
-        </select>
-
-        {/* Search */}
-        <div className="relative flex-1 min-w-[140px] max-w-xs">
-          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 text-xs">🔍</span>
-          <input type="text" placeholder="Cari symbol…" value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-7 pr-3 py-1.5 bg-white border border-neutral-200 rounded-lg text-xs focus:outline-none focus:border-teal-500" />
-        </div>
-
-        {filtered.length < results.length && (
-          <span className="text-xs text-neutral-500">{filtered.length} dari {results.length} hasil</span>
-        )}
       </div>
 
-      {/* ── Score Legend ──────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-4 text-[10px] text-neutral-500 flex-wrap">
-        <span className="font-semibold">Score:</span>
-        {[
-          { dot: "bg-green-500", label: "≥ 70 — High potential 🔥" },
-          { dot: "bg-yellow-500", label: "50–69 — Watch closely ⚡" },
-          { dot: "bg-neutral-400", label: "30–49 — Early signal 👀" },
-        ].map(l => (
-          <span key={l.label} className="flex items-center gap-1">
-            <span className={`w-2 h-2 rounded-full ${l.dot}`} />
-            {l.label}
+      {/* ── Active positions banner ────────────────────────────────────────── */}
+      {activePositions.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap px-3 py-2 bg-neutral-900 rounded-xl">
+          <span className="text-[10px] text-neutral-400 font-semibold shrink-0">
+            💼 {activePositions.length} posisi aktif:
           </span>
+          {activePositions.map(p => {
+            const upnl = p.unrealized_pnl_pct;
+            const isProfit = upnl != null && upnl >= 0;
+            const isLoss   = upnl != null && upnl < 0;
+            return (
+              <span
+                key={p.id}
+                className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg ${
+                  p.tp1_hit   ? "bg-yellow-900/60 text-yellow-300 border border-yellow-700/50" :
+                  isProfit    ? "bg-green-900/60 text-green-300 border border-green-700/50" :
+                  isLoss      ? "bg-red-900/60 text-red-300 border border-red-700/50" :
+                                "bg-neutral-700 text-neutral-300 border border-neutral-600"
+                }`}
+              >
+                <span>{p.symbol.replace("USDT", "")}</span>
+                {p.tp1_hit && <span className="text-[9px]">🟡TP1</span>}
+                {upnl != null ? (
+                  <span className="text-[10px]">{upnl >= 0 ? "+" : ""}{upnl.toFixed(2)}%</span>
+                ) : (
+                  <span className="text-[10px] opacity-50">—</span>
+                )}
+              </span>
+            );
+          })}
+          <span className="text-[10px] text-neutral-600 ml-auto">
+            Tutup posisi di History →
+          </span>
+        </div>
+      )}
+
+      {/* ── Filter bar ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-2">
+        {ALERT_FILTERS.map(f => (
+          <button
+            key={f.key}
+            onClick={() => setAlert(f.key)}
+            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+              alertFilter === f.key
+                ? "bg-teal-600 text-white shadow-sm"
+                : "bg-white border border-neutral-200 text-neutral-600 hover:border-teal-300 hover:text-teal-600"
+            }`}
+          >
+            {f.label}
+            <span className={`ml-1.5 text-[10px] ${alertFilter === f.key ? "text-teal-200" : "text-neutral-400"}`}>
+              ({counts[f.key] ?? 0})
+            </span>
+          </button>
         ))}
+
+        <div className="flex items-center gap-1.5 bg-white border border-neutral-200 rounded-full px-3 py-1.5">
+          <span className="text-neutral-400 text-[10px] font-semibold">MIN</span>
+          <select
+            value={minScore}
+            onChange={e => setMinScore(Number(e.target.value))}
+            className="text-xs text-neutral-700 bg-transparent focus:outline-none cursor-pointer"
+          >
+            <option value={30}>30pt</option>
+            <option value={50}>50pt ⚡</option>
+            <option value={70}>70pt 🔥</option>
+          </select>
+        </div>
+
+        <div className="relative flex-1 min-w-[140px] max-w-[200px]">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 text-xs">🔍</span>
+          <input
+            type="text"
+            placeholder="Cari koin…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-8 pr-3 py-1.5 bg-white border border-neutral-200 rounded-full text-xs focus:outline-none focus:border-teal-400 transition-colors"
+          />
+        </div>
+
+        {(alertFilter !== "ALL" || minScore > 30 || search) && (
+          <button
+            onClick={() => { setAlert("ALL"); setMinScore(30); setSearch(""); }}
+            className="text-xs text-neutral-400 hover:text-neutral-600 underline"
+          >
+            Reset
+          </button>
+        )}
+
+        <span className="text-xs text-neutral-400 ml-auto tabular-nums">
+          {filtered.length} dari {results.length} hasil
+        </span>
       </div>
+
+      {/* ── Market Intel Banner ──────────────────────────────────────────────── */}
+      <MarketIntelBanner mode="spot" />
+
+      {/* ── Score legend ───────────────────────────────────────────────────── */}
+      {!loading && filtered.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap px-1">
+          {[
+            { bg: "bg-green-500",  emoji: "🔥", label: "≥ 70 High" },
+            { bg: "bg-yellow-500", emoji: "⚡", label: "50–69 Watch" },
+            { bg: "bg-neutral-400",emoji: "👀", label: "30–49 Early" },
+          ].map(l => (
+            <span key={l.label} className="flex items-center gap-1.5 text-xs text-neutral-500">
+              <span className={`${l.bg} text-white text-[10px] font-bold px-2 py-0.5 rounded-full`}>
+                {l.emoji} {l.label}
+              </span>
+            </span>
+          ))}
+          {newSymbols.size > 0 && (
+            <span className="flex items-center gap-1.5 text-xs text-teal-600 font-semibold animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-teal-400 shrink-0" />
+              {newSymbols.size} koin baru terdeteksi
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ── Loading ────────────────────────────────────────────────────────── */}
       {loading && !results.length && (
-        <div className="py-16 text-center text-neutral-500">
-          <div className="animate-pulse space-y-2">
-            <p className="text-2xl">🚀</p>
-            <p className="font-semibold">Scanning 100 pair multi-timeframe...</p>
-            <p className="text-xs">Menganalisis BB Squeeze + Volume + RSI di 15m, 1H, 4H</p>
+        <div className="py-20 text-center">
+          <div className="space-y-3">
+            <div className="w-14 h-14 rounded-full bg-teal-100 flex items-center justify-center mx-auto">
+              <span className="text-3xl animate-bounce">🚀</span>
+            </div>
+            <p className="font-semibold text-neutral-700">Menghubungkan ke scanner...</p>
+            <p className="text-xs text-neutral-400">Menganalisis BB Squeeze + Volume + RSI di 15m, 1H, 4H</p>
           </div>
         </div>
+      )}
+
+      {/* ── Featured cards ─────────────────────────────────────────────────── */}
+      {!loading && featured.length > 0 && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            {featured.map((r, i) => (
+              <OpportunityFeatured
+                key={r.symbol}
+                r={r}
+                rank={i + 1}
+                isNew={newSymbols.has(r.symbol)}
+                onClick={() => setSelectedCoin(r)}
+              />
+            ))}
+          </div>
+
+          {rest.length > 0 && (
+            <Card className="overflow-hidden border-neutral-200">
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-neutral-50 border-b text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
+                <span className="w-6">#</span>
+                <span className="w-10">Skor</span>
+                <span className="flex-1">Koin &amp; Sinyal</span>
+                <span className="w-16 text-right hidden sm:block">24h</span>
+                <span className="hidden md:block">RSI</span>
+                <span className="w-14 text-right hidden lg:block">Vol</span>
+                <span className="hidden xl:block">TF</span>
+                <span className="w-4" />
+              </div>
+              {rest.map((r, i) => (
+                <OpportunityRow
+                  key={r.symbol}
+                  r={r}
+                  rank={i + TOP_FEATURED + 1}
+                  isNew={newSymbols.has(r.symbol)}
+                  onClick={() => setSelectedCoin(r)}
+                />
+              ))}
+            </Card>
+          )}
+        </>
       )}
 
       {/* ── Empty ─────────────────────────────────────────────────────────── */}
       {!loading && filtered.length === 0 && results.length > 0 && (
-        <div className="text-center text-neutral-500 py-10">
-          <p className="text-xl mb-2">🔍</p>
-          <p>Tidak ada hasil untuk filter ini</p>
-          <button onClick={() => { setAlert("ALL"); setMinScore(30); setSearch(""); }}
-            className="mt-2 text-xs text-teal-600 underline">Reset filter</button>
+        <div className="text-center py-12 text-neutral-400">
+          <p className="text-3xl mb-3">🔍</p>
+          <p className="font-semibold">Tidak ada hasil untuk filter ini</p>
+          <button
+            onClick={() => { setAlert("ALL"); setMinScore(30); setSearch(""); }}
+            className="mt-3 text-sm text-teal-600 hover:text-teal-500 underline"
+          >
+            Reset semua filter
+          </button>
         </div>
       )}
 
-      {/* ── Results Grid ──────────────────────────────────────────────────── */}
-      {filtered.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {filtered.map(r => (
-            <OpportunityCard key={r.symbol} r={r} />
-          ))}
+      {/* ── No data state ──────────────────────────────────────────────────── */}
+      {!loading && results.length === 0 && !scanning && (
+        <div className="text-center py-12 text-neutral-400">
+          <p className="text-3xl mb-3">📡</p>
+          <p className="font-semibold">Belum ada data</p>
+          <p className="text-xs mt-1">
+            {connState === "connected"
+              ? "Scanner sedang menunggu siklus pertama"
+              : "Menunggu koneksi..."}
+          </p>
         </div>
+      )}
+
+      {/* ── Coin detail modal ──────────────────────────────────────────────── */}
+      {selectedCoin && (
+        <CoinModal r={selectedCoin} onClose={() => setSelectedCoin(null)} />
       )}
 
     </div>

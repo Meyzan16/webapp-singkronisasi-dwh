@@ -53,9 +53,29 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def create_db_schema() -> None:
-    """Create all registered tables. Raises on connection failure."""
+    """Create all registered tables and apply additive column migrations."""
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await _migrate_columns(connection)
+
+
+async def _migrate_columns(connection) -> None:
+    """
+    Idempotent ALTER TABLE migrations for new columns.
+    Safe to run on every startup — skips columns that already exist.
+    """
+    migrations = [
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS leverage INTEGER",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS margin_type VARCHAR(10)",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS regime VARCHAR(20)",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trail_sl FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trail_active BOOLEAN DEFAULT FALSE",
+    ]
+    for sql in migrations:
+        try:
+            await connection.execute(__import__("sqlalchemy").text(sql))
+        except Exception:
+            pass  # column may already exist on non-PG dialects
 
 
 async def dispose_engine() -> None:

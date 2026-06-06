@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsIcon, LogOut, BarChart3, Grid2X2, BookOpen, History, Rocket } from "lucide-react";
+import { SettingsIcon, LogOut, Zap, Grid2X2, BookOpen, History, TrendingUp, BarChart2, Activity } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useContext } from "react";
 import Link from "next/link";
@@ -8,12 +8,13 @@ import DottedSeparator from "./ui/dotted-separator";
 import { GlobalContext } from "@/app/context";
 
 const routes = [
-  { label: "Dashboard",    href: "/dashboards",   icon: Grid2X2    },
-  { label: "Scanner",      href: "/scanner",      icon: BarChart3  },
-  { label: "Opportunity",  href: "/opportunity",  icon: Rocket     },
-  { label: "History",      href: "/history",      icon: History    },
-  { label: "Architecture", href: "/architecture", icon: BookOpen   },
-  { label: "Settings",     href: "/settings",     icon: SettingsIcon },
+  { label: "Dashboard",        href: "/dashboards",   icon: Grid2X2,     group: ""        },
+  { label: "Futures Scanner",  href: "/scanner",      icon: Zap,         group: "FUTURES" },
+  { label: "Spot Opportunity", href: "/opportunity",  icon: TrendingUp,  group: "SPOT"    },
+  { label: "History",          href: "/history",      icon: BarChart2,   group: "ALL"     },
+  { label: "System Health",    href: "/system-health", icon: Activity,    group: ""        },
+  { label: "Architecture",     href: "/architecture", icon: BookOpen,    group: ""        },
+  { label: "Settings",         href: "/settings",     icon: SettingsIcon, group: ""       },
 ];
 
 export const Navigation = () => {
@@ -32,22 +33,42 @@ export const Navigation = () => {
 
   return (
     <aside className="flex flex-col h-screen w-64 bg-neutral-100 text-black justify-between border-r border-neutral-300">
-      <nav className="px-6">
-        <div className="mb-2 text-xs font-semibold text-black">Navigation</div>
-        {routes.map((item) => {
+      <nav className="px-4 pt-2">
+        {routes.map((item, idx) => {
           const isActive = pathName === item.href;
           const Icon = item.icon;
+          // Show group label before first item of each group
+          const prevGroup = idx > 0 ? routes[idx - 1].group : "__none__";
+          const showGroupLabel = item.group && item.group !== prevGroup;
           return (
-            <Link key={item.href} href={item.href}>
-              <div className={`flex items-center gap-3 py-3 rounded-lg font-medium text-sm mb-1 transition-colors ${
-                isActive
-                  ? "px-2 bg-primarygreen text-white"
-                  : "text-black hover:px-2 hover:bg-neutral-300 hover:text-black"
-              }`}>
-                <Icon className="w-5 h-5" />
-                {item.label}
-              </div>
-            </Link>
+            <div key={item.href}>
+              {showGroupLabel && (
+                <div className={`mt-3 mb-1 px-2 text-[10px] font-bold uppercase tracking-widest ${
+                  item.group === "FUTURES" ? "text-blue-500"
+                  : item.group === "SPOT"  ? "text-teal-600"
+                  :                          "text-neutral-400"
+                }`}>
+                  {item.group === "FUTURES" ? "⚡ Futures"
+                  : item.group === "SPOT"   ? "🎯 Spot"
+                  :                           "📋 Riwayat"}
+                </div>
+              )}
+              {!item.group && idx === 0 && (
+                <div className="mb-1 px-2 text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                  Menu
+                </div>
+              )}
+              <Link href={item.href}>
+                <div className={`flex items-center gap-3 py-2.5 rounded-lg font-medium text-sm mb-0.5 transition-colors ${
+                  isActive
+                    ? "px-2 bg-primarygreen text-white"
+                    : "text-black hover:px-2 hover:bg-neutral-300 hover:text-black"
+                }`}>
+                  <Icon className="w-4 h-4 shrink-0" />
+                  {item.label}
+                </div>
+              </Link>
+            </div>
           );
         })}
       </nav>

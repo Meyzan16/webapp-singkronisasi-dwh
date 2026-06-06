@@ -60,13 +60,34 @@ async def get_daily_pnl(days: int = Query(30, description="Number of days to inc
 
 
 @router.delete("/history/all", dependencies=[_db])
-async def clear_all_trades() -> dict:
-    """Delete all paper trades — hard reset. Used when changing scoring rules."""
-    from sqlalchemy import text
+async def clear_all_trades(
+    style: Optional[str] = Query(None, description="Filter by style. Leave empty to clear all scanner trades only.")
+) -> dict:
+    """
+    Delete paper trades — hard reset.
+    - style=scalping|daytrading|swing|position → clear that style
+    - style=opportunity_spot → clear spot opportunity
+    - style=futures_agent1|futures_agent2 → clear futures
+    - no style → clear all spot scanner (scalping/daytrading/swing/position)
+    """
+    from sqlalchemy import text, delete
     from app.database import AsyncSessionLocal
+    from app.models.paper_trade import PaperTrade
+
+    scanner_styles = ["scalping", "daytrading", "swing", "position"]
+
     async with AsyncSessionLocal() as session:
-        result = await session.execute(text("DELETE FROM paper_trades"))
+        if style:
+            result = await session.execute(
+                delete(PaperTrade).where(PaperTrade.style == style)
+            )
+        else:
+            # Default: only spot scanner styles
+            result = await session.execute(
+                delete(PaperTrade).where(PaperTrade.style.in_(scanner_styles))
+            )
         await session.commit()
         deleted = result.rowcount
-    logger.info("paper_trades_cleared", deleted=deleted)
-    return {"deleted": deleted, "message": "All paper trades cleared."}
+
+    logger.info("paper_trades_cleared", style=style or "scanner", deleted=deleted)
+    return {"deleted": deleted, "style": style or "scanner", "message": f"{deleted} trade(s) cleared."}

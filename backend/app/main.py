@@ -26,17 +26,25 @@ from app.api.v1.positions import router as positions_router
 from app.api.v1.account import router as account_router
 from app.api.v1.market import router as market_router
 from app.api.v1.coin_detail import router as coin_detail_router
-from app.api.v1.scanner import router as scanner_router
 from app.api.v1.history import router as history_router
 from app.api.v1.opportunity import router as opportunity_router
-from app.models.paper_trade import PaperTrade as _PaperTrade  # noqa: F401 — register table
+from app.api.v1.futures_scanner import router as futures_router
+from app.api.v1.futures_learning import router as futures_learning_router
+from app.api.v1.market_context import router as market_context_router
+from app.api.v1.binance_status import router as binance_status_router
+from app.models.paper_trade import PaperTrade as _PaperTrade          # noqa: F401
+from app.models.signal_weight import AgentSignalWeight as _ASW         # noqa: F401
 from app.config import get_settings
 from app.database import AsyncSessionLocal, create_db_schema, dispose_engine, set_db_available
 from app.services.data_pipeline.binance_client import BinanceClient
 from app.services.data_pipeline.kline_fetcher import KlineFetcher
-from agents.scanner.scheduler import run_scanner_loop, get_state as scheduler_state
 from agents.opportunity.scheduler import run_opportunity_loop
+from agents.opportunity.monitor import run_opportunity_monitor
+from agents.futures.scheduler import run_futures_loop
+from agents.futures.monitor import run_futures_monitor
 from app.ws.position_stream import position_stream
+from app.ws.opportunity_stream import opportunity_stream
+from app.ws.futures_stream import futures_stream
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -86,14 +94,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("poller_skipped", error=str(exc)[:80])
 
-    # ── Background scanner scheduler (24/7, all 4 styles, every 15 min) ───────
-    scheduler_task    = asyncio.create_task(run_scanner_loop())
-    opportunity_task  = asyncio.create_task(run_opportunity_loop())
+    # ── Background agents ─────────────────────────────────────────────────────
+    opportunity_task     = asyncio.create_task(run_opportunity_loop())
+    monitor_task         = asyncio.create_task(run_opportunity_monitor())
+    futures_task         = asyncio.create_task(run_futures_loop())
+    futures_monitor_task = asyncio.create_task(run_futures_monitor())
 
     yield  # ← app is running
 
     # ── Shutdown ───────────────────────────────────────────────────────────────
-    for task in [scheduler_task, opportunity_task]:
+    for task in [opportunity_task, monitor_task, futures_task, futures_monitor_task]:
         task.cancel()
         try:
             await task
@@ -119,7 +129,6 @@ app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 # ── Routers ────────────────────────────────────────────────────────────────────
 # Non-DB (always work): scanner, market, TA engine, coin detail, account
-app.include_router(scanner_router,     prefix=settings.api_v1_prefix)
 app.include_router(market_router,      prefix=settings.api_v1_prefix)
 app.include_router(coin_detail_router, prefix=settings.api_v1_prefix)
 app.include_router(account_router,     prefix=settings.api_v1_prefix)
@@ -136,6 +145,10 @@ app.include_router(klines_router,      prefix=settings.api_v1_prefix)
 app.include_router(positions_router,   prefix=settings.api_v1_prefix)
 app.include_router(history_router,      prefix=settings.api_v1_prefix)
 app.include_router(opportunity_router,  prefix=settings.api_v1_prefix)
+app.include_router(futures_router,          prefix=settings.api_v1_prefix)
+app.include_router(futures_learning_router, prefix=settings.api_v1_prefix)
+app.include_router(market_context_router,  prefix=settings.api_v1_prefix)
+app.include_router(binance_status_router,  prefix=settings.api_v1_prefix)
 
 
 @app.websocket("/ws/positions")
@@ -143,42 +156,34 @@ async def ws_positions(websocket: WebSocket) -> None:
     await position_stream(websocket)
 
 
+@app.websocket("/ws/opportunity")
+async def ws_opportunity(websocket: WebSocket) -> None:
+    await opportunity_stream(websocket)
+
+
+@app.websocket("/ws/futures")
+async def ws_futures(websocket: WebSocket) -> None:
+    await futures_stream(websocket)
+
+
 @app.get("/health")
 async def health() -> dict:
-    """Health check — shows DB + scheduler status."""
-    import time
+    """Health check — DB + all 4 agent statuses."""
     from app.database import is_db_available
-    sched = scheduler_state()
-    next_in = None
-    if sched["next_scan"]:
-        next_in = max(0, round((sched["next_scan"] - time.time()) / 60, 1))
+    from agents.opportunity.scheduler  import get_state as opp_sched_state
+    from agents.opportunity.monitor    import get_state as opp_mon_state
+    from agents.futures.scheduler      import get_state as fut_sched_state
+    from agents.futures.monitor        import get_state as fut_mon_state
+    from agents.futures.weight_updater import get_state as weight_state
+    db_ok = is_db_available()
     return {
-        "status":           "ok",
-        "database":         "connected" if is_db_available() else "unavailable",
-        "scheduler": {
-            "running":           sched["running"],
-            "cycle_count":       sched["cycle_count"],
-            "interval_minutes":  sched["interval_minutes"],
-            "next_scan_in_min":  next_in,
-            "total_logged":      sched["total_logged"],
-            "last_error":        sched["last_error"],
-        },
-    }
-
-
-@app.get("/api/v1/scheduler/status")
-async def scheduler_status() -> dict:
-    """Detailed background scanner scheduler status."""
-    import time, datetime
-    sched = scheduler_state()
-    def fmt(ts):
-        return datetime.datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else None
-    next_in = None
-    if sched["next_scan"]:
-        next_in = max(0, round((sched["next_scan"] - time.time()) / 60, 1))
-    return {
-        **sched,
-        "last_scan_fmt":  fmt(sched["last_scan"]),
-        "next_scan_fmt":  fmt(sched["next_scan"]),
-        "next_in_minutes": next_in,
+        "status":          "ok",
+        "db":              "ok" if db_ok else "unavailable",
+        "database":        "connected" if db_ok else "unavailable",
+        "spot_scanner":    opp_sched_state(),
+        "spot_monitor":    opp_mon_state(),
+        "futures_scanner": fut_sched_state(),
+        "futures_monitor": fut_mon_state(),
+        "weight_updater":  weight_state(),
+        "scheduler":       opp_sched_state(),  # legacy key
     }

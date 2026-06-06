@@ -153,17 +153,110 @@ async def _fetch_avg_buy_price(
         return None
 
 
+@router.get("/market/spot-debug")
+async def debug_spot_connection() -> dict:
+    """
+    Debug endpoint — test Binance Spot API connectivity.
+    Returns detailed error info if something is wrong.
+    """
+    s = get_settings()
+    result: dict = {
+        "api_key_configured": bool(s.binance_api_key),
+        "api_key_prefix": s.binance_api_key[:8] + "..." if s.binance_api_key else "MISSING",
+        "spot_url": s.binance_spot_url,
+        "tests": {},
+    }
+
+    if not s.binance_api_key:
+        result["status"] = "error"
+        result["message"] = "BINANCE_API_KEY tidak ditemukan di .env"
+        return result
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        # Test 1: Public ping
+        try:
+            r = await client.get(spot("/api/v3/ping"))
+            result["tests"]["ping"] = {"ok": r.status_code == 200, "status": r.status_code}
+        except Exception as e:
+            result["tests"]["ping"] = {"ok": False, "error": str(e)[:80]}
+
+        # Test 2: Server time
+        try:
+            r = await client.get(spot("/api/v3/time"))
+            if r.status_code == 200:
+                server_time = r.json().get("serverTime", 0)
+                local_time  = int(time.time() * 1000)
+                diff_ms     = abs(server_time - local_time)
+                result["tests"]["time_sync"] = {
+                    "ok": diff_ms < 5000,
+                    "diff_ms": diff_ms,
+                    "warning": "Timestamp terlalu jauh!" if diff_ms > 5000 else None,
+                }
+            else:
+                result["tests"]["time_sync"] = {"ok": False, "status": r.status_code}
+        except Exception as e:
+            result["tests"]["time_sync"] = {"ok": False, "error": str(e)[:80]}
+
+        # Test 3: Account info (requires API key + Spot permission)
+        try:
+            qs = _signed_url("/api/v3/account", s.binance_api_secret)
+            r  = await client.get(spot(f"/api/v3/account?{qs}"), headers=_auth_headers(s.binance_api_key))
+            if r.status_code == 200:
+                data = r.json()
+                balances = [b for b in data.get("balances", []) if float(b["free"]) + float(b["locked"]) > 0]
+                result["tests"]["account"] = {
+                    "ok": True,
+                    "can_trade": data.get("canTrade"),
+                    "permissions": data.get("permissions", []),
+                    "non_zero_assets": len(balances),
+                }
+            else:
+                body = r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text
+                result["tests"]["account"] = {
+                    "ok": False,
+                    "status": r.status_code,
+                    "error": body if isinstance(body, dict) else body[:200],
+                }
+        except Exception as e:
+            result["tests"]["account"] = {"ok": False, "error": str(e)[:120]}
+
+    # Overall status
+    all_ok = all(t.get("ok") for t in result["tests"].values())
+    result["status"] = "ok" if all_ok else "error"
+    result["message"] = (
+        "Semua test berhasil — spot portfolio seharusnya muncul di dashboard"
+        if all_ok else
+        "Ada masalah — lihat detail 'tests' di atas"
+    )
+    return result
+
+
 @router.get("/market/spot-positions", response_model=SpotPositionsResponse)
 async def get_spot_positions() -> SpotPositionsResponse:
     """Fetch all non-zero spot holdings with current price, avg buy price, and P&L."""
     s = get_settings()
     if not s.binance_api_key:
-        raise HTTPException(status_code=400, detail="API key not configured")
+        raise HTTPException(
+            status_code=400,
+            detail="BINANCE_API_KEY tidak ditemukan. Tambahkan ke backend/.env lalu restart backend."
+        )
 
     qs = _signed_url("/api/v3/account", s.binance_api_secret)
 
     async with httpx.AsyncClient(timeout=20) as client:
-        account = await _get(client, spot(f"/api/v3/account?{qs}"), _auth_headers(s.binance_api_key))
+        try:
+            account = await _get(client, spot(f"/api/v3/account?{qs}"), _auth_headers(s.binance_api_key))
+        except HTTPException as e:
+            # Re-raise with more helpful message
+            detail = str(e.detail)
+            if "401" in detail or "-2014" in detail or "-2015" in detail:
+                raise HTTPException(status_code=401,
+                    detail="API Key tidak valid atau tidak punya izin Spot. "
+                           "Pastikan: 1) API Key aktif, 2) Permission 'Enable Reading' + 'Enable Spot' dicentang di Binance.")
+            if "403" in detail or "-1003" in detail:
+                raise HTTPException(status_code=403,
+                    detail="Rate limit atau IP restriction. Coba lagi dalam 1 menit.")
+            raise
         prices_raw: list = await _get(client, spot("/api/v3/ticker/price"))
         prices = {p["symbol"]: float(p["price"]) for p in prices_raw}
 

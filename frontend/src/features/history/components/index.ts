@@ -1,3 +1,3 @@
-export { AccuracyStats } from "./AccuracyStats";
-export { EquityCurve }  from "./EquityCurve";
-export { TradeTable }   from "./TradeTable";
+export { OppSpotTab }       from "./OppSpotTab";
+export { FuturesTab }       from "./FuturesTab";
+export { FuturesAnalytics } from "./FuturesAnalytics";
