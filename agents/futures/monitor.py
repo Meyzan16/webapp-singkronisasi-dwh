@@ -29,6 +29,13 @@ logger = structlog.get_logger(__name__)
 INTERVAL_SEC  = 120   # every 2 minutes
 STARTUP_DELAY = 60    # start after main scanner
 
+# Futures taker fee: 0.05% per side = 0.10% round trip
+TAKER_FEE     = 0.0005   # 0.05% per side
+ROUND_TRIP    = TAKER_FEE * 2  # 0.10% total
+
+# Max position age in days — close stalled futures positions
+MAX_AGE_DAYS  = 3   # futures positions should resolve faster than spot
+
 _running     = False
 _cycle_count = 0
 _last_check: Optional[float] = None
@@ -68,21 +75,38 @@ def _liq_dist_pct(price: float, liq: float, direction: str) -> float:
 # ── Price fetcher ─────────────────────────────────────────────────────────────
 
 async def _fetch_futures_prices(symbols: list[str]) -> dict[str, float]:
+    """Fetch futures mark prices — batch endpoint to minimize weight usage."""
+    if not symbols:
+        return {}
+    import json as _json
     prices: dict[str, float] = {}
-    async with httpx.AsyncClient(timeout=10) as client:
-        tasks = {
-            sym: asyncio.create_task(
-                client.get(fapi(f"/fapi/v1/ticker/price?symbol={sym}"))
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            # Batch: /fapi/v1/ticker/price?symbols=[...] — weight=2 for all
+            syms_param = _json.dumps(symbols)
+            r = await client.get(
+                fapi("/fapi/v1/ticker/price"),
+                params={"symbols": syms_param},
             )
-            for sym in symbols
-        }
-        for sym, task in tasks.items():
-            try:
-                r = await task
-                if r.status_code == 200:
-                    prices[sym] = float(r.json()["price"])
-            except Exception:
-                pass
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list):
+                    for item in data:
+                        prices[item["symbol"]] = float(item["price"])
+                    return prices
+            # Fallback: semaphore-limited individual requests
+            _sem = asyncio.Semaphore(10)
+            async def _fetch_one(sym: str) -> None:
+                async with _sem:
+                    try:
+                        resp = await client.get(fapi(f"/fapi/v1/ticker/price?symbol={sym}"))
+                        if resp.status_code == 200:
+                            prices[sym] = float(resp.json()["price"])
+                    except Exception:
+                        pass
+            await asyncio.gather(*[_fetch_one(s) for s in symbols])
+    except Exception:
+        pass
     return prices
 
 
@@ -177,33 +201,47 @@ async def check_futures_positions() -> int:
             direction    = trade.direction
             trail_active = bool(trade.trail_active)
 
-            new_status:  Optional[str]   = None
-            close_price: Optional[float] = None
+            new_status:   Optional[str]   = None
+            close_price:  Optional[float] = None
+            close_reason: Optional[str]   = None
+
+            # ── 0. Max age check (3 days — futures should resolve quickly) ────
+            age_days = (time.time() - (trade.entry_at or 0)) / 86400
+            if age_days > MAX_AGE_DAYS:
+                pnl_now = (price - entry) / entry * 100 if direction == "LONG" \
+                          else (entry - price) / entry * 100
+                new_status   = "tp" if pnl_now > 0 else "sl"
+                close_price  = round(price, 8)
+                close_reason = "max_age_expired"
 
             # ── 1. Auto-close: SL or TP2 hit ────────────────────────────────
-            if direction == "LONG":
+            elif direction == "LONG":
                 if price <= sl:
-                    new_status  = "sl"
-                    close_price = sl
+                    new_status   = "sl"
+                    close_price  = sl
+                    close_reason = "sl_hit"
                 elif price >= tp2:
-                    new_status  = "tp"
-                    close_price = tp2
+                    new_status   = "tp"
+                    close_price  = tp2
+                    close_reason = "tp2_hit"
             else:  # SHORT
                 if price >= sl:
-                    new_status  = "sl"
-                    close_price = sl
+                    new_status   = "sl"
+                    close_price  = sl
+                    close_reason = "sl_hit"
                 elif price <= tp2:
-                    new_status  = "tp"
-                    close_price = tp2
+                    new_status   = "tp"
+                    close_price  = tp2
+                    close_reason = "tp2_hit"
 
             # ── 2. Liquidation guard ─────────────────────────────────────────
             if not new_status:
                 liq   = _calc_liq_price(entry, leverage, direction)
                 d_pct = _liq_dist_pct(price, liq, direction)
                 if d_pct < LIQ_GUARD_DIST_PCT:
-                    # Too close to liquidation — exit at SL to protect capital
-                    new_status  = "sl"
-                    close_price = sl
+                    new_status   = "sl"
+                    close_price  = sl
+                    close_reason = "liq_guard"
                     _liq_guards += 1
                     logger.warning(
                         "liq_guard_triggered",
@@ -213,19 +251,30 @@ async def check_futures_positions() -> int:
                     )
 
             if new_status and close_price:
-                pnl = (close_price - entry) / entry * 100
-                if direction == "SHORT":
-                    pnl = (entry - close_price) / entry * 100
+                # Fee-aware P&L: 0.05% entry + 0.05% exit = 0.10% round trip
+                pnl_gross = (close_price - entry) / entry * 100 if direction == "LONG" \
+                            else (entry - close_price) / entry * 100
+                pnl_net   = pnl_gross - (ROUND_TRIP * 100)   # deduct fee in %
+                try:
+                    meta["close_reason"]  = close_reason
+                    meta["pnl_gross_pct"] = round(pnl_gross, 2)
+                    meta["fee_pct"]       = round(ROUND_TRIP * 100, 2)
+                    trade.signals_json    = json.dumps(meta)
+                except Exception:
+                    pass
                 trade.status      = new_status
                 trade.close_price = close_price
                 trade.closed_at   = time.time()
-                trade.pnl_pct     = round(pnl, 2)
+                trade.pnl_pct     = round(pnl_net, 2)   # net after fee
                 closed += 1
                 logger.info(
                     "futures_position_closed",
                     symbol=trade.symbol, direction=direction,
-                    status=new_status, entry=entry,
-                    close=close_price, pnl_pct=round(pnl, 2),
+                    status=new_status, reason=close_reason,
+                    entry=entry, close=close_price,
+                    pnl_gross=round(pnl_gross, 2),
+                    pnl_net=round(pnl_net, 2),
+                    fee=round(ROUND_TRIP * 100, 2),
                     agent=trade.style,
                 )
                 continue

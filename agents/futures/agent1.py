@@ -25,7 +25,7 @@ from .data import FuturesData
 
 logger = structlog.get_logger(__name__)
 
-MIN_SCORE  = 45   # lowered from 55: liquidation data (15pts) unavailable without API key
+MIN_SCORE  = 55   # restored: liquidation proxy via globalLongShortAccountRatio now working
 MIN_RR     = 3.0
 AGENT_NAME = "futures_agent1"
 
