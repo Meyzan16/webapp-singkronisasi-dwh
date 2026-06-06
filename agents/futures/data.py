@@ -222,5 +222,12 @@ async def fetch_top100_futures() -> list[dict]:
         if not isinstance(tickers, list):
             return []
 
+        # Filter stablecoin perpetuals (FDUSDUSDT, USDCUSDT perps, etc.)
+        _STABLE = {"USDC","FDUSD","TUSD","USDP","DAI","FRAX","USDD","RLUSD",
+                   "USD1","UUSD","BFUSD","USDE","BUSD","GUSD","HUSD"}
+        tickers = [
+            t for t in tickers
+            if t.get("symbol","").replace("USDT","") not in _STABLE
+        ]
         tickers.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
         return tickers[:100]

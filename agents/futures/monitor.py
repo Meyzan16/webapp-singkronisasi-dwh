@@ -168,9 +168,13 @@ async def check_futures_positions() -> int:
     updated = 0
 
     async with AsyncSessionLocal() as session:
+        # Monitor all futures-type positions (including legacy styles)
         result = await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style.in_(["futures_agent1", "futures_agent2"]),
+                PaperTrade.style.in_([
+                    "futures_agent1", "futures_agent2",
+                    "position", "scalping", "daytrading", "swing",   # legacy
+                ]),
                 PaperTrade.status == "open",
             )
         )

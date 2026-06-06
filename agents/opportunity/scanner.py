@@ -47,6 +47,15 @@ TOP_N             = 15    # hanya 15 terbaik — kualitas > kuantitas
 MIN_SCORE         = 65    # threshold lebih tinggi = hanya high-conviction
 AUTO_OPEN_SCORE   = 90    # auto-open untuk sinyal sangat kuat
 
+# Stablecoin blacklist — BB Width secara natural sempit, trigger false squeeze
+# Tidak ada volatilitas = tidak ada profit opportunity di SPOT
+STABLECOIN_BLACKLIST = {
+    "USDC", "FDUSD", "TUSD", "USDP", "GUSD", "USDD", "FRAX",
+    "DAI", "LUSD", "SUSD", "ALUSD", "HUSD", "EURS", "USDN",
+    "UST", "USTC", "RLUSD", "USD1", "UUSD", "BFUSD", "USDE",
+    "BUSD", "AEUR", "EURT", "XSGD", "BIDR", "IDRT",
+}
+
 # Fee awareness (Binance spot taker 0.1% per side = 0.2% round-trip)
 TAKER_FEE_PCT     = 0.10  # % per side
 ROUND_TRIP_FEE    = TAKER_FEE_PCT * 2  # 0.20% total cost
@@ -466,6 +475,13 @@ async def run_opportunity_scan() -> dict:
         tickers = [t for t in r.json() if str(t.get("symbol", "")).endswith("USDT")]
 
     tickers.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
+
+    # Filter stablecoins — natural tight BB triggers false squeeze signals
+    def _is_stablecoin(sym: str) -> bool:
+        base = sym.upper().replace("USDT", "")
+        return base in STABLECOIN_BLACKLIST
+
+    tickers    = [t for t in tickers if not _is_stablecoin(t["symbol"])]
     candidates = tickers[:100]
 
     # 2. Fetch klines concurrently — semaphore caps at 15 simultaneous requests
