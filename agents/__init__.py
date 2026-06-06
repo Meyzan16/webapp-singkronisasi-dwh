@@ -1,19 +1,9 @@
 """
 Agents package — autonomous trading agents.
 
-Each agent runs as an independent asyncio loop and can be developed,
-deployed, and scaled independently from the FastAPI backend.
-
 Agents:
-  scanner/      — Scans 100 USDT pairs every 15 min, caches results
-  paper_trader/ — Monitors open paper trades, closes on TP/SL
-  learning/     — (future) Strategy optimizer, ML signal improver
+  opportunity/  — Spot opportunity scanner + monitor (TP/SL)
+  futures/      — Futures Agent1 (AI) + Agent2 (T0-T4) + Monitor + WeightUpdater
 
-Entry point:
-  python -m agents          ← start all agents (standalone)
-  or imported by backend    ← agents run inside FastAPI lifespan
-
-Communication:
-  - Shared PostgreSQL DB (same DATABASE_URL as backend)
-  - scan_store (in-memory, shared when running inside backend)
+All agents are started by FastAPI lifespan in backend/app/main.py.
 """

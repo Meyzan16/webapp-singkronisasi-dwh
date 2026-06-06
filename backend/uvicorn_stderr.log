@@ -1,0 +1,10 @@
+INFO:     Will watch for changes in these directories: ['D:\\kerja\\Apps\\workspace\\agents-trading\\backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [39068] using WatchFiles
+INFO:     Started server process [40336]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:59242 - "WebSocket /ws/futures" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:59732 - "WebSocket /ws/opportunity" [accepted]
+INFO:     connection open
