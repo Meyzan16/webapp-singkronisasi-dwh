@@ -21,6 +21,7 @@ import httpx
 import structlog
 
 from app.services.binance_urls import fapi
+from agents.futures.utils import _ema, _atr   # F112: shared TA helpers (no local duplicate)
 
 logger = structlog.get_logger(__name__)
 
@@ -30,29 +31,6 @@ _cached_at:     Optional[float] = None
 
 
 # ── Math helpers ──────────────────────────────────────────────────────────────
-
-def _ema(values: list[float], period: int) -> float:
-    if len(values) < period:
-        return values[-1] if values else 0.0
-    k = 2 / (period + 1)
-    e = sum(values[:period]) / period
-    for v in values[period:]:
-        e = v * k + e * (1 - k)
-    return e
-
-
-def _atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float:
-    if len(closes) < 2:
-        return 0.0
-    trs = [
-        max(highs[i] - lows[i],
-            abs(highs[i] - closes[i - 1]),
-            abs(lows[i]  - closes[i - 1]))
-        for i in range(1, len(closes))
-    ]
-    tail = trs[-period:] if len(trs) >= period else trs
-    return sum(tail) / len(tail) if tail else 0.0
-
 
 def _bb_width(closes: list[float], period: int = 20) -> float:
     if len(closes) < period:

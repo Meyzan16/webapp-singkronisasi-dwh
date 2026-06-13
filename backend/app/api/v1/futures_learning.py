@@ -16,15 +16,13 @@ from sqlalchemy import select
 router = APIRouter(tags=["futures-learning"])
 logger = structlog.get_logger(__name__)
 
-from app.services.trading_costs import FUTURES_STARTING_BALANCE as STARTING_BALANCE, FUTURES_RISK_PCT as RISK_PCT
-
-
-def _notional(risk_pct: float) -> float:
-    return STARTING_BALANCE * RISK_PCT / (risk_pct / 100) if risk_pct > 0 else 0
-
-
-def _pnl_dollar(pnl_pct: float, risk_pct: float) -> float:
-    return pnl_pct / 100 * _notional(risk_pct)
+# F33: single source of truth for futures balance math (shared with monitor + risk dashboard)
+from app.services.trading_costs import (
+    FUTURES_STARTING_BALANCE as STARTING_BALANCE,
+    FUTURES_RISK_PCT as RISK_PCT,
+    futures_notional as _notional,
+    futures_pnl_dollar as _pnl_dollar,
+)
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────

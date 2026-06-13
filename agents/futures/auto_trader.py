@@ -24,6 +24,7 @@ logger = structlog.get_logger(__name__)
 
 AUTO_OPEN_THRESHOLD = 72   # fallback when no adaptive threshold yet
 MAX_AUTO_POSITIONS  = 5    # max concurrent auto positions per agent
+FUTURES_COOLDOWN_HOURS = 3 # F55: no re-entry within 3h of an SL on the same symbol+agent
 
 # Regimes where auto-open is fully disabled
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
@@ -118,8 +119,7 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
         )
         existing_syms: set[str] = {row[0] for row in existing_q.fetchall()}
 
-        # DB-based cooldown: skip if last trade for symbol+agent was SL within 3h
-        FUTURES_COOLDOWN_HOURS = 3
+        # DB-based cooldown: skip if last trade for symbol+agent was SL within 3h (F55)
         sl_cooldown_q = await session.execute(
             select(PaperTrade.symbol, PaperTrade.closed_at).where(
                 PaperTrade.style  == agent,
@@ -129,8 +129,8 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
         )
         sl_cooldown_syms: set[str] = {row[0] for row in sl_cooldown_q.fetchall()}
 
-        now    = time.time()
-        regime = get_cached_regime()
+        now = time.time()
+        # F12: reuse the regime fetched once at the top (was re-fetched here)
 
         for sig in candidates:
             if open_count + opened >= MAX_AUTO_POSITIONS:

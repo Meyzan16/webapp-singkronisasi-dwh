@@ -27,3 +27,20 @@ SL_SLIPPAGE_PCT      = 0.10
 # Referenced by: futures_learning.py, monitor.py, balance.py
 FUTURES_STARTING_BALANCE = 1_000.0   # paper wallet starting equity ($)
 FUTURES_RISK_PCT         = 0.01      # 1% risk per trade (fixed-fractional)
+
+# F15/F33: statuses that count toward realized balance & win-rate.
+# "expired" (stagnant/max-age closes) is deliberately EXCLUDED — not a real outcome.
+FUTURES_CLOSED_STATUSES = ("tp", "sl")
+
+
+def futures_notional(risk_pct: float | None) -> float:
+    """F33: position notional ($) for a futures paper trade — single source of truth.
+    Falls back to 2.0% risk when risk_pct is missing/invalid (matches legacy default)."""
+    rp = risk_pct if (risk_pct and risk_pct > 0) else 2.0
+    return FUTURES_STARTING_BALANCE * FUTURES_RISK_PCT / (rp / 100)
+
+
+def futures_pnl_dollar(pnl_pct: float | None, risk_pct: float | None) -> float:
+    """F33: realized $ P&L for a closed futures trade — single source of truth.
+    Used identically by monitor (balance rebuild), learning stats, and risk dashboard."""
+    return (pnl_pct or 0.0) / 100 * futures_notional(risk_pct)

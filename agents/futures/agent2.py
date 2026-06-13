@@ -594,7 +594,7 @@ def scan_symbol(
             "symbol":       symbol,
             "direction":    direction,
             "price":        round(price, 8),
-            "score":        round(min(score, 99), 1),
+            "score":        round(min(score, 100), 1),   # F7: cap at 100, not 99
             "signals":      signals,
             "leverage":     leverage,
             "change_24h":   round(change_24h, 2),

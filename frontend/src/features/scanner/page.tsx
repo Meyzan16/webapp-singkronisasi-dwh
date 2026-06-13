@@ -414,6 +414,12 @@ export default function ScannerFuturesPage() {
   const [nextScanDisplay, setNextScanDisplay] = useState<number | null>(null);
   const prevSymsRef  = useRef<Set<string>>(new Set());
 
+  // F99: pre-fill the symbol filter when arriving from the market overview (/scanner?symbol=BTC)
+  useEffect(() => {
+    const sym = new URLSearchParams(window.location.search).get("symbol");
+    if (sym) setSearch(sym);
+  }, []);
+
   // Fetch auto status + open positions on mount
   useEffect(() => {
     void (async () => {

@@ -367,16 +367,17 @@ async def get_futures_status() -> dict:
 
 # ── Risk Monitor ──────────────────────────────────────────────────────────────
 
-from app.services.trading_costs import FUTURES_STARTING_BALANCE as STARTING_BALANCE, FUTURES_RISK_PCT as RISK_PCT_DEFAULT
+# F33: shared balance math — single source of truth (monitor + learning use the same)
+from app.services.trading_costs import (
+    FUTURES_STARTING_BALANCE as STARTING_BALANCE,
+    FUTURES_RISK_PCT as RISK_PCT_DEFAULT,
+    futures_notional as _notional,
+)
 
 def _liq_price(entry: float, leverage: int, direction: str) -> float:
     """Cross margin liquidation ≈ entry ± (95% of margin)."""
     dist = entry * (0.95 / max(leverage, 1))
     return (entry - dist) if direction == "LONG" else (entry + dist)
-
-
-def _notional(risk_pct: float) -> float:
-    return STARTING_BALANCE * RISK_PCT_DEFAULT / (risk_pct / 100) if risk_pct > 0 else 0.0
 
 
 def _margin(notional: float, leverage: int) -> float:

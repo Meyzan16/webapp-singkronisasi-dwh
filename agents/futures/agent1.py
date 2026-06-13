@@ -30,6 +30,7 @@ from typing import Optional
 import structlog
 
 from .data import FuturesData
+from .utils import _ema, _atr   # F112: shared TA helpers (agent2 re-imports _ema/_atr from here)
 
 logger = structlog.get_logger(__name__)
 
@@ -38,16 +39,6 @@ AGENT_NAME = "futures_agent1"
 
 
 # ── Math helpers ──────────────────────────────────────────────────────────────
-
-def _ema(values: list[float], period: int) -> float:
-    if len(values) < period:
-        return values[-1] if values else 0.0
-    k = 2 / (period + 1)
-    e = sum(values[:period]) / period
-    for v in values[period:]:
-        e = v * k + e * (1 - k)
-    return e
-
 
 def _rsi(closes: list[float], period: int = 14) -> float:
     if len(closes) < period + 1:
@@ -60,19 +51,6 @@ def _rsi(closes: list[float], period: int = 14) -> float:
     ag = sum(gains) / period
     al = sum(losses) / period
     return 100 - (100 / (1 + ag / al)) if al > 0 else 100.0
-
-
-def _atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float:
-    if len(closes) < 2:
-        return 0.0
-    trs = [
-        max(highs[i] - lows[i],
-            abs(highs[i] - closes[i - 1]),
-            abs(lows[i] - closes[i - 1]))
-        for i in range(1, len(closes))
-    ]
-    tail = trs[-period:] if len(trs) >= period else trs
-    return sum(tail) / len(tail) if tail else 0.0
 
 
 def _swing_highs(highs: list[float], lookback: int = 5) -> list[float]:
@@ -697,7 +675,7 @@ def scan_symbol(
             "symbol":       symbol,
             "direction":    direction,
             "price":        round(price, 8),
-            "score":        round(min(score, 99), 1),
+            "score":        round(min(score, 100), 1),   # F7: cap at 100, not 99
             "signals":      signals,
             "leverage":     leverage,
             "change_24h":   round(change_24h, 2),

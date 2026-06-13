@@ -1,7 +1,8 @@
 """
-Futures Scanner Scheduler — runs Agent 1 + Agent 2 every 15 minutes.
+Futures Scanner Scheduler — runs Agent 1 + Agent 2 every cycle.
 
-Both agents run concurrently on the same 100-symbol universe.
+Both agents score the same universe sequentially per symbol (F113: not concurrent —
+one for-loop calls a1.scan_symbol() then a2.scan_symbol() per ticker).
 Results go into futures store (separate per agent).
 """
 

@@ -25,7 +25,10 @@ from app.database import AsyncSessionLocal, is_db_available
 from app.models.paper_balance import PaperBalance
 from app.models.paper_trade import PaperTrade
 from app.services.binance_urls import fapi
-from app.services.trading_costs import FUTURES_STARTING_BALANCE, FUTURES_RISK_PCT
+from app.services.trading_costs import (
+    FUTURES_STARTING_BALANCE, FUTURES_RISK_PCT,
+    FUTURES_CLOSED_STATUSES, futures_pnl_dollar,   # F33: single source of truth
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -190,10 +193,12 @@ async def _rebuild_futures_paper_balance(style_key: str) -> None:
         return
 
     async with AsyncSessionLocal() as session:
+        # F33: tp+sl only — expired excluded from balance (F15), consistent with
+        # learning stats and risk dashboard which use the same status policy.
         result = await session.execute(
             select(PaperTrade).where(
                 PaperTrade.style == style_key,
-                PaperTrade.status.in_(["tp", "sl", "expired"]),  # B1: include expired P&L
+                PaperTrade.status.in_(list(FUTURES_CLOSED_STATUSES)),
                 PaperTrade.pnl_pct.isnot(None),
             )
         )
@@ -205,9 +210,8 @@ async def _rebuild_futures_paper_balance(style_key: str) -> None:
             meta = json.loads(t.signals_json or "{}")
         except Exception:
             meta = {}
-        risk_pct = meta.get("risk_pct", 2.0) or 2.0
-        notional  = FUTURES_STARTING_BALANCE * FUTURES_RISK_PCT / (risk_pct / 100)
-        total_pnl += (t.pnl_pct / 100) * notional
+        # F33: shared formula — identical to learning/risk dashboard
+        total_pnl += futures_pnl_dollar(t.pnl_pct, meta.get("risk_pct"))
 
     new_balance = FUTURES_STARTING_BALANCE + total_pnl
     now = time.time()
