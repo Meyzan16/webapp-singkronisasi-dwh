@@ -21,11 +21,11 @@ _subscribers: list[asyncio.Queue] = []
 # ── Write ──────────────────────────────────────────────────────────────────────
 
 def set_result(agent: str, result: Any) -> None:
-    """Called by scheduler after each successful scan cycle."""
+    """Called by scheduler after each successful scan cycle.
+    F107: does NOT call set_scanning(False) — caller must do that after ALL agents done."""
     _results[agent] = result
     _ts[agent]      = time.time()
     _broadcast({"type": "snapshot", "agent": agent, **result})
-    set_scanning(False)
 
 
 def set_scanning(flag: bool) -> None:

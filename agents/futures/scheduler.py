@@ -20,10 +20,12 @@ from agents.futures.data import fetch_top100_futures, fetch_symbol_data
 
 logger = structlog.get_logger(__name__)
 
-INTERVAL_SEC  = 15 * 60
+INTERVAL_SEC  = 2 * 60    # scan every 2 minutes — pre-gainer signals can form fast
 STARTUP_DELAY = 30        # start after main scanner
 TOP_N         = 30        # top results per agent
 TIMEFRAMES    = ["15m", "1h", "4h"]
+# Expand universe: pre-gainer hunt needs wider coverage beyond just top-100 by volume
+UNIVERSE_CAP  = 150
 
 _running     = False
 _cycle_count = 0
@@ -48,28 +50,45 @@ async def _fetch_extreme_funding_tickers(existing: list[dict]) -> list[dict]:
     Fetch coins with extreme funding rates (abs > 0.03%) using premiumIndex (weight~2).
     Returns synthetic ticker dicts compatible with the main ticker list.
     Only returns coins NOT already in the existing top-100 list.
+    F101: fetches real priceChangePercent so change-based penalties work correctly.
     """
+    import json as _json
     existing_syms = {t["symbol"] for t in existing}
     async with httpx.AsyncClient(timeout=10) as c:
         r = await c.get(fapi("/fapi/v1/premiumIndex"))
-    if r.status_code != 200:
-        return []
-    data = r.json()
-    results = []
-    for item in data:
-        sym = item.get("symbol", "")
-        if not sym.endswith("USDT"):
-            continue
-        if sym in existing_syms:
-            continue
-        fr = float(item.get("lastFundingRate", 0))
-        if abs(fr) >= 0.0003:   # 0.03% threshold
-            results.append({
-                "symbol": sym,
-                "priceChangePercent": "0",
-                "lastFundingRate": str(fr),
-            })
-    return results[:30]   # cap at 30 extra coins
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        results = []
+        for item in data:
+            sym = item.get("symbol", "")
+            if not sym.endswith("USDT"):
+                continue
+            if sym in existing_syms:
+                continue
+            fr = float(item.get("lastFundingRate", 0))
+            if abs(fr) >= 0.0003:   # 0.03% threshold
+                results.append({
+                    "symbol": sym,
+                    "priceChangePercent": "0",   # fallback, overwritten below
+                    "lastFundingRate": str(fr),
+                })
+        results = results[:30]   # cap at 30 extra coins
+
+        # F101: fetch real 24h price change so change-based penalties/bonuses trigger
+        if results:
+            try:
+                syms_param = _json.dumps([r["symbol"] for r in results])
+                t_r = await c.get(fapi("/fapi/v1/ticker/24hr"), params={"symbols": syms_param})
+                if t_r.status_code == 200:
+                    ticker_map = {t["symbol"]: t for t in t_r.json()}
+                    for r in results:
+                        if r["symbol"] in ticker_map:
+                            r["priceChangePercent"] = ticker_map[r["symbol"]].get("priceChangePercent", "0")
+            except Exception:
+                pass   # keep "0" fallback if batch fetch fails
+
+    return results
 
 
 async def _run_scan() -> dict:
@@ -80,10 +99,11 @@ async def _run_scan() -> dict:
     start = time.time()
     logger.info("futures_scan_start")
 
-    # Step 1: top-100 futures tickers by volume
+    # Step 1: top-N futures tickers by volume (expanded for pre-gainer coverage)
     tickers = await fetch_top100_futures()
     if not tickers:
         raise RuntimeError("Could not fetch Futures tickers from Binance")
+    tickers = tickers[:UNIVERSE_CAP]
 
     # Step 1b: add extreme funding rate coins for Agent 1 (not always in top-100 volume)
     # premiumIndex endpoint is weight=~2, very cheap
@@ -99,8 +119,9 @@ async def _run_scan() -> dict:
         pass  # non-critical — agent2 still scans top-100
 
     # Step 2: fetch klines + futures data concurrently
-    # Rate-limit: batch of 20 concurrent symbols
-    BATCH = 10   # smaller batch = kinder to rate limits
+    # Rate limit budget: ~941 weight/scan vs 2400/min Binance limit — safe to be faster
+    BATCH       = 20   # 20 symbols concurrent (was 10) — 2× faster
+    BATCH_SLEEP = 0.2  # 200ms between batches (was 500ms) — still rate-limit safe
     all_tf_maps: dict[str, dict] = {}
 
     async with httpx.AsyncClient(timeout=20) as client:
@@ -117,7 +138,7 @@ async def _run_scan() -> dict:
                     all_tf_maps[symbol] = await task
                 except Exception:
                     all_tf_maps[symbol] = {}
-            await asyncio.sleep(0.5)   # 500ms between batches — respect rate limits
+            await asyncio.sleep(BATCH_SLEEP)
 
     # Step 3: score both agents
     a1_results: list[dict] = []
@@ -131,13 +152,14 @@ async def _run_scan() -> dict:
         if not tf_map:
             continue
 
-        r1 = a1.scan_symbol(symbol, tf_map, change_24h)
-        if r1:
-            a1_results.append(r1)
+        # F34/F52: scan_symbol now returns list — extend (not append) to get all directions
+        r1_list = a1.scan_symbol(symbol, tf_map, change_24h)
+        if r1_list:
+            a1_results.extend(r1_list)
 
-        r2 = a2.scan_symbol(symbol, tf_map, change_24h)
-        if r2:
-            a2_results.append(r2)
+        r2_list = a2.scan_symbol(symbol, tf_map, change_24h)
+        if r2_list:
+            a2_results.extend(r2_list)
 
     # Sort by score, take top N
     a1_results.sort(key=lambda x: x["score"], reverse=True)
@@ -189,9 +211,10 @@ async def run_futures_loop() -> None:
             futures_store.set_scanning(True)
             result = await _run_scan()
 
-            # Store results per agent
+            # Store results per agent — then signal scanning done (F107)
             futures_store.set_result("agent1", result["agent1"])
             futures_store.set_result("agent2", result["agent2"])
+            futures_store.set_scanning(False)
 
             _last_scan   = time.time()
             _cycle_count += 1
@@ -207,8 +230,8 @@ async def run_futures_loop() -> None:
             # Auto-open high-score positions (score >= 75)
             try:
                 from agents.futures.auto_trader import auto_open_positions
-                a1_auto = await auto_open_positions(a1_results, "futures_agent1")
-                a2_auto = await auto_open_positions(a2_results, "futures_agent2")
+                a1_auto = await auto_open_positions(result["agent1"]["results"], "futures_agent1")
+                a2_auto = await auto_open_positions(result["agent2"]["results"], "futures_agent2")
                 if a1_auto or a2_auto:
                     logger.info("auto_positions_opened", agent1=a1_auto, agent2=a2_auto)
             except Exception as exc:
@@ -234,5 +257,5 @@ async def run_futures_loop() -> None:
             logger.error("futures_scanner_error", error=_last_error)
 
         elapsed   = time.time() - (_last_scan or time.time())
-        sleep_for = max(60, INTERVAL_SEC - elapsed)
+        sleep_for = max(30, INTERVAL_SEC - elapsed)   # min 30s gap between scans
         await asyncio.sleep(sleep_for)
