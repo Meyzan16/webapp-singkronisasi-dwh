@@ -45,6 +45,29 @@ export default function ArchitecturePage() {
   const [taTab, setTaTab]       = useState("BB Squeeze");
   const [styleTab, setStyleTab] = useState("Scalping");
   const [agentTab, setAgentTab] = useState("Futures Agent 1");
+  const [bugTab, setBugTab]     = useState("Fixed");
+
+  const BUGS_FIXED = [
+    { id: "B1", sev: "🔴", title: "Spot Monitor menutup posisi sebagai 'tp' walau net P&L negatif", fix: "Hanya tandai 'tp' jika pnl_net > 0 setelah fee 0.2%", file: "agents/opportunity/monitor.py" },
+    { id: "B2", sev: "🔴", title: "Posisi ditutup dalam 53 detik — tidak ada minimum hold time", fix: "Tambah MIN_HOLD_MINUTES=30: risk-adjusted exits tidak bisa fire dalam 30 menit pertama", file: "agents/opportunity/monitor.py" },
+    { id: "B3", sev: "🔴", title: "trend_reversal menembak saat EMA sudah bearish SEBELUM entry", fix: "Simpan entry_ema_bullish di meta saat buka posisi, monitor cek apakah terjadi reversal nyata", file: "agents/opportunity/monitor.py + scheduler.py" },
+    { id: "B4", sev: "🔴", title: "Futures Auto-trader buka posisi di regime VOLATILE → langsung SL", fix: "Blokir auto-open di regime volatile, threshold naik jadi 80 (dari 75), ranging = 85", file: "agents/futures/auto_trader.py" },
+    { id: "B5", sev: "🔴", title: "WBTCUSDT re-entry 3x berturut-turut tanpa jeda setelah SL", fix: "Cooldown 2 jam setelah SL hit — tidak bisa buka posisi yang sama dalam 2 jam", file: "agents/opportunity/monitor.py + scheduler.py" },
+    { id: "B6", sev: "🟡", title: "Win-rate inflasi: 'tp' dengan pnl=-0.16% dihitung sebagai menang", fix: "Fungsi _is_real_win() diterapkan di history, learning stats, futures analytics", file: "backend/app/api/v1/history.py + futures_learning.py" },
+    { id: "B7", sev: "🟡", title: "flow_reversal menutup terlalu agresif (taker < 0.40)", fix: "Naikkan threshold ke 0.38, minimum profit 1.0% net sebelum bisa menutup via flow_reversal", file: "agents/opportunity/monitor.py" },
+    { id: "B8", sev: "🟡", title: "Equity chart di History hanya pakai 'status==tp' bukan net pnl", fix: "Semua kalkulasi win/loss pakai _is_real_win() yang cek pnl_net > 0", file: "backend/app/api/v1/futures_learning.py" },
+  ];
+
+  const NEW_FEATURES = [
+    { icon: "⚡", title: "Auto-Trade Futures (score ≥ 80)", desc: "Scanner otomatis buka paper trade jika score ≥ 80. Disabled di regime volatile, threshold 85 di ranging. Max 5 posisi per agent. Toggle on/off via API atau Scanner UI.", file: "agents/futures/auto_trader.py" },
+    { icon: "🔍", title: "Futures Monitor — Risk Dashboard", desc: "GET /futures/monitor/risk: per posisi tampilkan liq_price, margin, liq_dist_pct, SAFE/WARNING/DANGER status. Portfolio: Sharpe proxy, max drawdown, total margin.", file: "backend/app/api/v1/futures_scanner.py" },
+    { icon: "🚨", title: "Liquidation Guard", desc: "Monitor cek jarak ke liquidation price setiap 2 menit. Jika price dalam 8% dari liq price → tutup posisi di SL sekarang (sebelum diliquidasi exchange).", file: "agents/futures/monitor.py" },
+    { icon: "📈", title: "TP Extension ke TP3", desc: "Jika TP1 sudah dicapai dan score masih ≥ 70, monitor otomatis extend TP2 ke TP3 untuk memaksimalkan profit. Satu kali per posisi.", file: "agents/futures/monitor.py" },
+    { icon: "📅", title: "Monthly Win Rate — Agent 1 vs 2", desc: "History Futures tab: bandingkan win rate Agent 1 (AI) vs Agent 2 (T0-T4) per bulan dengan selector bulan dan progress bar.", file: "backend/app/api/v1/futures_learning.py + FuturesTab.tsx" },
+    { icon: "🔵🟣", title: "Open Positions Terpisah per Agent", desc: "History Monitor tab: Agent 1 dan Agent 2 open positions ditampilkan di dua kolom berbeda. Setiap posisi menampilkan entry, current, liq price, SL/TP, margin, risk status.", file: "frontend/src/features/history/components/FuturesTab.tsx" },
+    { icon: "💼", title: "Spot Portfolio Real Holdings", desc: "Dashboard section: real Binance spot holdings dengan harga masuk rata-rata (FIFO dari trade history), unrealized PnL per koin, alokasi portfolio. Debug endpoint: /market/spot-debug.", file: "backend/app/api/v1/market.py" },
+    { icon: "📊", title: "Scanner — Open Positions Monitor Banner", desc: "Futures Scanner page: banner aktif menampilkan semua posisi terbuka dengan unrealized PnL, risk status (SAFE/WARNING/DANGER), dan liq distance. Auto-refresh 30s.", file: "frontend/src/features/scanner/page.tsx" },
+  ];
 
   const AGENTS = {
     "Futures Agent 1": {
@@ -105,24 +128,30 @@ async def run_agent2_scan(symbols: list[str]) -> list[Signal]:
     "Futures Monitor": {
       icon: "👁", file: "agents/futures/monitor.py",
       color: "from-indigo-500/10 to-blue-500/10 border-indigo-300",
-      status: "✅ Aktif 24/7", interval: "Setiap 60 detik",
+      status: "✅ Aktif 24/7", interval: "Setiap 120 detik",
       group: "⚡ Futures",
-      desc: "Monitor semua posisi Futures yang open. Cek harga real-time dari Binance Futures, auto-close saat TP atau SL tercapai, update unrealized PnL di database.",
+      desc: "Monitor risk-adjusted untuk semua posisi Futures. Fitur: Auto-close TP/SL, Liquidation Guard (tutup sebelum liquidasi exchange), Trail SL ke breakeven, TP Extension ke TP3 otomatis.",
       pipeline: [
-        "Query semua paper_trades (type='futures') dengan status='open'",
-        "Batch fetch harga terkini dari Binance Futures markPrice",
-        "Per posisi LONG: harga ≤ SL → sl; harga ≥ TP2 atau TP3 → tp",
-        "Per posisi SHORT: harga ≥ SL → sl; harga ≤ TP2 atau TP3 → tp",
-        "Update unrealized_pnl di database untuk semua posisi terbuka",
-        "Commit perubahan, increment cycle_count",
+        "Query semua futures paper_trades dengan status='open'",
+        "Batch fetch live prices dari Binance Futures",
+        "Layer 1 — Hard exits: SL hit → sl | TP2/TP3 hit → tp",
+        "Layer 2 — Liquidation Guard: jika price dalam 8% liq_price → tutup di SL (protect capital)",
+        "Layer 3 — Trail SL: 50% menuju TP1 → SL ke breakeven | TP1 hit → SL ke entry+50%",
+        "Layer 4 — TP Extension: TP1 dicapai + score ≥ 70 → extend TP2 ke TP3",
+        "Log liq_guards + tp_extended ke health endpoint",
       ],
-      code: `# agents/futures/monitor.py
-while True:
-    positions = await get_open_futures_positions()
-    prices    = await batch_fetch_mark_prices(positions)
-    for pos in positions:
-        check_sl_tp(pos, prices[pos.symbol])
-    await asyncio.sleep(60)`,
+      code: `# agents/futures/monitor.py — v2 (dengan Liq Guard + TP Extension)
+async def check_futures_positions():
+    for trade in open_trades:
+        # Layer 1: SL/TP hit
+        if sl_or_tp_hit(price, sl, tp2): close_position()
+        # Layer 2: Liquidation Guard (NEW)
+        liq = calc_liq_price(entry, leverage, direction)
+        if dist_to_liq(price, liq) < 8%: close_at_sl()
+        # Layer 3: Trail SL
+        if halfway_to_tp1: move_sl_to_breakeven()
+        # Layer 4: TP Extension (NEW)
+        if tp1_hit and score >= 70: extend_tp_to_tp3()`,
     },
     "Weight Updater": {
       icon: "🧠", file: "agents/futures/weight_updater.py",
@@ -173,22 +202,26 @@ while True:
       color: "from-amber-500/10 to-orange-500/10 border-amber-300",
       status: "✅ Aktif 24/7", interval: "Setiap 60 detik",
       group: "🎯 Spot",
-      desc: "Monitor semua posisi Opportunity SPOT yang open. Cek harga real-time, auto-close saat TP/SL tercapai, set flag TP1 Hit tanpa menutup posisi.",
+      desc: "Risk-adjusted monitor untuk posisi Opportunity SPOT. v2: Min hold 30 menit, cooldown 2 jam setelah SL, trend_reversal hanya jika EMA memang berbalik (bukan sudah bearish sebelum entry).",
       pipeline: [
         "Query semua opportunity_spot trades dengan status='open'",
-        "Fetch harga terkini dari Binance Spot (concurrent batch)",
-        "Cek per posisi: harga ≤ SL → tutup status='sl'",
-        "Cek: harga ≥ TP3 atau TP2 → tutup status='tp'",
-        "Cek: harga ≥ TP1 (pertama kali) → set tp1_hit=True, posisi tetap open",
-        "Commit ke DB, broadcast update via WebSocket",
+        "Fetch live prices dari Binance Spot (batch concurrent)",
+        "Layer 1 Hard exits: SL hit → sl | TP2/TP3 hit → tp",
+        "TP1 hit → flag tp1_hit, SL pindah ke breakeven (entry × 1.002)",
+        "Layer 2 Risk-adjusted (hanya setelah 30 menit buka): EMA reversal, RSI overbought+stall, flow reversal",
+        "BUG FIX: status 'tp' hanya jika net pnl > 0 (setelah fee 0.2%)",
+        "SL hit → set cooldown 2 jam untuk symbol ini (cegah re-entry langsung)",
       ],
-      code: `# agents/opportunity/monitor.py
-while True:
-    n = await check_positions()   # cek semua open spot positions
-    # TP1 hit → flag, posisi tetap open (ride ke TP2)
-    # TP2/TP3 hit → close status='tp'
-    # SL hit     → close status='sl'
-    await asyncio.sleep(60)`,
+      code: `# agents/opportunity/monitor.py — v2 (bug fixes)
+# BUG FIX 1: min hold 30 menit sebelum risk-adjusted exits
+# BUG FIX 2: 'tp' hanya jika net P&L > 0 setelah fee
+# BUG FIX 3: trend_reversal hanya jika EMA berbalik setelah entry
+# BUG FIX 4: cooldown 2 jam setelah SL
+
+if hold_minutes < MIN_HOLD_MINUTES: return None  # jangan tutup terlalu cepat
+pnl_net = pnl_gross - EXECUTION_COST_PCT         # fee + spread + slippage
+new_status = "tp" if pnl_net > 0 else "sl"       # bukan cuma price > entry
+# cooldown re-entry 2 jam: query DB di scheduler (tahan restart)`,
     },
   };
 
@@ -305,9 +338,9 @@ Binance kline col[5] = total_volume
               <h1 className="text-3xl font-bold mb-1">📐 Arsitektur Sistem</h1>
               <p className="text-sm text-neutral-400 max-w-2xl leading-relaxed">
                 Crypto trading agent dengan <strong className="text-white">2 sistem independen</strong>:{" "}
-                <strong className="text-blue-400">Futures Scanner</strong> (AI + T0-T4, auto-log 24/7) dan{" "}
-                <strong className="text-teal-400">Opportunity SPOT</strong> (user-driven, 4 layer).
-                Total <strong className="text-white">6 autonomous agents</strong> berjalan di background.
+                <strong className="text-blue-400">Futures Scanner</strong> (AI + T0-T4, auto-trade, liq guard) dan{" "}
+                <strong className="text-teal-400">Opportunity SPOT</strong> (risk-adjusted, fee-aware, cooldown).
+                Total <strong className="text-white">6 autonomous agents</strong> + adaptive learning + risk dashboard.
               </p>
             </div>
             <div className="text-xs text-neutral-400 font-mono space-y-1 shrink-0">
@@ -668,6 +701,110 @@ Layer 4: History → Opportunity SPOT tab
               </div>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* ── Bug Fixes & New Features ─────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-5">
+          <SectionTitle icon="🐛" title="Changelog — Bug Fixes & Fitur Baru" sub="Pembaruan terbaru yang memperbaiki akurasi dan profitabilitas agents" />
+          <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl w-fit mb-4">
+            {(["Fixed", "New Features"] as const).map(t => (
+              <button key={t} onClick={() => setBugTab(t)}
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  bugTab === t ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"
+                }`}>{t === "Fixed" ? "🐛 Bug Fixes" : "✨ Fitur Baru"}</button>
+            ))}
+          </div>
+
+          {bugTab === "Fixed" && (
+            <div className="space-y-2">
+              {BUGS_FIXED.map(b => (
+                <div key={b.id} className={`rounded-xl border p-3 ${
+                  b.sev === "🔴" ? "bg-red-50 border-red-200" : "bg-yellow-50 border-yellow-200"
+                }`}>
+                  <div className="flex items-start gap-2">
+                    <span className="text-base shrink-0">{b.sev}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-neutral-800 mb-0.5">[{b.id}] {b.title}</p>
+                      <p className="text-[11px] text-neutral-600 mb-1">✅ Fix: {b.fix}</p>
+                      <code className="text-[10px] text-neutral-400 font-mono">{b.file}</code>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              <div className="mt-3 bg-neutral-900 text-white rounded-xl p-3 text-xs">
+                <p className="font-bold text-teal-400 mb-2">⚠️ Root Cause Utama Balance Turun</p>
+                <p className="text-neutral-300 leading-relaxed">
+                  Kombinasi Bug B2 + B3 menyebabkan posisi WBTCUSDT terbuka dan tertutup dalam{" "}
+                  <strong className="text-red-400">53 detik</strong> — EMA sudah bearish sebelum entry,
+                  monitor langsung menembak trend_reversal. Ditambah Bug B5 (tidak ada cooldown),
+                  posisi yang sama dibuka kembali 3× berturut-turut. Bug B4 menyebabkan futures
+                  auto-trader membuka SHORT di regime VOLATILE → langsung SL dalam 3–44 menit.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {bugTab === "New Features" && (
+            <div className="grid md:grid-cols-2 gap-3">
+              {NEW_FEATURES.map(f => (
+                <div key={f.title} className="bg-white border border-neutral-200 rounded-xl p-3 hover:border-teal-300 transition-colors">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-base">{f.icon}</span>
+                    <p className="text-xs font-bold text-neutral-800">{f.title}</p>
+                  </div>
+                  <p className="text-[11px] text-neutral-600 leading-relaxed mb-2">{f.desc}</p>
+                  <code className="text-[10px] text-neutral-400 font-mono">{f.file}</code>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Auto-Trade Rules ──────────────────────────────────────────────── */}
+      <Card>
+        <CardContent className="pt-5">
+          <SectionTitle icon="⚡" title="Auto-Trade Rules — Futures" sub="Kapan agent boleh buka posisi otomatis, kapan diblokir" />
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <Code>{`# agents/futures/auto_trader.py
+
+AUTO_OPEN_THRESHOLD = 80      # score minimal untuk auto-open
+VOLATILE_THRESHOLD  = 88      # lebih tinggi di volatile (belum aktif)
+MAX_AUTO_POSITIONS  = 5       # max posisi terbuka per agent
+
+BLOKIR auto-open jika:
+  regime == "volatile"        → semua sinyal unreliable
+  regime == "ranging"         → threshold naik ke 85
+  open_count >= 5             → sudah max posisi
+  symbol sudah open           → dedup per symbol+agent
+
+BOLEH auto-open jika:
+  score >= 80 (trending_up/trending_down)
+  score >= 85 (ranging)
+  regime != "volatile"
+  < 5 posisi terbuka per agent`}
+              </Code>
+            </div>
+            <div className="space-y-2">
+              {[
+                { regime: "trending_up",   threshold: "≥ 80",  action: "✅ Buka LONG priority",       cls: "bg-green-50 border-green-200" },
+                { regime: "trending_down", threshold: "≥ 80",  action: "✅ Buka SHORT priority",      cls: "bg-red-50 border-red-200"     },
+                { regime: "ranging",       threshold: "≥ 85",  action: "⚠️ Buka tapi threshold naik", cls: "bg-yellow-50 border-yellow-200" },
+                { regime: "volatile",      threshold: "BLOKIR", action: "🚫 Auto-trade dinonaktifkan", cls: "bg-orange-50 border-orange-300 font-bold" },
+              ].map(r => (
+                <div key={r.regime} className={`rounded-xl border p-3 ${r.cls}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold capitalize">{r.regime}</span>
+                    <span className="text-[10px] font-mono font-bold">{r.threshold}</span>
+                  </div>
+                  <p className="text-[11px] text-neutral-600 mt-0.5">{r.action}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
 

@@ -70,6 +70,15 @@ async def _migrate_columns(connection) -> None:
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS regime VARCHAR(20)",
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trail_sl FLOAT",
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS trail_active BOOLEAN DEFAULT FALSE",
+        # Real-balance tracking (v2)
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS position_size FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS risk_dollar FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS balance_snapshot FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS pnl_dollar FLOAT",
+        # §13.5: anti-duplikat — satu posisi open per (style, symbol);
+        # partial unique index menutup race manual open vs auto-open
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_open_position_per_symbol "
+        "ON paper_trades (style, symbol) WHERE status = 'open'",
     ]
     for sql in migrations:
         try:

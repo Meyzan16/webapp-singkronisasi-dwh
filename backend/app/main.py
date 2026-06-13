@@ -21,7 +21,10 @@ from app.api.v1.futures_scanner import router as futures_router
 from app.api.v1.futures_learning import router as futures_learning_router
 from app.api.v1.market_context import router as market_context_router
 from app.api.v1.binance_status import router as binance_status_router
+from app.api.v1.futures_market  import router as futures_market_router
+from app.api.v1.balance import router as balance_router
 from app.models.paper_trade import PaperTrade as _PaperTrade          # noqa: F401
+from app.models.paper_balance import PaperBalance as _PaperBalance    # noqa: F401
 from app.models.signal_weight import AgentSignalWeight as _ASW         # noqa: F401
 from app.config import get_settings
 from app.database import create_db_schema, dispose_engine, set_db_available
@@ -82,6 +85,8 @@ app.include_router(futures_router,          prefix=settings.api_v1_prefix)
 app.include_router(futures_learning_router, prefix=settings.api_v1_prefix)
 app.include_router(market_context_router,   prefix=settings.api_v1_prefix)
 app.include_router(binance_status_router,   prefix=settings.api_v1_prefix)
+app.include_router(futures_market_router,   prefix=settings.api_v1_prefix)
+app.include_router(balance_router,          prefix=settings.api_v1_prefix)
 
 
 @app.websocket("/ws/opportunity")
@@ -104,14 +109,43 @@ async def health() -> dict:
     from agents.futures.monitor        import get_state as fut_mon_state
     from agents.futures.weight_updater import get_state as weight_state
     db_ok = is_db_available()
+
+    opp_s = opp_sched_state()
+    opp_m = opp_mon_state()
+    fut_s = fut_sched_state()
+    fut_m = fut_mon_state()
+    w_s   = weight_state()
+
+    # Record status changes for health log
+    try:
+        from app.services.health_logger import record_agent_status, record_db_status
+        record_db_status(db_ok)
+        record_agent_status("spot_scanner",    opp_s.get("running", False), opp_s.get("last_error"))
+        record_agent_status("spot_monitor",    opp_m.get("running", False), opp_m.get("last_error"))
+        record_agent_status("futures_scanner", fut_s.get("running", False), fut_s.get("last_error"))
+        record_agent_status("futures_monitor", fut_m.get("running", False), fut_m.get("last_error"))
+        record_agent_status("weight_updater",  not bool(w_s.get("last_error")), w_s.get("last_error"))
+    except Exception:
+        pass
+
     return {
         "status":          "ok",
         "db":              "ok" if db_ok else "unavailable",
         "database":        "connected" if db_ok else "unavailable",
-        "spot_scanner":    opp_sched_state(),
-        "spot_monitor":    opp_mon_state(),
-        "futures_scanner": fut_sched_state(),
-        "futures_monitor": fut_mon_state(),
-        "weight_updater":  weight_state(),
-        "scheduler":       opp_sched_state(),  # legacy key
+        "spot_scanner":    opp_s,
+        "spot_monitor":    opp_m,
+        "futures_scanner": fut_s,
+        "futures_monitor": fut_m,
+        "weight_updater":  w_s,
+        "scheduler":       opp_s,  # legacy key
+    }
+
+
+@app.get("/health/log")
+async def health_log(limit: int = 100) -> dict:
+    """System health event log — API up/down, agent start/stop history."""
+    from app.services.health_logger import get_log, get_stats
+    return {
+        "events": get_log(limit=min(limit, 200)),
+        "stats":  get_stats(),
     }

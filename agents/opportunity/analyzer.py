@@ -190,12 +190,16 @@ async def analyze_coin(symbol: str) -> dict:
     # Use 1h as primary; fallback to 15m
     primary = klines.get("1h") or klines.get("15m") or list(klines.values())[0]
 
+    # §16.3 (≡ §10.1): entry = harga live dari candle berjalan; INDIKATOR
+    # dihitung dari candle SELESAI saja supaya tidak flicker
+    entry   = float(primary[-1][4])
+    primary = primary[:-1]
+    klines  = {k: v[:-1] for k, v in klines.items() if len(v) > 1}
+
     opens  = [float(k[1]) for k in primary]
     highs  = [float(k[2]) for k in primary]
     lows   = [float(k[3]) for k in primary]
     closes = [float(k[4]) for k in primary]
-
-    entry = closes[-1]  # current market price
     rp    = _round_price
 
     # ── Indicators ──────────────────────────────────────────────────────────────
@@ -223,11 +227,20 @@ async def analyze_coin(symbol: str) -> dict:
     risk    = entry - sl
     risk_pct = risk / entry * 100
 
-    # Clamp risk between 0.4% and 8%
-    if risk_pct > 8.0 or risk_pct < 0.4:
+    # §16.1: aturan risk SAMA dengan scanner (1.5–5%) — analyzer bukan pintu
+    # belakang yang membypass disiplin. ATR fallback, lalu clamp keras.
+    if risk_pct > 5.0 or risk_pct < 1.5:
         sl       = entry - atr * 1.5
         risk     = entry - sl
         risk_pct = risk / entry * 100
+    if risk_pct < 1.5:
+        sl       = entry * (1 - 0.015)
+        risk     = entry - sl
+        risk_pct = 1.5
+    elif risk_pct > 5.0:
+        sl       = entry * (1 - 0.05)
+        risk     = entry - sl
+        risk_pct = 5.0
 
     # ── TPs: swing highs (resistance) then R:R fallback ──────────────────────
     s_highs_1h = _swing_highs(highs, lookback=5)
@@ -251,6 +264,15 @@ async def analyze_coin(symbol: str) -> dict:
     if tp3 <= tp2:   tp3 = tp2 + risk * 2.0
 
     rr = (tp2 - entry) / risk if risk > 0 else 0
+
+    # §16.1: ENFORCE R:R minimum yang sama dengan scanner. Resistance terlalu
+    # dekat → angkat TP2 ke standar minimum (4×risk / +6%) seperti scanner.
+    below_standard = rr < 3.5
+    if below_standard:
+        tp2 = max(entry + risk * 4.0, entry * 1.06)
+        if tp3 <= tp2:
+            tp3 = max(entry + risk * 7.0, entry * 1.10)
+        rr  = (tp2 - entry) / risk if risk > 0 else 0
 
     # ── Analysis signals ──────────────────────────────────────────────────────
     signals = []
@@ -311,5 +333,6 @@ async def analyze_coin(symbol: str) -> dict:
         "depth_ratio":   depth_ratio,   # order book bid/(bid+ask) within 1% — None if unavailable
         "signals":       signals,
         "confidence":    conf,
+        "below_standard": below_standard,  # §16.1: TP asli < standar R:R, sudah diangkat
         "elapsed_sec":   elapsed,
     }

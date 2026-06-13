@@ -28,6 +28,14 @@ export interface OpportunityResult {
   tp2_pct?:  number;
   tp3_pct?:  number;
   rr_ratio?: number;
+  // Risk-adjusted metrics (§11.3) + transparansi agent (§11.5)
+  tp2_net_pct?:        number;
+  ev_per_risk?:        number;
+  raw_score?:          number;
+  auto_open?:          boolean;
+  weight_applied?:     number;
+  direction_confirmed?: boolean;
+  banned_by_learning?: boolean;
 }
 
 // ── Score helpers ─────────────────────────────────────────────────────────────
@@ -142,6 +150,21 @@ export function OpportunityFeatured({
                   {r.squeeze_tfs.length}TF SQUEEZE
                 </span>
               )}
+              {/* §11.5: tandai kandidat yang akan DIEKSEKUSI agent otomatis */}
+              {r.auto_open && (
+                <span className="text-[9px] bg-neutral-900 text-teal-300 px-1.5 py-0.5 rounded font-bold">
+                  🤖 AUTO
+                </span>
+              )}
+              {r.weight_applied != null && r.weight_applied !== 1.0 && (
+                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${
+                  r.weight_applied > 1
+                    ? "bg-green-50 text-green-700 border-green-200"
+                    : "bg-red-50 text-red-600 border-red-200"
+                }`}>
+                  {r.weight_applied > 1 ? "↑" : "↓"}{r.weight_applied.toFixed(1)}x learning
+                </span>
+              )}
             </div>
           </div>
 
@@ -181,6 +204,30 @@ export function OpportunityFeatured({
             </div>
           ))}
         </div>
+
+        {/* ── Risk-adjusted metrics (§11.3): potensi · risiko · asimetri ── */}
+        {(r.rr_ratio != null || r.tp2_net_pct != null) && (
+          <div className="grid grid-cols-3 gap-1.5 bg-neutral-50 rounded-xl px-2.5 py-2">
+            <div className="text-center">
+              <p className="text-[8px] text-neutral-400 font-semibold uppercase">R:R</p>
+              <p className="text-xs font-black text-neutral-800 tabular-nums">
+                {r.rr_ratio != null ? `1:${r.rr_ratio}` : "—"}
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="text-[8px] text-neutral-400 font-semibold uppercase">Risk</p>
+              <p className="text-xs font-black text-red-500 tabular-nums">
+                {r.risk_pct != null ? `${r.risk_pct.toFixed(1)}%` : "—"}
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="text-[8px] text-neutral-400 font-semibold uppercase">TP2 net</p>
+              <p className="text-xs font-black text-green-600 tabular-nums">
+                {r.tp2_net_pct != null ? `+${r.tp2_net_pct.toFixed(1)}%` : "—"}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* ── Quality indicators (no prices) ────────────── */}
         <div className="flex flex-wrap gap-1.5">
@@ -268,6 +315,16 @@ export function OpportunityRow({
           {r.squeeze_tfs.length > 1 && (
             <span className="text-[9px] bg-purple-600 text-white px-1.5 py-0.5 rounded font-bold">
               {r.squeeze_tfs.join("+")} SQZ
+            </span>
+          )}
+          {r.auto_open && (
+            <span className="text-[9px] bg-neutral-900 text-teal-300 px-1.5 py-0.5 rounded font-bold">
+              🤖 AUTO
+            </span>
+          )}
+          {r.rr_ratio != null && (
+            <span className="text-[9px] bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded font-mono font-bold">
+              R:R 1:{r.rr_ratio}
             </span>
           )}
           {isNew && (

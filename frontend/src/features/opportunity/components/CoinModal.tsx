@@ -25,6 +25,7 @@ interface AnalysisResult {
   depth_ratio:     number | null;   // order book bid ratio — None if unavailable
   signals:         string[];
   confidence:      number;
+  below_standard?: boolean;         // §16.1: TP asli < standar R:R engine
   elapsed_sec:     number;
 }
 
@@ -114,15 +115,19 @@ export function CoinModal({
   const [opened, setOpened]     = useState(false);
   const [openErr, setOpenErr]   = useState("");
 
-  // Determine current levels (analyzer > scanner)
+  // Determine current levels (analyzer > scanner).
+  // §16.4: fallback dari data SCAN — nilai yang tidak diketahui dikirim NETRAL
+  // (taker 0.5, confidence 50), bukan angka karangan yang mencemari training.
+  const usingFallback = analysis === null;
   const levels = analysis ?? (r.entry != null ? {
     entry: r.entry!, sl: r.sl!, tp1: r.tp1!, tp2: r.tp2!, tp3: r.tp3!,
     risk_pct: r.risk_pct!, tp1_pct: r.tp1_pct!, tp2_pct: r.tp2_pct!, tp3_pct: r.tp3_pct!,
     rr_ratio: r.rr_ratio!, taker_ratio: 0.5, taker_ratio_4h: 0.5,
     rsi_1h: r.rsi_1h ?? 50, bb_width_1h: r.bb_width_15m ?? 0,
-    ema_bullish: false, depth_ratio: null, signals: r.signals, confidence: 70, elapsed_sec: 0,
+    ema_bullish: false, depth_ratio: null, signals: r.signals, confidence: 50, elapsed_sec: 0,
     symbol: r.symbol,
   } : null);
+  const belowStandard = analysis?.below_standard === true;
 
   // Run analyzer when modal opens
   const runAnalyzer = useCallback(async () => {
@@ -304,6 +309,18 @@ export function CoinModal({
                 <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Rekomendasi Posisi SPOT</p>
                 {analyzeErr && <p className="text-[9px] text-amber-500">{analyzeErr}</p>}
               </div>
+              {/* §16.1: resistance asli tidak memenuhi standar R:R engine */}
+              {belowStandard && (
+                <div className="mb-2 text-[10px] bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 text-amber-700">
+                  ⚠️ Resistance terdekat di bawah standar R:R — target diangkat ke
+                  minimum engine. Pertimbangkan skip; struktur harga belum ideal.
+                </div>
+              )}
+              {usingFallback && !analyzing && (
+                <p className="mb-2 text-[9px] text-neutral-400">
+                  Sumber level: hasil scan terakhir (analyzer tidak tersedia)
+                </p>
+              )}
               <div className="border border-neutral-100 rounded-2xl overflow-hidden">
                 <div className="px-3 py-2">
                   <LevelRow label="TP3"   price={levels.tp3}  pct={levels.tp3_pct}  />

@@ -22,7 +22,7 @@ interface SpotData {
 }
 
 const fmtPrice = (p: number) =>
-  p < 0.0001 ? p.toFixed(8) : p < 1 ? p.toFixed(6) : p < 1000 ? p.toFixed(4) : p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  p < 0.0001 ? p.toFixed(8) : p < 1 ? p.toFixed(6) : p < 1000 ? p.toFixed(4) : p.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtUsd = (v: number) =>
   Math.abs(v) >= 1000 ? `$${(v / 1000).toFixed(2)}K` : `$${v.toFixed(2)}`;

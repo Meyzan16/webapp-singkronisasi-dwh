@@ -29,7 +29,14 @@ def _broadcast(msg: dict) -> None:
         try:
             q.put_nowait(msg)
         except asyncio.QueueFull:
-            pass
+            # §13.7: keep-latest — client lambat tidak boleh kehilangan snapshot
+            # terbaru selamanya; buang antrean lama, masukkan yang terbaru
+            try:
+                while not q.empty():
+                    q.get_nowait()
+                q.put_nowait(msg)
+            except (asyncio.QueueFull, asyncio.QueueEmpty):
+                pass
 
 
 def set_scanning(state: bool) -> None:
@@ -57,7 +64,8 @@ def get_result() -> Optional[dict]:
 
 
 def last_scan_ts() -> Optional[float]:
-    return _ts if _result else None
+    # §13.8: kembalikan _ts walau result di-clear — countdown UI tetap jalan
+    return _ts if _ts > 0 else None
 
 
 def is_scanning() -> bool:

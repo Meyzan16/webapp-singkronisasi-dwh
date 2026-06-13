@@ -9,10 +9,29 @@ import {
 import { CoinModal } from "./components/CoinModal";
 import { MarketIntelBanner } from "@/components/MarketIntelBanner";
 
-const WS_URL         = "ws://localhost:8000/ws/opportunity";
+// §11.6: WS URL dinamis — ikut host & protokol halaman (wss saat https)
+function wsUrl(): string {
+  if (typeof window === "undefined") return "ws://localhost:8000/ws/opportunity";
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.hostname}:8000/ws/opportunity`;
+}
+
 const RECONNECT_MS   = 3000;
 const TOP_FEATURED   = 5;
-const INTERVAL_SEC   = 15 * 60;
+const INTERVAL_SEC   = 3 * 60;
+
+// §11.1: aturan engine diambil dari API — UI tidak boleh hardcode angka aturan
+interface ScannerConfig {
+  min_score:          number;
+  auto_open_score:    number;
+  rr_min:             number;
+  sl_buffer_pct:      number;
+  tp2_rule:           string;
+  tp3_rule:           string;
+  execution_cost_pct: number;
+  direction_gate:     string;
+  max_concurrent:     number;
+}
 
 type ConnState = "connecting" | "connected" | "reconnecting" | "paused";
 
@@ -64,7 +83,8 @@ export default function OpportunityPage() {
   const [elapsed, setElapsed]         = useState(0);
   const [alertFilter, setAlert]       = useState("ALL");
   const [search, setSearch]           = useState("");
-  const [minScore, setMinScore]       = useState(30);
+  const [minScore, setMinScore]       = useState(0);
+  const [config, setConfig]           = useState<ScannerConfig | null>(null);
   const [isLive, setIsLive]           = useState(true);
   const [newSymbols, setNewSymbols]   = useState<Set<string>>(new Set());
   const [timeAgoStr, setTimeAgoStr]   = useState("");
@@ -88,6 +108,16 @@ export default function OpportunityPage() {
     const t = setInterval(() => void fetchActivePositions(), 30_000);
     return () => clearInterval(t);
   }, [fetchActivePositions]);
+
+  // §11.1: ambil aturan engine sekali — header & legend render dari sini
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch("/api/v1/opportunity/config");
+        if (r.ok) setConfig(await r.json() as ScannerConfig);
+      } catch { /* fallback: teks generik tanpa angka */ }
+    })();
+  }, []);
 
   // Countdown uses a ref so the interval never restarts
   const nextScanInRef = useRef<number | null>(null);
@@ -161,7 +191,7 @@ export default function OpportunityPage() {
     function connect() {
       if (!mounted) return;
       setConnState("connecting");
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(wsUrl());
 
       ws.onopen = () => { if (mounted) setConnState("connected"); };
 
@@ -207,7 +237,8 @@ export default function OpportunityPage() {
   const manualScan = useCallback(async () => {
     setScanning(true);
     try {
-      const r = await fetch("/api/v1/opportunity/scan?min_score=30&limit=50");
+      // §11.7: tanpa parameter mati — engine sudah memfilter via MIN_SCORE
+      const r = await fetch("/api/v1/opportunity/scan?limit=50", { method: "POST" });
       if (!r.ok) return;
       const d = await r.json() as Record<string, unknown>;
       applySnapshot(d);
@@ -232,8 +263,9 @@ export default function OpportunityPage() {
     return c;
   }, [results]);
 
-  const highCount  = results.filter(r => r.opportunity_score >= 70).length;
-  const watchCount = results.filter(r => r.opportunity_score >= 50 && r.opportunity_score < 70).length;
+  const autoThreshold = config?.auto_open_score ?? 90;
+  const highCount  = results.filter(r => r.auto_open || r.opportunity_score >= autoThreshold).length;
+  const watchCount = results.filter(r => !r.auto_open && r.opportunity_score < autoThreshold).length;
   const featured   = filtered.slice(0, TOP_FEATURED);
   const rest       = filtered.slice(TOP_FEATURED);
 
@@ -265,21 +297,28 @@ export default function OpportunityPage() {
                 <span className="text-3xl">🚀</span>
                 <div>
                   <h1 className="text-2xl font-bold leading-tight">Opportunity Scanner</h1>
-                  <p className="text-xs text-neutral-400">Rekomendasi posisi SPOT · Entry · SL · TP · R:R ≥ 2.0</p>
+                  <p className="text-xs text-neutral-400">
+                    Rekomendasi posisi SPOT · Entry · SL · TP
+                    {config && <> · R:R ≥ {config.rr_min}</>}
+                  </p>
                 </div>
               </div>
               <p className="text-xs text-neutral-500 max-w-md leading-relaxed ml-12">
-                Deteksi koin seperti <strong className="text-teal-300">OPN, PEPE, DOGE</strong> sebelum bergerak —
-                lengkap dengan level entry, stop loss, dan take profit yang siap dieksekusi.
+                Setup risk-adjusted: ranking berdasarkan expected value per unit risk,
+                size mengikuti balance real, biaya eksekusi
+                {config ? ` ${config.execution_cost_pct}%` : ""} sudah diperhitungkan.
               </p>
 
-              {/* Legend pills */}
+              {/* §11.1: legend dari aturan engine yang SEBENARNYA */}
               <div className="flex gap-2 mt-3 ml-12 flex-wrap">
-                {[
-                  { dot: "bg-red-400",   label: "SL · swing low -0.5%" },
-                  { dot: "bg-green-400", label: "TP2 · target utama (R:R 1:3)" },
-                  { dot: "bg-green-200", label: "TP3 · extended (R:R 1:5)" },
-                ].map(l => (
+                {(config ? [
+                  { dot: "bg-red-400",   label: `SL · swing low −${config.sl_buffer_pct}%` },
+                  { dot: "bg-green-400", label: `TP2 · ${config.tp2_rule}` },
+                  { dot: "bg-green-200", label: `TP3 · ${config.tp3_rule}` },
+                  { dot: "bg-teal-400",  label: `🤖 auto ≥ ${config.auto_open_score}pt + arah` },
+                ] : [
+                  { dot: "bg-neutral-500", label: "memuat aturan engine…" },
+                ]).map(l => (
                   <span key={l.label} className="flex items-center gap-1.5 text-[10px] text-neutral-400 bg-white/5 px-2.5 py-1 rounded-full border border-white/10">
                     <span className={`w-1.5 h-1.5 rounded-full ${l.dot}`} />
                     {l.label}
@@ -319,7 +358,7 @@ export default function OpportunityPage() {
               <div className="flex gap-2">
                 <div className="bg-green-500/15 border border-green-500/25 rounded-xl px-3.5 py-2 text-center min-w-[60px]">
                   <p className="text-green-400 font-black text-2xl leading-tight">{highCount}</p>
-                  <p className="text-[9px] text-green-500/80 mt-0.5">🔥 HIGH</p>
+                  <p className="text-[9px] text-green-500/80 mt-0.5">🤖 AUTO</p>
                 </div>
                 <div className="bg-yellow-500/15 border border-yellow-500/25 rounded-xl px-3.5 py-2 text-center min-w-[60px]">
                   <p className="text-yellow-400 font-black text-2xl leading-tight">{watchCount}</p>
@@ -416,6 +455,7 @@ export default function OpportunityPage() {
           </button>
         ))}
 
+        {/* §11.2: opsi filter dari threshold engine — tidak ada pilihan mati */}
         <div className="flex items-center gap-1.5 bg-white border border-neutral-200 rounded-full px-3 py-1.5">
           <span className="text-neutral-400 text-[10px] font-semibold">MIN</span>
           <select
@@ -423,9 +463,11 @@ export default function OpportunityPage() {
             onChange={e => setMinScore(Number(e.target.value))}
             className="text-xs text-neutral-700 bg-transparent focus:outline-none cursor-pointer"
           >
-            <option value={30}>30pt</option>
-            <option value={50}>50pt ⚡</option>
-            <option value={70}>70pt 🔥</option>
+            <option value={0}>Semua (≥{config?.min_score ?? 65}pt)</option>
+            <option value={80}>80pt ⚡</option>
+            <option value={config?.auto_open_score ?? 90}>
+              {config?.auto_open_score ?? 90}pt 🤖
+            </option>
           </select>
         </div>
 
@@ -461,9 +503,9 @@ export default function OpportunityPage() {
       {!loading && filtered.length > 0 && (
         <div className="flex items-center gap-3 flex-wrap px-1">
           {[
-            { bg: "bg-green-500",  emoji: "🔥", label: "≥ 70 High" },
-            { bg: "bg-yellow-500", emoji: "⚡", label: "50–69 Watch" },
-            { bg: "bg-neutral-400",emoji: "👀", label: "30–49 Early" },
+            { bg: "bg-neutral-900", emoji: "🤖", label: `≥ ${config?.auto_open_score ?? 90} Auto-open` },
+            { bg: "bg-green-500",   emoji: "🔥", label: `80–${(config?.auto_open_score ?? 90) - 1} High` },
+            { bg: "bg-yellow-500",  emoji: "⚡", label: `${config?.min_score ?? 65}–79 Watch` },
           ].map(l => (
             <span key={l.label} className="flex items-center gap-1.5 text-xs text-neutral-500">
               <span className={`${l.bg} text-white text-[10px] font-bold px-2 py-0.5 rounded-full`}>

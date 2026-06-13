@@ -57,29 +57,165 @@ def _trade_dict(t: PaperTrade) -> dict:
         "tp1_hit":     meta.get("tp1_hit", False),
         "current_price": None,
         "unrealized_pnl_pct": None,
-        "entry_at":    t.entry_at,
-        "closed_at":   t.closed_at,
-        "agent":       t.style,
+        "entry_at":       t.entry_at,
+        "closed_at":      t.closed_at,
+        "agent":          t.style,
+        "position_size":  t.position_size,
+        "risk_dollar":    t.risk_dollar,
+        "balance_snapshot": t.balance_snapshot,
+        "pnl_dollar":     t.pnl_dollar,
     }
 
 
 @router.get("/history/trades", dependencies=[_db])
 async def get_trades(
-    style:  Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
-    days:   int           = Query(30),
+    style:     Optional[str] = Query(None),
+    status:    Optional[str] = Query(None),
+    search:    Optional[str] = Query(None),   # symbol search (partial match)
+    days:      int           = Query(90),
+    page:      int           = Query(1, ge=1),
+    page_size: int           = Query(25, ge=1, le=200),
+    sort_by:   str           = Query("entry_at"),  # entry_at | closed_at | pnl_pct | score
+    sort_dir:  str           = Query("desc"),       # desc | asc
 ) -> dict:
+    """
+    Paginated trade history with search, filter, and sort.
+    Returns: trades (current page), total, page, pages, stats summary.
+    """
+    from sqlalchemy import func, or_
+
     cutoff = time.time() - days * 86400
+
     async with AsyncSessionLocal() as s:
         q = select(PaperTrade).where(PaperTrade.entry_at >= cutoff)
-        if style:
-            q = q.where(PaperTrade.style == style)
-        if status:
-            q = q.where(PaperTrade.status == status)
-        q = q.order_by(PaperTrade.entry_at.desc())
+
+        # Style filter
+        if style and style != "all":
+            if style == "spot":
+                q = q.where(PaperTrade.style == "opportunity_spot")
+            elif style == "agent1":
+                q = q.where(PaperTrade.style == "futures_agent1")
+            elif style == "agent2":
+                q = q.where(PaperTrade.style == "futures_agent2")
+            elif style == "futures":
+                q = q.where(PaperTrade.style.in_(["futures_agent1", "futures_agent2"]))
+            else:
+                q = q.where(PaperTrade.style == style)
+
+        # Status filter — §16.5: "win" konsisten dengan _is_real_win (tp + net > 0)
+        if status and status != "all":
+            if status == "win":
+                q = q.where(PaperTrade.status == "tp", PaperTrade.pnl_pct > 0)
+            elif status == "loss":
+                from sqlalchemy import and_ as _and, or_ as _or
+                q = q.where(_or(
+                    PaperTrade.status == "sl",
+                    _and(PaperTrade.status == "tp", PaperTrade.pnl_pct <= 0),
+                ))
+            elif status == "open":
+                q = q.where(PaperTrade.status == "open")
+            else:
+                q = q.where(PaperTrade.status == status)
+
+        # Symbol search
+        if search and search.strip():
+            pattern = f"%{search.strip().upper()}%"
+            q = q.where(PaperTrade.symbol.like(pattern))
+
+        # Total count (before pagination)
+        count_q  = select(func.count()).select_from(q.subquery())
+        total    = (await s.execute(count_q)).scalar() or 0
+
+        # Sort
+        sort_col = {
+            "entry_at":  PaperTrade.entry_at,
+            "closed_at": PaperTrade.closed_at,
+            "pnl_pct":   PaperTrade.pnl_pct,
+            "score":     PaperTrade.probability,
+            "symbol":    PaperTrade.symbol,
+        }.get(sort_by, PaperTrade.entry_at)
+
+        if sort_dir == "asc":
+            q = q.order_by(sort_col.asc().nullslast())
+        else:
+            q = q.order_by(sort_col.desc().nullslast())
+
+        # Pagination
+        offset = (page - 1) * page_size
+        q = q.offset(offset).limit(page_size)
+
         result = await s.execute(q)
-        trades = [_trade_dict(t) for t in result.scalars().all()]
-    return {"trades": trades, "total": len(trades)}
+        trades  = [_trade_dict(t) for t in result.scalars().all()]
+
+        # Quick summary stats (across full filtered set, not just this page)
+        all_q = select(PaperTrade).where(PaperTrade.entry_at >= cutoff)
+        if style and style != "all":
+            if style == "spot":
+                all_q = all_q.where(PaperTrade.style == "opportunity_spot")
+            elif style == "agent1":
+                all_q = all_q.where(PaperTrade.style == "futures_agent1")
+            elif style == "agent2":
+                all_q = all_q.where(PaperTrade.style == "futures_agent2")
+            elif style == "futures":
+                all_q = all_q.where(PaperTrade.style.in_(["futures_agent1", "futures_agent2"]))
+        if search and search.strip():
+            all_q = all_q.where(PaperTrade.symbol.like(f"%{search.strip().upper()}%"))
+
+        all_result = await s.execute(all_q)
+        all_trades = list(all_result.scalars().all())
+
+    # §6.2: summary konsisten dengan balance — manual ikut dihitung sebagai closed
+    tp_sl   = [t for t in all_trades if t.status in ("tp", "sl")]
+    manual  = [t for t in all_trades if t.status == "manual"]
+    closed  = tp_sl + manual
+    wins    = [t for t in tp_sl if _is_real_win(t)]
+    open_t  = [t for t in all_trades if t.status == "open"]
+    avg_pnl = (sum(t.pnl_pct for t in closed if t.pnl_pct is not None) / len(closed)) if closed else 0.0
+    realized_dollar = sum(t.pnl_dollar for t in closed if t.pnl_dollar is not None)
+
+    # §14.8: max drawdown + profit factor — metrik kunci "profit dengan risiko baik"
+    gross_win  = sum(t.pnl_dollar for t in closed if (t.pnl_dollar or 0) > 0)
+    gross_loss = abs(sum(t.pnl_dollar for t in closed if (t.pnl_dollar or 0) < 0))
+    profit_factor = round(gross_win / gross_loss, 2) if gross_loss > 0 else None
+
+    equity, peak, max_dd = 0.0, 0.0, 0.0
+    for t in sorted(closed, key=lambda x: x.closed_at or 0):
+        equity += t.pnl_dollar or 0.0
+        peak    = max(peak, equity)
+        max_dd  = max(max_dd, peak - equity)
+
+    return {
+        "trades":    trades,
+        "total":     total,
+        "page":      page,
+        "page_size": page_size,
+        "pages":     max(1, -(-total // page_size)),  # ceiling division
+        "summary": {
+            "total_all":        len(all_trades),
+            "open":             len(open_t),
+            "closed":           len(closed),
+            "manual_count":     len(manual),
+            "wins":             len(wins),
+            "losses":           len(tp_sl) - len(wins),
+            "win_rate":         round(len(wins) / len(tp_sl) * 100, 1) if tp_sl else 0.0,
+            "avg_pnl":          round(avg_pnl, 2),
+            "realized_pnl_dollar": round(realized_dollar, 2),
+            "profit_factor":    profit_factor,
+            "max_drawdown_dollar": round(max_dd, 2),
+        },
+    }
+
+
+def _is_real_win(t: PaperTrade) -> bool:
+    """
+    BUG FIX: A trade is a REAL win only if:
+      1. status == "tp" AND
+      2. net pnl_pct > 0 (not negative after fees)
+    Previously we counted status=="tp" with pnl_pct=-0.16 as a "win" — wrong!
+    """
+    if t.status != "tp":
+        return False
+    return (t.pnl_pct or 0.0) > 0
 
 
 @router.get("/history/stats", dependencies=[_db])
@@ -89,13 +225,14 @@ async def get_stats() -> dict:
         all_trades = list(result.scalars().all())
 
     closed = [t for t in all_trades if t.status in ("tp", "sl")]
-    wins   = [t for t in closed if t.status == "tp"]
+    # BUG FIX: real wins require positive net pnl (status "tp" with negative pnl is a loss)
+    wins   = [t for t in closed if _is_real_win(t)]
 
     by_style: dict = defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "avg_pnl": 0.0})
     for t in closed:
         st = by_style[t.style]
         st["total"] += 1
-        if t.status == "tp":
+        if _is_real_win(t):
             st["wins"] += 1
         else:
             st["losses"] += 1
@@ -178,6 +315,31 @@ async def get_daily_pnl(days: int = Query(30)) -> dict:
             d["losses"] += 1
 
     return {"daily": [{"date": k, **v} for k, v in sorted(daily.items())]}
+
+
+@router.delete("/history/cleanup-legacy", dependencies=[_db])
+async def cleanup_legacy_trades() -> dict:
+    """
+    Remove closed opportunity_spot trades that have no position_size data
+    (legacy trades from before real-balance tracking was added).
+    Keeps all open trades and all futures trades untouched.
+    """
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(PaperTrade).where(
+                PaperTrade.style    == "opportunity_spot",
+                PaperTrade.status   != "open",
+                PaperTrade.position_size.is_(None),
+            )
+        )
+        legacy = list(result.scalars().all())
+        count  = len(legacy)
+        for t in legacy:
+            await session.delete(t)
+        await session.commit()
+
+    logger.info("legacy_trades_cleaned", deleted=count)
+    return {"deleted": count, "message": f"{count} trade lama tanpa data margin dihapus"}
 
 
 @router.delete("/history/all", dependencies=[_db])

@@ -18,6 +18,12 @@ logger = structlog.get_logger(__name__)
 
 from app.services.binance_urls import get_spot_url, get_fapi_url, fapi, spot
 
+# ── In-memory cache ──────────────────────────────────────────────────────────
+# Avg buy price berdasarkan FIFO myTrades — hanya berubah bila ada trade baru.
+# Cache 10 menit agar tidak spam weight=10 per simbol setiap 15 detik poll.
+_avg_price_cache: dict[str, tuple[float | None, float]] = {}  # symbol → (avg, ts)
+_AVG_CACHE_TTL = 600  # seconds
+
 
 def _sign(secret: str, query_string: str) -> str:
     return hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
@@ -111,8 +117,15 @@ async def _fetch_avg_buy_price(
     if asset == "USDT":
         return 1.0
     symbol = f"{asset}USDT"
+
+    # Return cached value if still fresh (avg price only changes on new trades)
+    cached = _avg_price_cache.get(symbol)
+    if cached is not None and time.time() - cached[1] < _AVG_CACHE_TTL:
+        return cached[0]
+
     try:
-        qs = _signed_url("/api/v3/myTrades", api_secret, {"symbol": symbol, "limit": 500})
+        # Limit 1000 (Binance max) to cover more trade history (S12)
+        qs = _signed_url("/api/v3/myTrades", api_secret, {"symbol": symbol, "limit": 1000})
         resp = await client.get(spot(f"/api/v3/myTrades?{qs}"), headers=_auth_headers(api_key))
         if resp.status_code != 200:
             return None
@@ -144,10 +157,13 @@ async def _fetch_avg_buy_price(
         # Remaining lots = current holding
         total_qty = sum(lot[1] for lot in buy_lots)
         if total_qty < 1e-8:
+            _avg_price_cache[symbol] = (None, time.time())
             return None
 
         total_val = sum(lot[0] * lot[1] for lot in buy_lots)
-        return total_val / total_qty
+        result = total_val / total_qty
+        _avg_price_cache[symbol] = (result, time.time())
+        return result
 
     except Exception:
         return None

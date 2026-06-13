@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { HealthEventLog } from "./components/HealthEventLog";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -552,6 +553,14 @@ export default function HealthPage() {
           </div>
         </div>
       )}
+
+      {/* ── System Health Event Log ────────────────────────────────────────── */}
+      <div>
+        <p className="text-xs font-black text-neutral-400 uppercase tracking-widest mb-3">
+          📡 History System Health
+        </p>
+        <HealthEventLog />
+      </div>
 
       {/* ── Raw Health JSON (collapsible) ──────────────────────────────────── */}
       <details className="group">

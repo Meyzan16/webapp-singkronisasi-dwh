@@ -20,6 +20,9 @@ interface OppPos {
   signals: string[]; score: number; alert_type: string;
   tp1_hit: boolean; pnl_pct: number | null; entry_at: number;
   closed_at: number | null;
+  pnl_dollar?: number | null;
+  position_size?: number | null;
+  risk_dollar?: number | null;
 }
 
 interface FutPos {
@@ -90,21 +93,27 @@ interface BinanceStatus {
   checked_at:           number;
 }
 
+interface SpotBalance {
+  balance:         number;
+  initial_balance: number;
+  available:       number;
+  locked_margin:   number;
+  deposited_total: number;
+  realized_pnl:    number;
+  total_pnl:       number;
+  open_positions:  number;
+}
+
 const POLL_MS = 15_000;
 const BALANCE_START = 1000;
 const RISK_PCT = 0.01;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function pnlDollar(pnl_pct: number, risk_pct: number) {
+function pnlDollar(pnl_pct: number, risk_pct: number, balance = BALANCE_START) {
   if (risk_pct <= 0) return 0;
-  const notional = (BALANCE_START * RISK_PCT) / (risk_pct / 100);
+  const notional = (balance * RISK_PCT) / (risk_pct / 100);
   return (pnl_pct / 100) * notional;
-}
-
-function fmtTime(ts: number | null) {
-  if (!ts) return "—";
-  return new Date(ts * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 
 function fmtRelTime(ts: number | null) {
@@ -177,11 +186,13 @@ export default function DashboardPage() {
   const [binance,    setBinance]    = useState<BinanceStatus | null>(null);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [countdown,  setCountdown]  = useState(POLL_MS / 1000);
+  const [spotBal, setSpotBal] = useState<SpotBalance | null>(null);
+  const [futBal,  setFutBal]  = useState<SpotBalance | null>(null);
   const countRef = useRef(POLL_MS / 1000);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [ctxR, oppR, futR, learnR, statR, spotR, healthR, binanceR] = await Promise.allSettled([
+      const [ctxR, oppR, futR, learnR, statR, spotR, healthR, binanceR, balR, futBalR] = await Promise.allSettled([
         fetch("/api/v1/market/context"),
         fetch("/api/v1/opportunity/positions"),
         fetch("/api/v1/futures/positions?status=all"),
@@ -190,6 +201,8 @@ export default function DashboardPage() {
         fetch("/api/v1/market/spot-positions"),
         fetch("/health"),
         fetch("/api/v1/market/binance-status"),
+        fetch("/api/v1/balance/spot"),
+        fetch("/api/v1/balance/futures"),
       ]);
       if (ctxR.status === "fulfilled" && ctxR.value.ok)
         setCtx(await ctxR.value.json() as MarketCtx);
@@ -223,6 +236,10 @@ export default function DashboardPage() {
         setHealth(await healthR.value.json() as Health);
       if (binanceR.status === "fulfilled" && binanceR.value.ok)
         setBinance(await binanceR.value.json() as BinanceStatus);
+      if (balR.status === "fulfilled" && balR.value.ok)
+        setSpotBal(await balR.value.json() as SpotBalance);
+      if (futBalR.status === "fulfilled" && futBalR.value.ok)
+        setFutBal(await futBalR.value.json() as SpotBalance);
       setLastUpdate(new Date());
     } catch { /* silent */ }
   }, []);
@@ -243,10 +260,24 @@ export default function DashboardPage() {
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 
-  const oppOpen   = useMemo(() => oppPos.filter(p => p.status === "open"),    [oppPos]);
-  const futOpen   = useMemo(() => futPos.filter(p => p.status === "open"),    [futPos]);
-  const oppClosed = useMemo(() => oppPos.filter(p => p.status !== "open").slice(-20), [oppPos]);
-  const futClosed = useMemo(() => futPos.filter(p => p.status !== "open").slice(-20), [futPos]);
+  const oppOpen = useMemo(() => oppPos.filter(p => p.status === "open"), [oppPos]);
+  const futOpen = useMemo(() => futPos.filter(p => p.status === "open"), [futPos]);
+  // BUG FIX: API mengurut DESC by entry_at — `.slice(-20)` justru mengambil 20
+  // trade TERLAMA. Sort eksplisit by closed_at lalu ambil yang TERBARU.
+  const oppClosedAll = useMemo(() => oppPos.filter(p => p.status !== "open"), [oppPos]);
+  const oppClosed = useMemo(
+    () => [...oppClosedAll].sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0)).slice(0, 20),
+    [oppClosedAll]
+  );
+  const futClosed = useMemo(
+    () => futPos.filter(p => p.status !== "open")
+      .sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0)).slice(0, 20),
+    [futPos]
+  );
+
+  // Paper balances — spot dari balance API (sumber kebenaran), fallback hitung legacy
+  // Definisi awal agar semua useMemo di bawah bisa capture nilai ini
+  const initialOpp = spotBal?.initial_balance ?? BALANCE_START;
 
   // Combined recent trades (newest first)
   const recentTrades = useMemo(() => {
@@ -256,7 +287,8 @@ export default function DashboardPage() {
     const s: Trade[] = oppClosed.map(p => ({
       id: `s-${p.id}`, symbol: p.symbol, type: "spot" as const, dir: "LONG",
       status: p.status, entry: p.entry, pnl_pct: p.pnl_pct,
-      pnl$: p.pnl_pct != null ? pnlDollar(p.pnl_pct, p.risk_pct) : 0,
+      // pakai pnl_dollar tersimpan (margin riil); fallback rumus dengan initial_balance aktual
+      pnl$: p.pnl_dollar ?? (p.pnl_pct != null ? pnlDollar(p.pnl_pct, p.risk_pct, initialOpp) : 0),
       entry_at: p.entry_at, closed_at: p.closed_at,
     }));
     const f: Trade[] = futClosed.map(p => ({
@@ -267,29 +299,61 @@ export default function DashboardPage() {
       entry_at: p.entry_at, closed_at: p.closed_at,
     }));
     return [...s, ...f].sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0)).slice(0, 10);
-  }, [oppClosed, futClosed]);
+  }, [oppClosed, futClosed, initialOpp]);
 
-  // Paper balances
   const oppBalance = useMemo(() => {
-    let b = BALANCE_START;
-    [...oppClosed].sort((a, b) => (a.closed_at ?? 0) - (b.closed_at ?? 0))
-      .forEach(p => { if (p.pnl_pct != null) b = Math.max(0, b + pnlDollar(p.pnl_pct, p.risk_pct)); });
+    if (spotBal != null) return spotBal.balance;
+    let b = initialOpp;
+    [...oppClosedAll].sort((a, b) => (a.closed_at ?? 0) - (b.closed_at ?? 0))
+      .forEach(p => {
+        const d = p.pnl_dollar ?? (p.pnl_pct != null ? pnlDollar(p.pnl_pct, p.risk_pct, initialOpp) : 0);
+        b = Math.max(0, b + d);
+      });
     return b;
-  }, [oppClosed]);
+  }, [oppClosedAll, spotBal, initialOpp]);
+
+  // S5: running equity curve untuk chart — setiap titik = balance kumulatif setelah tiap trade
+  const oppEquityPoints = useMemo(() => {
+    const sorted = [...oppClosedAll].sort((a, b) => (a.closed_at ?? 0) - (b.closed_at ?? 0));
+    let b = initialOpp;
+    const pts: { balance: number; win: boolean }[] = [{ balance: b, win: true }];
+    for (const p of sorted) {
+      const d = p.pnl_dollar ?? (p.pnl_pct != null ? pnlDollar(p.pnl_pct, p.risk_pct, initialOpp) : 0);
+      b = Math.max(0, b + d);
+      pts.push({ balance: b, win: p.status === "tp" });
+    }
+    return pts;
+  }, [oppClosedAll, initialOpp]);
+
+  // Unrealized PnL for open positions (dollar)
+  const oppUnrealizedPnl = useMemo(
+    () => oppOpen.reduce((s, p) => s + ((p.unrealized_pnl_pct ?? 0) / 100 * (p.position_size ?? 0)), 0),
+    [oppOpen],
+  );
+  const futUnrealizedPnl = useMemo(
+    () => futOpen.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0),
+    [futOpen],
+  );
 
   const futBalance = learning?.balance.current ?? BALANCE_START;
-  const combinedPnl = (oppBalance - BALANCE_START) + (futBalance - BALANCE_START);
+  const initialFut = learning?.balance.starting ?? BALANCE_START;
+  const combinedPnl = (oppBalance - initialOpp) + (futBalance - initialFut);
 
+  // BUG FIX: definisi win SAMA dengan History/learning — TP+SL saja (manual
+  // exclude), win = TP dengan pnl net > 0; dari SEMUA closed di window, bukan 20
   const oppWinRate = useMemo(() => {
-    const c = oppClosed.filter(p => p.status !== "open");
-    return c.length > 0 ? (c.filter(p => p.status === "tp").length / c.length * 100) : 0;
-  }, [oppClosed]);
+    const tpSl = oppClosedAll.filter(p => p.status === "tp" || p.status === "sl");
+    const wins = tpSl.filter(p => p.status === "tp" && (p.pnl_pct ?? 0) > 0);
+    return tpSl.length > 0 ? (wins.length / tpSl.length) * 100 : 0;
+  }, [oppClosedAll]);
   const futWinRate = learning?.overall.win_rate ?? 0;
   const combinedWinRate = useMemo(() => {
-    const allClosed = oppClosed.length + (learning?.overall.closed ?? 0);
-    const allWins   = oppClosed.filter(p => p.status === "tp").length + (learning?.overall.wins ?? 0);
+    const tpSl = oppClosedAll.filter(p => p.status === "tp" || p.status === "sl");
+    const wins = tpSl.filter(p => p.status === "tp" && (p.pnl_pct ?? 0) > 0);
+    const allClosed = tpSl.length + (learning?.overall.closed ?? 0);
+    const allWins   = wins.length + (learning?.overall.wins ?? 0);
     return allClosed > 0 ? allWins / allClosed * 100 : 0;
-  }, [oppClosed, learning]);
+  }, [oppClosedAll, learning]);
 
   const totalOpenPositions = oppOpen.length + futOpen.length;
   const futCount = typeof ctx?.futures_signal_count === "number" ? ctx.futures_signal_count : -1;
@@ -321,7 +385,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <KpiCard
           label="Paper Balance"
-          value={`$${(oppBalance + futBalance - BALANCE_START).toFixed(0)}`}
+          value={`$${(oppBalance + futBalance).toFixed(0)}`}
           sub={`Spot $${oppBalance.toFixed(0)} + Fut $${futBalance.toFixed(0)}`}
           color={combinedPnl >= 0 ? "text-green-600" : "text-red-500"}
           icon="💰"
@@ -329,7 +393,7 @@ export default function DashboardPage() {
         <KpiCard
           label="Combined PnL"
           value={`${combinedPnl >= 0 ? "+" : ""}$${combinedPnl.toFixed(2)}`}
-          sub={`ROI ${((combinedPnl / (BALANCE_START * 2)) * 100).toFixed(1)}%`}
+          sub={`ROI ${((combinedPnl / (initialOpp + initialFut)) * 100).toFixed(1)}% dari modal $${(initialOpp + initialFut).toFixed(0)}`}
           color={combinedPnl >= 0 ? "text-green-600" : "text-red-500"}
           icon={combinedPnl >= 0 ? "📈" : "📉"}
         />
@@ -383,7 +447,11 @@ export default function DashboardPage() {
                         <span className="text-[9px] bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded font-bold">SPOT</span>
                         {p.tp1_hit && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold">TP1✓</span>}
                       </div>
-                      <p className="text-[10px] text-neutral-400 truncate">{p.signals[0] ?? ""}</p>
+                      <p className="text-[10px] text-neutral-400 truncate">
+                        {p.position_size != null
+                          ? `~$${p.position_size.toFixed(0)} · Risk $${(p.risk_dollar ?? 0).toFixed(1)}`
+                          : (p.signals[0] ?? "")}
+                      </p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-xs font-mono font-bold">${fmtPrice(p.entry)}</p>
@@ -514,70 +582,130 @@ export default function DashboardPage() {
       {/* ── 4. Balance Simulation + Win Rates ─────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-        {/* Spot Opp Balance */}
+        {/* Spot Opp Balance — Binance-style */}
         <div className="bg-white rounded-2xl border border-neutral-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">🎯 Spot Opp Balance</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">🎯 Spot Balance</p>
             <Link href="/history" className="text-[10px] text-teal-600 hover:underline">detail →</Link>
           </div>
-          <div className="flex items-baseline gap-2 mb-1">
-            <span className={`text-3xl font-black ${oppBalance >= BALANCE_START ? "text-green-600" : "text-red-500"}`}>
-              ${oppBalance.toFixed(0)}
+          <div className="flex items-baseline gap-2 mb-3">
+            <span className={`text-2xl font-black ${oppBalance >= initialOpp ? "text-green-600" : "text-red-500"}`}>
+              ${oppBalance.toFixed(2)}
             </span>
-            <span className={`text-sm font-bold ${(oppBalance - BALANCE_START) >= 0 ? "text-green-500" : "text-red-400"}`}>
-              {(oppBalance - BALANCE_START) >= 0 ? "+" : ""}${(oppBalance - BALANCE_START).toFixed(2)}
+            <span className={`text-xs font-bold ${(oppBalance - initialOpp) >= 0 ? "text-green-500" : "text-red-400"}`}>
+              {(oppBalance - initialOpp) >= 0 ? "+" : ""}${(oppBalance - initialOpp).toFixed(2)}
             </span>
           </div>
-          <p className="text-[10px] text-neutral-400 mb-3">
-            Modal $1,000 · Risk $10/trade · Win Rate <strong>{oppWinRate.toFixed(0)}%</strong>
-          </p>
-          {learning && (
-            <MiniEquity points={[{ balance: BALANCE_START, win: true },
-              ...oppClosed.map((p, i) => ({ balance: oppBalance, win: p.status === "tp", n: i+1 }))]} />
+
+          {/* Binance-style balance rows */}
+          <div className="space-y-1.5 text-[11px]">
+            <div className="flex justify-between">
+              <span className="text-neutral-500">Wallet Balance</span>
+              <span className="font-semibold text-neutral-800">${(spotBal?.balance ?? oppBalance).toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-neutral-500">Unrealized PnL
+                <span className="ml-1 text-[9px] bg-blue-50 text-blue-500 border border-blue-200 px-1 py-px rounded">live</span>
+              </span>
+              <span className={`font-semibold ${oppUnrealizedPnl >= 0 ? "text-green-600" : "text-red-500"}`}>
+                {oppUnrealizedPnl >= 0 ? "+" : ""}${oppUnrealizedPnl.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex justify-between font-bold border-t border-neutral-100 pt-1.5">
+              <span className="text-neutral-700">Margin Balance</span>
+              <span className="text-neutral-900">${((spotBal?.balance ?? oppBalance) + oppUnrealizedPnl).toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between pt-0.5">
+              <span className="text-neutral-500">Available</span>
+              <span className="font-semibold text-neutral-800">${(spotBal?.available ?? 0).toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-neutral-500">In Order ({spotBal?.open_positions ?? oppOpen.length})</span>
+              <span className="font-semibold text-neutral-800">${(spotBal?.locked_margin ?? 0).toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-t border-neutral-100 pt-1.5">
+              <span className="text-neutral-500">Realized PnL</span>
+              <span className={`font-semibold ${(spotBal?.realized_pnl ?? (oppBalance - initialOpp)) >= 0 ? "text-green-600" : "text-red-500"}`}>
+                {(spotBal?.realized_pnl ?? (oppBalance - initialOpp)) >= 0 ? "+" : ""}${(spotBal?.realized_pnl ?? (oppBalance - initialOpp)).toFixed(2)}
+              </span>
+            </div>
+          </div>
+
+          {oppEquityPoints.length > 1 && (
+            <div className="mt-3"><MiniEquity points={oppEquityPoints} /></div>
           )}
-          <div className="grid grid-cols-3 gap-2 mt-3">
+          <div className="grid grid-cols-4 gap-1.5 mt-3">
             {[
-              { label: "Open",  val: String(oppOpen.length),   color: "text-blue-600"  },
-              { label: "Win",   val: String(oppClosed.filter(p => p.status === "tp").length), color: "text-green-600" },
-              { label: "Loss",  val: String(oppClosed.filter(p => p.status === "sl").length), color: "text-red-500"   },
+              { label: "Open",  val: String(oppOpen.length), color: "text-blue-600" },
+              { label: "Win",   val: String(oppClosedAll.filter(p => p.status === "tp").length), color: "text-green-600" },
+              { label: "Loss",  val: String(oppClosedAll.filter(p => p.status === "sl").length), color: "text-red-500" },
+              { label: "WR",    val: oppClosedAll.filter(p => p.status === "tp" || p.status === "sl").length > 0 ? `${oppWinRate.toFixed(0)}%` : "—", color: oppWinRate >= 50 ? "text-green-600" : "text-red-500" },
             ].map(s => (
               <div key={s.label} className="text-center bg-neutral-50 rounded-xl py-2">
-                <p className={`text-lg font-black ${s.color}`}>{s.val}</p>
+                <p className={`text-sm font-black ${s.color}`}>{s.val}</p>
                 <p className="text-[9px] text-neutral-400">{s.label}</p>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Futures Balance */}
+        {/* Futures Balance — Binance-style */}
         <div className="bg-white rounded-2xl border border-neutral-200 p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">⚡ Futures Balance</p>
             <Link href="/history" className="text-[10px] text-blue-600 hover:underline">detail →</Link>
           </div>
-          <div className="flex items-baseline gap-2 mb-1">
-            <span className={`text-3xl font-black ${futBalance >= BALANCE_START ? "text-green-600" : "text-red-500"}`}>
-              ${futBalance.toFixed(0)}
+          <div className="flex items-baseline gap-2 mb-3">
+            <span className={`text-2xl font-black ${futBalance >= initialFut ? "text-green-600" : "text-red-500"}`}>
+              ${futBalance.toFixed(2)}
             </span>
-            <span className={`text-sm font-bold ${(futBalance - BALANCE_START) >= 0 ? "text-green-500" : "text-red-400"}`}>
-              {(futBalance - BALANCE_START) >= 0 ? "+" : ""}${(futBalance - BALANCE_START).toFixed(2)}
+            <span className={`text-xs font-bold ${(futBalance - initialFut) >= 0 ? "text-green-500" : "text-red-400"}`}>
+              {(futBalance - initialFut) >= 0 ? "+" : ""}${(futBalance - initialFut).toFixed(2)}
             </span>
           </div>
-          <p className="text-[10px] text-neutral-400 mb-3">
-            Modal $1,000 · Risk $10/trade · Win Rate <strong>{futWinRate.toFixed(0)}%</strong>
-          </p>
+
+          {/* Binance-style balance rows */}
+          <div className="space-y-1.5 text-[11px]">
+            <div className="flex justify-between">
+              <span className="text-neutral-500">Wallet Balance</span>
+              <span className="font-semibold text-neutral-800">${futBalance.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-neutral-500">Unrealized PnL
+                <span className="ml-1 text-[9px] bg-blue-50 text-blue-500 border border-blue-200 px-1 py-px rounded">live</span>
+              </span>
+              <span className={`font-semibold ${futUnrealizedPnl >= 0 ? "text-green-600" : "text-red-500"}`}>
+                {futOpen.length > 0 ? `${futUnrealizedPnl >= 0 ? "+" : ""}$${futUnrealizedPnl.toFixed(2)}` : "—"}
+              </span>
+            </div>
+            <div className="flex justify-between font-bold border-t border-neutral-100 pt-1.5">
+              <span className="text-neutral-700">Margin Balance</span>
+              <span className="text-neutral-900">${(futBalance + (futOpen.length > 0 ? futUnrealizedPnl : 0)).toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-t border-neutral-100 pt-1.5">
+              <span className="text-neutral-500">Realized PnL</span>
+              <span className={`font-semibold ${(learning?.balance.total_pnl ?? 0) >= 0 ? "text-green-600" : "text-red-500"}`}>
+                {learning?.balance.total_pnl != null
+                  ? `${learning.balance.total_pnl >= 0 ? "+" : ""}$${learning.balance.total_pnl.toFixed(2)}`
+                  : "—"}
+              </span>
+            </div>
+          </div>
+
           {learning?.equity_points && learning.equity_points.length > 1 && (
-            <MiniEquity points={learning.equity_points.map(p => ({ balance: p.balance, win: p.win }))} />
+            <div className="mt-3">
+              <MiniEquity points={learning.equity_points.map(p => ({ balance: p.balance, win: p.win }))} />
+            </div>
           )}
           <div className="grid grid-cols-4 gap-1.5 mt-3">
             {[
-              { label: "Open",  val: String(learning?.overall.open   ?? futOpen.length),   color: "text-blue-600"   },
-              { label: "Win",   val: String(learning?.overall.wins   ?? 0), color: "text-green-600"  },
-              { label: "Loss",  val: String(learning?.overall.losses ?? 0), color: "text-red-500"    },
+              { label: "Open",  val: String(learning?.overall.open   ?? futOpen.length), color: "text-blue-600"  },
+              { label: "Win",   val: String(learning?.overall.wins   ?? 0),              color: "text-green-600" },
+              { label: "Loss",  val: String(learning?.overall.losses ?? 0),              color: "text-red-500"   },
               { label: "WR",    val: learning && learning.overall.closed > 0 ? `${futWinRate.toFixed(0)}%` : "—", color: futWinRate >= 50 ? "text-green-600" : "text-red-500" },
             ].map(s => (
               <div key={s.label} className="text-center bg-neutral-50 rounded-xl py-2">
-                <p className={`text-base font-black ${s.color}`}>{s.val}</p>
+                <p className={`text-sm font-black ${s.color}`}>{s.val}</p>
                 <p className="text-[9px] text-neutral-400">{s.label}</p>
               </div>
             ))}
@@ -690,7 +818,7 @@ export default function DashboardPage() {
             {[
               {
                 label: "Spot Opp Scanner",
-                sub:   "Scans 100 pairs tiap 15m",
+                sub:   `Scans 100 pairs tiap ${health?.spot_scanner?.interval_minutes ?? 3}m`,
                 ok:    !!(health?.spot_scanner?.running),
                 cycle: health?.spot_scanner?.cycle_count,
                 err:   health?.spot_scanner?.last_error,
@@ -738,8 +866,8 @@ export default function DashboardPage() {
               {
                 label: "Futures Agent 2 — T0-T4",
                 sub:   "Wyckoff · Trend · Pattern · Trigger",
-                ok:    !!(health?.futures_scanner?.running),
-                cycle: undefined,
+                ok:    !!(health?.futures_scanner?.running) && (futStatus?.agent2_results ?? 0) > 0,
+                cycle: futStatus?.agent2_results,
                 err:   undefined,
               },
               {
@@ -899,7 +1027,7 @@ export default function DashboardPage() {
                 ) : spotAssets.length > 0 ? (
                   <>
                     <p className="text-xl font-black text-neutral-900 tabular-nums">
-                      ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${totalValue.toFixed(2)}
                     </p>
                     <p className={`text-xs font-bold ${totalPnlUSD >= 0 ? "text-green-600" : "text-red-500"}`}>
                       {totalPnlUSD >= 0 ? "+" : ""}${totalPnlUSD.toFixed(2)} unrealized
@@ -1080,7 +1208,7 @@ export default function DashboardPage() {
                           {a.total < 0.001 ? a.total.toFixed(6)
                             : a.total < 1    ? a.total.toFixed(4)
                             : a.total < 1000 ? a.total.toFixed(2)
-                            :                  a.total.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                            :                  Math.round(a.total).toLocaleString("en-US", { maximumFractionDigits: 0 })}
                         </p>
                         <p className="text-[10px] text-neutral-400">{a.asset}</p>
                       </div>
@@ -1121,7 +1249,7 @@ export default function DashboardPage() {
                 <div>
                   <p className="text-[10px] text-neutral-400 uppercase tracking-wide font-semibold mb-0.5">Total Nilai</p>
                   <p className="font-black text-neutral-800 text-base tabular-nums">
-                    ${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${totalValue.toFixed(2)}
                   </p>
                 </div>
                 <div>

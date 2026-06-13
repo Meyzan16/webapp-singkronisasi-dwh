@@ -5,16 +5,18 @@ Tujuan:
   Temukan koin yang sedang dalam fase akumulasi SEBELUM breakout besar.
   Fokus pada sinyal yang menunjukkan potensi kenaikan 2x–10x.
 
-Cara kerja:
-  1. Scan top-100 + small-cap candidates dari Binance Spot
-  2. Score 0–100+ menggunakan 9 sinyal multi-timeframe
-  3. Score ≥ 95 → AUTO-OPEN posisi tanpa persetujuan manual
-  4. Score 60–94 → Rekomendasi manual
-  5. Score < 60 → Skip
+Cara kerja (konstanta di bawah adalah sumber kebenaran — jangan tulis angka di docs):
+  1. Scan top-100 USDT pairs by quote volume (likuiditas minimum $5M/24h)
+  2. Score multi-sinyal; INDIKATOR dihitung dari candle SELESAI saja (§10.1)
+  3. raw_score (tanpa cap) ≥ AUTO_OPEN_SCORE + GERBANG ARAH terpenuhi → auto-open
+  4. MIN_SCORE ≤ score < AUTO_OPEN_SCORE → rekomendasi manual
+  5. Ranking & TOP_N dipotong berdasarkan EV per unit risk (§11.4), bukan score
 
-Auto-open trigger (score ≥ 95):
-  - BB Squeeze multi-TF + Volume surge + Taker buy dominan + EMA bullish
-  - Semua kondisi harus terpenuhi bersamaan (high conviction)
+Gerbang arah (§12.1 — sistem LONG-only WAJIB konfirmasi arah untuk auto-open):
+  taker_ratio ≥ 0.55 ATAU EMA9 > EMA21 di 1h. Tanpa itu squeeze hanya 10 pts
+  dan auto_open=False (tetap tampil sebagai rekomendasi manual).
+
+Regime gate (§12.5): BTC 24h < −3% atau EMA 4h bearish → semua auto-open OFF.
 
 Sinyal scoring:
   BB Squeeze multi-TF  : 35 pts  (energi terkompresi, ledakan mendekat)
@@ -38,31 +40,48 @@ import httpx
 import structlog
 
 from app.services.binance_urls import spot
+from app.services.trading_costs import EXECUTION_COST_PCT
 
 logger = structlog.get_logger(__name__)
 
 TIMEFRAMES        = ["15m", "1h", "4h"]
 CANDLE_LIMIT      = 100
-TOP_N             = 15    # hanya 15 terbaik — kualitas > kuantitas
-MIN_SCORE         = 65    # threshold lebih tinggi = hanya high-conviction
-AUTO_OPEN_SCORE   = 90    # auto-open untuk sinyal sangat kuat
+TOP_N             = 15     # hanya 15 terbaik — kualitas > kuantitas
+MIN_SCORE         = 65     # threshold lebih tinggi = hanya high-conviction
+AUTO_OPEN_SCORE   = 90     # auto-open untuk RAW score (pre-weight, tanpa cap)
+MIN_QUOTE_VOLUME  = 5_000_000   # §11.7: likuiditas minimum supaya eksekutable
 
-# Stablecoin blacklist — BB Width secara natural sempit, trigger false squeeze
-# Tidak ada volatilitas = tidak ada profit opportunity di SPOT
+# Gerbang arah untuk auto-open (§12.1)
+DIRECTION_TAKER_MIN = 0.55
+
+# Regime gate BTC (§12.5)
+BTC_REGIME_24H_MIN  = -3.0   # BTC 24h di bawah ini → auto-open OFF
+
+# Stablecoin / fiat / low-vol token blacklist
+# BB Width secara natural sempit → false squeeze signals
+# Updated: tambah fiat pairs, wrapped tokens, algorithmic stables
 STABLECOIN_BLACKLIST = {
+    # USD stablecoins
     "USDC", "FDUSD", "TUSD", "USDP", "GUSD", "USDD", "FRAX",
-    "DAI", "LUSD", "SUSD", "ALUSD", "HUSD", "EURS", "USDN",
-    "UST", "USTC", "RLUSD", "USD1", "UUSD", "BFUSD", "USDE",
-    "BUSD", "AEUR", "EURT", "XSGD", "BIDR", "IDRT",
+    "DAI", "LUSD", "SUSD", "ALUSD", "HUSD", "USDN", "USDE",
+    "UST", "USTC", "RLUSD", "USD1", "UUSD", "BFUSD", "BUSD",
+    "USDX", "USDY", "USDZ", "USDV", "MUSD", "CUSD", "SUSD",
+    "YUSD", "HUSD", "ZUSD", "DUSD", "NUSD", "XUSD", "PUSD",
+    # EUR / fiat pairs
+    "AEUR", "EURT", "EURS", "EUR",
+    # Asian fiat proxies
+    "XSGD", "BIDR", "IDRT", "THBX", "BRLA",
+    # Wrapped BTC/ETH (track BTC/ETH directly instead)
+    "WBTC", "WETH", "WEETH", "RETH", "STETH", "CBETH", "BETH",
+    # Liquid staking rebasing tokens (price tracks ETH = tight BB)
+    "FRXETH", "ANKRBNB", "SFRXETH",
+    # Stable algorithmic (FRAX/LUSD/USDD sudah di atas)
+    "MKUSD", "CRVUSD",
 }
 
-# Fee awareness (Binance spot taker 0.1% per side = 0.2% round-trip)
-TAKER_FEE_PCT     = 0.10  # % per side
-ROUND_TRIP_FEE    = TAKER_FEE_PCT * 2  # 0.20% total cost
-
-# Position sizing (paper trading $1000 balance, 1% risk per trade = $10 risk)
-PAPER_BALANCE     = 1_000.0
-RISK_PER_TRADE    = 0.01   # 1% of balance = $10
+# Biaya eksekusi penuh (fee + spread + slippage) dari satu sumber (§15.1).
+# Sizing TIDAK dihitung di sini — compute_spot_sizing (balance.py) adalah
+# satu-satunya sumber ukuran posisi dari balance real (§10.3).
 
 
 # ── Math helpers ───────────────────────────────────────────────────────────────
@@ -140,12 +159,19 @@ class TFData:
     price_slope:  float = 0.0
     vol_slope:    float = 0.0
     taker_ratio:  float = 0.5   # buy/(buy+sell) — >0.55 bullish
+    live_price:   float = 0.0   # harga candle berjalan (untuk entry, BUKAN indikator)
 
 
 def _analyze_tf(tf: str, klines: list) -> Optional[TFData]:
-    if len(klines) < 30:
+    if len(klines) < 31:
         return None
     try:
+        # §10.1: candle terakhir SEDANG BERJALAN — volume parsial & close bergerak
+        # membuat semua indikator (BB, RSI, vol_ratio) flicker antar scan.
+        # Indikator pakai candle SELESAI saja; harga live diambil terpisah.
+        live_price = float(klines[-1][4])
+        klines = klines[:-1]
+
         opens  = [float(k[1]) for k in klines]
         highs  = [float(k[2]) for k in klines]
         lows   = [float(k[3]) for k in klines]
@@ -153,6 +179,7 @@ def _analyze_tf(tf: str, klines: list) -> Optional[TFData]:
         vols   = [float(k[5]) for k in klines]
 
         d             = TFData(tf=tf, closes=closes, volumes=vols, opens=opens, highs=highs, lows=lows)
+        d.live_price  = live_price
         d.bb_width    = _bb_width(closes)
         d.rsi         = _rsi(closes, 14)
         d.vol_ratio   = _vol_ratio(vols)
@@ -252,9 +279,9 @@ def _calc_trade_levels(tf_data: dict[str, TFData], entry: float) -> Optional[dic
     if rr < 3.5:
         return None
 
-    # Fee-aware net P&L at each TP
+    # Net P&L setelah BIAYA EKSEKUSI PENUH — fee + spread + slippage (§15.1)
     def net_pct(tp: float) -> float:
-        return round((tp - entry) / entry * 100 - ROUND_TRIP_FEE, 2)
+        return round((tp - entry) / entry * 100 - EXECUTION_COST_PCT, 2)
 
     rp = _round_price
 
@@ -268,13 +295,10 @@ def _calc_trade_levels(tf_data: dict[str, TFData], entry: float) -> Optional[dic
         "tp1_pct":     round(tp1_pct, 2),
         "tp2_pct":     round((tp2 - entry) / entry * 100, 2),
         "tp3_pct":     round((tp3 - entry) / entry * 100, 2),
-        "tp1_net_pct": net_pct(tp1),   # after fee
-        "tp2_net_pct": net_pct(tp2),   # after fee
-        "tp3_net_pct": net_pct(tp3),   # after fee
+        "tp1_net_pct": net_pct(tp1),
+        "tp2_net_pct": net_pct(tp2),
+        "tp3_net_pct": net_pct(tp3),
         "rr_ratio":    round(rr, 1),
-        # Position sizing info
-        "position_usdt": round(PAPER_BALANCE * RISK_PER_TRADE / (risk_pct / 100), 2),
-        "risk_usdt":     round(PAPER_BALANCE * RISK_PER_TRADE, 2),
     }
 
 
@@ -294,7 +318,17 @@ def _score_symbol(
     ref = tf_data.get("15m") or tf_data.get("1h")
     if not ref:
         return None
-    current_price = ref.closes[-1]
+    # Harga live dari candle berjalan (indikator memakai candle selesai — §10.1)
+    current_price = ref.live_price or ref.closes[-1]
+
+    # ── GERBANG ARAH (§12.1): LONG-only wajib konfirmasi arah ─────────────────
+    # Squeeze itu arah-netral — kompresi meledak ke bawah sama seringnya.
+    d1h_dir   = tf_data.get("1h")
+    taker_avg = sum(d.taker_ratio for d in tf_data.values()) / len(tf_data)
+    direction_confirmed = (
+        taker_avg >= DIRECTION_TAKER_MIN
+        or bool(d1h_dir and d1h_dir.ema9 > d1h_dir.ema21)
+    )
 
     # 1. BB Squeeze (multi-TF) ─────────────────────────────────────────────────
     squeeze_tfs = []
@@ -304,11 +338,12 @@ def _score_symbol(
             squeeze_tfs.append(tf)
 
     if len(squeeze_tfs) >= 2:
-        score += 35
+        # Tanpa arah, kompresi hanya bernilai kecil (§12.1)
+        score += 35 if direction_confirmed else 10
         signals.append(f"🔵 BB Squeeze di {' + '.join(squeeze_tfs)} — ledakan volatilitas mendekat")
         alert = "squeeze"
     elif len(squeeze_tfs) == 1:
-        score += 15
+        score += 15 if direction_confirmed else 5
         signals.append(f"BB Squeeze {squeeze_tfs[0]}")
 
     # 2. Smart Money Accumulation ──────────────────────────────────────────────
@@ -326,7 +361,15 @@ def _score_symbol(
             score += 20
             signals.append("💪 Volume naik saat harga turun — hidden strength")
 
-    # 3. RSI Zone ──────────────────────────────────────────────────────────────
+    # 3. RSI Zone + REM OVERBOUGHT timeframe besar (§10.4) ────────────────────
+    # Rem dulu: RSI 4h sangat tinggi = parabolic, pola klasik beli di pucuk
+    d4h_rsi = tf_data["4h"].rsi if "4h" in tf_data else None
+    if d4h_rsi is not None and d4h_rsi > 82:
+        return None   # skip total — jangan tampil sebagai rekomendasi pun
+    if d4h_rsi is not None and d4h_rsi > 75:
+        score -= 15
+        signals.append(f"⚠️ RSI(4h) {d4h_rsi:.0f} — overbought berat, risiko pucuk")
+
     for tf, d in tf_data.items():
         if 35 <= d.rsi <= 55:
             score += 10
@@ -418,24 +461,35 @@ def _score_symbol(
     elif any("🎯" in s for s in signals):
         alert = "breakout"
 
-    final_score = round(min(score, 99), 1)
-    auto_open   = final_score >= AUTO_OPEN_SCORE
+    # §10.2: raw_score TANPA cap untuk ranking + conviction sizing;
+    # cap 99 hanya untuk tampilan UI (legacy display contract)
+    raw_score     = round(score, 1)
+    display_score = round(min(score, 99), 1)
+    # §12.1: auto-open WAJIB gerbang arah; tanpa itu hanya rekomendasi manual
+    auto_open = raw_score >= AUTO_OPEN_SCORE and direction_confirmed
+
+    # EMA bullish at entry time — stored in meta so monitor can detect REAL reversals
+    d1h_ref = tf_data.get("1h")
+    ema_bullish_at_entry = bool(d1h_ref and d1h_ref.ema9 > d1h_ref.ema21) if d1h_ref else True
 
     return {
-        "symbol":            symbol,
-        "current_price":     round(current_price, 8),
-        "opportunity_score": final_score,
-        "auto_open":         auto_open,   # True = posisi dibuka otomatis
-        "signals":           clean_signals[:5],
-        "alert_type":        alert,
-        "change_24h":        round(change_24h, 2),
-        "change_1h":         round(change_1h, 2),
-        "vol_ratio":         round(best.vol_ratio if best else 1.0, 2),
-        "avg_taker":         round(avg_taker, 3),
-        "bb_width_15m":      round(tf_data["15m"].bb_width * 100, 2) if "15m" in tf_data else None,
-        "rsi_1h":            round(tf_data["1h"].rsi, 1) if "1h" in tf_data else None,
-        "tfs_confirmed":     list(tf_data.keys()),
-        "squeeze_tfs":       squeeze_tfs,
+        "symbol":              symbol,
+        "current_price":       round(current_price, 8),
+        "opportunity_score":   display_score,
+        "raw_score":           raw_score,
+        "direction_confirmed": direction_confirmed,
+        "auto_open":           auto_open,
+        "signals":             clean_signals[:5],
+        "alert_type":          alert,
+        "change_24h":          round(change_24h, 2),
+        "change_1h":           round(change_1h, 2),
+        "vol_ratio":           round(best.vol_ratio if best else 1.0, 2),
+        "avg_taker":           round(avg_taker, 3),
+        "bb_width_15m":        round(tf_data["15m"].bb_width * 100, 2) if "15m" in tf_data else None,
+        "rsi_1h":              round(tf_data["1h"].rsi, 1) if "1h" in tf_data else None,
+        "tfs_confirmed":       list(tf_data.keys()),
+        "squeeze_tfs":         squeeze_tfs,
+        "ema_bullish":         ema_bullish_at_entry,  # for monitor trend_reversal detection
     }
 
 
@@ -458,6 +512,69 @@ async def _fetch_klines(client: httpx.AsyncClient, symbol: str, tf: str) -> list
 
 # ── Main scan ──────────────────────────────────────────────────────────────────
 
+async def _load_alert_weights() -> tuple[dict[str, float], set[str]]:
+    """
+    Load per-alert-type adaptive weights from DB.
+    Returns (weights, banned_types). banned (§14.7): weight < 0.8 dengan n ≥ 10
+    → tipe itu DILARANG auto-open sampai win rate pulih — learning yang punya gigi.
+    """
+    try:
+        from app.database import AsyncSessionLocal, is_db_available
+        from app.models.signal_weight import AgentSignalWeight
+        from sqlalchemy import select as _select
+
+        if not is_db_available():
+            return {}, set()
+
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                _select(AgentSignalWeight).where(
+                    AgentSignalWeight.agent      == "opportunity_spot",
+                    AgentSignalWeight.signal_key.like("alert:%"),
+                    AgentSignalWeight.total_count >= 3,
+                )
+            )
+            rows    = list(result.scalars().all())
+            weights = {r.signal_key.replace("alert:", ""): r.weight for r in rows}
+            banned  = {
+                r.signal_key.replace("alert:", "")
+                for r in rows
+                if r.weight < 0.8 and r.total_count >= 10
+            }
+            return weights, banned
+    except Exception:
+        return {}, set()
+
+
+def _ev_per_risk(result: dict) -> float:
+    """
+    Expected value per unit risk (§11.4) — SATU sumber ranking untuk
+    scheduler DAN UI. p_win dari RAW pre-weight score (§7.4), reward = TP2 NET.
+    """
+    p      = min(result.get("raw_score", result.get("opportunity_score", 0)), 99) / 100
+    reward = result.get("tp2_net_pct", 0) or 0
+    risk   = result.get("risk_pct", 0) or 2.0
+    ev     = p * reward - (1 - p) * risk
+    return round(ev / risk, 3)
+
+
+def _btc_regime(tf_data_btc: Optional[dict], btc_change_24h: float) -> tuple[str, bool]:
+    """
+    Regime BTC (§12.5): saat BTC turun tajam, hampir semua alt LONG gagal serentak.
+    Returns (label, auto_open_allowed).
+    """
+    if btc_change_24h < BTC_REGIME_24H_MIN:
+        return "bearish_24h", False
+    if tf_data_btc:
+        d4h = tf_data_btc.get("4h")
+        if d4h and d4h.ema9 < d4h.ema21:
+            return "bearish_4h", False
+        d1h = tf_data_btc.get("1h")
+        if d1h and d1h.ema9 > d1h.ema21:
+            return "bull", True
+    return "flat", True
+
+
 async def run_opportunity_scan() -> dict:
     """
     Scan top-100 USDT SPOT pairs.
@@ -466,23 +583,64 @@ async def run_opportunity_scan() -> dict:
     start = time.time()
     logger.info("opportunity_scan_start")
 
+    # Load adaptive weights (non-blocking — uses default 1.0 if DB unavailable)
+    alert_weights, banned_types = await _load_alert_weights()
+
     # 1. Get top-100 by quote volume (Spot)
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(spot("/api/v3/ticker/24hr"))
         if r.status_code != 200:
+            # §10.6: jangan diam — UI harus bisa bedakan "scan gagal" vs "kosong"
+            logger.warning("scan_ticker_failed", status=r.status_code)
             return {"results": [], "scanned": 0, "found": 0,
-                    "generated_at": int(time.time()), "elapsed_sec": 0}
+                    "generated_at": int(time.time()), "elapsed_sec": 0,
+                    "error": f"ticker_24hr gagal (HTTP {r.status_code})"}
         tickers = [t for t in r.json() if str(t.get("symbol", "")).endswith("USDT")]
 
     tickers.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
 
-    # Filter stablecoins — natural tight BB triggers false squeeze signals
+    # Filter 1: name-based blacklist
     def _is_stablecoin(sym: str) -> bool:
-        base = sym.upper().replace("USDT", "")
+        # Strip USDT suffix correctly (handle edge cases like "USDTUSDT")
+        base = sym.upper()
+        if base.endswith("USDT"):
+            base = base[:-4]           # remove last 4 chars "USDT"
         return base in STABLECOIN_BLACKLIST
 
-    tickers    = [t for t in tickers if not _is_stablecoin(t["symbol"])]
+    tickers = [t for t in tickers if not _is_stablecoin(t["symbol"])]
+
+    # Filter 2: price-range guard — if price ≈ $1 and barely moving, skip
+    # Catches new stablecoins not yet in the blacklist
+    def _is_pegged(t: dict) -> bool:
+        try:
+            price  = float(t.get("lastPrice", 0))
+            chg24h = abs(float(t.get("priceChangePercent", 0)))
+            # Pegged instrument: price $0.96–$1.05 and 24h change < 1%
+            return 0.96 < price < 1.05 and chg24h < 1.0
+        except Exception:
+            return False
+
+    tickers = [t for t in tickers if not _is_pegged(t)]
+
+    # Filter 3 (§11.7): likuiditas minimum — rekomendasi harus eksekutable
+    def _liquid(t: dict) -> bool:
+        try:
+            return float(t.get("quoteVolume", 0)) >= MIN_QUOTE_VOLUME
+        except (TypeError, ValueError):
+            return False
+
+    tickers    = [t for t in tickers if _liquid(t)]
     candidates = tickers[:100]
+
+    # BTC 24h change untuk regime gate (§12.5)
+    btc_change_24h = 0.0
+    for t in candidates:
+        if t["symbol"] == "BTCUSDT":
+            try:
+                btc_change_24h = float(t.get("priceChangePercent", 0))
+            except (TypeError, ValueError):
+                pass
+            break
 
     # 2. Fetch klines concurrently — semaphore caps at 15 simultaneous requests
     # (100 coins × 3 TF = 300 total; weight=2 each → max 30 weight at a time)
@@ -504,6 +662,7 @@ async def run_opportunity_scan() -> dict:
 
     # 3. Score + calculate trade levels
     results = []
+    btc_tf_data: Optional[dict] = None
     for ticker in candidates:
         symbol     = ticker["symbol"]
         change_24h = float(ticker.get("priceChangePercent", 0))
@@ -516,6 +675,8 @@ async def run_opportunity_scan() -> dict:
 
         if not tf_data:
             continue
+        if symbol == "BTCUSDT":
+            btc_tf_data = tf_data
 
         d1h       = tf_data.get("1h")
         change_1h = 0.0
@@ -526,24 +687,53 @@ async def run_opportunity_scan() -> dict:
         if result is None:
             continue
 
+        # Bobot learning: HANYA mengubah skor display & ranking — keputusan
+        # auto_open dan conviction sizing tetap dari raw pre-weight score (§7.4)
+        alert_weight = alert_weights.get(result["alert_type"], 1.0)
+        if alert_weight != 1.0:
+            result["opportunity_score"] = round(
+                min(result["opportunity_score"] * alert_weight, 99), 1
+            )
+        result["weight_applied"] = alert_weight
+
+        # §14.7: tipe dengan track record busuk (weight<0.8, n≥10) dilarang auto-open
+        if result["alert_type"] in banned_types:
+            result["auto_open"]      = False
+            result["banned_by_learning"] = True
+
+        if result["opportunity_score"] < MIN_SCORE:
+            continue  # penalti bobot boleh menggugurkan kandidat marjinal
+
         levels = _calc_trade_levels(tf_data, result["current_price"])
         if levels is None:
             continue  # skip coins without valid Entry/SL/TP
 
         result.update(levels)
+        result["ev_per_risk"] = _ev_per_risk(result)
         results.append(result)
 
-    results.sort(key=lambda x: x["opportunity_score"], reverse=True)
+    # §12.5: regime gate BTC — auto-open OFF saat market memusuhi LONG
+    regime, auto_allowed = _btc_regime(btc_tf_data, btc_change_24h)
+    if not auto_allowed:
+        for r_ in results:
+            r_["auto_open"] = False
+        logger.info("scan_regime_gate_active", regime=regime,
+                    btc_24h=btc_change_24h)
+
+    # §11.4: ranking & TOP_N berdasarkan EV per unit risk — bukan score
+    results.sort(key=lambda x: x.get("ev_per_risk", 0), reverse=True)
     results = results[:TOP_N]
 
     elapsed = round(time.time() - start, 1)
     logger.info("opportunity_scan_done",
-                found=len(results), scanned=len(candidates), elapsed_sec=elapsed)
+                found=len(results), scanned=len(candidates),
+                regime=regime, elapsed_sec=elapsed)
 
     return {
         "results":      results,
         "scanned":      len(candidates),
         "found":        len(results),
+        "btc_regime":   regime,
         "generated_at": int(time.time()),
         "elapsed_sec":  elapsed,
     }

@@ -152,6 +152,27 @@ async def get_binance_status() -> dict:
         result    = await _check_binance()
         _cache    = result
         _cache_ts = time.time()
+
+        # ── Log status changes ──────────────────────────────────────────────
+        try:
+            from app.services.health_logger import record_api_status
+            record_api_status(
+                "spot",
+                ok=result["spot_ok"],
+                latency_ms=result.get("spot_latency_ms"),
+                error=result.get("spot_error"),
+                banned_until=result.get("spot_banned_until"),
+            )
+            record_api_status(
+                "futures",
+                ok=result["futures_ok"],
+                latency_ms=result.get("futures_latency_ms"),
+                error=result.get("futures_error"),
+                banned_until=result.get("futures_banned_until"),
+            )
+        except Exception:
+            pass  # never let logging break the main response
+
         return result
     except Exception as exc:
         logger.warning("binance_status_check_error", error=str(exc)[:80])

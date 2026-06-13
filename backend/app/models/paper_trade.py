@@ -47,7 +47,13 @@ class PaperTrade(Base):
     trail_sl:      Mapped[float | None] = mapped_column(Float,       nullable=True)   # current trailed SL
     trail_active:  Mapped[bool | None]  = mapped_column(nullable=True, default=False) # trailing started
 
+    # Position sizing (real-balance linked — stored at open time)
+    position_size:    Mapped[float | None] = mapped_column(Float, nullable=True)   # notional $ value
+    risk_dollar:      Mapped[float | None] = mapped_column(Float, nullable=True)   # actual $ at risk
+    balance_snapshot: Mapped[float | None] = mapped_column(Float, nullable=True)   # balance when opened
+
     # Outcome
     status:      Mapped[str]         = mapped_column(String(10), nullable=False, default="open", index=True)  # open | tp | sl
     close_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     pnl_pct:     Mapped[float | None] = mapped_column(Float, nullable=True)   # % gain/loss at close
+    pnl_dollar:  Mapped[float | None] = mapped_column(Float, nullable=True)   # $ gain/loss at close
