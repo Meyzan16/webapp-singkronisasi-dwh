@@ -540,6 +540,7 @@ def scan_symbol(
     F52: Returns ALL valid directions where score ≥ MIN_SCORE.
     Primary: LONG on accumulation. Secondary: SHORT on clear distribution.
     Both are returned independently if both qualify.
+    F68/F69/F72: applies weight cache, adaptive threshold, and regime modifier.
     """
     if not tf_map:
         return []
@@ -549,6 +550,14 @@ def scan_symbol(
     if price <= 0:
         return []
 
+    # F68/F69/F72: load in-memory caches (synchronous — no await needed)
+    from agents.futures import weight_updater
+    from agents.futures.regime import get_cached_regime
+    weight_cache  = weight_updater.get_weight_cache(AGENT_NAME)
+    thresholds    = weight_updater.get_adaptive_thresholds(AGENT_NAME)
+    effective_min = thresholds["min_score"]
+    regime        = get_cached_regime()
+
     long_score,  long_sigs  = _score_accumulation(tf_map, price, change_24h)
     short_score, short_sigs = _score_distribution(tf_map, price, change_24h)
 
@@ -557,7 +566,25 @@ def scan_symbol(
         ("LONG",  long_score,  long_sigs),
         ("SHORT", short_score, short_sigs),
     ]:
-        if score < MIN_SCORE:
+        # F68: apply signal weight adjustments from historical win rates (±5 pts per signal)
+        for sig in signals:
+            key = weight_updater.normalize_signal_key(sig)
+            w   = weight_cache.get(key, 1.0)
+            score += (w - 1.0) * 5.0
+
+        # F72: regime modifier — reward alignment, penalize counter-trend
+        if regime == "volatile":
+            score *= 0.85
+        elif regime == "trending_up" and direction == "LONG":
+            score += 5
+        elif regime == "trending_down" and direction == "SHORT":
+            score += 5
+        elif regime == "trending_up" and direction == "SHORT":
+            score -= 5
+        elif regime == "trending_down" and direction == "LONG":
+            score -= 5
+
+        if score < effective_min:   # F69: adaptive threshold
             continue
         levels = _calc_levels(direction, tf_map, price)
         if not levels:

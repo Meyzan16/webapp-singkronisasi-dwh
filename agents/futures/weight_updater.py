@@ -4,17 +4,16 @@ Signal Weight Updater — runs after each scan cycle.
 Reads all closed futures trades, maps signals → win/loss,
 then upserts agent_signal_weights table.
 
-Weight formula:
-  win_rate >= 0.70 → weight = 1.5  (boost)
-  win_rate >= 0.55 → weight = 1.2
-  win_rate >= 0.40 → weight = 1.0  (neutral)
-  win_rate <  0.40 → weight = 0.7  (reduce)
-  total_count < 3  → weight = 1.0  (not enough data yet)
+Also maintains in-memory caches used synchronously by agents:
+  - _weight_cache:       {agent: {signal_key: weight}}
+  - _adaptive_thresholds: {agent: {min_score, auto_threshold}}
+  - _coin_blacklist:     {symbol: blacklist_until_ts}
 """
 
 import json
 import re
 import time
+from collections import defaultdict
 from typing import Optional
 
 import structlog
@@ -30,33 +29,119 @@ _last_run:   Optional[float] = None
 _last_error: Optional[str]   = None
 MIN_RUN_INTERVAL = 5 * 60  # don't run more than once every 5 min
 
+# ── In-memory caches (read synchronously by agents during scoring) ─────────────
+
+# F68: signal weight cache  {agent: {signal_key: weight}}
+_weight_cache: dict[str, dict[str, float]] = {}
+
+# F69: adaptive thresholds  {agent: {min_score: int, auto_threshold: int}}
+_adaptive_thresholds: dict[str, dict] = {}
+
+# F71: per-coin blacklist  {symbol: blacklist_until_ts}
+_coin_blacklist: dict[str, float] = {}
+
+
+# ── Public cache accessors ─────────────────────────────────────────────────────
+
+def get_weight_cache(agent: str) -> dict[str, float]:
+    """F68: Return weight dict for agent — read synchronously during scoring."""
+    return _weight_cache.get(agent, {})
+
+
+def get_adaptive_thresholds(agent: str) -> dict:
+    """F69: Return adaptive min_score and auto_threshold for agent."""
+    return _adaptive_thresholds.get(agent, {"min_score": 52, "auto_threshold": 72})
+
+
+def is_blacklisted(symbol: str) -> bool:
+    """F71: True if symbol is blacklisted due to consecutive losses."""
+    return time.time() < _coin_blacklist.get(symbol, 0)
+
+
+def normalize_signal_key(raw: str) -> str:
+    """F73: Expose normalizer so agents use identical keys to weight_updater."""
+    return _normalize_signal(raw)
+
+
+# ── Internal helpers ───────────────────────────────────────────────────────────
 
 def _normalize_signal(raw: str) -> str:
     """
-    Convert a human-readable signal string to a stable key.
-    Strip emojis, numbers, and reduce to 5-word normalized form.
+    F73: Convert signal string to a stable lookup key.
+    Preserves numbers to keep timeframe info: "BB Squeeze 1H" ≠ "BB Squeeze 4H".
+    Removes emojis / punctuation, lowercases, joins with underscore.
     """
-    cleaned = re.sub(r"[^\w\s%+.\-]", "", raw)
-    cleaned = re.sub(r"\d+\.?\d*", "N", cleaned)
-    words   = cleaned.strip().split()[:5]
-    return "_".join(w.lower() for w in words if w)
+    # Remove everything that isn't a word char or space (preserves digits)
+    cleaned = re.sub(r"[^\w\s]", " ", raw)
+    words   = cleaned.strip().lower().split()[:5]
+    return "_".join(w for w in words if w)
 
 
 def _weight_from_rate(win_rate: float, total: int) -> float:
+    """F75: Smooth linear interpolation instead of step function.
+    win_rate=0   → 0.70  (heavy reduce)
+    win_rate=0.5 → 1.10  (slight boost)
+    win_rate=1.0 → 1.50  (max boost)
+    """
     if total < 3:
-        return 1.0
-    if win_rate >= 0.70:
-        return 1.5
-    if win_rate >= 0.55:
-        return 1.2
-    if win_rate >= 0.40:
-        return 1.0
-    return 0.7
+        return 1.0  # not enough data → neutral
+    return round(max(0.7, min(1.5, 0.7 + win_rate * 0.8)), 3)
 
+
+def _update_coin_blacklist(trades: list) -> None:
+    """F71: Blacklist coins with 3 consecutive SL trades (24h cooldown)."""
+    by_symbol: dict = defaultdict(list)
+    for t in sorted(trades, key=lambda x: x.entry_at or 0):
+        by_symbol[t.symbol].append(t)
+
+    for symbol, sym_trades in by_symbol.items():
+        last3 = [t for t in sym_trades if t.status in ("sl", "tp")][-3:]
+        if len(last3) >= 3 and all(t.status == "sl" for t in last3):
+            until = time.time() + 24 * 3600
+            _coin_blacklist[symbol] = until
+            logger.info("coin_blacklisted", symbol=symbol, hours=24)
+
+
+def _compute_adaptive_thresholds(trades: list) -> None:
+    """F69: Compute per-agent adaptive thresholds from recent win rate."""
+    agent_wins:  dict[str, int] = defaultdict(int)
+    agent_total: dict[str, int] = defaultdict(int)
+
+    for t in trades:
+        a = t.style
+        agent_total[a] += 1
+        # Use same is_win definition as weight update (F60: pnl_pct > 0)
+        if t.status == "tp" and (t.pnl_pct or 0.0) > 0:
+            agent_wins[a] += 1
+
+    for agent_name, total in agent_total.items():
+        if total < 10:  # not enough data → defaults
+            _adaptive_thresholds[agent_name] = {"min_score": 52, "auto_threshold": 72}
+            continue
+
+        wr = agent_wins[agent_name] / total
+        if wr < 0.40:
+            thresholds = {"min_score": 57, "auto_threshold": 77}
+        elif wr < 0.55:
+            thresholds = {"min_score": 54, "auto_threshold": 74}
+        elif wr <= 0.65:
+            thresholds = {"min_score": 52, "auto_threshold": 72}
+        else:  # > 0.65 — performing well, slightly lower bar
+            thresholds = {"min_score": 50, "auto_threshold": 70}
+
+        _adaptive_thresholds[agent_name] = thresholds
+        logger.info("adaptive_thresholds_updated",
+                    agent=agent_name, win_rate=round(wr, 3),
+                    min_score=thresholds["min_score"],
+                    auto_threshold=thresholds["auto_threshold"])
+
+
+# ── Main update ────────────────────────────────────────────────────────────────
 
 async def update_weights() -> int:
     """
     Re-compute signal weights from all closed futures trades.
+    Also updates in-memory caches: weight_cache, adaptive_thresholds, coin_blacklist.
     Returns number of rows upserted.
     """
     global _last_run, _last_error
@@ -70,10 +155,11 @@ async def update_weights() -> int:
 
     try:
         async with AsyncSessionLocal() as session:
+            # F70: include expired trades as negative signal (was only tp+sl)
             result = await session.execute(
                 select(PaperTrade).where(
                     PaperTrade.style.in_(["futures_agent1", "futures_agent2"]),
-                    PaperTrade.status.in_(["tp", "sl"]),
+                    PaperTrade.status.in_(["tp", "sl", "expired"]),
                 )
             )
             trades = list(result.scalars().all())
@@ -82,8 +168,11 @@ async def update_weights() -> int:
             _last_run = now
             return 0
 
-        # ── Build (agent, signal_key, regime) → {wins, total} map ─────────
-        # key: (agent, signal_key, regime)
+        # ── Update in-memory caches before DB write ─────────────────────────
+        _update_coin_blacklist(trades)       # F71
+        _compute_adaptive_thresholds(trades) # F69
+
+        # ── Build (agent, signal_key, regime) → {wins, total} map ──────────
         stats: dict[tuple, dict] = {}
 
         for trade in trades:
@@ -97,22 +186,38 @@ async def update_weights() -> int:
                 continue
 
             agent  = trade.style
-            is_win = trade.status == "tp"
             regime = trade.regime or "all"
 
+            # F60: real win requires status=="tp" AND pnl_pct > 0
+            # F70: expired treated as loss (is_win = False)
+            is_win = trade.status == "tp" and (trade.pnl_pct or 0.0) > 0
+
             for raw_sig in signals:
-                key_all    = (agent, _normalize_signal(raw_sig), "all")
-                key_regime = (agent, _normalize_signal(raw_sig), regime)
+                sig_key    = _normalize_signal(raw_sig)
+                if not sig_key:
+                    continue
+                key_all    = (agent, sig_key, "all")
+                key_regime = (agent, sig_key, regime)
 
                 for k in [key_all, key_regime]:
-                    if k[1] == "":
-                        continue
                     entry = stats.setdefault(k, {"wins": 0, "total": 0})
                     entry["total"] += 1
                     if is_win:
                         entry["wins"] += 1
 
-        # ── Upsert to DB ──────────────────────────────────────────────────
+        # ── Update in-memory weight cache (F68: agents read synchronously) ──
+        new_cache: dict[str, dict[str, float]] = {}
+        for (agent_name, signal_key, regime_key), v in stats.items():
+            if regime_key != "all":
+                continue  # cache uses aggregate "all" weights
+            win_rate = v["wins"] / v["total"] if v["total"] > 0 else 0.5
+            w = _weight_from_rate(win_rate, v["total"])
+            if agent_name not in new_cache:
+                new_cache[agent_name] = {}
+            new_cache[agent_name][signal_key] = w
+        _weight_cache.update(new_cache)
+
+        # ── Upsert to DB ─────────────────────────────────────────────────────
         upserted = 0
         async with AsyncSessionLocal() as session:
             for (agent, signal_key, regime), v in stats.items():
@@ -132,7 +237,7 @@ async def update_weights() -> int:
                     row.win_count   = v["wins"]
                     row.total_count = v["total"]
                     row.win_rate    = round(win_rate, 4)
-                    row.weight      = round(weight, 2)
+                    row.weight      = round(weight, 4)
                     row.updated_at  = now
                 else:
                     session.add(AgentSignalWeight(
@@ -142,7 +247,7 @@ async def update_weights() -> int:
                         win_count   = v["wins"],
                         total_count = v["total"],
                         win_rate    = round(win_rate, 4),
-                        weight      = round(weight, 2),
+                        weight      = round(weight, 4),
                         updated_at  = now,
                     ))
                 upserted += 1
@@ -151,7 +256,10 @@ async def update_weights() -> int:
 
         _last_run   = now
         _last_error = None
-        logger.info("weights_updated", rows=upserted, trades=len(trades))
+        logger.info("weights_updated", rows=upserted, trades=len(trades),
+                    cache_agents=list(_weight_cache.keys()),
+                    blacklisted=len([s for s, t in _coin_blacklist.items()
+                                    if time.time() < t]))
         return upserted
 
     except Exception as exc:
@@ -161,4 +269,10 @@ async def update_weights() -> int:
 
 
 def get_state() -> dict:
-    return {"last_run": _last_run, "last_error": _last_error}
+    return {
+        "last_run":   _last_run,
+        "last_error": _last_error,
+        "cached_agents": list(_weight_cache.keys()),
+        "blacklisted_coins": [s for s, t in _coin_blacklist.items()
+                               if time.time() < t],
+    }

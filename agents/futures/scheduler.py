@@ -144,12 +144,18 @@ async def _run_scan() -> dict:
     a1_results: list[dict] = []
     a2_results: list[dict] = []
 
+    from agents.futures.weight_updater import is_blacklisted  # F71
+
     for ticker in tickers:
         symbol     = ticker["symbol"]
         change_24h = float(ticker.get("priceChangePercent", 0))
         tf_map     = all_tf_maps.get(symbol, {})
 
         if not tf_map:
+            continue
+
+        # F71: skip coins blacklisted due to 3 consecutive SL (24h cooldown)
+        if is_blacklisted(symbol):
             continue
 
         # F34/F52: scan_symbol now returns list — extend (not append) to get all directions

@@ -7,7 +7,7 @@ import asyncio
 import time
 from typing import Any, Optional
 
-STALE_SEC = 20 * 60  # results older than 20 min are stale
+STALE_SEC = 5 * 60   # F32: results older than 5 min are stale (was 20 min)
 
 # ── State ─────────────────────────────────────────────────────────────────────
 

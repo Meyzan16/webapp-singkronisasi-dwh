@@ -57,10 +57,11 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
         logger.info("auto_trade_blocked_regime", agent=agent, regime=regime)
         return 0
 
-    # BUG FIX: use higher threshold in ranging (trend signals unreliable)
-    effective_threshold = AUTO_OPEN_THRESHOLD
+    # F69: use adaptive threshold based on per-agent rolling win rate
+    from agents.futures.weight_updater import get_adaptive_thresholds
+    effective_threshold = get_adaptive_thresholds(agent)["auto_threshold"]
     if regime == "ranging":
-        effective_threshold = AUTO_OPEN_THRESHOLD + 5   # 85 in ranging
+        effective_threshold += 5   # extra bar in ranging (trend signals unreliable)
 
     # Filter: score >= threshold, sorted best first
     candidates = sorted(

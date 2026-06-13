@@ -24,7 +24,7 @@ from app.services.binance_urls import fapi
 
 logger = structlog.get_logger(__name__)
 
-CACHE_TTL = 30 * 60   # refresh every 30 min
+CACHE_TTL = 5 * 60    # F63: refresh every 5 min (was 30 min — too stale)
 _cached_regime: Optional[str]  = None
 _cached_at:     Optional[float] = None
 
@@ -105,10 +105,19 @@ def detect_from_ohlcv(
 
 # ── Fetch BTC 4H and detect ────────────────────────────────────────────────────
 
+def _parse_klines(klines: list) -> tuple[list, list, list, list]:
+    opens  = [float(k[1]) for k in klines]
+    highs  = [float(k[2]) for k in klines]
+    lows   = [float(k[3]) for k in klines]
+    closes = [float(k[4]) for k in klines]
+    return opens, highs, lows, closes
+
+
 async def fetch_regime() -> str:
     """
-    Fetch BTC 4H candles and detect market regime.
-    Returns cached value if fresh (< 30 min).
+    F63: Fetch BTC 4H + 1H candles and detect market regime.
+    F64: 1H is secondary check — volatile always wins; 1H overrides 4H when they disagree.
+    Returns cached value if fresh (< 5 min).
     """
     global _cached_regime, _cached_at
 
@@ -117,24 +126,37 @@ async def fetch_regime() -> str:
 
     try:
         async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.get(fapi("/fapi/v1/klines?symbol=BTCUSDT&interval=4h&limit=100"))
-        if r.status_code != 200:
-            return _cached_regime or "ranging"
+            # F64: fetch both timeframes concurrently
+            r4h, r1h = await asyncio.gather(
+                c.get(fapi("/fapi/v1/klines?symbol=BTCUSDT&interval=4h&limit=100")),
+                c.get(fapi("/fapi/v1/klines?symbol=BTCUSDT&interval=1h&limit=100")),
+            )
 
-        klines = r.json()
-        if not isinstance(klines, list) or len(klines) < 50:
-            return _cached_regime or "ranging"
+        regime_4h = "ranging"
+        if r4h.status_code == 200:
+            klines = r4h.json()
+            if isinstance(klines, list) and len(klines) >= 50:
+                regime_4h = detect_from_ohlcv(*_parse_klines(klines))
 
-        opens  = [float(k[1]) for k in klines]
-        highs  = [float(k[2]) for k in klines]
-        lows   = [float(k[3]) for k in klines]
-        closes = [float(k[4]) for k in klines]
+        regime_1h = "ranging"
+        if r1h.status_code == 200:
+            klines = r1h.json()
+            if isinstance(klines, list) and len(klines) >= 50:
+                regime_1h = detect_from_ohlcv(*_parse_klines(klines))
 
-        regime = detect_from_ohlcv(opens, highs, lows, closes)
+        # F64: merge 4H + 1H — volatile wins; 1H overrides 4H for trend responsiveness
+        if "volatile" in (regime_4h, regime_1h):
+            regime = "volatile"
+        elif regime_1h != "ranging":
+            regime = regime_1h   # trust 1H when it sees a forming trend
+        else:
+            regime = regime_4h   # fall back to macro 4H
+
         _cached_regime = regime
         _cached_at     = time.time()
 
-        logger.info("regime_detected", regime=regime)
+        logger.info("regime_detected", regime=regime,
+                    regime_4h=regime_4h, regime_1h=regime_1h)
         return regime
 
     except Exception as exc:
