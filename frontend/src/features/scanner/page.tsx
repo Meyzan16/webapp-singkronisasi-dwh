@@ -24,7 +24,9 @@ interface FuturesSignal {
   tp2:          number;
   tp3:          number;
   risk_pct:     number;
+  tp1_pct:      number;   // P8: backend already sends these — were dropped before
   tp2_pct:      number;
+  tp3_pct:      number;
   rr_ratio:     number;
 }
 
@@ -220,7 +222,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
         body: JSON.stringify({
           symbol: s.symbol, direction: s.direction, agent: s.agent,
           entry: s.entry, sl: s.sl, tp1: s.tp1, tp2: s.tp2, tp3: s.tp3,
-          risk_pct: s.risk_pct, tp1_pct: 0, tp2_pct: s.tp2_pct, tp3_pct: 0,
+          risk_pct: s.risk_pct, tp1_pct: s.tp1_pct, tp2_pct: s.tp2_pct, tp3_pct: s.tp3_pct,
           rr_ratio: s.rr_ratio, leverage: s.leverage, score: s.score,
           signals: s.signals, funding_rate: s.funding_rate,
           oi_change: s.oi_change, liq_long: s.liq_long, liq_short: s.liq_short,
@@ -232,13 +234,19 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
     finally { setOpening(false); }
   };
 
-  const levels = [
-    { label: "TP3",   val: s.tp3,   cl: "text-green-400" },
-    { label: "TP2 ★", val: s.tp2,   cl: "text-green-600 bg-green-50 font-bold" },
-    { label: "TP1",   val: s.tp1,   cl: "text-green-500" },
-    { label: "Entry", val: s.entry, cl: "bg-neutral-100 font-bold" },
-    { label: "SL",    val: s.sl,    cl: "text-red-500" },
+  // P8: build the price ladder so the HIGHEST price is always at the top.
+  // LONG: TP3>TP2>TP1>Entry>SL · SHORT: SL>Entry>TP1>TP2>TP3 (was inverted for SHORT).
+  type Lvl = { label: string; val: number; pct: number | null; loss?: boolean; cl: string };
+  const tpRows: Lvl[] = [
+    { label: "TP3",   val: s.tp3, pct: s.tp3_pct, cl: "text-green-400" },
+    { label: "TP2 ★", val: s.tp2, pct: s.tp2_pct, cl: "text-green-600 bg-green-50 font-bold" },
+    { label: "TP1",   val: s.tp1, pct: s.tp1_pct, cl: "text-green-500" },
   ];
+  const entryRow: Lvl = { label: "Entry", val: s.entry, pct: null, cl: "bg-neutral-100 font-bold" };
+  const slRow:    Lvl = { label: "SL",    val: s.sl,    pct: s.risk_pct, loss: true, cl: "text-red-500" };
+  const levels: Lvl[] = isLong
+    ? [...tpRows, entryRow, slRow]                       // high → low
+    : [slRow, entryRow, ...[...tpRows].reverse()];       // SHORT: SL(top) → TP3(bottom)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
@@ -281,6 +289,11 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
                 <div key={row.label} className={`flex items-center gap-3 px-4 py-2 ${row.cl}`}>
                   <span className="text-[10px] font-mono w-12 shrink-0">{row.label}</span>
                   <span className="flex-1 font-mono text-sm tabular-nums">${fmtPrice(row.val)}</span>
+                  {row.pct != null && (
+                    <span className="text-[10px] font-mono tabular-nums opacity-80">
+                      {row.loss ? "-" : "+"}{row.pct}%
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -317,7 +330,8 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
             {[
               { label: "Funding",  value: `${s.funding_rate >= 0 ? "+" : ""}${s.funding_rate.toFixed(3)}%`, cls: s.funding_rate > 0.05 ? "text-red-500" : s.funding_rate < -0.02 ? "text-green-600" : "text-neutral-700" },
               { label: "OI Change",value: `${s.oi_change >= 0 ? "+" : ""}${s.oi_change.toFixed(1)}%`,       cls: s.oi_change > 2 ? "text-teal-600" : "text-neutral-700" },
-              { label: "Liq (1H)", value: isLong ? `$${s.liq_long.toFixed(1)}M` : `$${s.liq_short.toFixed(1)}M`, cls: "text-neutral-700" },
+              // P8: show the squeeze FUEL for the trade side — LONG feeds on short liq, SHORT on long liq
+              { label: isLong ? "Short Liq 🔥" : "Long Liq 🔥", value: isLong ? `$${s.liq_short.toFixed(1)}M` : `$${s.liq_long.toFixed(1)}M`, cls: isLong ? "text-green-600" : "text-red-500" },
             ].map(x => (
               <div key={x.label} className="bg-neutral-50 rounded-xl p-3 text-center">
                 <p className="text-[10px] text-neutral-400 uppercase tracking-wide font-semibold mb-0.5">{x.label}</p>
