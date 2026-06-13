@@ -123,6 +123,11 @@ function calcLiqPrice(entry: number, leverage: number, direction: "LONG" | "SHOR
   return direction === "LONG" ? entry - dist : entry + dist;
 }
 
+// F104: a "win" is status=="tp" AND net pnl > 0 (matches backend _is_real_win)
+function isRealWin(p: FuturesPosition): boolean {
+  return p.status === "tp" && (p.pnl_pct ?? 0) > 0;
+}
+
 function tradePnlDollar(p: FuturesPosition, riskDollar = FALLBACK_RISK_DOLLAR): number | null {
   if (p.status === "open") {
     if (p.unrealized_pnl == null || p.risk_pct <= 0) return null;
@@ -352,9 +357,6 @@ export function FuturesTab() {
   // F46: reactive risk-dollar from API starting balance (falls back to $1000 × 1%)
   const startingBalance = learning?.balance?.starting ?? _FALLBACK_BALANCE;
   const riskDollar      = startingBalance * RISK_PCT;
-
-  // F104: a "win" is status=="tp" AND net pnl > 0 (matches backend _is_real_win)
-  const isRealWin = (p: FuturesPosition) => p.status === "tp" && (p.pnl_pct ?? 0) > 0;
 
   const stats = useMemo(() => {
     const open   = positions.filter(p => p.status === "open");

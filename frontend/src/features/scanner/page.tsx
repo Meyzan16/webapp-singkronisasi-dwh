@@ -755,7 +755,7 @@ export default function ScannerFuturesPage() {
         <div className="text-center py-12 text-neutral-400">
           <p className="text-3xl mb-3">🔍</p>
           <p className="font-semibold">Tidak ada sinyal untuk filter ini</p>
-          <button onClick={() => { setDirFilter("ALL"); setMinScore(55); setSearch(""); setActiveAgent("all"); }}
+          <button onClick={() => { setDirFilter("ALL"); setMinScore(52); setSearch(""); setActiveAgent("all"); }}
             className="mt-3 text-sm text-teal-600 underline">Reset filter</button>
         </div>
       )}

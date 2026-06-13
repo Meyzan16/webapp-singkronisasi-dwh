@@ -37,8 +37,7 @@ interface SignalWeight {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const TARGET = 80;
-const FALLBACK_START = 1000;   // F30: only used until stats.balance.starting loads
+const TARGET = 80;   // F30: starting balance now comes from stats.balance.starting (no hardcode)
 
 const REGIME_CFG: Record<string, { emoji: string; label: string; bar: string; bg: string }> = {
   trending_up:   { emoji: "📈", label: "Trending Up",   bar: "bg-green-500",  bg: "bg-green-50 border-green-200"   },

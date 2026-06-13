@@ -244,9 +244,9 @@ async def _rebuild_futures_paper_balance(style_key: str) -> None:
 
 # ── Main check ────────────────────────────────────────────────────────────────
 
-async def check_futures_positions() -> int:
+async def check_futures_positions() -> tuple[int, int]:
     """
-    Check all open futures positions. Returns count closed + updated.
+    Check all open futures positions. Returns (closed, updated) counts.  # B3
 
     Enhanced checks (per cycle):
       1. Auto-close: SL or TP2 hit
@@ -257,7 +257,7 @@ async def check_futures_positions() -> int:
     global _liq_guards, _tp_extended
 
     if not is_db_available():
-        return 0
+        return 0, 0   # B3: tuple — caller unpacks (closed, updated)
 
     closed  = 0
     updated = 0
@@ -273,7 +273,7 @@ async def check_futures_positions() -> int:
         trades = list(result.scalars().all())
 
         if not trades:
-            return 0
+            return 0, 0   # B3: tuple — caller unpacks (closed, updated)
 
         symbols = list({t.symbol for t in trades})
         prices  = await _fetch_futures_prices(symbols)
