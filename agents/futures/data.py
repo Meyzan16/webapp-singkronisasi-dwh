@@ -159,7 +159,7 @@ async def fetch_symbol_data(
 
     result: dict[str, FuturesData] = {}
     for tf, klines in klines_map.items():
-        if not klines:
+        if not klines or len(klines) < 50:   # F2: need ≥50 candles for EMA50/indicators
             continue
         d = FuturesData(
             symbol   = symbol,
@@ -222,12 +222,36 @@ async def fetch_top100_futures() -> list[dict]:
         if not isinstance(tickers, list):
             return []
 
-        # Filter stablecoin perpetuals (FDUSDUSDT, USDCUSDT perps, etc.)
-        _STABLE = {"USDC","FDUSD","TUSD","USDP","DAI","FRAX","USDD","RLUSD",
-                   "USD1","UUSD","BFUSD","USDE","BUSD","GUSD","HUSD"}
-        tickers = [
-            t for t in tickers
-            if t.get("symbol","").replace("USDT","") not in _STABLE
-        ]
+        # Filter 1: stablecoin perpetuals
+        _STABLE = {
+            "USDC","FDUSD","TUSD","USDP","DAI","FRAX","USDD","RLUSD",
+            "USD1","UUSD","BFUSD","USDE","BUSD","GUSD","HUSD","USDN",
+            "USTC","UST","EUR","AEUR","EURT","EURS",
+        }
+
+        # Filter 2: commodity / TradFi index perpetuals
+        # These instruments don't respond to crypto TA signals (Wyckoff/EMA/BB)
+        _COMMODITY = {
+            "SPY",     # S&P 500 ETF
+            "PAXG",    # Tokenized Gold
+            "XAUT",    # Tether Gold
+            "COPPER",  # Copper futures
+            "SILVER",  # Silver
+            "GOLD",    # Gold
+            "OIL",     # Oil
+            "WTI",     # WTI Crude
+            "CORN",    # Corn
+            "WHEAT",   # Wheat
+            "NATGAS",  # Natural gas
+        }
+
+        _SKIP = _STABLE | _COMMODITY
+
+        def _base(sym: str) -> str:
+            """Extract base asset: 'SPYUSDT' → 'SPY'."""
+            s = sym.upper()
+            return s[:-4] if s.endswith("USDT") else s
+
+        tickers = [t for t in tickers if _base(t.get("symbol", "")) not in _SKIP]
         tickers.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
-        return tickers[:100]
+        return tickers[:200]  # caller slices to desired universe size

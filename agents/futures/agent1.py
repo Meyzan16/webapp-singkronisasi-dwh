@@ -1,18 +1,26 @@
 """
-Agent 1 — AI Knowledge Futures Scanner.
+Agent 1 — Pre-Gainer / Pre-Dump Scout.
 
-Strategy:
-  LONG  → buy at support + funding bearish bias + OI confirms + RSI < 50
-  SHORT → sell at resistance + funding bullish bias + OI confirms + RSI > 55
+Goal: Find setups BEFORE coins make big moves — both LONG and SHORT.
+      Hunt "quiet coins" while they're still coiling — before the explosion or implosion.
 
-Signals (scored 0-100):
-  Funding Rate:        0-25 pts  (strongest Futures signal — market sentiment)
-  OI Divergence:       0-20 pts  (smart money vs price divergence)
-  Liquidation data:    0-15 pts  (cascade = capitulation reversal)
-  S/R Confluence:      0-20 pts  (multi-TF zone alignment)
-  Technical TA:        0-20 pts  (RSI + EMA + volume)
+Pre-PUMP fingerprint (LONG):
+  1. BB Squeeze at base/support           — energy coiling at bottom, about to explode up
+  2. Volume accumulating, price flat      — smart money buying quietly
+  3. Funding neutral / negative           — market not yet crowded LONG (fuel available)
+  4. OI rising steadily                  — new money entering long
+  5. Price near resistance < 3%          — catalyst within reach, breakout imminent
+  6. RSI 40-55 sweet spot                — momentum turning up, not yet overbought
 
-Min score: 55  |  Min R:R: 1:3  |  Leverage: dynamic (ATR-based)
+Pre-DUMP fingerprint (SHORT):
+  1. BB Squeeze at top/resistance         — energy coiling at top, about to collapse
+  2. Volume distributing, price flat      — smart money selling quietly at top
+  3. Funding HIGH (> 0.05%)              — longs overcrowded = fuel for dump
+  4. OI rising at resistance             — long trap forming, forced unwind coming
+  5. Price near resistance < 2%          — rejection zone
+  6. RSI 55-70 fading zone               — momentum stalling, overbought approaching
+
+Min score: 52  |  Min R:R: 1:3  |  Leverage: dynamic (ATR-based)
 """
 
 import math
@@ -25,7 +33,7 @@ from .data import FuturesData
 
 logger = structlog.get_logger(__name__)
 
-MIN_SCORE  = 55   # restored: liquidation proxy via globalLongShortAccountRatio now working
+MIN_SCORE  = 52
 MIN_RR     = 3.0
 AGENT_NAME = "futures_agent1"
 
@@ -86,32 +94,6 @@ def _swing_lows(lows: list[float], lookback: int = 5) -> list[float]:
     return sorted(set(pivots))
 
 
-def _rsi_divergence(closes: list[float], period: int = 14) -> str:
-    """
-    Detect RSI divergence over last 20 candles.
-    Returns: 'bullish' | 'bearish' | 'none'
-    Bullish: price makes lower low, RSI makes higher low.
-    Bearish: price makes higher high, RSI makes lower high.
-    """
-    if len(closes) < 30:
-        return "none"
-    mid     = len(closes) // 2
-    prev_p  = min(closes[:mid])
-    curr_p  = min(closes[mid:])
-    prev_rsi = _rsi(closes[:mid + period], period)
-    curr_rsi = _rsi(closes[mid:], period)
-
-    if curr_p < prev_p and curr_rsi > prev_rsi:
-        return "bullish"   # price lower, RSI higher → hidden strength
-
-    prev_high = max(closes[:mid])
-    curr_high = max(closes[mid:])
-    if curr_high > prev_high and curr_rsi < prev_rsi:
-        return "bearish"   # price higher, RSI lower → hidden weakness
-
-    return "none"
-
-
 def _round_price(price: float, ref: float) -> float:
     if ref >= 1000:  return round(price, 2)
     if ref >= 10:    return round(price, 4)
@@ -120,37 +102,107 @@ def _round_price(price: float, ref: float) -> float:
     return round(price, 8)
 
 
-# ── Leverage calculator ───────────────────────────────────────────────────────
+# ── Signal detectors ──────────────────────────────────────────────────────────
+
+def _bb_squeeze(closes: list[float], period: int = 20) -> tuple[bool, float, str]:
+    """
+    Detect Bollinger Band Squeeze (volatility compression).
+    Returns (is_squeeze, bb_width_pct, label).
+    Strong squeeze: width < 4% → breakout very close.
+    Moderate squeeze: width 4-7% → compression building.
+    """
+    if len(closes) < period:
+        return False, 100.0, "none"
+    tail = closes[-period:]
+    mean = sum(tail) / period
+    std  = math.sqrt(sum((v - mean) ** 2 for v in tail) / period)
+    bw   = (std * 4) / mean * 100 if mean > 0 else 100.0
+    if bw < 4.0:
+        return True, round(bw, 2), "strong"
+    if bw < 7.0:
+        return True, round(bw, 2), "moderate"
+    return False, round(bw, 2), "none"
+
+
+def _volume_accumulation(closes: list[float], volumes: list[float]) -> tuple[bool, float, str]:
+    """
+    Volume rising while price is flat = smart money accumulation.
+    Returns (is_accum, vol_ratio, label).
+    Key insight: institutions buy quietly — volume up, price barely moves.
+    """
+    if len(closes) < 21 or len(volumes) < 21:
+        return False, 1.0, "none"
+
+    avg_vol    = sum(volumes[-21:-1]) / 20
+    cur_vol    = volumes[-1]
+    vol_ratio  = cur_vol / avg_vol if avg_vol > 0 else 1.0
+
+    # Price movement over last 5 candles (flat = accumulation, not distribution)
+    price_move = abs((closes[-1] - closes[-5]) / closes[-5]) if closes[-5] > 0 else 1.0
+
+    if vol_ratio >= 2.5 and price_move < 0.03:
+        return True, round(vol_ratio, 2), "strong"
+    if vol_ratio >= 1.8 and price_move < 0.04:
+        return True, round(vol_ratio, 2), "moderate"
+    return False, round(vol_ratio, 2), "none"
+
+
+def _candle_coil(opens: list[float], closes: list[float], n: int = 8) -> bool:
+    """
+    Shrinking candle bodies over last N candles = energy coiling.
+    Confirms BB Squeeze signal.
+    """
+    if len(closes) < n + 1 or len(opens) < n + 1:
+        return False
+    bodies = [abs(closes[i] - opens[i]) for i in range(-n, 0)]
+    # Bodies shrinking trend (last is at least 40% smaller than first)
+    return bodies[-1] < bodies[0] * 0.6 and bodies[-1] < bodies[int(n / 2)] * 0.8
+
+
+def _rsi_sweet_spot(closes: list[float]) -> tuple[float, str]:
+    """
+    RSI in 40-55 zone = momentum waking up, not yet overbought.
+    This is the ideal entry zone before a big move.
+    Returns (rsi, zone_label).
+    """
+    rsi = _rsi(closes, 14)
+    if 43 <= rsi <= 55:
+        return rsi, "sweet"      # momentum turning up perfectly
+    if 35 <= rsi < 43:
+        return rsi, "recovering" # oversold recovery, still good
+    if 55 < rsi <= 63:
+        return rsi, "building"   # momentum building, watch out for extension
+    return rsi, "outside"
+
+
+# ── Leverage ──────────────────────────────────────────────────────────────────
 
 def calc_leverage(atr_pct: float, score: float) -> int:
-    """
-    Dynamic leverage based on volatility (ATR%) and signal confidence (score).
-    Higher volatility = lower leverage (protect capital).
-    Higher score = slightly more leverage (more confident).
-    """
+    """Dynamic leverage based on volatility (ATR%) + confidence (score)."""
     if atr_pct > 5.0:   base = 2
     elif atr_pct > 3.0: base = 3
     elif atr_pct > 2.0: base = 5
     elif atr_pct > 1.0: base = 7
     else:               base = 10
 
-    # Confidence boost (max +3x)
-    if score >= 80:   base = min(base + 3, 15)
-    elif score >= 70: base = min(base + 2, 12)
-    elif score >= 60: base = min(base + 1, 10)
+    if score >= 80:    base = min(base + 3, 15)
+    elif score >= 70:  base = min(base + 2, 12)
+    elif score >= 60:  base = min(base + 1, 10)
 
     return base
 
 
-# ── Signal scoring ────────────────────────────────────────────────────────────
+# ── Main scorer ───────────────────────────────────────────────────────────────
 
-def _score_direction(
-    direction: str,     # "LONG" or "SHORT"
-    tf_map: dict[str, FuturesData],
-    price: float,
+def _score_pregainer(
+    tf_map:     dict[str, FuturesData],
+    price:      float,
     change_24h: float,
 ) -> tuple[float, list[str]]:
-    """Score a specific direction for this symbol. Returns (score, signals)."""
+    """
+    Score a symbol for pre-gainer LONG setup.
+    Returns (score, signals_list).
+    """
     score   = 0.0
     signals: list[str] = []
 
@@ -161,156 +213,330 @@ def _score_direction(
     if not ref:
         return 0.0, []
 
-    # ── 1. Funding Rate (0-25 pts) ──────────────────────────────────────────
-    fr = ref.funding_rate
-    fr_avg = ref.funding_rate_avg
+    # ── 1. BB Squeeze multi-TF (0-30 pts) ─────────────────────────────────────
+    # Primary signal — compression across multiple timeframes = explosion imminent
+    squeeze_pts = 0
+    squeeze_signals: list[str] = []
 
-    if direction == "LONG":
-        if fr < -0.03 / 100:          # shorts paying heavily → squeeze coming
-            score += 25
-            signals.append(f"🔴 Funding {fr*100:.3f}% — short squeeze likely")
-        elif fr < 0:
-            score += 12
-            signals.append(f"Funding {fr*100:.3f}% negatif — bias bullish")
-        elif fr > 0.10 / 100:         # longs overpaying → bad for long
-            score -= 10
-    else:  # SHORT
-        if fr > 0.10 / 100:           # longs overpaying → correction coming
-            score += 25
-            signals.append(f"🟢 Funding +{fr*100:.3f}% — long squeeze likely")
-        elif fr > 0.05 / 100:
-            score += 12
-            signals.append(f"Funding +{fr*100:.3f}% tinggi — bias bearish")
-        elif fr < 0:                  # shorts paying → bad for short
-            score -= 8
+    for tf_key, d in [("4h", d4h), ("1h", d1h), ("15m", d15)]:
+        if not d or len(d.closes) < 20:
+            continue
+        is_sq, bw, label = _bb_squeeze(d.closes)
+        if label == "strong":
+            pts = 14 if tf_key == "4h" else (12 if tf_key == "1h" else 8)
+            squeeze_pts += pts
+            squeeze_signals.append(f"🔵 BB Squeeze {tf_key} ({bw:.1f}% width) — energi terkompresi")
+        elif label == "moderate":
+            pts = 8 if tf_key == "4h" else (6 if tf_key == "1h" else 4)
+            squeeze_pts += pts
+            squeeze_signals.append(f"BB Squeeze {tf_key} ({bw:.1f}%) — kompresi sedang")
 
-    # ── 2. OI Divergence (0-20 pts) ──────────────────────────────────────────
+        # Candle coil confirms the squeeze
+        if is_sq and d.opens and _candle_coil(d.opens, d.closes):
+            squeeze_pts += 2
+
+    squeeze_pts = min(squeeze_pts, 30)
+    score += squeeze_pts
+    if squeeze_signals:
+        signals.extend(squeeze_signals[:2])
+
+    # F35: flat coin bonus — genuinely coiling = ideal pre-gainer setup
+    if -2.0 <= change_24h <= 2.0 and squeeze_pts > 0:
+        score += 5
+        signals.append(f"🟢 Flat {change_24h:+.1f}% + BB Squeeze — pre-gainer coiling ideal")
+
+    # ── 2. Volume Accumulation (0-25 pts) ─────────────────────────────────────
+    # Smart money buying quietly — volume up, price flat
+    best_accum = 0
+    for tf_key, d in [("1h", d1h), ("4h", d4h), ("15m", d15)]:
+        if not d or len(d.closes) < 21:
+            continue
+        is_accum, vol_r, label = _volume_accumulation(d.closes, d.volumes)
+        if label == "strong":
+            pts = 25 if tf_key == "1h" else (20 if tf_key == "4h" else 15)
+            if pts > best_accum:
+                best_accum = pts
+                signals.append(f"📦 Volume Akumulasi {tf_key} {vol_r:.1f}× — smart money masuk diam-diam")
+        elif label == "moderate":
+            pts = 15 if tf_key == "1h" else (12 if tf_key == "4h" else 8)
+            if pts > best_accum:
+                best_accum = pts
+                signals.append(f"Volume naik {vol_r:.1f}× {tf_key} — akumulasi terbentuk")
+
+    score += best_accum
+
+    # ── 3. Funding Rate neutral/negative (0-15 pts) ───────────────────────────
+    # Fuel = market not yet crowded LONG → room to run when breakout hits
+    fr = ref.funding_rate   # raw (e.g. 0.0001 = 0.01%)
+    if fr < -0.04 / 100:
+        score += 15
+        signals.append(f"🔴 Funding {fr*100:.3f}% negatif ekstrem — short squeeze fuel siap")
+    elif fr < -0.01 / 100:
+        score += 10
+        signals.append(f"Funding {fr*100:.3f}% negatif — shorts bayar, fuel untuk pump")
+    elif fr <= 0.01 / 100:
+        score += 6   # near-zero = neutral, still ok
+    elif fr > 0.05 / 100:
+        # Crowded longs already → headwind
+        score -= 8
+    elif fr > 0.03 / 100:
+        score -= 4
+
+    # ── 4. OI Building (0-12 pts) ─────────────────────────────────────────────
+    # Open Interest rising = new money entering = conviction accumulating
     oi_chg = ref.oi_change_pct
+    if oi_chg >= 3.0:
+        score += 12
+        signals.append(f"📊 OI +{oi_chg:.1f}% — posisi baru masuk, konviksi meningkat")
+    elif oi_chg >= 1.5:
+        score += 8
+        signals.append(f"OI +{oi_chg:.1f}% — akumulasi open interest")
+    elif oi_chg >= 0.5:
+        score += 4
+    elif oi_chg < -2.0:
+        score -= 5   # OI falling = liquidation / exit risk
 
-    if direction == "LONG":
-        if oi_chg > 2 and change_24h < -1.5:   # OI rising + price falling = short trap
-            score += 20
-            signals.append(f"📊 OI +{oi_chg:.1f}% saat harga turun — short trap setup")
-        elif oi_chg > 1 and change_24h < -1:    # moderate OI rise with price drop
-            score += 12
-            signals.append(f"OI +{oi_chg:.1f}% saat harga terkoreksi — potential reversal")
-        elif oi_chg > 1 and change_24h > 0:     # OI rising + price rising = trend confirm
-            score += 8
-            signals.append(f"OI +{oi_chg:.1f}% konfirmasi momentum naik")
-        elif oi_chg < -2:                        # OI falling = long capitulation
-            score -= 8
-    else:  # SHORT
-        if oi_chg > 2 and change_24h > 1.5:    # OI rising + price rising = long trap
-            score += 20
-            signals.append(f"📊 OI +{oi_chg:.1f}% saat harga naik — long trap setup")
-        elif oi_chg > 1 and change_24h > 1:     # moderate rise with price up
-            score += 12
-            signals.append(f"OI +{oi_chg:.1f}% saat harga naik — potential rejection")
-        elif oi_chg > 1 and change_24h < 0:     # OI rising + price falling = trend confirm
-            score += 8
-            signals.append(f"OI +{oi_chg:.1f}% konfirmasi tekanan jual")
-        elif oi_chg < -2:                        # OI falling = short capitulation
-            score -= 8
-
-    # ── 3. Liquidation Cascade (0-15 pts) ────────────────────────────────────
-    liq_long  = ref.liq_long_usdt
-    liq_short = ref.liq_short_usdt
-
-    if direction == "LONG" and liq_long > 500_000:
-        # Large long liquidation = capitulation → potential reversal up
-        score += 15
-        signals.append(f"💥 Likuidasi LONG ${liq_long/1e6:.1f}M — potensi reversal naik")
-    elif direction == "SHORT" and liq_short > 500_000:
-        # Large short liquidation = potential reversal down after exhaustion
-        score += 15
-        signals.append(f"💥 Likuidasi SHORT ${liq_short/1e6:.1f}M — potensi reversal turun")
-    elif direction == "LONG" and liq_short > 200_000:
-        score += 5   # shorts being squeezed = bullish pressure
-    elif direction == "SHORT" and liq_long > 200_000:
-        score += 5
-
-    # ── 4. S/R Confluence (0-20 pts) ─────────────────────────────────────────
-    support_score    = 0
-    resistance_score = 0
-    sr_signal        = ""
-
-    for tf_key, d in tf_map.items():
-        if not d.lows or not d.highs:
+    # ── 5. Near Resistance < 3% (0-10 pts) ───────────────────────────────────
+    # Catalyst within reach → breakout needs only small push
+    near_resistance = False
+    for tf_key, d in [("1h", d1h), ("4h", d4h)]:
+        if not d or not d.highs:
             continue
-        s_lows  = _swing_lows(d.lows, lookback=5)
         s_highs = _swing_highs(d.highs, lookback=5)
+        close_res = [r for r in s_highs if 0 < (r - price) / price < 0.03]
+        if close_res:
+            dist_pct = (close_res[0] - price) / price * 100
+            score += 10
+            signals.append(f"🎯 Dekat resistance {tf_key} — {dist_pct:.1f}% lagi ke breakout")
+            near_resistance = True
+            break
+    if not near_resistance:
+        # F6: breakout bonus only if coin is genuinely flat — not already pumped
+        for tf_key, d in [("1h", d1h)]:
+            if not d or not d.highs:
+                continue
+            recent_high = max(d.highs[-30:]) if len(d.highs) >= 30 else max(d.highs)
+            if price > recent_high * 0.99 and 0 < change_24h < 2:
+                score += 5  # fresh breakout on flat coin = true pre-gainer
 
-        # Near support (within 1.5%)?
-        near_sup = [s for s in s_lows if 0 < (price - s) / price < 0.015]
-        # Near resistance (within 1.5%)?
-        near_res = [r for r in s_highs if 0 < (r - price) / price < 0.015]
+    # ── 6. RSI Sweet Spot 40-55 (0-8 pts) ────────────────────────────────────
+    # Momentum turning up, not yet overbought — ideal pre-pump entry zone
+    primary = d1h or d15 or d4h
+    rsi_val = 50.0   # F106: compute once, reuse in penalties below
+    if primary and primary.closes:
+        rsi_val, zone = _rsi_sweet_spot(primary.closes)
+        if zone == "sweet":
+            score += 8
+            signals.append(f"RSI {rsi_val:.0f} sweet spot — momentum naik, belum overbought")
+        elif zone == "recovering":
+            score += 5
+            signals.append(f"RSI {rsi_val:.0f} recovering — reversal bias naik")
+        elif zone == "building":
+            score += 3
 
-        if near_sup:
-            support_score += 7
-            sr_signal = f"📍 Near support {tf_key} — zona beli kuat"
-        if near_res:
-            resistance_score += 7
-            sr_signal = f"📍 Near resistance {tf_key} — zona jual kuat"
+    # ── Penalties ─────────────────────────────────────────────────────────────
 
-    if direction == "LONG":
-        score += min(support_score, 20)
-        if support_score >= 7:
-            signals.append(sr_signal or "Support zone teridentifikasi multi-TF")
-    else:
-        score += min(resistance_score, 20)
-        if resistance_score >= 7:
-            signals.append(sr_signal or "Resistance zone teridentifikasi multi-TF")
+    # Already pumped = missed the move → heavy penalty
+    if change_24h > 15:
+        score -= 25
+    elif change_24h > 8:
+        score -= 12
 
-    # ── 5. Technical TA (0-20 pts) ───────────────────────────────────────────
-    for tf_key, d in tf_map.items():
-        if not d.closes:
+    # Dumping coin = wrong direction for LONG
+    if change_24h < -15:
+        score -= 10
+
+    # Overbought = late entry risk (F106: reuse rsi_val, no second _rsi() call)
+    if rsi_val > 72:
+        score -= 10
+    elif rsi_val > 65:
+        score -= 5
+
+    # High positive funding = longs already crowded
+    if fr > 0.05 / 100:
+        pass   # already penalized above
+
+    # Liquidation short squeeze bonus (shorts getting liquidated = bullish fuel)
+    if ref.liq_short_usdt > 100_000:
+        score += 5
+        signals.append(f"Short squeeze aktif — ${ref.liq_short_usdt/1e6:.1f}M short terliquidasi")
+    elif ref.liq_long_usdt > 500_000:
+        # Massive long liq = capitulation bottom → reversal potential
+        score += 3
+
+    return score, signals[:5]
+
+
+# ── Pre-Dump scorer (SHORT) ───────────────────────────────────────────────────
+
+def _score_predump(
+    tf_map:     dict[str, FuturesData],
+    price:      float,
+    change_24h: float,
+) -> tuple[float, list[str]]:
+    """
+    Score a symbol for pre-dump SHORT setup.
+    Mirror of _score_pregainer but for downside moves.
+
+    Pre-dump fingerprint:
+      BB Squeeze at resistance    → compression at top = dump imminent
+      Volume distributing, flat   → smart money selling quietly at top
+      Funding HIGH                → longs overcrowded = forced unwind fuel
+      OI rising at resistance     → long trap, forced unwind when support breaks
+      Near resistance < 2%        → rejection zone
+      RSI 55-70 fading zone       → momentum stalling, reversal approaching
+    """
+    score   = 0.0
+    signals: list[str] = []
+
+    d1h = tf_map.get("1h")
+    d4h = tf_map.get("4h")
+    d15 = tf_map.get("15m")
+    ref  = d1h or d4h or d15
+    if not ref:
+        return 0.0, []
+
+    # ── 1. BB Squeeze at resistance (0-30 pts) ────────────────────────────────
+    # Compression at top = energy loading for a drop, not a pump
+    squeeze_pts = 0
+    squeeze_signals: list[str] = []
+
+    for tf_key, d in [("4h", d4h), ("1h", d1h), ("15m", d15)]:
+        if not d or len(d.closes) < 20:
             continue
-        rsi  = _rsi(d.closes, 14)
-        ema9 = _ema(d.closes, 9)
-        ema21 = _ema(d.closes, 21)
-        div  = _rsi_divergence(d.closes)
+        is_sq, bw, label = _bb_squeeze(d.closes)
+        if label == "strong":
+            pts = 14 if tf_key == "4h" else (12 if tf_key == "1h" else 8)
+            squeeze_pts += pts
+            squeeze_signals.append(f"🔴 BB Squeeze {tf_key} ({bw:.1f}%) di puncak — energi dump terkompres")
+        elif label == "moderate":
+            pts = 8 if tf_key == "4h" else (6 if tf_key == "1h" else 4)
+            squeeze_pts += pts
+            squeeze_signals.append(f"BB Squeeze {tf_key} ({bw:.1f}%) — kompresi di area resistance")
 
-        if direction == "LONG":
-            if rsi < 35:
-                score += 8
-                signals.append(f"RSI({tf_key}) {rsi:.0f} — oversold, potensi reversal")
-                break
-            elif rsi < 50:
-                score += 5
-                break
-        else:  # SHORT
-            if rsi > 70:
-                score += 8
-                signals.append(f"RSI({tf_key}) {rsi:.0f} — overbought, rawan koreksi")
-                break
-            elif rsi > 55:
-                score += 5
-                break
+        if is_sq and d.opens and _candle_coil(d.opens, d.closes):
+            squeeze_pts += 2
 
-    # EMA alignment
-    long_ema = all(
-        _ema(d.closes, 9) > _ema(d.closes, 21)
-        for d in tf_map.values() if len(d.closes) >= 21
-    )
-    short_ema = all(
-        _ema(d.closes, 9) < _ema(d.closes, 21)
-        for d in tf_map.values() if len(d.closes) >= 21
-    )
+    squeeze_pts = min(squeeze_pts, 30)
+    score += squeeze_pts
+    if squeeze_signals:
+        signals.extend(squeeze_signals[:2])
 
-    if direction == "LONG" and long_ema:
-        score += 7
-        signals.append("EMA9 > EMA21 semua TF — momentum bullish terkonfirmasi")
-    elif direction == "SHORT" and short_ema:
-        score += 7
-        signals.append("EMA9 < EMA21 semua TF — momentum bearish terkonfirmasi")
+    # ── 2. Volume distribution at top (0-25 pts) ─────────────────────────────
+    # Vol rising while price flat at a HIGH level = distribution, not accumulation
+    best_dist = 0
+    for tf_key, d in [("1h", d1h), ("4h", d4h), ("15m", d15)]:
+        if not d or len(d.closes) < 21:
+            continue
+        avg_vol    = sum(d.volumes[-21:-1]) / 20 if len(d.volumes) >= 21 else 0
+        cur_vol    = d.volumes[-1] if d.volumes else 0
+        vol_ratio  = cur_vol / avg_vol if avg_vol > 0 else 1.0
+        # Price flat at top = distribution (same pattern as accumulation but at HIGH)
+        price_move = abs((d.closes[-1] - d.closes[-5]) / d.closes[-5]) if len(d.closes) >= 5 and d.closes[-5] > 0 else 1.0
 
-    # RSI divergence bonus
-    if direction == "LONG" and div == "bullish":
+        if vol_ratio >= 2.5 and price_move < 0.03:   # F37: distribution doesn't require price near exact 30-candle high
+            pts = 25 if tf_key == "1h" else (20 if tf_key == "4h" else 15)
+            if pts > best_dist:
+                best_dist = pts
+                signals.append(f"📤 Volume distribusi {tf_key} {vol_ratio:.1f}× — smart money exit diam-diam")
+        elif vol_ratio >= 1.8 and price_move < 0.04:
+            pts = 12 if tf_key == "1h" else 8
+            if pts > best_dist:
+                best_dist = pts
+                signals.append(f"Volume naik {vol_ratio:.1f}× {tf_key} di area tinggi — potensi distribusi")
+
+    score += best_dist
+
+    # ── 3. Funding rate HIGH (0-15 pts) ──────────────────────────────────────
+    # Longs overcrowded → forced unwind when price starts dropping
+    fr = ref.funding_rate
+    if fr > 0.08 / 100:
+        score += 15
+        signals.append(f"🔴 Funding +{fr*100:.3f}% ekstrem — longs overcrowded, long squeeze fuel")
+    elif fr > 0.05 / 100:
+        score += 10
+        signals.append(f"Funding +{fr*100:.3f}% tinggi — longs bayar mahal, potensi exit massal")
+    elif fr > 0.02 / 100:
         score += 5
-        signals.append("🔵 Bullish RSI divergence — hidden strength")
-    elif direction == "SHORT" and div == "bearish":
+    elif fr < 0:
+        # Negative funding = shorts paying = headwind for SHORT
+        score -= 8
+
+    # ── 4. OI rising at resistance (0-12 pts) ────────────────────────────────
+    # New longs entering at resistance = long trap (will be forced to close on drop)
+    oi_chg = ref.oi_change_pct
+    if oi_chg >= 3.0 and change_24h > 2:
+        score += 12
+        signals.append(f"📊 OI +{oi_chg:.1f}% saat harga naik — long trap forming, forced unwind imminent")
+    elif oi_chg >= 1.5 and change_24h > 0:
+        score += 7
+        signals.append(f"OI +{oi_chg:.1f}% — posisi long baru di area resistance")
+    elif oi_chg >= 0.5:
+        score += 3
+    elif oi_chg < -2.0:
+        score -= 4  # OI falling = longs already exiting
+
+    # ── 5. Near resistance < 2% (0-10 pts) ───────────────────────────────────
+    # Price hugging resistance = rejection zone, short entry ideal
+    near_resistance = False
+    for tf_key, d in [("1h", d1h), ("4h", d4h)]:
+        if not d or not d.highs:
+            continue
+        s_highs = _swing_highs(d.highs, lookback=5)
+        at_res = [r for r in s_highs if abs(price - r) / price < 0.02 and r >= price * 0.99]
+        if at_res:
+            dist_pct = abs(at_res[0] - price) / price * 100
+            score += 10
+            signals.append(f"🎯 Di zona resistance {tf_key} — {dist_pct:.1f}% dari rejection level")
+            near_resistance = True
+            break
+
+    if not near_resistance:
+        # Already broke resistance cleanly = don't short (missed the rejection)
+        for tf_key, d in [("1h", d1h)]:
+            if d and d.highs:
+                recent_high = max(d.highs[-20:]) if len(d.highs) >= 20 else max(d.highs)
+                if price > recent_high * 1.02:
+                    score -= 5   # already broke out, shorting now is dangerous
+
+    # ── 6. RSI fading zone 55-70 (0-8 pts) ───────────────────────────────────
+    # Momentum stalling in this zone = about to reject, ideal SHORT entry
+    primary = d1h or d15 or d4h
+    rsi_val = 50.0   # compute once, reuse in penalties
+    if primary and primary.closes:
+        rsi_val = _rsi(primary.closes, 14)
+        if 58 <= rsi_val <= 70:
+            score += 8
+            signals.append(f"RSI {rsi_val:.0f} fading zone — momentum stalling, reversal approaching")
+        elif 70 < rsi_val <= 80:
+            score += 5   # overbought, could still go higher but risk elevated
+            signals.append(f"RSI {rsi_val:.0f} overbought — extended, rawan koreksi tajam")
+        elif rsi_val < 40:
+            score -= 8   # oversold = dangerous to short
+
+    # ── Penalties ─────────────────────────────────────────────────────────────
+
+    # Already dumped big = missed the move down
+    if change_24h < -12:
+        score -= 20
+    elif change_24h < -6:
+        score -= 10
+
+    # Already pumping hard = momentum too strong for SHORT
+    if change_24h > 15:
+        score -= 12
+
+    # Long liquidation = bearish fuel for SHORT
+    if ref.liq_long_usdt > 100_000:
         score += 5
-        signals.append("🔴 Bearish RSI divergence — hidden weakness")
+        signals.append(f"💥 Long liquidation ${ref.liq_long_usdt/1e6:.1f}M — bearish pressure")
+    elif ref.liq_short_usdt > 500_000:
+        # Short liquidation = shorts getting squeezed = headwind for new SHORT
+        score -= 4
+
+    # Oversold RSI = avoid short (reuse rsi_val, no second _rsi() call)
+    if rsi_val < 30:
+        score -= 10
 
     return score, signals[:5]
 
@@ -319,74 +545,70 @@ def _score_direction(
 
 def _calc_levels(
     direction: str,
-    tf_map: dict[str, FuturesData],
-    price: float,
+    tf_map:    dict[str, FuturesData],
+    price:     float,
 ) -> Optional[dict]:
     """
-    Calculate Entry / SL / TP1 / TP2 / TP3 for Futures trade.
-
-    LONG:
-      Entry = current price
-      SL    = below nearest swing low (1H) + ATR buffer
-      TP1   = R:R 1:1.5, TP2 = nearest resistance, TP3 = R:R 1:5
-
-    SHORT:
-      Entry = current price
-      SL    = above nearest swing high (1H) + ATR buffer
-      TP1   = R:R 1:1.5, TP2 = nearest support, TP3 = R:R 1:5
+    Trade levels for LONG or SHORT.
+    LONG:  SL below swing low, TP at resistance.
+    SHORT: SL above swing high, TP at support.
     """
     d1h = tf_map.get("1h")
     d4h = tf_map.get("4h")
     if not d1h or len(d1h.closes) < 20:
         return None
 
-    atr       = _atr(d1h.highs, d1h.lows, d1h.closes, 14)
-    atr_pct   = atr / price * 100 if price > 0 else 0
-    rp        = _round_price
+    atr     = _atr(d1h.highs, d1h.lows, d1h.closes, 14)
+    atr_pct = atr / price * 100 if price > 0 else 0
+    rp      = _round_price
 
     if direction == "LONG":
-        s_lows    = _swing_lows(d1h.lows, lookback=5)
-        below     = [s for s in s_lows if s < price * 0.999]
-        swing_sl  = max(below) if below else min(d1h.lows[-20:])
-        sl        = swing_sl - atr * 0.3
-        risk      = price - sl
-        risk_pct  = risk / price * 100
+        s_lows   = _swing_lows(d1h.lows, lookback=5)
+        below    = [s for s in s_lows if s < price * 0.999]
+        swing_sl = max(below) if below else min(d1h.lows[-20:])
+        sl       = swing_sl - atr * 0.3
+        risk     = price - sl
+        risk_pct = risk / price * 100
 
         if risk_pct > 8.0 or risk_pct < 0.3:
-            sl        = price - atr * 1.5
-            risk      = price - sl
-            risk_pct  = risk / price * 100
+            sl       = price - atr * 1.5
+            risk     = price - sl
+            risk_pct = risk / price * 100
 
-        # TP2: nearest resistance above
-        s_highs = _swing_highs(d1h.highs, lookback=5)
+        s_highs   = _swing_highs(d1h.highs, lookback=5)
         if d4h:
             s_highs += _swing_highs(d4h.highs, lookback=3)
         valid_res = sorted([h for h in s_highs if h > price * 1.005])
-        tp2       = valid_res[0] if valid_res else rp(price + risk * 3.0, price)
-        tp1       = rp(price + risk * 1.5, price)
-        tp3       = rp(price + risk * 5.0, price)
+        tp2 = valid_res[0] if valid_res else rp(price + risk * 3.0, price)
+        tp1 = rp(price + risk * 1.5, price)
+        tp3 = rp(price + risk * 5.0, price)
+        tp1_pct = (tp1 - price) / price * 100
+        tp2_pct = (tp2 - price) / price * 100
+        tp3_pct = (tp3 - price) / price * 100
 
     else:  # SHORT
-        s_highs   = _swing_highs(d1h.highs, lookback=5)
-        above     = [h for h in s_highs if h > price * 1.001]
-        swing_sl  = min(above) if above else max(d1h.highs[-20:])
-        sl        = swing_sl + atr * 0.3
-        risk      = sl - price
-        risk_pct  = risk / price * 100
+        s_highs  = _swing_highs(d1h.highs, lookback=5)
+        above    = [h for h in s_highs if h > price * 1.001]
+        swing_sl = min(above) if above else max(d1h.highs[-20:])
+        sl       = swing_sl + atr * 0.3
+        risk     = sl - price
+        risk_pct = risk / price * 100
 
         if risk_pct > 8.0 or risk_pct < 0.3:
-            sl        = price + atr * 1.5
-            risk      = sl - price
-            risk_pct  = risk / price * 100
+            sl       = price + atr * 1.5
+            risk     = sl - price
+            risk_pct = risk / price * 100
 
-        # TP2: nearest support below
-        s_lows = _swing_lows(d1h.lows, lookback=5)
+        s_lows   = _swing_lows(d1h.lows, lookback=5)
         if d4h:
             s_lows += _swing_lows(d4h.lows, lookback=3)
         valid_sup = sorted([l for l in s_lows if l < price * 0.995], reverse=True)
-        tp2       = valid_sup[0] if valid_sup else rp(price - risk * 3.0, price)
-        tp1       = rp(price - risk * 1.5, price)
-        tp3       = rp(price - risk * 5.0, price)
+        tp2 = valid_sup[0] if valid_sup else rp(price - risk * 3.0, price)
+        tp1 = rp(price - risk * 1.5, price)
+        tp3 = rp(price - risk * 5.0, price)
+        tp1_pct = (price - tp1) / price * 100
+        tp2_pct = (price - tp2) / price * 100
+        tp3_pct = (price - tp3) / price * 100
 
     if risk <= 0:
         return None
@@ -395,84 +617,69 @@ def _calc_levels(
     if rr < MIN_RR:
         return None
 
-    if direction == "LONG":
-        tp1_pct = (tp1 - price) / price * 100
-        tp2_pct = (tp2 - price) / price * 100
-        tp3_pct = (tp3 - price) / price * 100
-    else:
-        tp1_pct = (price - tp1) / price * 100
-        tp2_pct = (price - tp2) / price * 100
-        tp3_pct = (price - tp3) / price * 100
-
     return {
-        "entry":     rp(price, price),
-        "sl":        rp(sl, price),
-        "tp1":       rp(tp1, price),
-        "tp2":       rp(tp2, price),
-        "tp3":       rp(tp3, price),
-        "risk_pct":  round(risk_pct, 2),
-        "tp1_pct":   round(tp1_pct, 2),
-        "tp2_pct":   round(tp2_pct, 2),
-        "tp3_pct":   round(tp3_pct, 2),
-        "rr_ratio":  round(rr, 1),
-        "atr_pct":   round(atr_pct, 2),
+        "entry":    rp(price, price),
+        "sl":       rp(sl, price),
+        "tp1":      tp1,
+        "tp2":      rp(tp2, price),
+        "tp3":      tp3,
+        "risk_pct": round(risk_pct, 2),
+        "tp1_pct":  round(tp1_pct, 2),
+        "tp2_pct":  round(tp2_pct, 2),
+        "tp3_pct":  round(tp3_pct, 2),
+        "rr_ratio": round(rr, 1),
+        "atr_pct":  round(atr_pct, 2),
     }
 
 
 # ── Main scan ─────────────────────────────────────────────────────────────────
 
 def scan_symbol(
-    symbol: str,
-    tf_map: dict[str, FuturesData],
+    symbol:     str,
+    tf_map:     dict[str, FuturesData],
     change_24h: float,
-) -> Optional[dict]:
+) -> list[dict]:
     """
-    Evaluate a symbol for Agent 1.
-    Returns the best direction (LONG or SHORT) if score ≥ MIN_SCORE, else None.
+    Evaluate a symbol for Agent 1 (Pre-Gainer / Pre-Dump Scout).
+    F34: Returns ALL valid directions (LONG and/or SHORT) where score ≥ MIN_SCORE.
+    Both directions are returned independently if both qualify.
     """
     if not tf_map:
-        return None
+        return []
 
     ref   = tf_map.get("1h") or tf_map.get("4h") or next(iter(tf_map.values()))
     price = ref.closes[-1] if ref.closes else 0.0
     if price <= 0:
-        return None
+        return []
 
-    # Score both directions, pick the better one
-    long_score,  long_sigs  = _score_direction("LONG",  tf_map, price, change_24h)
-    short_score, short_sigs = _score_direction("SHORT", tf_map, price, change_24h)
+    long_score,  long_sigs  = _score_pregainer(tf_map, price, change_24h)
+    short_score, short_sigs = _score_predump(tf_map, price, change_24h)
 
-    # Choose direction with higher score (must exceed MIN_SCORE)
-    if long_score >= short_score and long_score >= MIN_SCORE:
-        direction = "LONG"
-        score     = long_score
-        signals   = long_sigs
-    elif short_score > long_score and short_score >= MIN_SCORE:
-        direction = "SHORT"
-        score     = short_score
-        signals   = short_sigs
-    else:
-        return None
-
-    levels = _calc_levels(direction, tf_map, price)
-    if not levels:
-        return None
-
-    atr_pct  = levels.pop("atr_pct")
-    leverage = calc_leverage(atr_pct, score)
-
-    return {
-        "symbol":      symbol,
-        "direction":   direction,
-        "price":       round(price, 8),
-        "score":       round(min(score, 99), 1),
-        "signals":     signals,
-        "leverage":    leverage,
-        "change_24h":  round(change_24h, 2),
-        "funding_rate": round(ref.funding_rate * 100, 4),   # as %
-        "oi_change":   round(ref.oi_change_pct, 2),
-        "liq_long":    round(ref.liq_long_usdt / 1e6, 2),   # in $M
-        "liq_short":   round(ref.liq_short_usdt / 1e6, 2),
-        "agent":       AGENT_NAME,
-        **levels,
-    }
+    results = []
+    for direction, score, signals in [
+        ("LONG",  long_score,  long_sigs),
+        ("SHORT", short_score, short_sigs),
+    ]:
+        if score < MIN_SCORE:
+            continue
+        levels = _calc_levels(direction, tf_map, price)
+        if not levels:
+            continue
+        atr_pct  = levels.pop("atr_pct")
+        leverage = calc_leverage(atr_pct, score)
+        results.append({
+            "symbol":       symbol,
+            "direction":    direction,
+            "price":        round(price, 8),
+            "score":        round(min(score, 99), 1),
+            "signals":      signals,
+            "leverage":     leverage,
+            "change_24h":   round(change_24h, 2),
+            "funding_rate": round(ref.funding_rate * 100, 4),
+            "oi_change":    round(ref.oi_change_pct, 2),
+            "liq_long":     round(ref.liq_long_usdt / 1e6, 3),
+            "liq_short":    round(ref.liq_short_usdt / 1e6, 3),
+            "agent":        AGENT_NAME,
+            **levels,
+        })
+    return results
