@@ -33,7 +33,7 @@ class PaperTrade(Base):
     alert_type:   Mapped[str]  = mapped_column(String(20),  nullable=False, default="")
     sl_method:    Mapped[str]  = mapped_column(String(120), nullable=False, default="")
     tp_method:    Mapped[str]  = mapped_column(String(120), nullable=False, default="")
-    signals_json: Mapped[str]  = mapped_column(Text,        nullable=False, default="[]")  # JSON array
+    signals_json: Mapped[str]  = mapped_column(Text,        nullable=False, default="{}")  # JSON object
     entry_type:   Mapped[str]  = mapped_column(String(20),  nullable=False, default="market")
 
     # Lifecycle timestamps (unix seconds as float)

@@ -16,8 +16,7 @@ from sqlalchemy import select
 router = APIRouter(tags=["futures-learning"])
 logger = structlog.get_logger(__name__)
 
-STARTING_BALANCE = 1000.0
-RISK_PCT         = 0.01
+from app.services.trading_costs import FUTURES_STARTING_BALANCE as STARTING_BALANCE, FUTURES_RISK_PCT as RISK_PCT
 
 
 def _notional(risk_pct: float) -> float:
@@ -67,8 +66,12 @@ async def get_learning_stats() -> dict:
         )
         weights = list(weights_result.scalars().all())
 
-    closed  = [t for t in all_trades if t.status in ("tp", "sl")]
+    closed  = [t for t in all_trades if t.status in ("tp", "sl")]   # expired excluded — not real outcomes
     open_t  = [t for t in all_trades if t.status == "open"]
+
+    def _is_real_win(t) -> bool:
+        """BUG FIX: status=='tp' with negative net pnl is NOT a win."""
+        return t.status == "tp" and (t.pnl_pct or 0.0) > 0
 
     # Balance simulation
     balance = STARTING_BALANCE
@@ -90,14 +93,14 @@ async def get_learning_stats() -> dict:
             "ts":      t.closed_at,
         })
 
-    wins   = [t for t in closed if t.status == "tp"]
-    losses = [t for t in closed if t.status == "sl"]
+    wins   = [t for t in closed if _is_real_win(t)]
+    losses = [t for t in closed if not _is_real_win(t)]
     wr     = len(wins) / len(closed) * 100 if closed else 0.0
 
     # Per-agent
     def agent_stats(agent_name: str) -> dict:
         ag_closed = [t for t in closed if t.style == agent_name]
-        ag_wins   = [t for t in ag_closed if t.status == "tp"]
+        ag_wins   = [t for t in ag_closed if _is_real_win(t)]
         ag_rate   = len(ag_wins) / len(ag_closed) * 100 if ag_closed else 0.0
         return {
             "total":    len(ag_closed),
@@ -112,11 +115,11 @@ async def get_learning_stats() -> dict:
     for i in range(len(closed)):
         start = max(0, i - window + 1)
         chunk = closed[start: i + 1]
-        chunk_wins = sum(1 for t in chunk if t.status == "tp")
+        chunk_wins = sum(1 for t in chunk if _is_real_win(t))
         trend.append({
             "trade_n":  i + 1,
             "win_rate": round(chunk_wins / len(chunk) * 100, 1),
-            "win":      closed[i].status == "tp",
+            "win":      _is_real_win(closed[i]),
         })
 
     # Signal performance
@@ -134,7 +137,7 @@ async def get_learning_stats() -> dict:
         r = t.regime or "unknown"
         entry = regime_map.setdefault(r, {"wins": 0, "total": 0, "pnl_sum": 0.0})
         entry["total"] += 1
-        if t.status == "tp":
+        if _is_real_win(t):
             entry["wins"] += 1
         try:
             meta     = json.loads(t.signals_json or "{}")
@@ -157,8 +160,8 @@ async def get_learning_stats() -> dict:
     # Per-direction stats
     long_closed  = [t for t in closed if t.direction == "LONG"]
     short_closed = [t for t in closed if t.direction == "SHORT"]
-    long_wins    = [t for t in long_closed if t.status == "tp"]
-    short_wins   = [t for t in short_closed if t.status == "tp"]
+    long_wins    = [t for t in long_closed  if _is_real_win(t)]
+    short_wins   = [t for t in short_closed if _is_real_win(t)]
 
     # Leverage distribution: how many trades per leverage bucket
     lev_dist: dict[str, int] = {}
@@ -181,7 +184,7 @@ async def get_learning_stats() -> dict:
         })
         ak = "agent1" if t.style == "futures_agent1" else "agent2"
         entry[ak]["total"] += 1
-        if t.status == "tp":
+        if _is_real_win(t):
             entry[ak]["wins"] += 1
 
     monthly_stats = []

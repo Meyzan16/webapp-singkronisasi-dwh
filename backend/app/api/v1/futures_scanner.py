@@ -16,6 +16,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
+from app.services.trading_costs import FUTURES_STARTING_BALANCE, FUTURES_RISK_PCT
+
 router = APIRouter(tags=["futures"])
 logger = structlog.get_logger(__name__)
 
@@ -137,6 +139,15 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
     except Exception:
         pass  # if price fetch fails, allow the trade
 
+    # R:R ≥ 1:3 validation (F19)
+    risk   = abs(body.entry - body.sl)
+    reward = abs(body.tp2 - body.entry)
+    if risk > 0 and reward / risk < 3.0:
+        raise HTTPException(
+            status_code=422,
+            detail=f"R:R {reward/risk:.1f} terlalu kecil. Minimum R:R 1:3 — perbesar TP2 atau perkecil SL.",
+        )
+
     # Dedup: one open position per symbol per agent
     async with AsyncSessionLocal() as check:
         existing = await check.execute(
@@ -175,27 +186,36 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
     from agents.futures.regime import get_cached_regime
     current_regime = get_cached_regime()
 
+    # F59: compute position sizing at open time (same formula as auto_trader)
+    _risk_pct        = body.risk_pct or 2.0
+    _notional        = FUTURES_STARTING_BALANCE * FUTURES_RISK_PCT / (_risk_pct / 100)
+    _pos_size        = round(_notional, 2)
+    _risk_dollar_val = round(_notional * (_risk_pct / 100), 2)
+
     async with AsyncSessionLocal() as session:
         trade = PaperTrade(
-            symbol       = symbol,
-            direction    = body.direction,
-            style        = body.agent,
-            entry_price  = body.entry,
-            stop_loss    = body.sl,
-            take_profit  = body.tp2,
-            risk_reward  = f"1:{body.rr_ratio}",
-            probability  = body.score,
-            alert_type   = body.direction.lower(),
-            sl_method    = f"Swing {'low' if body.direction == 'LONG' else 'high'} + ATR | SL {body.sl}",
-            tp_method    = f"TP1 +{body.tp1_pct}% | TP2 +{body.tp2_pct}% | TP3 +{body.tp3_pct}%",
-            signals_json = json.dumps(meta),
-            entry_type   = "market",
-            entry_at     = time.time(),
-            status       = "open",
-            leverage     = body.leverage,
-            margin_type  = "cross",
-            regime       = current_regime,
-            trail_active = False,
+            symbol           = symbol,
+            direction        = body.direction,
+            style            = body.agent,
+            entry_price      = body.entry,
+            stop_loss        = body.sl,
+            take_profit      = body.tp2,
+            risk_reward      = f"1:{body.rr_ratio}",
+            probability      = body.score,
+            alert_type       = body.direction.lower(),
+            sl_method        = f"Swing {'low' if body.direction == 'LONG' else 'high'} + ATR | SL {body.sl}",
+            tp_method        = f"TP1 +{body.tp1_pct}% | TP2 +{body.tp2_pct}% | TP3 +{body.tp3_pct}%",
+            signals_json     = json.dumps(meta, ensure_ascii=False),
+            entry_type       = "market",
+            entry_at         = time.time(),
+            status           = "open",
+            leverage         = body.leverage,
+            margin_type      = "cross",
+            regime           = current_regime,
+            trail_active     = False,
+            position_size    = _pos_size,
+            risk_dollar      = _risk_dollar_val,
+            balance_snapshot = FUTURES_STARTING_BALANCE,
         )
         session.add(trade)
         await session.commit()
@@ -256,23 +276,20 @@ async def get_futures_positions(
         )
         trades = result.scalars().all()
 
-    # Fetch live prices for open positions
+    # Fetch live prices for open positions — batch endpoint (weight=2 for all, F18)
     open_symbols = list({t.symbol for t in trades if t.status == "open"})
     live_prices: dict[str, float] = {}
     if open_symbols:
         try:
+            import json as _json
             async with httpx.AsyncClient(timeout=8) as c:
-                tasks = {
-                    sym: c.get(fapi(f"/fapi/v1/ticker/price?symbol={sym}"))
-                    for sym in open_symbols
-                }
-                for sym, task in tasks.items():
-                    try:
-                        r = await task
-                        if r.status_code == 200:
-                            live_prices[sym] = float(r.json()["price"])
-                    except Exception:
-                        pass
+                syms_param = _json.dumps(open_symbols)
+                r = await c.get(fapi("/fapi/v1/ticker/price"), params={"symbols": syms_param})
+                if r.status_code == 200:
+                    data = r.json()
+                    if isinstance(data, list):
+                        for item in data:
+                            live_prices[item["symbol"]] = float(item["price"])
         except Exception:
             pass
 
@@ -284,12 +301,13 @@ async def get_futures_positions(
             meta = {}
 
         cp = live_prices.get(t.symbol) if t.status == "open" else None
+        _FUTURES_FEE_PCT = 0.10  # 0.05% taker per side × 2 round-trip (F23)
         upnl = None
         if cp and t.entry_price > 0:
             if t.direction == "LONG":
-                upnl = round((cp - t.entry_price) / t.entry_price * 100, 2)
+                upnl = round((cp - t.entry_price) / t.entry_price * 100 - _FUTURES_FEE_PCT, 2)
             else:
-                upnl = round((t.entry_price - cp) / t.entry_price * 100, 2)
+                upnl = round((t.entry_price - cp) / t.entry_price * 100 - _FUTURES_FEE_PCT, 2)
 
         positions.append({
             "id":               t.id,
@@ -333,7 +351,8 @@ async def get_futures_status() -> dict:
     ts_a1   = fs.last_scan_ts("agent1")
     ts_a2   = fs.last_scan_ts("agent2")
     last_ts = max(ts_a1 or 0, ts_a2 or 0) or None
-    next_in = max(0, round((900 - (time.time() - last_ts)) / 60, 1)) if last_ts else None
+    from agents.futures.scheduler import INTERVAL_SEC as _SCHED_INTERVAL
+    next_in = max(0, round((_SCHED_INTERVAL - (time.time() - last_ts)) / 60, 1)) if last_ts else None
 
     return {
         **state,
@@ -347,8 +366,7 @@ async def get_futures_status() -> dict:
 
 # ── Risk Monitor ──────────────────────────────────────────────────────────────
 
-STARTING_BALANCE  = 1000.0
-RISK_PCT_DEFAULT  = 0.01
+from app.services.trading_costs import FUTURES_STARTING_BALANCE as STARTING_BALANCE, FUTURES_RISK_PCT as RISK_PCT_DEFAULT
 
 def _liq_price(entry: float, leverage: int, direction: str) -> float:
     """Cross margin liquidation ≈ entry ± (95% of margin)."""

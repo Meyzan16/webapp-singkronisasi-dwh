@@ -9,7 +9,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 logger = structlog.get_logger(__name__)
 
 HEARTBEAT_SEC = 5
-INTERVAL_SEC  = 15 * 60
+INTERVAL_SEC  = 2 * 60   # must match agents/futures/scheduler.py INTERVAL_SEC
 
 
 def _next_scan_in(last_ts: Optional[float]) -> Optional[int]:

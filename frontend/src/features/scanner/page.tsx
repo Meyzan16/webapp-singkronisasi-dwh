@@ -46,7 +46,7 @@ interface OpenPosition {
 
 type ConnState = "connecting" | "connected" | "reconnecting" | "paused";
 const WS_URL        = "ws://localhost:8000/ws/futures";
-const INTERVAL_SEC  = 15 * 60;
+const INTERVAL_SEC  = 2 * 60;
 
 const CONN_META: Record<ConnState, { dot: string; label: string; color: string }> = {
   connected:    { dot: "bg-green-400",               label: "LIVE",        color: "text-green-400 border-green-500/40 bg-green-500/10"   },
@@ -65,8 +65,8 @@ function DirBadge({ dir }: { dir: "LONG" | "SHORT" }) {
 
 function AgentBadge({ agent }: { agent: string }) {
   return agent === "futures_agent1"
-    ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">AI</span>
-    : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">T0-T4</span>;
+    ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Pre-Gainer</span>
+    : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Accum.</span>;
 }
 
 function ScoreBubble({ score }: { score: number }) {
@@ -110,7 +110,7 @@ function SignalCard({ s, isNew, isOpen, openPos, onClick }: {
                   OPEN {openPos.upnl_pct >= 0 ? "+" : ""}{openPos.upnl_pct.toFixed(1)}%
                 </span>
               )}
-              {s.score >= 75 && (
+              {s.score >= 72 && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-100 text-teal-700 border border-teal-200">
                   🤖 AUTO
                 </span>
@@ -238,7 +238,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
                 <DirBadge dir={s.direction} />
                 <span className="text-[11px] bg-white/10 text-white px-2 py-0.5 rounded font-bold">{s.leverage}x Cross Margin</span>
                 <span className={`text-[11px] px-2 py-0.5 rounded font-bold border ${s.agent === "futures_agent1" ? "bg-blue-600/30 text-blue-300 border-blue-500/30" : "bg-purple-600/30 text-purple-300 border-purple-500/30"}`}>
-                  {s.agent === "futures_agent1" ? "Agent 1 — AI Knowledge" : "Agent 2 — T0-T4"}
+                  {s.agent === "futures_agent1" ? "Agent 1 — Pre-Gainer Scout" : "Agent 2 — Accumulation Detector"}
                 </span>
               </div>
             </div>
@@ -379,7 +379,7 @@ export default function ScannerFuturesPage() {
   const [scanned, setScanned]         = useState(0);
   const [activeAgent, setActiveAgent] = useState<"all" | "agent1" | "agent2">("all");
   const [dirFilter, setDirFilter]     = useState<"ALL" | "LONG" | "SHORT">("ALL");
-  const [minScore, setMinScore]       = useState(55);
+  const [minScore, setMinScore]       = useState(52);
   const [search, setSearch]           = useState("");
   const [selected, setSelected]       = useState<FuturesSignal | null>(null);
   const [newSymbols, setNewSymbols]   = useState<Set<string>>(new Set());
@@ -544,14 +544,14 @@ export default function ScannerFuturesPage() {
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-3xl">⚡</span>
                 <div>
-                  <h1 className="text-2xl font-bold">Scanner Futures</h1>
-                  <p className="text-xs text-neutral-400">2 Agents · USDT-M Perpetual · LONG &amp; SHORT · Cross Margin · R:R ≥ 1:3</p>
+                  <h1 className="text-2xl font-bold">Futures Pre-Gainer Scanner</h1>
+                  <p className="text-xs text-neutral-400">Cari coin sebelum pump besar · BB Squeeze · Akumulasi · Funding neutral · OI building</p>
                 </div>
               </div>
               <div className="flex gap-2 ml-12 flex-wrap">
                 {[
-                  { key: "agent1" as const, label: "🤖 Agent 1 — AI Knowledge", cls: "bg-blue-500/20 border-blue-400/40 text-blue-300"     },
-                  { key: "agent2" as const, label: "🧠 Agent 2 — T0-T4",        cls: "bg-purple-500/20 border-purple-400/40 text-purple-300" },
+                  { key: "agent1" as const, label: "🎯 Agent 1 — Pre-Gainer Scout",      cls: "bg-blue-500/20 border-blue-400/40 text-blue-300"     },
+                  { key: "agent2" as const, label: "📦 Agent 2 — Accumulation Detector", cls: "bg-purple-500/20 border-purple-400/40 text-purple-300" },
                 ].map(a => (
                   <button key={a.key}
                     onClick={() => setActiveAgent(prev => prev === a.key ? "all" : a.key)}
@@ -569,7 +569,7 @@ export default function ScannerFuturesPage() {
                 </button>
                 {scanning && (
                   <span className="flex items-center gap-1.5 text-[11px] text-teal-300 bg-teal-500/10 border border-teal-500/30 px-3 py-1.5 rounded-full">
-                    <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />Scanning 100 pairs...
+                    <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />Scanning 150 pairs...
                   </span>
                 )}
                 {!scanning && nextScanDisplay != null && connState === "connected" && (
@@ -647,7 +647,7 @@ export default function ScannerFuturesPage() {
             )}
           </div>
           <p className="text-[11px] text-neutral-500 mt-0.5">
-            Score ≥ 75pt → otomatis buka paper trade · Max 5 posisi per agent · Dedup aktif
+            Score ≥ 72pt → otomatis buka paper trade · Max 5 posisi per agent · Entry sebelum pump
           </p>
         </div>
         <button
@@ -675,9 +675,10 @@ export default function ScannerFuturesPage() {
           <span className="text-neutral-400 text-[10px] font-semibold">MIN</span>
           <select value={minScore} onChange={e => setMinScore(Number(e.target.value))}
             className="text-xs text-neutral-700 bg-transparent focus:outline-none">
-            <option value={55}>55pt</option>
-            <option value={65}>65pt ⚡</option>
-            <option value={75}>75pt 🔥</option>
+            <option value={52}>52pt</option>
+            <option value={60}>60pt ⚡</option>
+            <option value={72}>72pt 🔥 Auto</option>
+            <option value={80}>80pt 💎</option>
           </select>
         </div>
         <div className="relative flex-1 min-w-[140px] max-w-[200px]">
@@ -699,8 +700,8 @@ export default function ScannerFuturesPage() {
           <div className="w-14 h-14 rounded-full bg-teal-100 flex items-center justify-center mx-auto">
             <span className="text-3xl animate-bounce">⚡</span>
           </div>
-          <p className="font-semibold text-neutral-700">Menghubungkan ke Futures Scanner...</p>
-          <p className="text-xs text-neutral-400">Agent 1 (AI Knowledge) + Agent 2 (T0-T4) · 100 USDT-M pairs</p>
+          <p className="font-semibold text-neutral-700">Menghubungkan ke Pre-Gainer Scanner...</p>
+          <p className="text-xs text-neutral-400">Agent 1 (Pre-Gainer Scout) + Agent 2 (Accumulation Detector) · 150 USDT-M pairs</p>
         </div>
       )}
 

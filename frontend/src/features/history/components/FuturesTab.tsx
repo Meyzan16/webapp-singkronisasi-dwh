@@ -2,14 +2,14 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { fmtPrice } from "@/lib/format";
 import { FuturesAnalytics } from "./FuturesAnalytics";
+import { DBHistoryTable } from "@/features/health/components/DBHistoryTable";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Constants (F21: fallbacks only — runtime values from API) ─────────────────
 
-const STARTING_BALANCE = 1000;
-const RISK_PCT         = 0.01;
-const RISK_DOLLAR      = STARTING_BALANCE * RISK_PCT; // $10
-const REFRESH_MS       = 15_000;   // 15 s live polling
-const TARGET_WIN_RATE  = 80;
+const _FALLBACK_BALANCE  = 1000;   // used only when /futures/learning/stats not loaded yet
+const RISK_PCT           = 0.01;   // 1% fixed-fractional (matches trading_costs.py)
+const REFRESH_MS         = 15_000; // 15 s live polling
+const TARGET_WIN_RATE    = 80;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -107,6 +107,8 @@ interface FuturesPosition {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+const RISK_DOLLAR = _FALLBACK_BALANCE * RISK_PCT; // $10 (matches trading_costs.py)
+
 function calcNotional(riskPct: number): number {
   return riskPct > 0 ? RISK_DOLLAR / (riskPct / 100) : 0;
 }
@@ -143,25 +145,6 @@ function DirBadge({ dir }: { dir: "LONG" | "SHORT" }) {
     : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-100 text-red-700 border border-red-300">▼ S</span>;
 }
 
-function AgentBadge({ agent }: { agent: string }) {
-  return agent === "futures_agent1"
-    ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">AI</span>
-    : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">T4</span>;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const cfg: Record<string, string> = {
-    open: "bg-blue-100 text-blue-700 border-blue-200",
-    tp:   "bg-green-100 text-green-700 border-green-200",
-    sl:   "bg-red-100 text-red-600 border-red-200",
-  };
-  const label: Record<string, string> = { open: "🔵 Open", tp: "✅ TP", sl: "🛑 SL" };
-  return (
-    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${cfg[status] ?? "bg-neutral-100 text-neutral-500 border-neutral-200"}`}>
-      {label[status] ?? status}
-    </span>
-  );
-}
 
 function RiskStatusBadge({ status }: { status: "SAFE" | "WARNING" | "DANGER" }) {
   const cfg = {
@@ -286,9 +269,9 @@ function OpenPosCard({ p, risk }: { p: FuturesPosition; risk?: RiskPosition }) {
 
 // ── Balance simulation ─────────────────────────────────────────────────────────
 
-function buildEquity(closed: FuturesPosition[]): { balance: number; n: number; symbol: string; win: boolean }[] {
+function buildEquity(closed: FuturesPosition[], startingBalance: number): { balance: number; n: number; symbol: string; win: boolean }[] {
   const sorted = [...closed].sort((a, b) => (a.closed_at ?? 0) - (b.closed_at ?? 0));
-  let balance = STARTING_BALANCE;
+  let balance = startingBalance;
   const points = [{ balance, n: 0, symbol: "", win: true }];
   sorted.forEach((p, i) => {
     const pnl$ = tradePnlDollar(p);
@@ -300,8 +283,6 @@ function buildEquity(closed: FuturesPosition[]): { balance: number; n: number; s
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
-type SortKey  = "date" | "pnl" | "symbol" | "score";
-type FilterKey = "all" | "open" | "win" | "loss";
 type SubTab   = "overview" | "monitor" | "analytics";
 
 export function FuturesTab() {
@@ -311,9 +292,7 @@ export function FuturesTab() {
   const [riskDash, setRiskDash]       = useState<RiskDashboard | null>(null);
   const [loading, setLoading]         = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [sortBy, setSortBy]           = useState<SortKey>("date");
-  const [sortDir, setSortDir]         = useState<"desc" | "asc">("desc");
-  const [filterBy, setFilterBy]       = useState<FilterKey>("all");
+  // (sortBy/sortDir/filterBy removed — history now uses DBHistoryTable)
   const [agentFilter, setAgentFilter] = useState<"all" | "agent1" | "agent2">("all");
   const [countdown, setCountdown]     = useState(REFRESH_MS / 1000);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
@@ -370,7 +349,8 @@ export function FuturesTab() {
     const losses = closed.filter(p => p.status === "sl");
 
     const totalPnl$ = closed.reduce((acc, p) => acc + (tradePnlDollar(p) ?? 0), 0);
-    const currentBalance = STARTING_BALANCE + totalPnl$;
+    // F22: prefer server-computed balance (/futures/learning/stats) over client-side calc
+    const currentBalance = learning?.balance?.current ?? (_FALLBACK_BALANCE + totalPnl$);
     const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : 0;
 
     const a1Closed = closed.filter(p => p.agent === "futures_agent1");
@@ -387,45 +367,17 @@ export function FuturesTab() {
       a1: { total: a1Closed.length, wins: a1Wins, rate: a1Closed.length > 0 ? a1Wins / a1Closed.length * 100 : 0 },
       a2: { total: a2Closed.length, wins: a2Wins, rate: a2Closed.length > 0 ? a2Wins / a2Closed.length * 100 : 0 },
     };
-  }, [positions]);
+  }, [positions, learning]);
 
-  // Monthly filtered closed list
-  const closedByMonth = useMemo(() => {
-    const closed = positions.filter(p => p.status !== "open");
-    if (selectedMonth === "all") return closed;
-    return closed.filter(p => {
-      if (!p.entry_at) return false;
-      const m = new Date(p.entry_at * 1000).toISOString().slice(0, 7);
-      return m === selectedMonth;
-    });
-  }, [positions, selectedMonth]);
+  const startingBalance = learning?.balance?.starting ?? _FALLBACK_BALANCE;
+  const equityPoints = useMemo(
+    () => buildEquity(positions.filter(p => p.status !== "open"), startingBalance),
+    [positions, startingBalance]
+  );
 
-  const equityPoints = useMemo(() => buildEquity(positions.filter(p => p.status !== "open")), [positions]);
+  // (displayClosed removed — riwayat now handled by DBHistoryTable below)
 
-  // ── Filtered + sorted closed list ─────────────────────────────────────────────
-
-  const displayClosed = useMemo(() => {
-    let list = [...closedByMonth];
-    if (agentFilter === "agent1") list = list.filter(p => p.agent === "futures_agent1");
-    if (agentFilter === "agent2") list = list.filter(p => p.agent === "futures_agent2");
-    if (filterBy === "win")  list = list.filter(p => p.status === "tp");
-    if (filterBy === "loss") list = list.filter(p => p.status === "sl");
-
-    list.sort((a, b) => {
-      if (sortBy === "date")   return sortDir === "desc" ? (b.entry_at ?? 0) - (a.entry_at ?? 0) : (a.entry_at ?? 0) - (b.entry_at ?? 0);
-      if (sortBy === "symbol") return sortDir === "asc" ? a.symbol.localeCompare(b.symbol) : b.symbol.localeCompare(a.symbol);
-      if (sortBy === "pnl") {
-        const pa = tradePnlDollar(a) ?? -9999;
-        const pb = tradePnlDollar(b) ?? -9999;
-        return sortDir === "desc" ? pb - pa : pa - pb;
-      }
-      if (sortBy === "score") return sortDir === "desc" ? b.score - a.score : a.score - b.score;
-      return 0;
-    });
-    return list;
-  }, [closedByMonth, agentFilter, filterBy, sortBy, sortDir]);
-
-  const balanceColor = stats.currentBalance >= STARTING_BALANCE ? "text-green-600" : "text-red-500";
+  const balanceColor = stats.currentBalance >= startingBalance ? "text-green-600" : "text-red-500";
   const pnlColor     = stats.totalPnl$ >= 0 ? "text-green-600" : "text-red-500";
 
   // Risk map for open positions
@@ -484,7 +436,7 @@ export function FuturesTab() {
               <div>
                 <p className="text-xs text-neutral-400 uppercase tracking-wider font-semibold mb-1">🔍 Portfolio Risk Dashboard</p>
                 <div className="flex items-baseline gap-3">
-                  <span className={`text-4xl font-black ${pd.current_balance >= STARTING_BALANCE ? "text-green-400" : "text-red-400"}`}>
+                  <span className={`text-4xl font-black ${pd.current_balance >= startingBalance ? "text-green-400" : "text-red-400"}`}>
                     ${pd.current_balance.toFixed(2)}
                   </span>
                   <span className={`text-sm font-bold ${pd.total_closed_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
@@ -940,123 +892,37 @@ export function FuturesTab() {
         </div>
       </div>
 
-      {/* ── Toolbar ──────────────────────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
-          {(["all", "win", "loss"] as FilterKey[]).map(f => {
-            const labels: Record<FilterKey, string> = { all: "Semua", open: "Open", win: "Win", loss: "Loss" };
-            const count = f === "all"
-              ? closedByMonth.length
-              : f === "win"  ? closedByMonth.filter(p => p.status === "tp").length
-              :                closedByMonth.filter(p => p.status === "sl").length;
-            return (
-              <button key={f} onClick={() => setFilterBy(f)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                  filterBy === f ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"
-                }`}>
-                {labels[f]} <span className="text-[10px] opacity-60">{count}</span>
-              </button>
-            );
-          })}
+      {/* ── Live indicator ────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-50 border border-blue-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+          <span className="text-[10px] font-bold text-blue-700">LIVE</span>
+          <span className="text-[10px] text-blue-600 tabular-nums">{countdown}s</span>
         </div>
-        <select value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)}
-          className="text-xs border border-neutral-200 rounded-lg px-2 py-1.5 bg-white text-neutral-700 focus:outline-none">
-          <option value="date">Sort: Tanggal</option>
-          <option value="pnl">Sort: P&L $</option>
-          <option value="score">Sort: Score</option>
-          <option value="symbol">Sort: Symbol</option>
-        </select>
-        <button onClick={() => setSortDir(d => d === "desc" ? "asc" : "desc")}
-          className="text-xs border border-neutral-200 rounded-lg px-2 py-1.5 bg-white text-neutral-600 font-mono">
-          {sortDir === "desc" ? "↓" : "↑"}
+        {lastUpdated && <p className="text-[10px] text-neutral-400">{lastUpdated.toLocaleTimeString()}</p>}
+        <button onClick={() => void fetchPositions()} disabled={loading}
+          className="text-xs text-teal-600 hover:text-teal-500 font-semibold disabled:opacity-40">
+          {loading ? "..." : "↺"}
         </button>
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-50 border border-blue-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-            <span className="text-[10px] font-bold text-blue-700">LIVE</span>
-            <span className="text-[10px] text-blue-600 tabular-nums">{countdown}s</span>
-          </div>
-          {lastUpdated && <p className="text-[10px] text-neutral-400">{lastUpdated.toLocaleTimeString()}</p>}
-          <button onClick={() => void fetchPositions()} disabled={loading}
-            className="text-xs text-teal-600 hover:text-teal-500 font-semibold disabled:opacity-40">
-            {loading ? "..." : "↺"}
-          </button>
-        </div>
       </div>
 
-      {/* ── Closed positions ──────────────────────────────────────────────────────── */}
+      {/* ── 🗄 Riwayat DB Lengkap — Futures ───────────────────────────────────── */}
       <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-neutral-100 bg-neutral-50 flex items-center gap-3">
-          <h3 className="font-bold text-sm text-neutral-700">📋 Riwayat Posisi Futures</h3>
-          {selectedMonth !== "all" && (
-            <span className="text-[10px] bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full font-semibold">
-              {fmtMonth(selectedMonth)}
-            </span>
-          )}
+        <div className="px-5 py-3 border-b border-neutral-100 bg-neutral-50">
+          <h3 className="font-bold text-sm text-neutral-700">
+            🗄 Riwayat Database — Futures Agent 1 + 2
+          </h3>
+          <p className="text-[10px] text-neutral-400 mt-0.5">
+            Semua trade · search simbol · pagination · alasan tutup posisi lengkap
+          </p>
         </div>
-
-        {displayClosed.length === 0 ? (
-          <div className="text-center py-10 text-neutral-400">
-            <p className="text-2xl mb-2">{filterBy !== "all" ? "🔍" : "📭"}</p>
-            <p className="text-sm">
-              {filterBy !== "all" ? "Tidak ada posisi untuk filter ini" : "Belum ada posisi yang tertutup"}
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="hidden sm:flex items-center gap-2 px-4 py-2 bg-neutral-50 border-b text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
-              <span className="flex-1">Koin</span>
-              <span className="w-16 text-right">Entry</span>
-              <span className="w-16 text-right hidden md:block">Close</span>
-              <span className="w-20 text-right">P&L ($)</span>
-              <span className="w-16 text-right">P&L (%)</span>
-              <span className="w-12 text-center">Lev</span>
-              <span className="w-20 text-center">Status</span>
-            </div>
-
-            {displayClosed.map(p => {
-              const pnl$   = tradePnlDollar(p);
-              const pnlPct = p.pnl_pct ?? 0;
-              const pnlColor = pnlPct >= 0 ? "text-green-600" : "text-red-500";
-              return (
-                <div key={p.id}
-                  className="flex items-center gap-2 px-4 py-3 border-b border-neutral-100 hover:bg-neutral-50 last:border-0 flex-wrap">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="font-bold text-sm">{p.symbol.replace("USDT", "")}/USDT</span>
-                      <DirBadge dir={p.direction} />
-                      <AgentBadge agent={p.agent} />
-                    </div>
-                    <p className="text-[10px] text-neutral-400">
-                      {p.entry_at ? new Date(p.entry_at * 1000).toLocaleDateString("id-ID") : ""}
-                      {p.signals[0] ? ` · ${p.signals[0].replace(/[^\w\s%+.-]/g, "").trim().slice(0, 40)}` : ""}
-                    </p>
-                  </div>
-                  <div className="w-16 text-right hidden sm:block">
-                    <p className="text-xs font-mono">${fmtPrice(p.entry)}</p>
-                  </div>
-                  <div className="w-16 text-right hidden md:block">
-                    {p.close_price != null && <p className="text-xs font-mono">${fmtPrice(p.close_price)}</p>}
-                  </div>
-                  <div className="w-20 text-right">
-                    <PnlDollar value={pnl$} />
-                  </div>
-                  <div className="w-16 text-right hidden sm:block">
-                    <p className={`text-sm font-black tabular-nums ${pnlColor}`}>
-                      {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
-                    </p>
-                  </div>
-                  <div className="w-12 text-center hidden sm:block">
-                    <span className="text-[10px] bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded font-semibold">{p.leverage}x</span>
-                  </div>
-                  <div className="w-20 text-center">
-                    <StatusBadge status={p.status} />
-                  </div>
-                </div>
-              );
-            })}
-          </>
-        )}
+        <div className="p-4">
+          <DBHistoryTable
+            defaultStyle="futures"
+            hideStyleTabs={false}
+            compact={true}
+          />
+        </div>
       </div>
 
     </div>
