@@ -22,9 +22,8 @@ from agents.futures.regime import get_cached_regime
 
 logger = structlog.get_logger(__name__)
 
-AUTO_OPEN_THRESHOLD          = 72   # Pre-gainer scout: entry earlier = lower bar OK
-AUTO_OPEN_VOLATILE_THRESHOLD = 82   # Higher bar in volatile regime
-MAX_AUTO_POSITIONS           = 5    # max concurrent auto positions per agent
+AUTO_OPEN_THRESHOLD = 72   # fallback when no adaptive threshold yet
+MAX_AUTO_POSITIONS  = 5    # max concurrent auto positions per agent
 
 # Regimes where auto-open is fully disabled
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk

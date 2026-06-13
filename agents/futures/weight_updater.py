@@ -91,7 +91,8 @@ def _weight_from_rate(win_rate: float, total: int) -> float:
 def _update_coin_blacklist(trades: list) -> None:
     """F71: Blacklist coins with 3 consecutive SL trades (24h cooldown)."""
     by_symbol: dict = defaultdict(list)
-    for t in sorted(trades, key=lambda x: x.entry_at or 0):
+    # B2: sort by closed_at, not entry_at — consecutive means last 3 CLOSED, not opened
+    for t in sorted(trades, key=lambda x: x.closed_at or x.entry_at or 0):
         by_symbol[t.symbol].append(t)
 
     for symbol, sym_trades in by_symbol.items():

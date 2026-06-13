@@ -17,6 +17,7 @@ from app.services.binance_urls import fapi
 from agents.futures import agent2 as a2
 from agents.futures import store as futures_store
 from agents.futures.data import fetch_top100_futures, fetch_symbol_data
+from agents.futures.weight_updater import is_blacklisted   # B4: top-level import
 
 logger = structlog.get_logger(__name__)
 
@@ -143,8 +144,6 @@ async def _run_scan() -> dict:
     # Step 3: score both agents
     a1_results: list[dict] = []
     a2_results: list[dict] = []
-
-    from agents.futures.weight_updater import is_blacklisted  # F71
 
     for ticker in tickers:
         symbol     = ticker["symbol"]

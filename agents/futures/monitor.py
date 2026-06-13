@@ -193,7 +193,7 @@ async def _rebuild_futures_paper_balance(style_key: str) -> None:
         result = await session.execute(
             select(PaperTrade).where(
                 PaperTrade.style == style_key,
-                PaperTrade.status.in_(["tp", "sl"]),
+                PaperTrade.status.in_(["tp", "sl", "expired"]),  # B1: include expired P&L
                 PaperTrade.pnl_pct.isnot(None),
             )
         )
@@ -516,7 +516,7 @@ async def check_futures_positions() -> int:
         if closed > 0 or updated > 0:
             await session.commit()
 
-    return closed + updated
+    return closed, updated   # B3: return tuple so caller can track closes separately
 
 
 # ── Background loop ───────────────────────────────────────────────────────────
@@ -540,13 +540,15 @@ async def run_futures_monitor() -> None:
             _closed_today = 0
 
         try:
-            n = await check_futures_positions()
+            closed_n, updated_n = await check_futures_positions()  # B3: unpack tuple
+            n = closed_n + updated_n
             _cycle_count += 1
             _last_check   = time.time()
             _last_error   = None
             if n:
-                _closed_today += n
-                logger.info("futures_monitor_cycle", closed_updated=n, cycle=_cycle_count,
+                _closed_today += closed_n  # B3: count actual closes only, not SL-trail updates
+                logger.info("futures_monitor_cycle", closed=closed_n, updated=updated_n,
+                            cycle=_cycle_count,
                             liq_guards=_liq_guards, tp_extended=_tp_extended)
             # F62: rebuild balance only every 10 cycles to reduce DB load
             if _cycle_count % 10 == 0:

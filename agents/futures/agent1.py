@@ -33,7 +33,6 @@ from .data import FuturesData
 
 logger = structlog.get_logger(__name__)
 
-MIN_SCORE  = 52
 MIN_RR     = 3.0
 AGENT_NAME = "futures_agent1"
 
