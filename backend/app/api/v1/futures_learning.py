@@ -206,12 +206,14 @@ async def get_learning_stats() -> dict:
             },
         })
 
-    # Conservative (no-leverage) equity: each win = +$30, loss = -$10 flat
+    # Conservative (flat R:R 1:3) equity — F65: derive from constants, not hardcoded $30/$10
+    _risk_dollar = STARTING_BALANCE * RISK_PCT   # loss per trade
+    _win_dollar  = _risk_dollar * 3.0            # R:R 1:3 → win pays 3× risk
     nc_balance = STARTING_BALANCE
     nc_points = []
     for ep in equity_points:
         win = ep["win"]
-        nc_balance += 30.0 if win else -10.0
+        nc_balance += _win_dollar if win else -_risk_dollar
         nc_points.append({"trade_n": ep["trade_n"], "balance": round(nc_balance, 2)})
 
     return {
@@ -233,7 +235,7 @@ async def get_learning_stats() -> dict:
             "total_pnl": round(balance - STARTING_BALANCE, 2),
             "roi_pct":   round((balance - STARTING_BALANCE) / STARTING_BALANCE * 100, 2),
         },
-        "equity_points":   equity_points[-50:],  # last 50 for chart
+        "equity_points":   equity_points,         # F66: full journey from $start (no slice)
         "win_rate_trend":  trend[-20:],           # last 20 for trend chart
         "top_signals":     top_signals,
         "bottom_signals":  bottom_signals,
@@ -243,7 +245,7 @@ async def get_learning_stats() -> dict:
             "short": {"total": len(short_closed), "wins": len(short_wins), "win_rate": round(len(short_wins)/len(short_closed)*100, 1) if short_closed else 0.0},
         },
         "leverage_dist":   lev_dist,
-        "conservative_equity": nc_points[-50:],
+        "conservative_equity": nc_points,   # F66: full journey (no slice)
         "monthly_stats":   monthly_stats,
         "monitor":         monitor_state(),
         "updater":         updater_state(),

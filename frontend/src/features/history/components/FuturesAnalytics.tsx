@@ -38,7 +38,7 @@ interface SignalWeight {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const TARGET = 80;
-const START  = 1000;
+const FALLBACK_START = 1000;   // F30: only used until stats.balance.starting loads
 
 const REGIME_CFG: Record<string, { emoji: string; label: string; bar: string; bg: string }> = {
   trending_up:   { emoji: "📈", label: "Trending Up",   bar: "bg-green-500",  bg: "bg-green-50 border-green-200"   },
@@ -87,11 +87,13 @@ function BarCompare({
 // ── Equity dual line chart ────────────────────────────────────────────────────
 
 function EquityDualChart({
-  leveraged, conservative,
+  leveraged, conservative, start,
 }: {
   leveraged:    { trade_n: number; balance: number; win: boolean }[];
   conservative: { trade_n: number; balance: number }[];
+  start:        number;   // F30: starting balance from API
 }) {
+  const START = start;
   if (leveraged.length < 2) return (
     <div className="text-center py-8 text-neutral-400 text-sm">Butuh minimal 2 closed trades</div>
   );
@@ -196,7 +198,12 @@ export function FuturesAnalytics() {
     } finally { setUpdating(false); }
   };
 
-  useEffect(() => { void fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    void fetchAll();
+    // F31: auto-refresh every 60s so analytics stay live without manual Update
+    const poll = setInterval(() => { void fetchAll(true); }, 60_000);
+    return () => clearInterval(poll);
+  }, [fetchAll]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
@@ -444,7 +451,7 @@ export function FuturesAnalytics() {
           </div>
         </div>
         <div className="p-5">
-          <EquityDualChart leveraged={stats.equity_points} conservative={stats.conservative_equity} />
+          <EquityDualChart leveraged={stats.equity_points} conservative={stats.conservative_equity} start={stats.balance.starting} />
 
           {/* Leverage distribution */}
           {Object.keys(stats.leverage_dist).length > 0 && (

@@ -45,8 +45,15 @@ interface OpenPosition {
 }
 
 type ConnState = "connecting" | "connected" | "reconnecting" | "paused";
-const WS_URL        = "ws://localhost:8000/ws/futures";
 const INTERVAL_SEC  = 2 * 60;
+
+// F111: derive WS URL from env or current host so non-localhost deployments connect
+function futuresWsUrl(): string {
+  const base = process.env.NEXT_PUBLIC_WS_URL;
+  if (base) return `${base}/ws/futures`;
+  if (typeof window !== "undefined") return `ws://${window.location.host}/ws/futures`;
+  return "ws://localhost:8000/ws/futures";
+}
 
 const CONN_META: Record<ConnState, { dot: string; label: string; color: string }> = {
   connected:    { dot: "bg-green-400",               label: "LIVE",        color: "text-green-400 border-green-500/40 bg-green-500/10"   },
@@ -181,6 +188,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
   const [opening, setOpening] = useState(false);
   const [opened,  setOpened]  = useState(false);
   const [error,   setError]   = useState("");
+  const [balance, setBalance] = useState(1000);   // F38: fallback until /balance/futures loads
   const isLong = s.direction === "LONG";
 
   useEffect(() => {
@@ -189,6 +197,19 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
     document.body.style.overflow = "hidden";
     return () => { window.removeEventListener("keydown", h); document.body.style.overflow = ""; };
   }, [onClose]);
+
+  // F38: fetch real paper balance for accurate position-sizing simulation
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch("/api/v1/balance/futures");
+        if (r.ok) {
+          const d = await r.json() as { balance?: number };
+          if (typeof d.balance === "number" && d.balance > 0) setBalance(d.balance);
+        }
+      } catch { /* keep fallback */ }
+    })();
+  }, []);
 
   const handleOpen = async () => {
     setOpening(true); setError("");
@@ -307,8 +328,8 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
 
           {/* Position sizing simulation */}
           {!opened && (() => {
-            const BALANCE  = 1000;
-            const riskDollar  = BALANCE * 0.01;                              // $10
+            const BALANCE  = balance;                                        // F38: real balance from API
+            const riskDollar  = BALANCE * 0.01;                              // 1% of balance
             const notional    = s.risk_pct > 0 ? riskDollar / (s.risk_pct / 100) : 0;
             const margin      = s.leverage > 0 ? notional / s.leverage : notional;
             const winDollar   = riskDollar * s.rr_ratio;
@@ -316,10 +337,10 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
             const liqPrice    = s.direction === "LONG" ? s.entry - liqDist : s.entry + liqDist;
             return (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-3">💰 Simulasi Position Sizing ($1,000 balance)</p>
+                <p className="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-3">💰 Simulasi Position Sizing (${BALANCE.toLocaleString()} balance)</p>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { label: "Modal",      value: "$1,000 USDT",                  cls: "text-neutral-700" },
+                    { label: "Modal",      value: `$${BALANCE.toLocaleString()} USDT`, cls: "text-neutral-700" },
                     { label: "Risk (1%)",  value: `-$${riskDollar.toFixed(0)}`,   cls: "text-red-600"     },
                     { label: "Notional",   value: `$${notional.toFixed(0)}`,      cls: "text-neutral-700" },
                     { label: "Margin",     value: `$${margin.toFixed(0)}`,        cls: "text-blue-600"    },
@@ -471,7 +492,7 @@ export default function ScannerFuturesPage() {
     function connect() {
       if (!mounted) return;
       setConnState("connecting");
-      ws = new WebSocket(WS_URL);
+      ws = new WebSocket(futuresWsUrl());
       ws.onopen  = () => { if (mounted) setConnState("connected"); };
       ws.onmessage = (e) => {
         if (!mounted) return;
@@ -520,8 +541,9 @@ export default function ScannerFuturesPage() {
     ? Math.round(((INTERVAL_SEC - nextScanDisplay) / INTERVAL_SEC) * 100) : 0;
   const fmtCD = (s: number | null) => s == null ? "--:--"
     : `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
-  const totalLong  = [...agent1, ...agent2].filter(s => s.direction === "LONG").length;
-  const totalShort = [...agent1, ...agent2].filter(s => s.direction === "SHORT").length;
+  // F40: dedupe by symbol across agents — one coin counted once per direction
+  const totalLong  = new Set([...agent1, ...agent2].filter(s => s.direction === "LONG").map(s => s.symbol)).size;
+  const totalShort = new Set([...agent1, ...agent2].filter(s => s.direction === "SHORT").map(s => s.symbol)).size;
 
   // Compute sets of open symbols for badge
   const openSymbolMap = useMemo(() => {
@@ -569,7 +591,7 @@ export default function ScannerFuturesPage() {
                 </button>
                 {scanning && (
                   <span className="flex items-center gap-1.5 text-[11px] text-teal-300 bg-teal-500/10 border border-teal-500/30 px-3 py-1.5 rounded-full">
-                    <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />Scanning 150 pairs...
+                    <span className="w-2 h-2 rounded-full bg-teal-400 animate-ping" />{scanned > 0 ? `Scanning ${scanned} pairs...` : "Scanning pairs..."}
                   </span>
                 )}
                 {!scanning && nextScanDisplay != null && connState === "connected" && (

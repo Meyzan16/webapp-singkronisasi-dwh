@@ -107,10 +107,11 @@ interface FuturesPosition {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const RISK_DOLLAR = _FALLBACK_BALANCE * RISK_PCT; // $10 (matches trading_costs.py)
+// F46: fallback only — real riskDollar derived from API starting balance and threaded in
+const FALLBACK_RISK_DOLLAR = _FALLBACK_BALANCE * RISK_PCT; // $10 (matches trading_costs.py)
 
-function calcNotional(riskPct: number): number {
-  return riskPct > 0 ? RISK_DOLLAR / (riskPct / 100) : 0;
+function calcNotional(riskPct: number, riskDollar = FALLBACK_RISK_DOLLAR): number {
+  return riskPct > 0 ? riskDollar / (riskPct / 100) : 0;
 }
 
 function calcMargin(notional: number, leverage: number): number {
@@ -122,13 +123,13 @@ function calcLiqPrice(entry: number, leverage: number, direction: "LONG" | "SHOR
   return direction === "LONG" ? entry - dist : entry + dist;
 }
 
-function tradePnlDollar(p: FuturesPosition): number | null {
+function tradePnlDollar(p: FuturesPosition, riskDollar = FALLBACK_RISK_DOLLAR): number | null {
   if (p.status === "open") {
     if (p.unrealized_pnl == null || p.risk_pct <= 0) return null;
-    return (p.unrealized_pnl / 100) * calcNotional(p.risk_pct);
+    return (p.unrealized_pnl / 100) * calcNotional(p.risk_pct, riskDollar);
   }
   if (p.pnl_pct == null || p.risk_pct <= 0) return null;
-  return (p.pnl_pct / 100) * calcNotional(p.risk_pct);
+  return (p.pnl_pct / 100) * calcNotional(p.risk_pct, riskDollar);
 }
 
 function fmtMonth(m: string): string {
@@ -187,10 +188,10 @@ function WinRateBar({ rate, label }: { rate: number; label: string }) {
 
 // ── Open Position Card — used in separated Agent 1 / Agent 2 panels ────────────
 
-function OpenPosCard({ p, risk }: { p: FuturesPosition; risk?: RiskPosition }) {
-  const upnl$   = tradePnlDollar(p);
+function OpenPosCard({ p, risk, riskDollar }: { p: FuturesPosition; risk?: RiskPosition; riskDollar: number }) {
+  const upnl$   = tradePnlDollar(p, riskDollar);
   const upnlPct = p.unrealized_pnl;
-  const notional = calcNotional(p.risk_pct);
+  const notional = calcNotional(p.risk_pct, riskDollar);
   const margin   = calcMargin(notional, p.leverage);
   const liq     = calcLiqPrice(p.entry, p.leverage, p.direction);
   const rStatus = risk?.risk_status ?? "SAFE";
@@ -269,12 +270,12 @@ function OpenPosCard({ p, risk }: { p: FuturesPosition; risk?: RiskPosition }) {
 
 // ── Balance simulation ─────────────────────────────────────────────────────────
 
-function buildEquity(closed: FuturesPosition[], startingBalance: number): { balance: number; n: number; symbol: string; win: boolean }[] {
+function buildEquity(closed: FuturesPosition[], startingBalance: number, riskDollar: number): { balance: number; n: number; symbol: string; win: boolean }[] {
   const sorted = [...closed].sort((a, b) => (a.closed_at ?? 0) - (b.closed_at ?? 0));
   let balance = startingBalance;
   const points = [{ balance, n: 0, symbol: "", win: true }];
   sorted.forEach((p, i) => {
-    const pnl$ = tradePnlDollar(p);
+    const pnl$ = tradePnlDollar(p, riskDollar);
     if (pnl$ != null) balance = Math.max(0, balance + pnl$);
     points.push({ balance, n: i + 1, symbol: p.symbol.replace("USDT", ""), win: (p.pnl_pct ?? 0) >= 0 });
   });
@@ -296,16 +297,18 @@ export function FuturesTab() {
   const [agentFilter, setAgentFilter] = useState<"all" | "agent1" | "agent2">("all");
   const [countdown, setCountdown]     = useState(REFRESH_MS / 1000);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
+  const [autoThreshold, setAutoThreshold] = useState<number | null>(null);  // F26/F10
   const countRef = useRef(REFRESH_MS / 1000);
 
   const fetchPositions = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     // reset error state
     try {
-      const [posRes, learnRes, riskRes] = await Promise.all([
+      const [posRes, learnRes, riskRes, autoRes] = await Promise.all([
         fetch("/api/v1/futures/positions?status=all"),
         fetch("/api/v1/futures/learning/stats"),
         fetch("/api/v1/futures/monitor/risk"),
+        fetch("/api/v1/futures/auto/status"),   // F26/F10: real auto-open threshold
       ]);
       if (!posRes.ok) return; // fetch error — show stale data or empty state
       const d = await posRes.json() as { positions: FuturesPosition[] };
@@ -317,6 +320,10 @@ export function FuturesTab() {
       if (riskRes.ok) {
         const rd = await riskRes.json() as RiskDashboard;
         if (!("error" in rd)) setRiskDash(rd);
+      }
+      if (autoRes.ok) {
+        const ad = await autoRes.json() as { threshold?: number };
+        if (typeof ad.threshold === "number") setAutoThreshold(ad.threshold);
       }
       setLastUpdated(new Date());
     } catch {
@@ -342,21 +349,29 @@ export function FuturesTab() {
 
   // ── Derived stats ──────────────────────────────────────────────────────────────
 
+  // F46: reactive risk-dollar from API starting balance (falls back to $1000 × 1%)
+  const startingBalance = learning?.balance?.starting ?? _FALLBACK_BALANCE;
+  const riskDollar      = startingBalance * RISK_PCT;
+
+  // F104: a "win" is status=="tp" AND net pnl > 0 (matches backend _is_real_win)
+  const isRealWin = (p: FuturesPosition) => p.status === "tp" && (p.pnl_pct ?? 0) > 0;
+
   const stats = useMemo(() => {
     const open   = positions.filter(p => p.status === "open");
-    const closed = positions.filter(p => p.status !== "open");
-    const wins   = closed.filter(p => p.status === "tp");
-    const losses = closed.filter(p => p.status === "sl");
+    // F43: only tp/sl count as closed — expired must not inflate the win-rate denominator
+    const closed = positions.filter(p => p.status === "tp" || p.status === "sl");
+    const wins   = closed.filter(isRealWin);                  // F104
+    const losses = closed.filter(p => !isRealWin(p));         // sl + tp-with-negative-pnl
 
-    const totalPnl$ = closed.reduce((acc, p) => acc + (tradePnlDollar(p) ?? 0), 0);
+    const totalPnl$ = closed.reduce((acc, p) => acc + (tradePnlDollar(p, riskDollar) ?? 0), 0);
     // F22: prefer server-computed balance (/futures/learning/stats) over client-side calc
-    const currentBalance = learning?.balance?.current ?? (_FALLBACK_BALANCE + totalPnl$);
+    const currentBalance = learning?.balance?.current ?? (startingBalance + totalPnl$);
     const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : 0;
 
     const a1Closed = closed.filter(p => p.agent === "futures_agent1");
     const a2Closed = closed.filter(p => p.agent === "futures_agent2");
-    const a1Wins   = a1Closed.filter(p => p.status === "tp").length;
-    const a2Wins   = a2Closed.filter(p => p.status === "tp").length;
+    const a1Wins   = a1Closed.filter(isRealWin).length;      // F104
+    const a2Wins   = a2Closed.filter(isRealWin).length;      // F104
     const a1Open   = open.filter(p => p.agent === "futures_agent1");
     const a2Open   = open.filter(p => p.agent === "futures_agent2");
 
@@ -367,12 +382,11 @@ export function FuturesTab() {
       a1: { total: a1Closed.length, wins: a1Wins, rate: a1Closed.length > 0 ? a1Wins / a1Closed.length * 100 : 0 },
       a2: { total: a2Closed.length, wins: a2Wins, rate: a2Closed.length > 0 ? a2Wins / a2Closed.length * 100 : 0 },
     };
-  }, [positions, learning]);
+  }, [positions, learning, startingBalance, riskDollar]);
 
-  const startingBalance = learning?.balance?.starting ?? _FALLBACK_BALANCE;
   const equityPoints = useMemo(
-    () => buildEquity(positions.filter(p => p.status !== "open"), startingBalance),
-    [positions, startingBalance]
+    () => buildEquity(positions.filter(p => p.status === "tp" || p.status === "sl"), startingBalance, riskDollar),
+    [positions, startingBalance, riskDollar]
   );
 
   // (displayClosed removed — riwayat now handled by DBHistoryTable below)
@@ -443,7 +457,7 @@ export function FuturesTab() {
                     {pd.total_closed_pnl >= 0 ? "+" : ""}${pd.total_closed_pnl.toFixed(2)}
                   </span>
                 </div>
-                <p className="text-xs text-neutral-500 mt-1">Modal $1,000 · Risk $10/trade · Sharpe ≈ {pd.risk_adjusted_return.toFixed(2)}</p>
+                <p className="text-xs text-neutral-500 mt-1">Modal ${startingBalance.toLocaleString()} · Risk ${riskDollar.toFixed(0)}/trade · Sharpe ≈ {pd.risk_adjusted_return.toFixed(2)}</p>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center">
                 <div className="bg-white/5 rounded-xl px-3 py-2">
@@ -506,7 +520,7 @@ export function FuturesTab() {
               {stats.a1Open.length === 0
                 ? <div className="text-center py-8 text-neutral-400 text-sm border border-dashed border-neutral-200 rounded-2xl">Tidak ada posisi terbuka</div>
                 : <div className="space-y-2">
-                    {stats.a1Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} />)}
+                    {stats.a1Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}
                   </div>
               }
             </div>
@@ -523,7 +537,7 @@ export function FuturesTab() {
               {stats.a2Open.length === 0
                 ? <div className="text-center py-8 text-neutral-400 text-sm border border-dashed border-neutral-200 rounded-2xl">Tidak ada posisi terbuka</div>
                 : <div className="space-y-2">
-                    {stats.a2Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} />)}
+                    {stats.a2Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}
                   </div>
               }
             </div>
@@ -596,7 +610,7 @@ export function FuturesTab() {
                   {stats.totalPnl$ >= 0 ? "+" : ""}${stats.totalPnl$.toFixed(2)}
                 </span>
               </div>
-              <p className="text-xs text-neutral-400 mt-1">Modal awal <strong className="text-neutral-200">$1,000</strong> · Risk <strong className="text-yellow-300">$10/trade (1%)</strong> · Target R:R ≥ 1:3</p>
+              <p className="text-xs text-neutral-400 mt-1">Modal awal <strong className="text-neutral-200">${startingBalance.toLocaleString()}</strong> · Risk <strong className="text-yellow-300">${riskDollar.toFixed(0)}/trade (1%)</strong> · Target R:R ≥ 1:3</p>
             </div>
             <div className="grid grid-cols-2 gap-2 text-center">
               {[
@@ -642,9 +656,16 @@ export function FuturesTab() {
           <h3 className="text-sm font-bold text-neutral-700 mb-3 flex items-center gap-2">
             🔵 Posisi Terbuka ({stats.open})
             <span className="text-[10px] text-neutral-400 font-normal">— Dipisah per agent</span>
+            {agentFilter !== "all" && (   // F25: agentFilter now actually filters the panels
+              <button onClick={() => setAgentFilter("all")}
+                className="text-[10px] text-teal-600 font-semibold underline ml-1">
+                Filter: {agentFilter === "agent1" ? "Agent 1" : "Agent 2"} ✕
+              </button>
+            )}
           </h3>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Agent 1 Open */}
+            {agentFilter !== "agent2" && (
             <div className="bg-blue-50 border border-blue-100 rounded-2xl overflow-hidden">
               <div className="px-4 py-2.5 border-b border-blue-100 flex items-center gap-2">
                 <span className="text-xs font-bold text-blue-700">🤖 Agent 1 — AI Knowledge</span>
@@ -657,12 +678,14 @@ export function FuturesTab() {
                 <div className="text-center py-6 text-neutral-400 text-xs">Tidak ada posisi terbuka</div>
               ) : (
                 <div className="divide-y divide-blue-50 p-2 space-y-1.5">
-                  {stats.a1Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} />)}
+                  {stats.a1Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}
                 </div>
               )}
             </div>
+            )}
 
             {/* Agent 2 Open */}
+            {agentFilter !== "agent1" && (
             <div className="bg-purple-50 border border-purple-100 rounded-2xl overflow-hidden">
               <div className="px-4 py-2.5 border-b border-purple-100 flex items-center gap-2">
                 <span className="text-xs font-bold text-purple-700">🧠 Agent 2 — T0-T4</span>
@@ -675,10 +698,11 @@ export function FuturesTab() {
                 <div className="text-center py-6 text-neutral-400 text-xs">Tidak ada posisi terbuka</div>
               ) : (
                 <div className="divide-y divide-purple-50 p-2 space-y-1.5">
-                  {stats.a2Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} />)}
+                  {stats.a2Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
       )}
@@ -732,7 +756,9 @@ export function FuturesTab() {
             </select>
           </div>
           <div className="space-y-3">
-            {learning.monthly_stats.map(m => (
+            {learning.monthly_stats
+              .filter(m => selectedMonth === "all" || m.month === selectedMonth)   // F49: actually filter
+              .map(m => (
               <div key={m.month} className={`rounded-xl p-3 ${selectedMonth === m.month ? "bg-teal-50 border border-teal-200" : "bg-neutral-50"}`}>
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs font-bold text-neutral-700">{fmtMonth(m.month)}</p>
@@ -867,7 +893,7 @@ export function FuturesTab() {
             })}
           </div>
           <div className="flex justify-between text-[9px] text-neutral-400 mt-1">
-            <span>$1,000 start</span>
+            <span>${startingBalance.toLocaleString()} start</span>
             <span className={`font-bold ${balanceColor}`}>${stats.currentBalance.toFixed(0)} sekarang</span>
           </div>
         </div>
@@ -878,10 +904,10 @@ export function FuturesTab() {
         <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">💡 Logika Position Sizing</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
           {[
-            { label: "Modal Awal",   value: "$1,000",     sub: "paper balance" },
-            { label: "Risk/Trade",   value: "$10 (1%)",   sub: "fixed per trade" },
-            { label: "R:R Minimum",  value: "1 : 3",      sub: "win $30, lose $10" },
-            { label: "Auto-Open",    value: "≥ 75pt",     sub: "score threshold" },
+            { label: "Modal Awal",   value: `$${startingBalance.toLocaleString()}`,        sub: "paper balance" },
+            { label: "Risk/Trade",   value: `$${riskDollar.toFixed(0)} (1%)`,              sub: "fixed per trade" },
+            { label: "R:R Minimum",  value: "1 : 3",                                       sub: `win $${(riskDollar * 3).toFixed(0)}, lose $${riskDollar.toFixed(0)}` },
+            { label: "Auto-Open",    value: autoThreshold != null ? `≥ ${autoThreshold}pt` : "—", sub: "score threshold" },
           ].map(x => (
             <div key={x.label} className="bg-white/60 rounded-xl p-2.5">
               <p className="text-[10px] text-amber-600 font-semibold">{x.label}</p>
