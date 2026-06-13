@@ -13,11 +13,42 @@ from sqlalchemy import delete, select
 
 from app.database import AsyncSessionLocal, require_db
 from app.models.paper_trade import PaperTrade
+from app.services.trading_costs import FUTURES_STARTING_BALANCE, FUTURES_RISK_PCT
 
 router = APIRouter(tags=["history"])
 logger = structlog.get_logger(__name__)
 
 _db = Depends(require_db)
+
+_FUTURES_STYLES = ["futures_agent1", "futures_agent2"]
+
+
+def _parse_rr(rr: Optional[str]) -> float:
+    """F50: robust R:R parse — handles '1:3', '1:3.5', bare '3.5', or malformed."""
+    if not rr:
+        return 0.0
+    try:
+        return float(rr.split(":")[1]) if ":" in rr else float(rr)
+    except (ValueError, IndexError):
+        return 0.0
+
+
+def _apply_trade_filters(q, style: Optional[str], search: Optional[str]):
+    """F45: shared style + symbol-search filter so paginated and summary queries match."""
+    if style and style != "all":
+        if style == "spot":
+            q = q.where(PaperTrade.style == "opportunity_spot")
+        elif style == "agent1":
+            q = q.where(PaperTrade.style == "futures_agent1")
+        elif style == "agent2":
+            q = q.where(PaperTrade.style == "futures_agent2")
+        elif style == "futures":
+            q = q.where(PaperTrade.style.in_(_FUTURES_STYLES))
+        else:
+            q = q.where(PaperTrade.style == style)
+    if search and search.strip():
+        q = q.where(PaperTrade.symbol.like(f"%{search.strip().upper()}%"))
+    return q
 
 
 def _trade_dict(t: PaperTrade) -> dict:
@@ -43,7 +74,7 @@ def _trade_dict(t: PaperTrade) -> dict:
         "risk_pct":    meta.get("risk_pct", 0),
         "tp2_pct":     meta.get("tp2_pct", 0),
         "tp3_pct":     meta.get("tp3_pct", 0),
-        "rr_ratio":    float(t.risk_reward.split(":")[1]) if t.risk_reward and ":" in t.risk_reward else 0,
+        "rr_ratio":    _parse_rr(t.risk_reward),
         "score":       t.probability,
         "leverage":    t.leverage,
         "margin_type": t.margin_type,
@@ -88,19 +119,7 @@ async def get_trades(
 
     async with AsyncSessionLocal() as s:
         q = select(PaperTrade).where(PaperTrade.entry_at >= cutoff)
-
-        # Style filter
-        if style and style != "all":
-            if style == "spot":
-                q = q.where(PaperTrade.style == "opportunity_spot")
-            elif style == "agent1":
-                q = q.where(PaperTrade.style == "futures_agent1")
-            elif style == "agent2":
-                q = q.where(PaperTrade.style == "futures_agent2")
-            elif style == "futures":
-                q = q.where(PaperTrade.style.in_(["futures_agent1", "futures_agent2"]))
-            else:
-                q = q.where(PaperTrade.style == style)
+        q = _apply_trade_filters(q, style, search)   # F45: shared filter
 
         # Status filter — §16.5: "win" konsisten dengan _is_real_win (tp + net > 0)
         if status and status != "all":
@@ -116,11 +135,6 @@ async def get_trades(
                 q = q.where(PaperTrade.status == "open")
             else:
                 q = q.where(PaperTrade.status == status)
-
-        # Symbol search
-        if search and search.strip():
-            pattern = f"%{search.strip().upper()}%"
-            q = q.where(PaperTrade.symbol.like(pattern))
 
         # Total count (before pagination)
         count_q  = select(func.count()).select_from(q.subquery())
@@ -149,17 +163,7 @@ async def get_trades(
 
         # Quick summary stats (across full filtered set, not just this page)
         all_q = select(PaperTrade).where(PaperTrade.entry_at >= cutoff)
-        if style and style != "all":
-            if style == "spot":
-                all_q = all_q.where(PaperTrade.style == "opportunity_spot")
-            elif style == "agent1":
-                all_q = all_q.where(PaperTrade.style == "futures_agent1")
-            elif style == "agent2":
-                all_q = all_q.where(PaperTrade.style == "futures_agent2")
-            elif style == "futures":
-                all_q = all_q.where(PaperTrade.style.in_(["futures_agent1", "futures_agent2"]))
-        if search and search.strip():
-            all_q = all_q.where(PaperTrade.symbol.like(f"%{search.strip().upper()}%"))
+        all_q = _apply_trade_filters(all_q, style, search)   # F45: same shared filter
 
         all_result = await s.execute(all_q)
         all_trades = list(all_result.scalars().all())
@@ -219,9 +223,12 @@ def _is_real_win(t: PaperTrade) -> bool:
 
 
 @router.get("/history/stats", dependencies=[_db])
-async def get_stats() -> dict:
+async def get_stats(days: int = Query(90)) -> dict:
+    cutoff = time.time() - days * 86400   # F48: bound query by time window
     async with AsyncSessionLocal() as s:
-        result = await s.execute(select(PaperTrade))
+        result = await s.execute(
+            select(PaperTrade).where(PaperTrade.entry_at >= cutoff)
+        )
         all_trades = list(result.scalars().all())
 
     closed = [t for t in all_trades if t.status in ("tp", "sl")]
@@ -249,32 +256,54 @@ async def get_stats() -> dict:
             "wins":     len(wins),
             "losses":   len(closed) - len(wins),
             "win_rate": len(wins) / len(closed) * 100 if closed else 0.0,
-            "avg_pnl":  sum(t.pnl_pct for t in closed if t.pnl_pct) / len(closed) if closed else 0.0,
+            # F53: include break-even (pnl_pct == 0.0) in the average
+            "avg_pnl":  sum(t.pnl_pct for t in closed if t.pnl_pct is not None) / len(closed) if closed else 0.0,
         },
         "by_style": dict(by_style),
     }
 
 
 @router.get("/history/equity", dependencies=[_db])
-async def get_equity() -> dict:
+async def get_equity(style: str = Query("futures")) -> dict:
+    import json
+
+    # F103: filter by style so the curve isn't a mix of futures + spot
+    if style == "spot":
+        style_filter = [PaperTrade.style == "opportunity_spot"]
+    elif style == "agent1":
+        style_filter = [PaperTrade.style == "futures_agent1"]
+    elif style == "agent2":
+        style_filter = [PaperTrade.style == "futures_agent2"]
+    elif style == "all":
+        style_filter = []
+    else:  # "futures" (default)
+        style_filter = [PaperTrade.style.in_(_FUTURES_STYLES)]
+
     async with AsyncSessionLocal() as s:
         result = await s.execute(
             select(PaperTrade)
-            .where(PaperTrade.status.in_(["tp", "sl"]))
+            .where(PaperTrade.status.in_(["tp", "sl"]), *style_filter)
             .order_by(PaperTrade.closed_at)
         )
         trades = list(result.scalars().all())
 
-    BALANCE     = 1000.0
-    RISK_PCT    = 0.01
-    RISK_DOLLAR = BALANCE * RISK_PCT  # $10
+    # F41: single source of truth from trading_costs.py
+    BALANCE     = FUTURES_STARTING_BALANCE
+    RISK_DOLLAR = BALANCE * FUTURES_RISK_PCT
 
     balance = BALANCE
     points  = [{"trade_n": 0, "balance": balance, "win": True, "symbol": "start"}]
     for i, t in enumerate(trades, 1):
-        if t.pnl_pct is None or t.stop_loss <= 0 or t.entry_price <= 0:
+        if t.pnl_pct is None or t.entry_price <= 0:
             continue
-        risk_pct_val = abs(t.entry_price - t.stop_loss) / t.entry_price * 100
+        # F44: use original risk_pct from signals_json — current SL may be trailed
+        try:
+            meta = json.loads(t.signals_json or "{}")
+            if not isinstance(meta, dict):
+                meta = {}
+        except Exception:
+            meta = {}
+        risk_pct_val = meta.get("risk_pct_original") or meta.get("risk_pct") or 2.0
         if risk_pct_val <= 0:
             continue
         notional = RISK_DOLLAR / (risk_pct_val / 100)
@@ -307,7 +336,7 @@ async def get_daily_pnl(days: int = Query(30)) -> dict:
         day = datetime.datetime.fromtimestamp(t.closed_at or 0).strftime("%Y-%m-%d")
         d   = daily[day]
         d["trades"] += 1
-        if t.pnl_pct:
+        if t.pnl_pct is not None:   # F42: include break-even (0.0) trades
             d["pnl"] = round(d["pnl"] + t.pnl_pct, 2)
         if t.status == "tp":
             d["wins"] += 1

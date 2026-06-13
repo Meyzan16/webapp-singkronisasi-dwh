@@ -9,7 +9,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 logger = structlog.get_logger(__name__)
 
 HEARTBEAT_SEC = 5
-INTERVAL_SEC  = 2 * 60   # must match agents/futures/scheduler.py INTERVAL_SEC
+# F29: single source of truth — import instead of duplicating the value
+from agents.futures.scheduler import INTERVAL_SEC
 
 
 def _next_scan_in(last_ts: Optional[float]) -> Optional[int]:

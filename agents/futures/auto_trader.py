@@ -31,6 +31,9 @@ AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
 # Global toggle — can be changed via API at runtime
 _auto_enabled = True
 
+# F102: manual threshold override set via API. When None, adaptive threshold is used.
+_manual_threshold: Optional[int] = None
+
 
 def set_auto_enabled(flag: bool) -> None:
     global _auto_enabled
@@ -40,6 +43,26 @@ def set_auto_enabled(flag: bool) -> None:
 
 def is_auto_enabled() -> bool:
     return _auto_enabled
+
+
+def set_auto_threshold(threshold: Optional[int]) -> None:
+    """F102: manual override for auto-open threshold. Pass None to revert to adaptive."""
+    global _manual_threshold
+    _manual_threshold = threshold
+    logger.info("auto_threshold_set", threshold=threshold)
+
+
+def get_auto_threshold() -> int:
+    """F102: displayed/effective base threshold — manual override or default fallback."""
+    return _manual_threshold if _manual_threshold is not None else AUTO_OPEN_THRESHOLD
+
+
+def _effective_threshold(agent: str) -> int:
+    """Base threshold for an agent: manual override wins, else adaptive (F69)."""
+    if _manual_threshold is not None:
+        return _manual_threshold
+    from agents.futures.weight_updater import get_adaptive_thresholds
+    return get_adaptive_thresholds(agent)["auto_threshold"]
 
 
 async def auto_open_positions(results: list[dict], agent: str) -> int:
@@ -56,9 +79,8 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
         logger.info("auto_trade_blocked_regime", agent=agent, regime=regime)
         return 0
 
-    # F69: use adaptive threshold based on per-agent rolling win rate
-    from agents.futures.weight_updater import get_adaptive_thresholds
-    effective_threshold = get_adaptive_thresholds(agent)["auto_threshold"]
+    # F69/F102: manual override wins, else adaptive threshold per-agent win rate
+    effective_threshold = _effective_threshold(agent)
     if regime == "ranging":
         effective_threshold += 5   # extra bar in ranging (trend signals unreliable)
 

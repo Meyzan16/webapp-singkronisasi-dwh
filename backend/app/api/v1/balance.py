@@ -22,8 +22,9 @@ router = APIRouter(tags=["balance"])
 logger = structlog.get_logger(__name__)
 
 STYLE_MAP = {
-    "spot":    "opportunity_spot",
-    "futures": "futures_agent1",   # placeholder for future
+    "spot":     "opportunity_spot",
+    "futures":  "futures_agent1",   # default futures balance = agent1
+    "futures2": "futures_agent2",   # F109: agent2 balance now reachable
 }
 
 DEFAULT_BALANCE = FUTURES_STARTING_BALANCE  # single source: trading_costs.py
@@ -268,7 +269,8 @@ async def deposit_balance(style: str, body: DepositRequest) -> dict:
 
 
 class ResetRequest(BaseModel):
-    initial_balance: float = Field(default=1000.0, gt=0)
+    # F110: default from single source of truth in trading_costs.py
+    initial_balance: float = Field(default=FUTURES_STARTING_BALANCE, gt=0)
 
 
 @router.post("/balance/{style}/reset")

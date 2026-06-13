@@ -10,6 +10,7 @@ GET  /futures/status           — scheduler + agent status
 
 import json
 import time
+from typing import Optional
 
 import structlog
 from fastapi import APIRouter, HTTPException, Query
@@ -53,7 +54,7 @@ class OpenFuturesTradeRequest(BaseModel):
 async def get_futures_scan(
     agent:     str   = Query(default="all",  description="all | agent1 | agent2"),
     direction: str   = Query(default="ALL",  description="ALL | LONG | SHORT"),
-    min_score: float = Query(default=55),
+    min_score: float = Query(default=52),   # F105: match agent MIN threshold (was 55)
     limit:     int   = Query(default=30, ge=1, le=100),
 ) -> dict:
     """Cached scan results from both agents. Triggers fresh scan if cache empty."""
@@ -82,7 +83,7 @@ async def get_futures_scan(
 async def force_futures_scan(
     agent:     str   = Query(default="all"),
     direction: str   = Query(default="ALL"),
-    min_score: float = Query(default=55),
+    min_score: float = Query(default=52),   # F105: match agent MIN threshold (was 55)
     limit:     int   = Query(default=30, ge=1, le=100),
 ) -> dict:
     """Force fresh scan of 100 Futures pairs. Takes ~30–60s."""
@@ -268,11 +269,11 @@ async def get_futures_positions(
         conditions.append(PaperTrade.status == status)
 
     async with AsyncSessionLocal() as session:
+        # F24: no limit — equity curve and balance need the full closed-trade history
         result = await session.execute(
             select(PaperTrade)
             .where(*conditions)
             .order_by(PaperTrade.entry_at.desc())
-            .limit(100)
         )
         trades = result.scalars().all()
 
@@ -416,22 +417,19 @@ async def get_risk_dashboard() -> dict:
         )
         closed_trades = list(closed_result.scalars().all())
 
-    # Fetch live prices
+    # Fetch live prices — batch endpoint (weight=2 for all, F27)
     symbols = list({t.symbol for t in open_trades})
     live_prices: dict[str, float] = {}
     if symbols:
         try:
             async with httpx.AsyncClient(timeout=8) as c:
-                import asyncio
-                tasks = {sym: asyncio.create_task(c.get(fapi(f"/fapi/v1/ticker/price?symbol={sym}")))
-                         for sym in symbols}
-                for sym, task in tasks.items():
-                    try:
-                        r = await task
-                        if r.status_code == 200:
-                            live_prices[sym] = float(r.json()["price"])
-                    except Exception:
-                        pass
+                syms_param = json.dumps(symbols)
+                r = await c.get(fapi("/fapi/v1/ticker/price"), params={"symbols": syms_param})
+                if r.status_code == 200:
+                    data = r.json()
+                    if isinstance(data, list):
+                        for item in data:
+                            live_prices[item["symbol"]] = float(item["price"])
         except Exception:
             pass
 
@@ -460,11 +458,12 @@ async def get_risk_dashboard() -> dict:
         liq         = _liq_price(entry, leverage, direction)
         current     = live_prices.get(t.symbol, entry)
 
-        # Unrealized P&L %
+        # Unrealized P&L % — deduct 0.10% round-trip fee (F28)
+        _FUTURES_FEE_PCT = 0.10
         if direction == "LONG":
-            upnl_pct = (current - entry) / entry * 100 if entry > 0 else 0.0
+            upnl_pct = (current - entry) / entry * 100 - _FUTURES_FEE_PCT if entry > 0 else 0.0
         else:
-            upnl_pct = (entry - current) / entry * 100 if entry > 0 else 0.0
+            upnl_pct = (entry - current) / entry * 100 - _FUTURES_FEE_PCT if entry > 0 else 0.0
         upnl_dollar = upnl_pct / 100 * notional
 
         # Distance to liquidation %
@@ -587,26 +586,32 @@ async def get_risk_dashboard() -> dict:
 
 class AutoTradeToggle(BaseModel):
     enabled: bool
-    threshold: int = 75   # score threshold (optional override)
+    threshold: Optional[int] = None   # F102: optional manual override (None = adaptive)
 
 
 @router.get("/futures/auto/status")
 async def get_auto_status() -> dict:
     """Get auto-trade status and settings."""
-    from agents.futures.auto_trader import is_auto_enabled, AUTO_OPEN_THRESHOLD, MAX_AUTO_POSITIONS
+    from agents.futures.auto_trader import is_auto_enabled, get_auto_threshold, MAX_AUTO_POSITIONS
     return {
         "enabled":       is_auto_enabled(),
-        "threshold":     AUTO_OPEN_THRESHOLD,
+        "threshold":     get_auto_threshold(),   # F102: reflects manual override if set
         "max_positions": MAX_AUTO_POSITIONS,
     }
 
 
 @router.post("/futures/auto/toggle")
 async def toggle_auto_trade(body: AutoTradeToggle) -> dict:
-    """Enable or disable automatic paper trade opening."""
-    from agents.futures.auto_trader import set_auto_enabled
+    """Enable or disable automatic paper trade opening (optionally override threshold)."""
+    from agents.futures.auto_trader import set_auto_enabled, set_auto_threshold, get_auto_threshold
     set_auto_enabled(body.enabled)
-    return {"enabled": body.enabled, "message": f"Auto-trade {'enabled' if body.enabled else 'disabled'}"}
+    if body.threshold is not None:        # F102: apply manual threshold when provided
+        set_auto_threshold(body.threshold)
+    return {
+        "enabled":   body.enabled,
+        "threshold": get_auto_threshold(),
+        "message":   f"Auto-trade {'enabled' if body.enabled else 'disabled'}",
+    }
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────
@@ -630,7 +635,7 @@ def _filter_results(
     return {
         "agent1":       _apply(a1.get("results", [])) if agent in ("all", "agent1") else [],
         "agent2":       _apply(a2.get("results", [])) if agent in ("all", "agent2") else [],
-        "scanned":      a1.get("scanned", 0) or a2.get("scanned", 0),
+        "scanned":      max(a1.get("scanned", 0), a2.get("scanned", 0)),   # F20: consistent count
         "generated_at": max(a1.get("generated_at", 0), a2.get("generated_at", 0)),
         "elapsed_sec":  max(a1.get("elapsed_sec", 0), a2.get("elapsed_sec", 0)),
     }

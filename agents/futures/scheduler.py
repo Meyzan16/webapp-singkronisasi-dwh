@@ -35,12 +35,16 @@ _last_error: Optional[str]   = None
 
 
 def get_state() -> dict:
+    # F9: expose next_scan_in_min so API/WS don't re-derive it (and get it wrong)
+    next_in = round(max(0, INTERVAL_SEC - (time.time() - (_last_scan or 0))) / 60, 1) \
+              if _last_scan else None
     return {
         "running":          _running,
         "cycle_count":      _cycle_count,
         "last_scan_ts":     _last_scan,
         "last_error":       _last_error,
         "interval_minutes": INTERVAL_SEC // 60,
+        "next_scan_in_min": next_in,
     }
 
 
