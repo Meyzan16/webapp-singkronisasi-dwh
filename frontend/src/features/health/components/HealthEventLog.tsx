@@ -237,17 +237,17 @@ export function HealthEventLog() {
                             {String(e.detail.latency_ms)}ms
                           </span>
                         )}
-                        {e.detail.error && (
+                        {e.detail.error != null && (
                           <span className="text-[9px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded font-mono max-w-xs truncate">
                             {String(e.detail.error)}
                           </span>
                         )}
-                        {e.detail.agent && (
+                        {e.detail.agent != null && (
                           <span className="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono">
                             {String(e.detail.agent)}
                           </span>
                         )}
-                        {e.detail.banned_until && (
+                        {e.detail.banned_until != null && (
                           <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold">
                             ⛔ ban s/d {new Date(Number(e.detail.banned_until) * 1000).toLocaleTimeString("id-ID")}
                           </span>

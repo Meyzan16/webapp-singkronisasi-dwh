@@ -29,7 +29,7 @@ STYLE_MAP = {
 }
 
 # Trades are tagged per agent, but they all settle into the single "futures" wallet.
-_FUTURES_AGENT_STYLES = ["futures_agent1", "futures_agent2"]
+_FUTURES_AGENT_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
 
 
 def _wallet_trade_styles(style_key: str) -> list[str]:

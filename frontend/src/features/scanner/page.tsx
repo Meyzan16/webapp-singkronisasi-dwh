@@ -73,9 +73,11 @@ function DirBadge({ dir }: { dir: "LONG" | "SHORT" }) {
 }
 
 function AgentBadge({ agent }: { agent: string }) {
-  return agent === "futures_agent1"
-    ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Pre-Gainer</span>
-    : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Accum.</span>;
+  if (agent === "futures_agent1")
+    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Pre-Gainer</span>;
+  if (agent === "futures_agent3")
+    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">Momentum</span>;
+  return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Accum.</span>;
 }
 
 function ScoreBubble({ score }: { score: number }) {
@@ -406,13 +408,14 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
 export default function ScannerFuturesPage() {
   const [agent1, setAgent1]           = useState<FuturesSignal[]>([]);
   const [agent2, setAgent2]           = useState<FuturesSignal[]>([]);
+  const [agent3, setAgent3]           = useState<FuturesSignal[]>([]);
   const [loading, setLoading]         = useState(true);
   const [scanning, setScanning]       = useState(false);
   const [connState, setConnState]     = useState<ConnState>("connecting");
   const [isLive, setIsLive]           = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [scanned, setScanned]         = useState(0);
-  const [activeAgent, setActiveAgent] = useState<"all" | "agent1" | "agent2">("all");
+  const [activeAgent, setActiveAgent] = useState<"all" | "agent1" | "agent2" | "agent3">("all");
   const [dirFilter, setDirFilter]     = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [minScore, setMinScore]       = useState(52);
   const [search, setSearch]           = useState("");
@@ -491,12 +494,13 @@ export default function ScannerFuturesPage() {
   const applySnapshot = useCallback((data: Record<string, unknown>) => {
     const a1 = ((data.agent1 as Record<string, unknown> | undefined)?.results ?? []) as FuturesSignal[];
     const a2 = ((data.agent2 as Record<string, unknown> | undefined)?.results ?? []) as FuturesSignal[];
-    const allSyms = new Set([...a1.map(r => r.symbol), ...a2.map(r => r.symbol)]);
+    const a3 = ((data.agent3 as Record<string, unknown> | undefined)?.results ?? []) as FuturesSignal[];
+    const allSyms = new Set([...a1.map(r => r.symbol), ...a2.map(r => r.symbol), ...a3.map(r => r.symbol)]);
     const prev    = prevSymsRef.current;
     const fresh   = new Set<string>();
     if (prev.size > 0) allSyms.forEach(s => { if (!prev.has(s)) fresh.add(s); });
     prevSymsRef.current = allSyms;
-    setAgent1(a1); setAgent2(a2);
+    setAgent1(a1); setAgent2(a2); setAgent3(a3);
     setScanned(((data.agent1 as Record<string, unknown>)?.scanned as number) ?? 0);
     setLastUpdated(new Date()); setLoading(false); setScanning(false);
     if (typeof data.next_scan_in === "number") {
@@ -547,7 +551,8 @@ export default function ScannerFuturesPage() {
     const all: FuturesSignal[] =
       activeAgent === "agent1" ? agent1 :
       activeAgent === "agent2" ? agent2 :
-      [...agent1, ...agent2];
+      activeAgent === "agent3" ? agent3 :
+      [...agent1, ...agent2, ...agent3];
     const q = search.trim().toLowerCase();
     return all.filter(s =>
       s.score >= minScore &&
@@ -562,8 +567,9 @@ export default function ScannerFuturesPage() {
   const fmtCD = (s: number | null) => s == null ? "--:--"
     : `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
   // F40: dedupe by symbol across agents — one coin counted once per direction
-  const totalLong  = new Set([...agent1, ...agent2].filter(s => s.direction === "LONG").map(s => s.symbol)).size;
-  const totalShort = new Set([...agent1, ...agent2].filter(s => s.direction === "SHORT").map(s => s.symbol)).size;
+  const allSignals = [...agent1, ...agent2, ...agent3];
+  const totalLong  = new Set(allSignals.filter(s => s.direction === "LONG").map(s => s.symbol)).size;
+  const totalShort = new Set(allSignals.filter(s => s.direction === "SHORT").map(s => s.symbol)).size;
 
   // Compute sets of open symbols for badge
   const openSymbolMap = useMemo(() => {
@@ -594,6 +600,7 @@ export default function ScannerFuturesPage() {
                 {[
                   { key: "agent1" as const, label: "🎯 Agent 1 — Pre-Gainer Scout",      cls: "bg-blue-500/20 border-blue-400/40 text-blue-300"     },
                   { key: "agent2" as const, label: "📦 Agent 2 — Accumulation Detector", cls: "bg-purple-500/20 border-purple-400/40 text-purple-300" },
+                  { key: "agent3" as const, label: "🔥 Agent 3 — Momentum Capture",      cls: "bg-orange-500/20 border-orange-400/40 text-orange-300" },
                 ].map(a => (
                   <button key={a.key}
                     onClick={() => setActiveAgent(prev => prev === a.key ? "all" : a.key)}

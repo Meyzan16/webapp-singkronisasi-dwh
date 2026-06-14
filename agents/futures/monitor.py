@@ -51,7 +51,7 @@ _liq_guards   = 0   # positions closed by liquidation guard
 _tp_extended  = 0   # positions with TP extended
 _today: Optional[str] = None  # F61: track date for daily closed_today reset
 
-_FUTURES_STYLES = ("futures_agent1", "futures_agent2")
+_FUTURES_STYLES = ("futures_agent1", "futures_agent2", "futures_agent3")
 
 
 def get_state() -> dict:
@@ -253,7 +253,7 @@ async def check_futures_positions() -> tuple[int, int]:
         # Monitor all futures-type positions (including legacy styles)
         result = await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style.in_(["futures_agent1", "futures_agent2"]),
+                PaperTrade.style.in_(list(_FUTURES_STYLES)),
                 PaperTrade.status == "open",
             )
         )

@@ -18,6 +18,7 @@ interface MonthlyStats {
   month:  string;
   agent1: { total: number; wins: number; win_rate: number };
   agent2: { total: number; wins: number; win_rate: number };
+  agent3: { total: number; wins: number; win_rate: number };
 }
 
 interface LearningStats {
@@ -26,6 +27,7 @@ interface LearningStats {
   overall:         { total: number; open: number; closed: number; wins: number; losses: number; win_rate: number };
   agent1:          { total: number; wins: number; losses: number; win_rate: number };
   agent2:          { total: number; wins: number; losses: number; win_rate: number };
+  agent3?:         { total: number; wins: number; losses: number; win_rate: number };
   balance:         { starting: number; current: number; total_pnl: number; roi_pct: number };
   win_rate_trend:  { trade_n: number; win_rate: number; win: boolean }[];
   top_signals:     { key: string; agent: string; win_rate: number; weight: number; total: number; wins: number }[];
@@ -87,6 +89,7 @@ interface RiskDashboard {
   agent_breakdown: {
     agent1: { open: number; margin: number; at_risk: number };
     agent2: { open: number; margin: number; at_risk: number };
+    agent3?: { open: number; margin: number; at_risk: number };
   };
   gate?: GateState;
 }
@@ -358,7 +361,7 @@ export function FuturesTab() {
   const [loading, setLoading]         = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   // (sortBy/sortDir/filterBy removed — history now uses DBHistoryTable)
-  const [agentFilter, setAgentFilter] = useState<"all" | "agent1" | "agent2">("all");
+  const [agentFilter, setAgentFilter] = useState<"all" | "agent1" | "agent2" | "agent3">("all");
   const [countdown, setCountdown]     = useState(REFRESH_MS / 1000);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [autoThreshold, setAutoThreshold] = useState<number | null>(null);  // F26/F10
@@ -431,17 +434,21 @@ export function FuturesTab() {
 
     const a1Closed = closed.filter(p => p.agent === "futures_agent1");
     const a2Closed = closed.filter(p => p.agent === "futures_agent2");
-    const a1Wins   = a1Closed.filter(isRealWin).length;      // F104
-    const a2Wins   = a2Closed.filter(isRealWin).length;      // F104
+    const a3Closed = closed.filter(p => p.agent === "futures_agent3");
+    const a1Wins   = a1Closed.filter(isRealWin).length;
+    const a2Wins   = a2Closed.filter(isRealWin).length;
+    const a3Wins   = a3Closed.filter(isRealWin).length;
     const a1Open   = open.filter(p => p.agent === "futures_agent1");
     const a2Open   = open.filter(p => p.agent === "futures_agent2");
+    const a3Open   = open.filter(p => p.agent === "futures_agent3");
 
     return {
       open: open.length, closed: closed.length, wins: wins.length, losses: losses.length,
       winRate, currentBalance, totalPnl$,
-      a1Open, a2Open,
+      a1Open, a2Open, a3Open,
       a1: { total: a1Closed.length, wins: a1Wins, rate: a1Closed.length > 0 ? a1Wins / a1Closed.length * 100 : 0 },
       a2: { total: a2Closed.length, wins: a2Wins, rate: a2Closed.length > 0 ? a2Wins / a2Closed.length * 100 : 0 },
+      a3: { total: a3Closed.length, wins: a3Wins, rate: a3Closed.length > 0 ? a3Wins / a3Closed.length * 100 : 0 },
     };
   }, [positions, learning, startingBalance, riskDollar]);
 
@@ -541,17 +548,18 @@ export function FuturesTab() {
 
             {/* Agent breakdown */}
             {ab && (
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { key: "agent1", label: "🤖 Agent 1 AI", color: "blue",   data: ab.agent1 },
-                  { key: "agent2", label: "🧠 Agent 2 T4", color: "purple", data: ab.agent2 },
-                ].map(a => (
-                  <div key={a.key} className={`bg-white/5 rounded-xl p-3 border ${a.data.at_risk > 0 ? "border-red-700/40" : "border-white/5"}`}>
-                    <p className={`text-[10px] font-bold mb-2 ${a.color === "blue" ? "text-blue-300" : "text-purple-300"}`}>{a.label}</p>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-neutral-400">Open: <strong className="text-white">{a.data.open}</strong></span>
-                      <span className="text-neutral-400">Margin: <strong className="text-yellow-300">${a.data.margin.toFixed(0)}</strong></span>
-                      {a.data.at_risk > 0 && <span className="text-red-400 font-bold">⚠️ {a.data.at_risk} at risk</span>}
+              <div className="grid grid-cols-3 gap-3">
+                {([
+                  { key: "agent1", label: "🤖 Agent 1 AI",   color: "blue",   data: ab.agent1 },
+                  { key: "agent2", label: "🧠 Agent 2 T4",   color: "purple", data: ab.agent2 },
+                  { key: "agent3", label: "🔥 Agent 3 Momo", color: "orange", data: ab.agent3 },
+                ] as const).filter(a => a.data).map(a => (
+                  <div key={a.key} className={`bg-white/5 rounded-xl p-3 border ${(a.data!.at_risk ?? 0) > 0 ? "border-red-700/40" : "border-white/5"}`}>
+                    <p className={`text-[10px] font-bold mb-2 ${a.color === "blue" ? "text-blue-300" : a.color === "purple" ? "text-purple-300" : "text-orange-300"}`}>{a.label}</p>
+                    <div className="flex flex-col gap-1 text-xs">
+                      <span className="text-neutral-400">Open: <strong className="text-white">{a.data!.open}</strong></span>
+                      <span className="text-neutral-400">Margin: <strong className="text-yellow-300">${a.data!.margin.toFixed(0)}</strong></span>
+                      {(a.data!.at_risk ?? 0) > 0 && <span className="text-red-400 font-bold">⚠️ {a.data!.at_risk} at risk</span>}
                     </div>
                   </div>
                 ))}
@@ -569,20 +577,20 @@ export function FuturesTab() {
           </div>
         )}
 
-        {/* Open positions by agent — side by side */}
-        {(stats.a1Open.length > 0 || stats.a2Open.length > 0) ? (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Open positions by agent */}
+        {(stats.a1Open.length > 0 || stats.a2Open.length > 0 || stats.a3Open.length > 0) ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Agent 1 */}
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200">🤖 Agent 1 — AI Knowledge</span>
+                <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200">🤖 Agent 1 — AI</span>
                 <span className="text-xs text-neutral-500">{stats.a1Open.length} posisi</span>
-                {ab && ab.agent1.at_risk > 0 && (
-                  <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent1.at_risk} at risk</span>
+                {ab && (ab.agent1.at_risk ?? 0) > 0 && (
+                  <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent1.at_risk}</span>
                 )}
               </div>
               {stats.a1Open.length === 0
-                ? <div className="text-center py-8 text-neutral-400 text-sm border border-dashed border-neutral-200 rounded-2xl">Tidak ada posisi terbuka</div>
+                ? <div className="text-center py-8 text-neutral-400 text-xs border border-dashed border-neutral-200 rounded-2xl">Kosong</div>
                 : <div className="space-y-2">
                     {stats.a1Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}
                   </div>
@@ -592,16 +600,33 @@ export function FuturesTab() {
             {/* Agent 2 */}
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">🧠 Agent 2 — T0-T4</span>
+                <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">🧠 Agent 2 — T4</span>
                 <span className="text-xs text-neutral-500">{stats.a2Open.length} posisi</span>
-                {ab && ab.agent2.at_risk > 0 && (
-                  <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent2.at_risk} at risk</span>
+                {ab && (ab.agent2.at_risk ?? 0) > 0 && (
+                  <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent2.at_risk}</span>
                 )}
               </div>
               {stats.a2Open.length === 0
-                ? <div className="text-center py-8 text-neutral-400 text-sm border border-dashed border-neutral-200 rounded-2xl">Tidak ada posisi terbuka</div>
+                ? <div className="text-center py-8 text-neutral-400 text-xs border border-dashed border-neutral-200 rounded-2xl">Kosong</div>
                 : <div className="space-y-2">
                     {stats.a2Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}
+                  </div>
+              }
+            </div>
+
+            {/* Agent 3 */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">🔥 Agent 3 — Momo</span>
+                <span className="text-xs text-neutral-500">{stats.a3Open.length} posisi</span>
+                {ab && ab.agent3 && (ab.agent3.at_risk ?? 0) > 0 && (
+                  <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent3.at_risk}</span>
+                )}
+              </div>
+              {stats.a3Open.length === 0
+                ? <div className="text-center py-8 text-neutral-400 text-xs border border-dashed border-neutral-200 rounded-2xl">Kosong</div>
+                : <div className="space-y-2">
+                    {stats.a3Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}
                   </div>
               }
             </div>
@@ -720,29 +745,29 @@ export function FuturesTab() {
       {/* ── Wallet: deposit / withdraw + balance sheet (Phase 9) ──────────────── */}
       <FuturesWallet onChanged={() => void fetchPositions(true)} />
 
-      {/* ── Agent 1 vs Agent 2 OPEN POSITIONS (separated) ────────────────────── */}
-      {(stats.a1Open.length > 0 || stats.a2Open.length > 0) && (
+      {/* ── Open positions — separated per agent ─────────────────────────────── */}
+      {(stats.a1Open.length > 0 || stats.a2Open.length > 0 || stats.a3Open.length > 0) && (
         <div>
           <h3 className="text-sm font-bold text-neutral-700 mb-3 flex items-center gap-2">
             🔵 Posisi Terbuka ({stats.open})
             <span className="text-[10px] text-neutral-400 font-normal">— Dipisah per agent</span>
-            {agentFilter !== "all" && (   // F25: agentFilter now actually filters the panels
+            {agentFilter !== "all" && (
               <button onClick={() => setAgentFilter("all")}
                 className="text-[10px] text-teal-600 font-semibold underline ml-1">
-                Filter: {agentFilter === "agent1" ? "Agent 1" : "Agent 2"} ✕
+                Filter: {agentFilter === "agent1" ? "Agent 1" : agentFilter === "agent2" ? "Agent 2" : "Agent 3"} ✕
               </button>
             )}
           </h3>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Agent 1 Open */}
-            {agentFilter !== "agent2" && (
+            {agentFilter !== "agent2" && agentFilter !== "agent3" && (
             <div className="bg-blue-50 border border-blue-100 rounded-2xl overflow-hidden">
               <div className="px-4 py-2.5 border-b border-blue-100 flex items-center gap-2">
-                <span className="text-xs font-bold text-blue-700">🤖 Agent 1 — AI Knowledge</span>
+                <span className="text-xs font-bold text-blue-700">🤖 Agent 1 — AI</span>
                 <span className="ml-auto text-[10px] text-blue-500">{stats.a1Open.length} open</span>
-                {riskDash?.agent_breakdown.agent1.at_risk ? (
+                {(riskDash?.agent_breakdown.agent1.at_risk ?? 0) > 0 && (
                   <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1.5 py-0.5 rounded">⚠️ AT RISK</span>
-                ) : null}
+                )}
               </div>
               {stats.a1Open.length === 0 ? (
                 <div className="text-center py-6 text-neutral-400 text-xs">Tidak ada posisi terbuka</div>
@@ -755,14 +780,14 @@ export function FuturesTab() {
             )}
 
             {/* Agent 2 Open */}
-            {agentFilter !== "agent1" && (
+            {agentFilter !== "agent1" && agentFilter !== "agent3" && (
             <div className="bg-purple-50 border border-purple-100 rounded-2xl overflow-hidden">
               <div className="px-4 py-2.5 border-b border-purple-100 flex items-center gap-2">
                 <span className="text-xs font-bold text-purple-700">🧠 Agent 2 — T0-T4</span>
                 <span className="ml-auto text-[10px] text-purple-500">{stats.a2Open.length} open</span>
-                {riskDash?.agent_breakdown.agent2.at_risk ? (
+                {(riskDash?.agent_breakdown.agent2.at_risk ?? 0) > 0 && (
                   <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1.5 py-0.5 rounded">⚠️ AT RISK</span>
-                ) : null}
+                )}
               </div>
               {stats.a2Open.length === 0 ? (
                 <div className="text-center py-6 text-neutral-400 text-xs">Tidak ada posisi terbuka</div>
@@ -773,24 +798,46 @@ export function FuturesTab() {
               )}
             </div>
             )}
+
+            {/* Agent 3 Open */}
+            {agentFilter !== "agent1" && agentFilter !== "agent2" && (
+            <div className="bg-orange-50 border border-orange-100 rounded-2xl overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-orange-100 flex items-center gap-2">
+                <span className="text-xs font-bold text-orange-700">🔥 Agent 3 — Momentum</span>
+                <span className="ml-auto text-[10px] text-orange-500">{stats.a3Open.length} open</span>
+                {(riskDash?.agent_breakdown.agent3?.at_risk ?? 0) > 0 && (
+                  <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1.5 py-0.5 rounded">⚠️ AT RISK</span>
+                )}
+              </div>
+              {stats.a3Open.length === 0 ? (
+                <div className="text-center py-6 text-neutral-400 text-xs">Tidak ada posisi terbuka</div>
+              ) : (
+                <div className="divide-y divide-orange-50 p-2 space-y-1.5">
+                  {stats.a3Open.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}
+                </div>
+              )}
+            </div>
+            )}
           </div>
         </div>
       )}
 
       {/* ── Agent comparison ──────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         {[
-          { key: "agent1" as const, label: "Agent 1 — AI Knowledge", color: "blue",   emoji: "🤖", data: stats.a1 },
-          { key: "agent2" as const, label: "Agent 2 — T0-T4",         color: "purple", emoji: "🧠", data: stats.a2 },
+          { key: "agent1" as const, label: "Agent 1 — AI",       color: "blue",   emoji: "🤖", data: stats.a1 },
+          { key: "agent2" as const, label: "Agent 2 — T0-T4",    color: "purple", emoji: "🧠", data: stats.a2 },
+          { key: "agent3" as const, label: "Agent 3 — Momentum", color: "orange", emoji: "🔥", data: stats.a3 },
         ].map(a => {
           const rateColor = a.data.rate >= 60 ? "text-green-600" : a.data.rate >= 50 ? "text-yellow-600" : a.data.total > 0 ? "text-red-500" : "text-neutral-400";
-          const border    = a.color === "blue" ? "border-blue-200 bg-blue-50" : "border-purple-200 bg-purple-50";
-          const badge     = a.color === "blue" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700";
+          const border    = a.color === "blue" ? "border-blue-200 bg-blue-50" : a.color === "purple" ? "border-purple-200 bg-purple-50" : "border-orange-200 bg-orange-50";
+          const badge     = a.color === "blue" ? "bg-blue-100 text-blue-700" : a.color === "purple" ? "bg-purple-100 text-purple-700" : "bg-orange-100 text-orange-700";
+          const ring      = a.color === "blue" ? "ring-blue-400" : a.color === "purple" ? "ring-purple-400" : "ring-orange-400";
           return (
             <div key={a.key}
               onClick={() => setAgentFilter(f => f === a.key ? "all" : a.key)}
               className={`rounded-2xl border-2 p-4 cursor-pointer transition-all ${
-                agentFilter === a.key ? border + " ring-2 ring-offset-1 " + (a.color === "blue" ? "ring-blue-400" : "ring-purple-400") : "border-neutral-200 bg-white hover:border-neutral-300"
+                agentFilter === a.key ? border + " ring-2 ring-offset-1 " + ring : "border-neutral-200 bg-white hover:border-neutral-300"
               }`}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">{a.emoji}</span>
@@ -813,7 +860,7 @@ export function FuturesTab() {
       {learning?.monthly_stats && learning.monthly_stats.length > 0 && (
         <div className="bg-white border border-neutral-200 rounded-2xl p-4">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">📅 Win Rate Bulanan — Agent 1 vs 2</p>
+            <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">📅 Win Rate Bulanan — Agent 1 vs 2 vs 3</p>
             <select
               value={selectedMonth}
               onChange={e => setSelectedMonth(e.target.value)}
@@ -835,11 +882,13 @@ export function FuturesTab() {
                   <div className="flex gap-3 text-[10px] text-neutral-500">
                     <span>A1: {m.agent1.wins}/{m.agent1.total}</span>
                     <span>A2: {m.agent2.wins}/{m.agent2.total}</span>
+                    {m.agent3 && <span>A3: {m.agent3.wins}/{m.agent3.total}</span>}
                   </div>
                 </div>
                 <div className="space-y-1.5">
                   <WinRateBar rate={m.agent1.win_rate} label={`🤖 Agent 1: ${m.agent1.win_rate.toFixed(0)}%`} />
                   <WinRateBar rate={m.agent2.win_rate} label={`🧠 Agent 2: ${m.agent2.win_rate.toFixed(0)}%`} />
+                  {m.agent3 && <WinRateBar rate={m.agent3.win_rate} label={`🔥 Agent 3: ${m.agent3.win_rate.toFixed(0)}%`} />}
                 </div>
               </div>
             ))}

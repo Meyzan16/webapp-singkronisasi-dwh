@@ -16,6 +16,7 @@ import structlog
 from agents.futures import agent1 as a1
 from app.services.binance_urls import fapi
 from agents.futures import agent2 as a2
+from agents.futures import agent3 as a3
 from agents.futures import store as futures_store
 from agents.futures.data import fetch_top100_futures, fetch_symbol_data
 from agents.futures.weight_updater import is_blacklisted   # B4: top-level import
@@ -146,9 +147,10 @@ async def _run_scan() -> dict:
                     all_tf_maps[symbol] = {}
             await asyncio.sleep(BATCH_SLEEP)
 
-    # Step 3: score both agents
+    # Step 3: score all three agents
     a1_results: list[dict] = []
     a2_results: list[dict] = []
+    a3_results: list[dict] = []
 
     for ticker in tickers:
         symbol     = ticker["symbol"]
@@ -162,7 +164,7 @@ async def _run_scan() -> dict:
         if is_blacklisted(symbol):
             continue
 
-        # F34/F52: scan_symbol now returns list — extend (not append) to get all directions
+        # F34/F52: scan_symbol returns list — extend (not append) to get all directions
         r1_list = a1.scan_symbol(symbol, tf_map, change_24h)
         if r1_list:
             a1_results.extend(r1_list)
@@ -171,11 +173,18 @@ async def _run_scan() -> dict:
         if r2_list:
             a2_results.extend(r2_list)
 
+        # Phase 11: Agent 3 — Momentum Capture (already-moving coins)
+        r3_list = a3.scan_symbol(symbol, tf_map, change_24h)
+        if r3_list:
+            a3_results.extend(r3_list)
+
     # Sort by score, take top N
     a1_results.sort(key=lambda x: x["score"], reverse=True)
     a2_results.sort(key=lambda x: x["score"], reverse=True)
+    a3_results.sort(key=lambda x: x["score"], reverse=True)
     a1_results = a1_results[:TOP_N]
     a2_results = a2_results[:TOP_N]
+    a3_results = a3_results[:TOP_N]
 
     elapsed  = round(time.time() - start, 1)
     gen_time = int(time.time())
@@ -195,12 +204,20 @@ async def _run_scan() -> dict:
             "generated_at": gen_time,
             "elapsed_sec":  elapsed,
         },
+        "agent3": {
+            "results":      a3_results,
+            "total":        len(a3_results),
+            "scanned":      len(tickers),
+            "generated_at": gen_time,
+            "elapsed_sec":  elapsed,
+        },
     }
 
     logger.info(
         "futures_scan_done",
         agent1=len(a1_results),
         agent2=len(a2_results),
+        agent3=len(a3_results),
         scanned=len(tickers),
         elapsed_sec=elapsed,
     )
@@ -224,6 +241,7 @@ async def run_futures_loop() -> None:
             # Store results per agent — then signal scanning done (F107)
             futures_store.set_result("agent1", result["agent1"])
             futures_store.set_result("agent2", result["agent2"])
+            futures_store.set_result("agent3", result["agent3"])   # Phase 11
             futures_store.set_scanning(False)
 
             _last_scan   = time.time()
@@ -235,15 +253,17 @@ async def run_futures_loop() -> None:
                 cycle=_cycle_count,
                 agent1=result["agent1"]["total"],
                 agent2=result["agent2"]["total"],
+                agent3=result["agent3"]["total"],
             )
 
-            # Auto-open high-score positions (score >= 75)
+            # Auto-open high-score positions (score >= threshold)
             try:
                 from agents.futures.auto_trader import auto_open_positions
                 a1_auto = await auto_open_positions(result["agent1"]["results"], "futures_agent1")
                 a2_auto = await auto_open_positions(result["agent2"]["results"], "futures_agent2")
-                if a1_auto or a2_auto:
-                    logger.info("auto_positions_opened", agent1=a1_auto, agent2=a2_auto)
+                a3_auto = await auto_open_positions(result["agent3"]["results"], "futures_agent3")  # Phase 11
+                if a1_auto or a2_auto or a3_auto:
+                    logger.info("auto_positions_opened", agent1=a1_auto, agent2=a2_auto, agent3=a3_auto)
             except Exception as exc:
                 logger.warning("auto_open_error", error=str(exc)[:80])
 

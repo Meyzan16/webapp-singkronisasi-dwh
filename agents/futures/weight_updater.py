@@ -159,7 +159,7 @@ async def update_weights() -> int:
             # F70: include expired trades as negative signal (was only tp+sl)
             result = await session.execute(
                 select(PaperTrade).where(
-                    PaperTrade.style.in_(["futures_agent1", "futures_agent2"]),
+                    PaperTrade.style.in_(["futures_agent1", "futures_agent2", "futures_agent3"]),
                     PaperTrade.status.in_(["tp", "sl", "expired"]),
                 )
             )

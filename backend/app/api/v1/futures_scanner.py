@@ -68,6 +68,7 @@ async def get_futures_scan(
             result = await _run_scan()
             fs.set_result("agent1", result["agent1"])
             fs.set_result("agent2", result["agent2"])
+            fs.set_result("agent3", result["agent3"])
             cached = fs.get_all_results()
         except Exception as exc:
             fs.set_scanning(False)
@@ -94,6 +95,7 @@ async def force_futures_scan(
         result = await _run_scan()
         fs.set_result("agent1", result["agent1"])
         fs.set_result("agent2", result["agent2"])
+        fs.set_result("agent3", result["agent3"])
         return _filter_results(fs.get_all_results(), agent, direction, min_score, limit)
     except Exception as exc:
         fs.set_scanning(False)
@@ -268,13 +270,16 @@ async def get_futures_positions(
         return {"positions": [], "total": 0}
 
     # Build filter
+    _ALL_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
     conditions = [
-        PaperTrade.style.in_(["futures_agent1", "futures_agent2"])
+        PaperTrade.style.in_(_ALL_STYLES)
     ]
     if agent == "agent1":
         conditions = [PaperTrade.style == "futures_agent1"]
     elif agent == "agent2":
         conditions = [PaperTrade.style == "futures_agent2"]
+    elif agent == "agent3":
+        conditions = [PaperTrade.style == "futures_agent3"]
     if status != "all":
         conditions.append(PaperTrade.status == status)
 
@@ -406,10 +411,11 @@ async def get_risk_dashboard() -> dict:
     if not is_db_available():
         return {"error": "db_unavailable", "positions": [], "portfolio": {}}
 
+    _ALL_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style.in_(["futures_agent1", "futures_agent2"]),
+                PaperTrade.style.in_(_ALL_STYLES),
                 PaperTrade.status == "open",
             ).order_by(PaperTrade.entry_at.desc())
         )
@@ -418,7 +424,7 @@ async def get_risk_dashboard() -> dict:
         # Also get all closed for risk-adjusted return
         closed_result = await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style.in_(["futures_agent1", "futures_agent2"]),
+                PaperTrade.style.in_(_ALL_STYLES),
                 PaperTrade.status.in_(["tp", "sl"]),
             ).order_by(PaperTrade.entry_at)
         )
@@ -595,6 +601,11 @@ async def get_risk_dashboard() -> dict:
                 "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent2"), 2),
                 "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent2" and p["risk_status"] == "DANGER"),
             },
+            "agent3": {
+                "open": sum(1 for p in positions if p["agent"] == "futures_agent3"),
+                "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent3"), 2),
+                "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent3" and p["risk_status"] == "DANGER"),
+            },
         },
         "generated_at": time.time(),
         "gate": _gate,   # Phase 10: full gate state — frontend reads from risk dashboard
@@ -676,6 +687,7 @@ def _filter_results(
 ) -> dict:
     a1 = cached.get("agent1", {})
     a2 = cached.get("agent2", {})
+    a3 = cached.get("agent3", {})
 
     def _apply(results: list) -> list:
         out = [r for r in results if r.get("score", 0) >= min_score]
@@ -686,7 +698,8 @@ def _filter_results(
     return {
         "agent1":       _apply(a1.get("results", [])) if agent in ("all", "agent1") else [],
         "agent2":       _apply(a2.get("results", [])) if agent in ("all", "agent2") else [],
-        "scanned":      max(a1.get("scanned", 0), a2.get("scanned", 0)),   # F20: consistent count
-        "generated_at": max(a1.get("generated_at", 0), a2.get("generated_at", 0)),
-        "elapsed_sec":  max(a1.get("elapsed_sec", 0), a2.get("elapsed_sec", 0)),
+        "agent3":       _apply(a3.get("results", [])) if agent in ("all", "agent3") else [],
+        "scanned":      max(a1.get("scanned", 0), a2.get("scanned", 0), a3.get("scanned", 0)),
+        "generated_at": max(a1.get("generated_at", 0), a2.get("generated_at", 0), a3.get("generated_at", 0)),
+        "elapsed_sec":  max(a1.get("elapsed_sec", 0), a2.get("elapsed_sec", 0), a3.get("elapsed_sec", 0)),
     }

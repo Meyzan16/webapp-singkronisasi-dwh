@@ -50,7 +50,7 @@ async def get_learning_stats() -> dict:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style.in_(["futures_agent1", "futures_agent2"]),
+                PaperTrade.style.in_(["futures_agent1", "futures_agent2", "futures_agent3"]),
             ).order_by(PaperTrade.entry_at)
         )
         all_trades = list(result.scalars().all())
@@ -183,8 +183,14 @@ async def get_learning_stats() -> dict:
             "month": month_key,
             "agent1": {"wins": 0, "total": 0},
             "agent2": {"wins": 0, "total": 0},
+            "agent3": {"wins": 0, "total": 0},
         })
-        ak = "agent1" if t.style == "futures_agent1" else "agent2"
+        if t.style == "futures_agent1":
+            ak = "agent1"
+        elif t.style == "futures_agent2":
+            ak = "agent2"
+        else:
+            ak = "agent3"
         entry[ak]["total"] += 1
         if _is_real_win(t):
             entry[ak]["wins"] += 1
@@ -194,6 +200,7 @@ async def get_learning_stats() -> dict:
         v = monthly[month_key]
         a1 = v["agent1"]
         a2 = v["agent2"]
+        a3 = v["agent3"]
         monthly_stats.append({
             "month": month_key,
             "agent1": {
@@ -205,6 +212,11 @@ async def get_learning_stats() -> dict:
                 "total":    a2["total"],
                 "wins":     a2["wins"],
                 "win_rate": round(a2["wins"] / a2["total"] * 100, 1) if a2["total"] > 0 else 0.0,
+            },
+            "agent3": {
+                "total":    a3["total"],
+                "wins":     a3["wins"],
+                "win_rate": round(a3["wins"] / a3["total"] * 100, 1) if a3["total"] > 0 else 0.0,
             },
         })
 
@@ -232,6 +244,7 @@ async def get_learning_stats() -> dict:
         },
         "agent1":        agent_stats("futures_agent1"),
         "agent2":        agent_stats("futures_agent2"),
+        "agent3":        agent_stats("futures_agent3"),
         "balance": {
             "starting":  round(wallet_base, 2),                     # Phase 9: real base (incl. deposits)
             "current":   round(balance, 2),
