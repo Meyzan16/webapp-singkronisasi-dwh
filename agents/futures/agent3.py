@@ -37,7 +37,7 @@ from .data import FuturesData
 from .agent1 import (
     _rsi, _swing_lows, _swing_highs, _round_price,
     _ema, _atr,
-    MIN_RR,
+    MIN_RR, MIN_SL_PCT, MAX_SL_MARGIN_PCT,
 )
 
 logger = structlog.get_logger(__name__)
@@ -49,8 +49,12 @@ AGENT_NAME = "futures_agent3"
 _MAX_LEV = 10
 
 
-def calc_leverage_momentum(atr_pct: float, score: float) -> int:
-    """Dynamic leverage — more conservative than pre-gainer agents (max 10x)."""
+def calc_leverage_momentum(atr_pct: float, score: float, risk_pct: float = 0.0) -> int:
+    """Dynamic leverage — more conservative than pre-gainer agents (max 10x).
+
+    BUG-L6/L7: reconciled with SL distance so a full SL never loses more than
+    MAX_SL_MARGIN_PCT of margin (was ATR-only → tight SL + high leverage wipe).
+    """
     if atr_pct > 5.0:   base = 2
     elif atr_pct > 3.0: base = 3
     elif atr_pct > 2.0: base = 4
@@ -60,7 +64,11 @@ def calc_leverage_momentum(atr_pct: float, score: float) -> int:
     if score >= 80:    base = min(base + 2, _MAX_LEV)
     elif score >= 70:  base = min(base + 1, _MAX_LEV)
 
-    return min(base, _MAX_LEV)
+    # BUG-L6/L7: cap leverage by SL distance (margin loss ≈ risk_pct × leverage)
+    if risk_pct and risk_pct > 0:
+        base = min(base, max(1, int(MAX_SL_MARGIN_PCT / risk_pct)))
+
+    return max(1, min(base, _MAX_LEV))
 
 
 # ── Signal helpers ────────────────────────────────────────────────────────────
@@ -430,10 +438,16 @@ def _calc_levels(
         risk     = price - sl
         risk_pct = risk / price * 100
 
-        if risk_pct > 7.0 or risk_pct < 0.3:
+        # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
+        min_sl_pct = max(MIN_SL_PCT, atr_pct * 0.8)
+        if risk_pct > 7.0:
             sl       = price - atr * 1.2
             risk     = price - sl
             risk_pct = risk / price * 100
+        if risk_pct < min_sl_pct:
+            risk     = price * (min_sl_pct / 100)
+            sl       = price - risk
+            risk_pct = min_sl_pct
 
         s_highs   = _swing_highs(ref.highs, lookback=4)
         if d4h:
@@ -454,10 +468,16 @@ def _calc_levels(
         risk     = sl - price
         risk_pct = risk / price * 100
 
-        if risk_pct > 7.0 or risk_pct < 0.3:
+        # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
+        min_sl_pct = max(MIN_SL_PCT, atr_pct * 0.8)
+        if risk_pct > 7.0:
             sl       = price + atr * 1.2
             risk     = sl - price
             risk_pct = risk / price * 100
+        if risk_pct < min_sl_pct:
+            risk     = price * (min_sl_pct / 100)
+            sl       = price + risk
+            risk_pct = min_sl_pct
 
         s_lows   = _swing_lows(ref.lows, lookback=4)
         if d4h:
@@ -551,7 +571,7 @@ def scan_symbol(
         if not levels:
             continue
         atr_pct  = levels.pop("atr_pct")
-        leverage = calc_leverage_momentum(atr_pct, score)
+        leverage = calc_leverage_momentum(atr_pct, score, levels["risk_pct"])
         results.append({
             "symbol":       symbol,
             "direction":    direction,

@@ -589,7 +589,7 @@ def scan_symbol(
         if not levels:
             continue
         atr_pct  = levels.pop("atr_pct")
-        leverage = calc_leverage(atr_pct, score)
+        leverage = calc_leverage(atr_pct, score, levels["risk_pct"])
         results.append({
             "symbol":       symbol,
             "direction":    direction,

@@ -37,6 +37,14 @@ logger = structlog.get_logger(__name__)
 MIN_RR     = 3.0
 AGENT_NAME = "futures_agent1"
 
+# BUG-L3/L5: minimum SL distance (%) — stops tighter than this get hit by market noise
+# (was an implicit 0.3% floor → 0.34% SL @ 12x = instant noise stop-out, win rate 0%).
+MIN_SL_PCT = 1.5
+# BUG-L6/L7: reconcile leverage with SL distance — cap leverage so a full SL hit loses
+# at most this % of margin (margin loss ≈ risk_pct × leverage). Prevents the old
+# inverse coupling where low-ATR coins got MAX leverage paired with the TIGHTEST SL.
+MAX_SL_MARGIN_PCT = 25.0
+
 
 # ── Math helpers ──────────────────────────────────────────────────────────────
 
@@ -154,8 +162,14 @@ def _rsi_sweet_spot(closes: list[float]) -> tuple[float, str]:
 
 # ── Leverage ──────────────────────────────────────────────────────────────────
 
-def calc_leverage(atr_pct: float, score: float) -> int:
-    """Dynamic leverage based on volatility (ATR%) + confidence (score)."""
+def calc_leverage(atr_pct: float, score: float, risk_pct: float = 0.0) -> int:
+    """Dynamic leverage from volatility (ATR%) + confidence (score), reconciled with SL.
+
+    BUG-L6/L7: leverage is now capped by the SL distance so a full SL hit never loses
+    more than MAX_SL_MARGIN_PCT of margin. Previously leverage was derived from ATR alone
+    and never reconciled with the (often tiny) SL — low-ATR coins got 12-15x paired with a
+    0.3-0.7% SL, guaranteeing a noise stop-out.
+    """
     if atr_pct > 5.0:   base = 2
     elif atr_pct > 3.0: base = 3
     elif atr_pct > 2.0: base = 5
@@ -166,7 +180,11 @@ def calc_leverage(atr_pct: float, score: float) -> int:
     elif score >= 70:  base = min(base + 2, 12)
     elif score >= 60:  base = min(base + 1, 10)
 
-    return base
+    # BUG-L6/L7: cap leverage by SL distance (margin loss ≈ risk_pct × leverage)
+    if risk_pct and risk_pct > 0:
+        base = min(base, max(1, int(MAX_SL_MARGIN_PCT / risk_pct)))
+
+    return max(1, base)
 
 
 # ── Main scorer ───────────────────────────────────────────────────────────────
@@ -547,10 +565,16 @@ def _calc_levels(
         risk     = price - sl
         risk_pct = risk / price * 100
 
-        if risk_pct > 8.0 or risk_pct < 0.3:
+        # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
+        min_sl_pct = max(MIN_SL_PCT, atr_pct * 0.8)
+        if risk_pct > 8.0:
             sl       = price - atr * 1.5
             risk     = price - sl
             risk_pct = risk / price * 100
+        if risk_pct < min_sl_pct:
+            risk     = price * (min_sl_pct / 100)
+            sl       = price - risk
+            risk_pct = min_sl_pct
 
         s_highs   = _swing_highs(d1h.highs, lookback=5)
         if d4h:
@@ -571,10 +595,16 @@ def _calc_levels(
         risk     = sl - price
         risk_pct = risk / price * 100
 
-        if risk_pct > 8.0 or risk_pct < 0.3:
+        # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
+        min_sl_pct = max(MIN_SL_PCT, atr_pct * 0.8)
+        if risk_pct > 8.0:
             sl       = price + atr * 1.5
             risk     = sl - price
             risk_pct = risk / price * 100
+        if risk_pct < min_sl_pct:
+            risk     = price * (min_sl_pct / 100)
+            sl       = price + risk
+            risk_pct = min_sl_pct
 
         s_lows   = _swing_lows(d1h.lows, lookback=5)
         if d4h:
@@ -670,7 +700,7 @@ def scan_symbol(
         if not levels:
             continue
         atr_pct  = levels.pop("atr_pct")
-        leverage = calc_leverage(atr_pct, score)
+        leverage = calc_leverage(atr_pct, score, levels["risk_pct"])
         results.append({
             "symbol":       symbol,
             "direction":    direction,
