@@ -22,7 +22,7 @@ logger = structlog.get_logger(__name__)
 INTERVAL_SEC  = 3 * 60    # scan every 3 minutes — catch entries before big moves
 STARTUP_DELAY = 20
 
-MAX_OPENS_PER_CYCLE = 2   # §7B: ambil puncak ranking saja, jangan borong
+MAX_OPENS_PER_CYCLE = 3   # §7B: naik 2→3 agar tidak melewat momentum bersamaan
 
 # §14.4: circuit breaker — rugi harian (WIB) melebihi batas → auto-open jeda
 DAILY_LOSS_LIMIT_FRACTION = 0.03
@@ -178,7 +178,7 @@ async def _auto_open_position(coin: dict) -> bool:
     # SL: 2 jam (jangan re-entry setup yang baru gagal).
     # §12.7: TP juga 45 menit — jangan langsung beli lagi di puncak pump yang sama.
     COOLDOWN_SL_HOURS = 2.0
-    COOLDOWN_TP_HOURS = 0.75
+    COOLDOWN_TP_HOURS = 0.33   # 20 menit — kurangi miss second leg pasca-TP
     async with AsyncSessionLocal() as ck:
         last_close_q = await ck.execute(
             select(PaperTrade).where(

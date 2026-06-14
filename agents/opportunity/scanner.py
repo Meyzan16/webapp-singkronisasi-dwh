@@ -51,6 +51,10 @@ MIN_SCORE         = 65     # threshold lebih tinggi = hanya high-conviction
 AUTO_OPEN_SCORE   = 85     # auto-open untuk RAW score (pre-weight, tanpa cap)
 MIN_QUOTE_VOLUME  = 5_000_000   # §11.7: likuiditas minimum supaya eksekutable
 
+# Momentum fast-track (R4): coin sudah bergerak kuat → threshold lebih rendah
+FASTTRACK_24H_PCT   = 8.0   # change_24h ≥ 8% → momentum nyata, tidak perlu score setinggi normal
+FASTTRACK_MIN_SCORE = 80    # masih butuh score ≥ 80 + direction gate — bukan open sembarang
+
 # Gerbang arah untuk auto-open (§12.1)
 DIRECTION_TAKER_MIN = 0.55
 
@@ -466,7 +470,9 @@ def _score_symbol(
     raw_score     = round(score, 1)
     display_score = round(min(score, 99), 1)
     # §12.1: auto-open WAJIB gerbang arah; tanpa itu hanya rekomendasi manual
-    auto_open = raw_score >= AUTO_OPEN_SCORE and direction_confirmed
+    # R4: fast-track untuk coin yang sudah bergerak kuat (change_24h ≥ 8%)
+    momentum_fasttrack = change_24h >= FASTTRACK_24H_PCT and raw_score >= FASTTRACK_MIN_SCORE
+    auto_open = (raw_score >= AUTO_OPEN_SCORE or momentum_fasttrack) and direction_confirmed
 
     # EMA bullish at entry time — stored in meta so monitor can detect REAL reversals
     d1h_ref = tf_data.get("1h")
@@ -479,6 +485,7 @@ def _score_symbol(
         "raw_score":           raw_score,
         "direction_confirmed": direction_confirmed,
         "auto_open":           auto_open,
+        "momentum_fasttrack":  momentum_fasttrack,
         "signals":             clean_signals[:5],
         "alert_type":          alert,
         "change_24h":          round(change_24h, 2),
