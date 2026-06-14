@@ -34,7 +34,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P2) |
 | **Bukti** | ALLUSDT terbuka di Agent 1 DAN Agent 2 — entry `0.4936`, SL `0.4901`, TP2 `0.5468` identik |
 | **Akar** | [auto_trader.py:122-128](agents/futures/auto_trader.py:122) — dedup `existing_q` filter `PaperTrade.style == agent` (per-agent), bukan lintas-agent |
 | **Dampak** | Sejak Phase 9 ketiga agent berbagi 1 wallet cross-margin. Binance cross-margin nyata = 1 posisi netto per symbol. Duplikat → margin & risk dihitung 2x untuk pergerakan korelasi 100%, liq price salah, risk gate & portfolio heat lihat 2x eksposur |
@@ -173,7 +173,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P2) |
 | **Akar** | [auto_trader.py:29,78](agents/futures/auto_trader.py:78): `AUTO_DISABLED_REGIMES={"volatile"}` → return 0 untuk semua agent |
 | **Dampak** | Saat BTC volatile (justru saat big-movers terbanyak — screenshot: 29 coin >10%), agent3 momentum **diblokir total** tepat saat peluang momentum paling kaya |
 | **Fix** | Lane momentum (Lane B refactor) jangan diblanket-block di volatile; sesuaikan per setup_type |
@@ -368,7 +368,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P2) |
 | **Akar** | [agent3.py:159](agents/futures/agent3.py:159): teks sinyal "Momentum kuat — ikuti dengan SL ketat" |
 | **Dampak** | Filosofi agent3 membakukan SL ketat (memperkuat BUG-L3/L7 untuk momentum) |
 | **Fix** | Lane momentum tetap pakai SL floor sadar-leverage; jangan "SL ketat" untuk leverage tinggi |

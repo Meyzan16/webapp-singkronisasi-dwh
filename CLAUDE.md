@@ -124,7 +124,7 @@ agents/
 - **Scanner agent** is the ONLY source that scans + logs to paper_trades
 - Scanner API is read-only — serves `agents/scanner/store.py` cache
 - R:R ≥ 1:3 enforced at both scanner level and paper_trader level
-- Dedup: one open trade per coin+style (cross-style trades are independent)
+- Dedup (spot): one open trade per coin+style. Dedup (futures, P2+): GLOBAL — one open trade per coin across ALL lanes (agent1/2/3 share one cross-margin wallet, so a symbol nets to one position)
 - No cooldown — free re-entry after trade closes (TP/SL)
 
 ### Agent modes
