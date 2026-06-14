@@ -276,6 +276,8 @@ async def get_equity(style: str = Query("futures")) -> dict:
         style_filter = [PaperTrade.style == "futures_agent1"]
     elif style == "agent2":
         style_filter = [PaperTrade.style == "futures_agent2"]
+    elif style == "agent3":
+        style_filter = [PaperTrade.style == "futures_agent3"]
     elif style == "all":
         style_filter = []
     else:  # "futures" (default)

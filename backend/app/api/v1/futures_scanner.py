@@ -1,7 +1,7 @@
 """
-Futures Scanner API — Agent 1 (AI Knowledge) + Agent 2 (T0-T4).
+Futures Scanner API — Agent 1 (Pre-Gainer) + Agent 2 (Accumulation) + Agent 3 (Momentum).
 
-GET  /futures/scan             — cached results (both agents)
+GET  /futures/scan             — cached results (all agents)
 POST /futures/scan             — force fresh scan
 GET  /futures/positions        — open futures paper trades
 POST /futures/trade            — open a futures paper trade
@@ -108,7 +108,7 @@ async def force_futures_scan(
 @router.post("/futures/trade")
 async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
     """
-    Open a futures paper trade (Agent 1 or Agent 2).
+    Open a futures paper trade (Agent 1, 2, or 3).
     Rules: per-coin per-agent dedup, entry within 2% of market, R:R ≥ 1:3.
     """
     from app.database import AsyncSessionLocal, is_db_available
