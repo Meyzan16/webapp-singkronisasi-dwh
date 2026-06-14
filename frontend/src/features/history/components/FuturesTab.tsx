@@ -552,7 +552,7 @@ export function FuturesTab() {
                 {([
                   { key: "agent1", label: "🤖 Agent 1 AI",   color: "blue",   data: ab.agent1 },
                   { key: "agent2", label: "🧠 Agent 2 T4",   color: "purple", data: ab.agent2 },
-                  { key: "agent3", label: "🔥 Agent 3 Momo", color: "orange", data: ab.agent3 },
+                  { key: "agent3", label: "🔥 Agent 3 Momentum", color: "orange", data: ab.agent3 },
                 ] as const).filter(a => a.data).map(a => (
                   <div key={a.key} className={`bg-white/5 rounded-xl p-3 border ${(a.data!.at_risk ?? 0) > 0 ? "border-red-700/40" : "border-white/5"}`}>
                     <p className={`text-[10px] font-bold mb-2 ${a.color === "blue" ? "text-blue-300" : a.color === "purple" ? "text-purple-300" : "text-orange-300"}`}>{a.label}</p>
@@ -617,7 +617,7 @@ export function FuturesTab() {
             {/* Agent 3 */}
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">🔥 Agent 3 — Momo</span>
+                <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">🔥 Agent 3 — Momentum Capture</span>
                 <span className="text-xs text-neutral-500">{stats.a3Open.length} posisi</span>
                 {ab && ab.agent3 && (ab.agent3.at_risk ?? 0) > 0 && (
                   <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent3.at_risk}</span>
@@ -1055,7 +1055,7 @@ export function FuturesTab() {
       <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-neutral-100 bg-neutral-50">
           <h3 className="font-bold text-sm text-neutral-700">
-            🗄 Riwayat Database — Futures Agent 1 + 2
+            🗄 Riwayat Database — Futures Agents 1, 2, 3
           </h3>
           <p className="text-[10px] text-neutral-400 mt-0.5">
             Semua trade · search simbol · pagination · alasan tutup posisi lengkap

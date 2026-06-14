@@ -268,8 +268,8 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
               <div className="flex gap-2 flex-wrap">
                 <DirBadge dir={s.direction} />
                 <span className="text-[11px] bg-white/10 text-white px-2 py-0.5 rounded font-bold">{s.leverage}x Cross Margin</span>
-                <span className={`text-[11px] px-2 py-0.5 rounded font-bold border ${s.agent === "futures_agent1" ? "bg-blue-600/30 text-blue-300 border-blue-500/30" : "bg-purple-600/30 text-purple-300 border-purple-500/30"}`}>
-                  {s.agent === "futures_agent1" ? "Agent 1 — Pre-Gainer Scout" : "Agent 2 — Accumulation Detector"}
+                <span className={`text-[11px] px-2 py-0.5 rounded font-bold border ${s.agent === "futures_agent1" ? "bg-blue-600/30 text-blue-300 border-blue-500/30" : s.agent === "futures_agent3" ? "bg-orange-600/30 text-orange-300 border-orange-500/30" : "bg-purple-600/30 text-purple-300 border-purple-500/30"}`}>
+                  {s.agent === "futures_agent1" ? "Agent 1 — Pre-Gainer Scout" : s.agent === "futures_agent3" ? "Agent 3 — Momentum Capture" : "Agent 2 — Accumulation Detector"}
                 </span>
               </div>
             </div>

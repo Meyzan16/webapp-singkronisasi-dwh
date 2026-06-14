@@ -20,7 +20,7 @@ logger = structlog.get_logger(__name__)
 
 _db = Depends(require_db)
 
-_FUTURES_STYLES = ["futures_agent1", "futures_agent2"]
+_FUTURES_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
 
 
 def _parse_rr(rr: Optional[str]) -> float:
@@ -42,6 +42,8 @@ def _apply_trade_filters(q, style: Optional[str], search: Optional[str]):
             q = q.where(PaperTrade.style == "futures_agent1")
         elif style == "agent2":
             q = q.where(PaperTrade.style == "futures_agent2")
+        elif style == "agent3":
+            q = q.where(PaperTrade.style == "futures_agent3")
         elif style == "futures":
             q = q.where(PaperTrade.style.in_(_FUTURES_STYLES))
         else:

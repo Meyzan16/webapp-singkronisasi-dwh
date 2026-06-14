@@ -26,7 +26,7 @@ logger = structlog.get_logger(__name__)
 class OpenFuturesTradeRequest(BaseModel):
     symbol:    str
     direction: str       # "LONG" | "SHORT"
-    agent:     str       # "futures_agent1" | "futures_agent2"
+    agent:     str       # "futures_agent1" | "futures_agent2" | "futures_agent3"
     entry:     float
     sl:        float
     tp1:       float
@@ -50,7 +50,7 @@ class OpenFuturesTradeRequest(BaseModel):
 
 @router.get("/futures/scan")
 async def get_futures_scan(
-    agent:     str   = Query(default="all",  description="all | agent1 | agent2"),
+    agent:     str   = Query(default="all",  description="all | agent1 | agent2 | agent3"),
     direction: str   = Query(default="ALL",  description="ALL | LONG | SHORT"),
     min_score: float = Query(default=52),   # F105: match agent MIN threshold (was 55)
     limit:     int   = Query(default=30, ge=1, le=100),

@@ -107,7 +107,7 @@ async def evaluate_risk_gate() -> None:
         async with AsyncSessionLocal() as session:
             closed_trades = list((await session.execute(
                 select(PaperTrade).where(
-                    PaperTrade.style.in_(["futures_agent1", "futures_agent2"]),
+                    PaperTrade.style.in_(["futures_agent1", "futures_agent2", "futures_agent3"]),
                     PaperTrade.status.in_(list(FUTURES_CLOSED_STATUSES)),
                     PaperTrade.pnl_dollar.isnot(None),
                 ).order_by(PaperTrade.closed_at.asc())
