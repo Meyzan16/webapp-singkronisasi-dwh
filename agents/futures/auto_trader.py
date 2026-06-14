@@ -79,6 +79,15 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
         logger.info("auto_trade_blocked_regime", agent=agent, regime=regime)
         return 0
 
+    # Phase 10: risk gate — circuit-breaker (DD > 20%) + RAR gate (Sharpe < −0.5)
+    from agents.futures.risk_gate import is_gate_open, is_state_stale, evaluate_risk_gate
+    if is_state_stale():
+        await evaluate_risk_gate()
+    gate_open, gate_reason = is_gate_open()
+    if not gate_open:
+        logger.info("auto_trade_gate_blocked", agent=agent, reason=gate_reason)
+        return 0
+
     # F69/F102: manual override wins, else adaptive threshold per-agent win rate
     effective_threshold = _effective_threshold(agent)
     if regime == "ranging":

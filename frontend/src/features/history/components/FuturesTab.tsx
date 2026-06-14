@@ -59,6 +59,18 @@ interface RiskPosition {
   auto_opened:  boolean;
 }
 
+// Phase 10: risk gate state (included in risk dashboard response)
+interface GateState {
+  active:        boolean;
+  gate_type:     "none" | "circuit_breaker" | "rar" | "override";
+  reason:        string;
+  drawdown_pct:  number;
+  rar:           number;
+  n_trades:      number;
+  dd_threshold:  number;
+  rar_threshold: number;
+}
+
 interface RiskDashboard {
   positions: RiskPosition[];
   portfolio: {
@@ -76,6 +88,7 @@ interface RiskDashboard {
     agent1: { open: number; margin: number; at_risk: number };
     agent2: { open: number; margin: number; at_risk: number };
   };
+  gate?: GateState;
 }
 
 interface FuturesPosition {
@@ -187,6 +200,51 @@ function WinRateBar({ rate, label }: { rate: number; label: string }) {
       </div>
       <div className="h-1.5 bg-neutral-200 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(rate, 100)}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// ── Phase 10: Risk gate banner (circuit-breaker + RAR gate) ──────────────────
+
+function GateBanner({ gate }: { gate: GateState | undefined }) {
+  if (!gate || !gate.active) return null;
+
+  const isCB       = gate.gate_type === "circuit_breaker";
+  const isRAR      = gate.gate_type === "rar";
+  const isOverride = gate.gate_type === "override";
+
+  const cfg = isCB
+    ? { bg: "bg-red-50 border-red-300",  icon: "⛔", title: "Circuit Breaker Aktif", textCls: "text-red-700" }
+    : isRAR
+    ? { bg: "bg-orange-50 border-orange-300", icon: "⚠️", title: "RAR Gate Aktif", textCls: "text-orange-700" }
+    : { bg: "bg-yellow-50 border-yellow-300", icon: "🔒", title: "Gate Manual (Override)", textCls: "text-yellow-800" };
+
+  return (
+    <div className={`border rounded-2xl p-4 ${cfg.bg}`}>
+      <div className="flex items-start gap-3">
+        <span className="text-2xl leading-none mt-0.5">{cfg.icon}</span>
+        <div className="flex-1 min-w-0">
+          <p className={`font-black text-sm mb-1 ${cfg.textCls}`}>{cfg.title}</p>
+          <p className={`text-xs leading-relaxed ${cfg.textCls} opacity-90`}>{gate.reason}</p>
+
+          {/* Metrics strip */}
+          {!isOverride && (
+            <div className="flex gap-4 mt-2 text-xs">
+              <span className={cfg.textCls}>
+                DD dari peak: <strong className={isCB ? "text-red-700" : ""}>{gate.drawdown_pct.toFixed(1)}%</strong>
+                <span className="opacity-60 ml-1">(batas {gate.dd_threshold}%)</span>
+              </span>
+              {gate.n_trades >= 5 && (
+                <span className={cfg.textCls}>
+                  Sharpe: <strong className={isRAR ? "text-orange-700" : ""}>{gate.rar.toFixed(3)}</strong>
+                  <span className="opacity-60 ml-1">(batas {gate.rar_threshold})</span>
+                </span>
+              )}
+              <span className="opacity-60 text-neutral-500">{gate.n_trades} trade tertutup</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -446,6 +504,9 @@ export function FuturesTab() {
       <div className="space-y-5">
         {SubTabBar}
 
+        {/* Phase 10: risk gate banner */}
+        <GateBanner gate={riskDash?.gate} />
+
         {/* Portfolio summary */}
         {pd && (
           <div className="rounded-2xl bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 text-white p-5">
@@ -598,6 +659,9 @@ export function FuturesTab() {
   return (
     <div className="space-y-5">
       {SubTabBar}
+
+      {/* ── Phase 10: risk gate banner ─────────────────────────────────────────── */}
+      <GateBanner gate={riskDash?.gate} />
 
       {/* ── Balance simulation banner ──────────────────────────────────────────── */}
       <div className="rounded-2xl bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 text-white overflow-hidden">

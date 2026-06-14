@@ -115,6 +115,14 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
     if not is_db_available():
         raise HTTPException(status_code=503, detail="Database tidak tersedia")
 
+    # Phase 10: risk gate — circuit-breaker + RAR gate (first check, before any other validation)
+    from agents.futures.risk_gate import is_gate_open, is_state_stale, evaluate_risk_gate
+    if is_state_stale():
+        await evaluate_risk_gate()
+    gate_open, gate_reason = is_gate_open()
+    if not gate_open:
+        raise HTTPException(status_code=422, detail=f"Risk gate aktif: {gate_reason}")
+
     symbol = body.symbol.upper()
 
     # Entry validation: within 2% of market price
@@ -555,6 +563,11 @@ async def get_risk_dashboard() -> dict:
         except Exception:
             pass
 
+    # Phase 10: refresh risk gate state with fresh metrics (frontend polls this every 15 s)
+    from agents.futures.risk_gate import update_gate_state, get_gate_state
+    update_gate_state(max_dd, sharpe, len(pnl_series))
+    _gate = get_gate_state()
+
     total_closed_pnl = balance - wallet_base
 
     return {
@@ -584,7 +597,40 @@ async def get_risk_dashboard() -> dict:
             },
         },
         "generated_at": time.time(),
+        "gate": _gate,   # Phase 10: full gate state — frontend reads from risk dashboard
     }
+
+
+# ── Risk gate (Phase 10) ──────────────────────────────────────────────────────
+
+@router.get("/futures/risk/gate")
+async def get_risk_gate() -> dict:
+    """
+    Current risk gate state.
+    gate_type: none | circuit_breaker | rar | override
+    active=True means NO new positions are allowed.
+    """
+    from agents.futures.risk_gate import is_state_stale, evaluate_risk_gate, get_gate_state
+    if is_state_stale():
+        await evaluate_risk_gate()
+    return get_gate_state()
+
+
+class GateOverrideRequest(BaseModel):
+    open: Optional[bool] = None  # True=force gate open | False=force closed | None=auto
+
+
+@router.post("/futures/risk/gate/override")
+async def override_risk_gate(body: GateOverrideRequest) -> dict:
+    """
+    Manual gate override. Use carefully — this bypasses or enforces the circuit-breaker.
+      open=True  → force gate open (allow new positions even when metrics say stop)
+      open=False → force gate closed (block new positions regardless of metrics)
+      open=None  → revert to auto (clears override; next cycle re-evaluates)
+    """
+    from agents.futures.risk_gate import set_override, get_gate_state
+    set_override(body.open)
+    return {"message": "Override diset", "gate": get_gate_state()}
 
 
 # ── Auto-trade toggle ──────────────────────────────────────────────────────────
