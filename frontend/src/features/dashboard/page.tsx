@@ -46,8 +46,8 @@ interface LearningStats {
 
 interface FuturesStatus {
   next_scan_in_min: number | null;
-  agent1_results: number; agent2_results: number;
-  agent1_last_scan: number | null; agent2_last_scan: number | null;
+  agent1_results: number; agent2_results: number; agent3_results?: number;
+  agent1_last_scan: number | null; agent2_last_scan: number | null; agent3_last_scan?: number | null;
   is_scanning?: boolean;
 }
 
@@ -478,7 +478,7 @@ export default function DashboardPage() {
                         <span className="font-bold text-sm">{p.symbol.replace("USDT","")}</span>
                         <DirBadge dir={p.direction} />
                         <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">
-                          {p.agent === "futures_agent1" ? "AI" : "T4"} {p.leverage}x
+                          {p.agent === "futures_agent1" ? "Pre" : p.agent === "futures_agent3" ? "Momo" : "Accum"} {p.leverage}x
                         </span>
                       </div>
                       <p className="text-[10px] text-neutral-400 truncate">{p.signals[0] ?? ""}</p>
@@ -523,16 +523,21 @@ export default function DashboardPage() {
                   {futCount < 0 ? "belum scan" : `${futCount} sinyal`}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
+              <div className="grid grid-cols-3 gap-2 text-xs">
                 <div>
-                  <p className="text-neutral-400 text-[10px]">Agent 1 (AI)</p>
+                  <p className="text-neutral-400 text-[10px]">Agent 1 (Pre-Gainer)</p>
                   <p className="font-bold text-blue-600">{futStatus?.agent1_results ?? 0} sinyal</p>
                   <p className="text-[10px] text-neutral-400">{fmtRelTime(futStatus?.agent1_last_scan ?? null)}</p>
                 </div>
                 <div>
-                  <p className="text-neutral-400 text-[10px]">Agent 2 (T0-T4)</p>
+                  <p className="text-neutral-400 text-[10px]">Agent 2 (Accumulation)</p>
                   <p className="font-bold text-purple-600">{futStatus?.agent2_results ?? 0} sinyal</p>
                   <p className="text-[10px] text-neutral-400">{fmtRelTime(futStatus?.agent2_last_scan ?? null)}</p>
+                </div>
+                <div>
+                  <p className="text-neutral-400 text-[10px]">Agent 3 (Momentum)</p>
+                  <p className="font-bold text-orange-600">{futStatus?.agent3_results ?? 0} sinyal</p>
+                  <p className="text-[10px] text-neutral-400">{fmtRelTime(futStatus?.agent3_last_scan ?? null)}</p>
                 </div>
               </div>
               {futStatus?.next_scan_in_min != null && (
@@ -857,14 +862,14 @@ export default function DashboardPage() {
           <div className="space-y-1.5">
             {[
               {
-                label: "Futures Agent 1 — AI",
+                label: "Futures Agent 1 — Pre-Gainer",
                 sub:   "Funding · OI · Liquidation · S/R",
                 ok:    !!(health?.futures_scanner?.running),
                 cycle: health?.futures_scanner?.cycle_count,
                 err:   health?.futures_scanner?.last_error,
               },
               {
-                label: "Futures Agent 2 — T0-T4",
+                label: "Futures Agent 2 — Accumulation",
                 sub:   "Wyckoff · Trend · Pattern · Trigger",
                 ok:    !!(health?.futures_scanner?.running) && (futStatus?.agent2_results ?? 0) > 0,
                 cycle: futStatus?.agent2_results,
@@ -954,7 +959,7 @@ export default function DashboardPage() {
                         <span className="font-bold text-sm">{t.symbol.replace("USDT","")}/USDT</span>
                         {t.type === "fut" && t.agent && (
                           <span className="text-[9px] text-neutral-400">
-                            {t.agent === "futures_agent1" ? "AI" : "T4"}
+                            {t.agent === "futures_agent1" ? "Pre" : t.agent === "futures_agent3" ? "Momo" : "Accum"}
                             {t.leverage != null ? ` ${t.leverage}x` : ""}
                           </span>
                         )}

@@ -365,17 +365,24 @@ export default function HealthPage() {
         <p className="text-xs font-black text-blue-500 uppercase tracking-widest mb-3">⚡ Futures Agents</p>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <AgentCard
-            icon="🤖"
-            label="Futures Agent 1 — AI"
+            icon="🎯"
+            label="Futures Agent 1 — Pre-Gainer"
             sub="agents/futures/agent1.py"
             color="blue"
             state={health?.futures_scanner}
           />
           <AgentCard
-            icon="🔭"
-            label="Futures Agent 2 — T0-T4"
+            icon="📦"
+            label="Futures Agent 2 — Accumulation"
             sub="agents/futures/agent2.py"
             color="purple"
+            state={health?.futures_scanner}
+          />
+          <AgentCard
+            icon="🔥"
+            label="Futures Agent 3 — Momentum"
+            sub="agents/futures/agent3.py"
+            color="orange"
             state={health?.futures_scanner}
           />
           <AgentCard

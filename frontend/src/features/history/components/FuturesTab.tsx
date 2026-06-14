@@ -784,7 +784,7 @@ export function FuturesTab() {
             {agentFilter !== "agent1" && agentFilter !== "agent3" && (
             <div className="bg-purple-50 border border-purple-100 rounded-2xl overflow-hidden">
               <div className="px-4 py-2.5 border-b border-purple-100 flex items-center gap-2">
-                <span className="text-xs font-bold text-purple-700">🧠 Agent 2 — T0-T4</span>
+                <span className="text-xs font-bold text-purple-700">📦 Agent 2 — Accumulation</span>
                 <span className="ml-auto text-[10px] text-purple-500">{stats.a2Open.length} open</span>
                 {(riskDash?.agent_breakdown.agent2.at_risk ?? 0) > 0 && (
                   <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1.5 py-0.5 rounded">⚠️ AT RISK</span>
@@ -826,9 +826,9 @@ export function FuturesTab() {
       {/* ── Agent comparison ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { key: "agent1" as const, label: "Agent 1 — AI",       color: "blue",   emoji: "🤖", data: stats.a1 },
-          { key: "agent2" as const, label: "Agent 2 — T0-T4",    color: "purple", emoji: "🧠", data: stats.a2 },
-          { key: "agent3" as const, label: "Agent 3 — Momentum", color: "orange", emoji: "🔥", data: stats.a3 },
+          { key: "agent1" as const, label: "Agent 1 — Pre-Gainer",   color: "blue",   emoji: "🎯", data: stats.a1 },
+          { key: "agent2" as const, label: "Agent 2 — Accumulation", color: "purple", emoji: "📦", data: stats.a2 },
+          { key: "agent3" as const, label: "Agent 3 — Momentum",     color: "orange", emoji: "🔥", data: stats.a3 },
         ].map(a => {
           const rateColor = a.data.rate >= 60 ? "text-green-600" : a.data.rate >= 50 ? "text-yellow-600" : a.data.total > 0 ? "text-red-500" : "text-neutral-400";
           const border    = a.color === "blue" ? "border-blue-200 bg-blue-50" : a.color === "purple" ? "border-purple-200 bg-purple-50" : "border-orange-200 bg-orange-50";
@@ -978,7 +978,7 @@ export function FuturesTab() {
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] text-neutral-700 truncate">{s.key.replace(/_/g, " ")}</p>
-                  <p className="text-[9px] text-neutral-400">{s.agent === "futures_agent1" ? "AI" : "T0-T4"} · {s.wins}/{s.total} trades</p>
+                  <p className="text-[9px] text-neutral-400">{s.agent === "futures_agent1" ? "Pre" : s.agent === "futures_agent3" ? "Momo" : "Accum"} · {s.wins}/{s.total} trades</p>
                 </div>
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                   s.weight >= 1.4 ? "bg-green-100 text-green-700" : s.weight >= 1.1 ? "bg-blue-100 text-blue-700" : "bg-neutral-100 text-neutral-600"
