@@ -372,7 +372,8 @@ async def get_futures_status() -> dict:
     state   = get_state()
     ts_a1   = fs.last_scan_ts("agent1")
     ts_a2   = fs.last_scan_ts("agent2")
-    last_ts = max(ts_a1 or 0, ts_a2 or 0) or None
+    ts_a3   = fs.last_scan_ts("agent3")   # BUG-L21: agent3 was missing
+    last_ts = max(ts_a1 or 0, ts_a2 or 0, ts_a3 or 0) or None
     from agents.futures.scheduler import INTERVAL_SEC as _SCHED_INTERVAL
     next_in = max(0, round((_SCHED_INTERVAL - (time.time() - last_ts)) / 60, 1)) if last_ts else None
 
@@ -381,8 +382,10 @@ async def get_futures_status() -> dict:
         "next_scan_in_min":  next_in,
         "agent1_last_scan":  ts_a1,
         "agent2_last_scan":  ts_a2,
+        "agent3_last_scan":  ts_a3,
         "agent1_results":    len((fs.get_result("agent1") or {}).get("results", [])),
         "agent2_results":    len((fs.get_result("agent2") or {}).get("results", [])),
+        "agent3_results":    len((fs.get_result("agent3") or {}).get("results", [])),
     }
 
 
@@ -556,8 +559,10 @@ async def get_risk_dashboard() -> dict:
             risk_pct = meta.get("risk_pct", 2.0)
         except Exception:
             risk_pct = 2.0
-        # Use the stored dollar P&L (real sizing); fall back to recompute for legacy rows
-        pnl_d   = t.pnl_dollar if t.pnl_dollar is not None else (t.pnl_pct or 0.0) / 100 * _notional(risk_pct)
+        # Use stored dollar P&L (real sizing); prefer real notional; $1000 helper only for
+        # ancient rows with neither pnl_dollar nor position_size (BUG-L22)
+        pnl_d   = (t.pnl_dollar if t.pnl_dollar is not None
+                   else (t.pnl_pct or 0.0) / 100 * (t.position_size or _notional(risk_pct)))
         balance += pnl_d
         pnl_series.append(pnl_d)
         if balance > peak_bal:

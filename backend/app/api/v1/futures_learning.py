@@ -83,9 +83,12 @@ async def get_learning_stats() -> dict:
     wallet_base  = _wallet.initial_balance + _wallet.deposited_total - _wallet.withdrawn_total
 
     def _trade_pnl_dollar(t) -> float:
-        """Stored real $ P&L; fall back to constant-based recompute for legacy rows."""
+        """Stored real $ P&L; prefer the trade's real notional; $1000 constant only for
+        truly ancient rows that have neither pnl_dollar nor position_size (BUG-L22)."""
         if t.pnl_dollar is not None:
             return t.pnl_dollar
+        if t.position_size:
+            return (t.pnl_pct or 0.0) / 100 * t.position_size
         try:
             risk_pct = json.loads(t.signals_json or "{}").get("risk_pct", 2.0)
         except Exception:

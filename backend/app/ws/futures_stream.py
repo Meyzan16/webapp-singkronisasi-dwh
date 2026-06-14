@@ -12,11 +12,25 @@ HEARTBEAT_SEC = 5
 # F29: single source of truth — import instead of duplicating the value
 from agents.futures.scheduler import INTERVAL_SEC
 
+# BUG-L20: all lanes streamed (agent3 was dropped → momentum wiped from the live UI each tick)
+_WS_AGENTS = ["agent1", "agent2", "agent3"]
+
 
 def _next_scan_in(last_ts: Optional[float]) -> Optional[int]:
     if last_ts is None:
         return None
     return max(0, int(INTERVAL_SEC - (time.time() - last_ts)))
+
+
+def _build_snapshot(fs) -> dict:
+    """BUG-L20: bundle ALL lanes (agent1/2/3) into one snapshot payload."""
+    data = fs.get_all_results()
+    last_ts = max((fs.last_scan_ts(a) or 0) for a in _WS_AGENTS) or None
+    return {
+        "type": "snapshot",
+        **{a: data.get(a, {}) for a in _WS_AGENTS},
+        "next_scan_in": _next_scan_in(last_ts),
+    }
 
 
 async def futures_stream(websocket: WebSocket) -> None:
@@ -28,16 +42,8 @@ async def futures_stream(websocket: WebSocket) -> None:
     queue = fs.subscribe()
     try:
         # Send current cached data on connect
-        cached = fs.get_all_results()
-        if cached:
-            await websocket.send_json({
-                "type":     "snapshot",
-                "agent1":   cached.get("agent1", {}),
-                "agent2":   cached.get("agent2", {}),
-                "next_scan_in": _next_scan_in(
-                    max((fs.last_scan_ts(a) or 0) for a in ["agent1", "agent2"]) or None
-                ),
-            })
+        if fs.get_all_results():
+            await websocket.send_json(_build_snapshot(fs))
         else:
             await websocket.send_json({
                 "type":     "status",
@@ -50,26 +56,17 @@ async def futures_stream(websocket: WebSocket) -> None:
                 msg = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_SEC)
 
                 if msg["type"] == "snapshot":
-                    # Re-bundle both agents' latest data on any snapshot update
-                    all_data = fs.get_all_results()
-                    await websocket.send_json({
-                        "type":     "snapshot",
-                        "agent1":   all_data.get("agent1", {}),
-                        "agent2":   all_data.get("agent2", {}),
-                        "next_scan_in": _next_scan_in(
-                            max((fs.last_scan_ts(a) or 0) for a in ["agent1", "agent2"]) or None
-                        ),
-                    })
+                    # Re-bundle ALL lanes' latest data on any snapshot update (BUG-L20)
+                    await websocket.send_json(_build_snapshot(fs))
                 else:
                     await websocket.send_json(msg)
 
             except asyncio.TimeoutError:
+                last_ts = max((fs.last_scan_ts(a) or 0) for a in _WS_AGENTS) or None
                 await websocket.send_json({
                     "type":     "heartbeat",
                     "scanning": fs.is_scanning(),
-                    "next_scan_in": _next_scan_in(
-                        max((fs.last_scan_ts(a) or 0) for a in ["agent1", "agent2"]) or None
-                    ),
+                    "next_scan_in": _next_scan_in(last_ts),
                     "ts": time.time(),
                 })
 
