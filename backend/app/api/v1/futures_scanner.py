@@ -20,6 +20,9 @@ from sqlalchemy import select
 router = APIRouter(tags=["futures"])
 logger = structlog.get_logger(__name__)
 
+# P2: all futures lanes share one wallet → dedup & queries are GLOBAL across styles (BUG-L1)
+_ALL_FUTURES_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
+
 
 # ── Schema ─────────────────────────────────────────────────────────────────────
 
@@ -109,7 +112,8 @@ async def force_futures_scan(
 async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
     """
     Open a futures paper trade (Agent 1, 2, or 3).
-    Rules: per-coin per-agent dedup, entry within 2% of market, R:R ≥ 1:3.
+    Rules: GLOBAL per-coin dedup (one position per symbol across all lanes — cross-margin),
+    entry within 2% of market, R:R ≥ 1:3.
     """
     from app.database import AsyncSessionLocal, is_db_available
     from app.models.paper_trade import PaperTrade
@@ -157,19 +161,21 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
             detail=f"R:R {reward/risk:.1f} terlalu kecil. Minimum R:R 1:3 — perbesar TP2 atau perkecil SL.",
         )
 
-    # Dedup: one open position per symbol per agent
+    # BUG-L1: GLOBAL dedup — one open position per symbol across ALL lanes (cross-margin
+    # nets to a single position per symbol; the old per-agent dedup allowed duplicates).
     async with AsyncSessionLocal() as check:
         existing = await check.execute(
             select(PaperTrade).where(
-                PaperTrade.style  == body.agent,
+                PaperTrade.style.in_(_ALL_FUTURES_STYLES),
                 PaperTrade.status == "open",
                 PaperTrade.symbol == symbol,
             ).limit(1)
         )
-        if existing.scalar_one_or_none():
+        dup = existing.scalar_one_or_none()
+        if dup is not None:
             raise HTTPException(
                 status_code=409,
-                detail=f"{symbol} sudah ada posisi terbuka di {body.agent}. Tunggu TP/SL."
+                detail=f"{symbol} sudah ada posisi terbuka ({dup.style}). Cross-margin = satu posisi per koin."
             )
 
     # Store extra data in signals_json
@@ -270,7 +276,7 @@ async def get_futures_positions(
         return {"positions": [], "total": 0}
 
     # Build filter
-    _ALL_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
+    _ALL_STYLES = _ALL_FUTURES_STYLES
     conditions = [
         PaperTrade.style.in_(_ALL_STYLES)
     ]
@@ -411,7 +417,7 @@ async def get_risk_dashboard() -> dict:
     if not is_db_available():
         return {"error": "db_unavailable", "positions": [], "portfolio": {}}
 
-    _ALL_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
+    _ALL_STYLES = _ALL_FUTURES_STYLES
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PaperTrade).where(

@@ -256,14 +256,18 @@ async def run_futures_loop() -> None:
                 agent3=result["agent3"]["total"],
             )
 
-            # Auto-open high-score positions (score >= threshold)
+            # P2: UNIFIED auto-open — one ranked pool across all lanes, global dedup (BUG-L1)
             try:
                 from agents.futures.auto_trader import auto_open_positions
-                a1_auto = await auto_open_positions(result["agent1"]["results"], "futures_agent1")
-                a2_auto = await auto_open_positions(result["agent2"]["results"], "futures_agent2")
-                a3_auto = await auto_open_positions(result["agent3"]["results"], "futures_agent3")  # Phase 11
-                if a1_auto or a2_auto or a3_auto:
-                    logger.info("auto_positions_opened", agent1=a1_auto, agent2=a2_auto, agent3=a3_auto)
+                all_candidates = (
+                    result["agent1"]["results"]
+                    + result["agent2"]["results"]
+                    + result["agent3"]["results"]
+                )
+                total_auto = await auto_open_positions(all_candidates)
+                if total_auto:
+                    logger.info("auto_positions_opened", opened=total_auto,
+                                pool=len(all_candidates))
             except Exception as exc:
                 logger.warning("auto_open_error", error=str(exc)[:80])
 

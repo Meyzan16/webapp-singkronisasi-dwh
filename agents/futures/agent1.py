@@ -714,6 +714,7 @@ def scan_symbol(
             "liq_long":     round(ref.liq_long_usdt / 1e6, 3),
             "liq_short":    round(ref.liq_short_usdt / 1e6, 3),
             "agent":        AGENT_NAME,
+            "setup_type":   "pre_move",   # P2: lane tag for unified scanner
             **levels,
         })
     return results

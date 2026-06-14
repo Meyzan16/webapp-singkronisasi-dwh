@@ -164,7 +164,7 @@ def _score_momentum_long(
         signals.append(f"Momentum early +{change_24h:.1f}% — awal terbentuk, masih ada room")
     elif 12 < change_24h <= 18:
         score += 15
-        signals.append(f"⚡ Momentum kuat +{change_24h:.1f}% — wave sudah jelas, ikuti dengan SL ketat")
+        signals.append(f"⚡ Momentum kuat +{change_24h:.1f}% — wave sudah jelas, SL sadar-leverage")
     elif 18 < change_24h <= 25:
         score += 8
         signals.append(f"Momentum tinggi +{change_24h:.1f}% — waspadai exhaustion candle")
@@ -231,7 +231,7 @@ def _score_momentum_long(
             signals.append(f"RSI {rsi_val:.0f} — momentum building, waktu entry bagus")
         elif 70 < rsi_val <= 78:
             score += 6
-            signals.append(f"RSI {rsi_val:.0f} extended — momentum kuat, SL ketat di low terakhir")
+            signals.append(f"RSI {rsi_val:.0f} extended — momentum kuat, SL di swing terakhir")
         elif rsi_val < 45:
             score -= 6  # coin actually stalling/reversing
 
@@ -299,7 +299,7 @@ def _score_momentum_short(
         signals.append(f"Dump early {change_24h:.1f}% — awal turun, momentum SHORT terbentuk")
     elif 12 < drop <= 18:
         score += 15
-        signals.append(f"⚡ Dump kuat {change_24h:.1f}% — wave turun jelas, short dengan SL ketat")
+        signals.append(f"⚡ Dump kuat {change_24h:.1f}% — wave turun jelas, short SL sadar-leverage")
     elif 18 < drop <= 25:
         score += 8
         signals.append(f"Dump besar {change_24h:.1f}% — waspadai bouncing oversold")
@@ -585,6 +585,7 @@ def scan_symbol(
             "liq_long":     round(ref.liq_long_usdt / 1e6, 3),
             "liq_short":    round(ref.liq_short_usdt / 1e6, 3),
             "agent":        AGENT_NAME,
+            "setup_type":   "momentum",   # P2: lane tag for unified scanner
             **levels,
         })
     return results

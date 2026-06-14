@@ -22,8 +22,11 @@ from agents.futures.regime import get_cached_regime
 logger = structlog.get_logger(__name__)
 
 AUTO_OPEN_THRESHOLD = 72   # fallback when no adaptive threshold yet
-MAX_AUTO_POSITIONS  = 5    # max concurrent auto positions per agent
-FUTURES_COOLDOWN_HOURS = 3 # F55: no re-entry within 3h of an SL on the same symbol+agent
+MAX_AUTO_POSITIONS  = 6    # P2: GLOBAL cap across all lanes (one shared wallet)
+FUTURES_COOLDOWN_HOURS = 3 # F55: no re-entry within 3h of an SL on the same symbol (global)
+
+# P2: all futures lane styles share ONE wallet → dedup & limits are GLOBAL (BUG-L1).
+_FUTURES_STYLES = ("futures_agent1", "futures_agent2", "futures_agent3")
 
 # Regimes where auto-open is fully disabled
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
@@ -65,19 +68,22 @@ def _effective_threshold(agent: str) -> int:
     return get_adaptive_thresholds(agent)["auto_threshold"]
 
 
-async def auto_open_positions(results: list[dict], agent: str) -> int:
+async def auto_open_positions(candidates: list[dict]) -> int:
     """
-    Auto-open paper trades for signals where score >= threshold.
+    P2 — UNIFIED global auto-open across ALL futures lanes (pre_move + momentum).
+
+    Takes the combined candidate pool from every lane and opens the globally best
+    setups, capped by ONE shared wallet:
+      - BUG-L1: ONE position per symbol across all lanes (cross-margin nets to one
+        position per symbol) — the highest-score candidate per symbol wins.
+      - BUG-L12: in a volatile regime, momentum setups are still allowed; only
+        pre_move setups are skipped (was a blanket block of all lanes).
     Returns count of positions opened.
     """
     if not _auto_enabled or not is_db_available():
         return 0
 
-    # BUG FIX: block auto-open in disabled regimes (volatile = immediate SL risk)
     regime = get_cached_regime()
-    if regime in AUTO_DISABLED_REGIMES:
-        logger.info("auto_trade_blocked_regime", agent=agent, regime=regime)
-        return 0
 
     # Phase 10: risk gate — circuit-breaker (DD > 20%) + RAR gate (Sharpe < −0.5)
     from agents.futures.risk_gate import is_gate_open, is_state_stale, evaluate_risk_gate
@@ -85,52 +91,59 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
         await evaluate_risk_gate()
     gate_open, gate_reason = is_gate_open()
     if not gate_open:
-        logger.info("auto_trade_gate_blocked", agent=agent, reason=gate_reason)
+        logger.info("auto_trade_gate_blocked", reason=gate_reason)
         return 0
 
-    # F69/F102: manual override wins, else adaptive threshold per-agent win rate
-    effective_threshold = _effective_threshold(agent)
-    if regime == "ranging":
-        effective_threshold += 5   # extra bar in ranging (trend signals unreliable)
+    # Dedup by symbol — keep the highest-score candidate (global ranking, BUG-L1).
+    # Per-candidate adaptive threshold (its own lane) + ranging bar; BUG-L12 volatile gate.
+    best_by_symbol: dict[str, dict] = {}
+    for r in candidates:
+        symbol = r.get("symbol", "")
+        if not symbol:
+            continue
+        threshold = _effective_threshold(r.get("agent", ""))
+        if regime == "ranging":
+            threshold += 5
+        if r.get("score", 0) < threshold:
+            continue
+        # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
+        if regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":
+            continue
+        cur = best_by_symbol.get(symbol)
+        if cur is None or r.get("score", 0) > cur.get("score", 0):
+            best_by_symbol[symbol] = r
 
-    # Filter: score >= threshold, sorted best first
-    candidates = sorted(
-        [r for r in results if r.get("score", 0) >= effective_threshold],
-        key=lambda x: x.get("score", 0),
-        reverse=True,
-    )
-    if not candidates:
+    ranked = sorted(best_by_symbol.values(), key=lambda x: x.get("score", 0), reverse=True)
+    if not ranked:
         return 0
 
     opened = 0
 
     async with AsyncSessionLocal() as session:
-        # Count current open positions for this agent
+        # GLOBAL open count across all lanes (BUG-L1)
         count_q = await session.execute(
             select(func.count(PaperTrade.id)).where(
-                PaperTrade.style  == agent,
+                PaperTrade.style.in_(_FUTURES_STYLES),
                 PaperTrade.status == "open",
             )
         )
         open_count: int = count_q.scalar() or 0
-
         if open_count >= MAX_AUTO_POSITIONS:
-            logger.debug("auto_trader_at_max", agent=agent, open=open_count)
+            logger.debug("auto_trader_at_max", open=open_count)
             return 0
 
-        # Existing open symbols for this agent
+        # GLOBAL open symbols + SL cooldown across all lanes (BUG-L1)
         existing_q = await session.execute(
             select(PaperTrade.symbol).where(
-                PaperTrade.style  == agent,
+                PaperTrade.style.in_(_FUTURES_STYLES),
                 PaperTrade.status == "open",
             )
         )
         existing_syms: set[str] = {row[0] for row in existing_q.fetchall()}
 
-        # DB-based cooldown: skip if last trade for symbol+agent was SL within 3h (F55)
         sl_cooldown_q = await session.execute(
-            select(PaperTrade.symbol, PaperTrade.closed_at).where(
-                PaperTrade.style  == agent,
+            select(PaperTrade.symbol).where(
+                PaperTrade.style.in_(_FUTURES_STYLES),
                 PaperTrade.status == "sl",
                 PaperTrade.closed_at > (time.time() - FUTURES_COOLDOWN_HOURS * 3600),
             )
@@ -138,18 +151,17 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
         sl_cooldown_syms: set[str] = {row[0] for row in sl_cooldown_q.fetchall()}
 
         now = time.time()
-        # F12: reuse the regime fetched once at the top (was re-fetched here)
 
-        for sig in candidates:
+        for sig in ranked:
             if open_count + opened >= MAX_AUTO_POSITIONS:
                 break
 
             symbol = sig.get("symbol", "")
+            agent  = sig.get("agent", "")
             if not symbol or symbol in existing_syms:
-                continue
-            # DB cooldown check
+                continue   # BUG-L1: already open in some lane → skip (cross-margin = one position)
             if symbol in sl_cooldown_syms:
-                logger.debug("auto_trade_cooldown_skip", agent=agent, symbol=symbol)
+                logger.debug("auto_trade_cooldown_skip", symbol=symbol)
                 continue
 
             # F13: ensure risk_pct is never None/0 — use 2.0 as safe fallback
@@ -157,13 +169,11 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
             leverage  = sig.get("leverage", 5)
 
             # Phase 9: size from the REAL shared futures wallet (balance-aware + portfolio heat).
-            # Prior trades opened in this same cycle are committed below, so the wallet view stays current.
             from app.api.v1.balance import compute_futures_sizing
             sizing = await compute_futures_sizing(sig.get("score", 0), risk_pct, leverage)
             if not sizing["can_open"]:
-                logger.info("auto_trade_sizing_blocked", agent=agent, symbol=symbol,
-                            reason=sizing["reason"])
-                break   # wallet limit reached (heat / concurrency / margin) — stop opening this cycle
+                logger.info("auto_trade_sizing_blocked", symbol=symbol, reason=sizing["reason"])
+                break   # wallet limit reached (heat / concurrency / margin) — stop this cycle
             pos_size        = sizing["position_size"]
             risk_dollar_val = sizing["risk_dollar"]
             bal_snapshot    = sizing["balance"]
@@ -185,13 +195,14 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
                 "liq_long":     sig.get("liq_long", 0),
                 "liq_short":    sig.get("liq_short", 0),
                 "margin_type":  "cross",
-                "auto_opened":  True,             # ← tagged as auto
+                "setup_type":   sig.get("setup_type", "pre_move"),   # P2: lane tag
+                "auto_opened":  True,
             }
 
             trade = PaperTrade(
                 symbol           = symbol,
                 direction        = sig.get("direction", "LONG"),
-                style            = agent,
+                style            = agent,                # lane identity preserved for win-rate
                 entry_price      = sig.get("entry", sig.get("price", 0)),
                 stop_loss        = sig.get("sl", 0),
                 take_profit      = sig.get("tp2", 0),
@@ -221,11 +232,9 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
 
             logger.info(
                 "auto_trade_opened",
-                agent=agent, symbol=symbol,
-                direction=sig.get("direction"),
-                score=sig.get("score"),
-                leverage=sig.get("leverage"),
-                entry=sig.get("entry"),
+                agent=agent, symbol=symbol, setup_type=sig.get("setup_type"),
+                direction=sig.get("direction"), score=sig.get("score"),
+                leverage=sig.get("leverage"), entry=sig.get("entry"),
                 pos_size=pos_size, risk_dollar=risk_dollar_val,
             )
 
