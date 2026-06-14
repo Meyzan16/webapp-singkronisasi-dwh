@@ -332,7 +332,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P5) |
 | **Akar** | [futures_stream.py:33-39,55-61,70-71](backend/app/ws/futures_stream.py:33): snapshot & heartbeat hanya kirim `agent1`+`agent2`; `next_scan_in` hanya cek `["agent1","agent2"]` |
 | **Dampak** | **PALING PARAH untuk UI**: frontend `applySnapshot` baca `data.agent3 ?? []` → tiap update WS, agent3 di-set `[]` (terhapus). Momentum (agent3) cuma muncul sekejap setelah manual scan, lalu hilang pada heartbeat WS berikutnya. Inilah kenapa agent3 "kedip-kedip"/hilang di scanner live |
 | **Fix** | Kirim agent3 di snapshot + heartbeat; `next_scan_in` sertakan agent3 |
@@ -341,7 +341,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM (edit dulu ditolak user) |
+| **Status** | ✅ SELESAI (P5) (edit dulu ditolak user) |
 | **Akar** | [futures_scanner.py:362-380](backend/app/api/v1/futures_scanner.py:362): tak ada `agent3_last_scan`/`agent3_results`; `last_ts = max(ts_a1, ts_a2)` abaikan timing agent3 |
 | **Dampak** | Widget status scanner & countdown next-scan tidak akurat untuk agent3 |
 | **Fix** | Tambah agent3_last_scan/results + sertakan di max() last_ts |
@@ -350,7 +350,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P5) |
 | **Akar** | [trading_costs.py:36-46](backend/app/services/trading_costs.py:36): hitung notional/pnl dari `FUTURES_STARTING_BALANCE=1000` flat |
 | **Dampak** | Fallback legacy & sebagian path P&L abaikan wallet nyata (jika deposit, wallet >1000). Divergen dari Phase 9 real-balance |
 | **Fix** | Saat refactor: semua P&L/notional dari position_size tersimpan + wallet nyata, bukan konstanta |
