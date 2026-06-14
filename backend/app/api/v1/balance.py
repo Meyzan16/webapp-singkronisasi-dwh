@@ -196,6 +196,7 @@ FUTURES_MAX_CONCURRENT      = 6       # max open positions across BOTH agents (o
 FUTURES_MIN_NOTIONAL_ABS    = 50.0    # never open dust positions
 FUTURES_MAX_PORTFOLIO_RISK  = 0.06    # Σ open risk_dollar ≤ 6% of wallet
 FUTURES_MAX_MARGIN_FRACTION = 0.35    # one position's margin ≤ 35% of wallet
+FUTURES_MAX_NOTIONAL_FRACTION = 1.5   # BUG-L4: one position's notional ≤ 1.5× wallet
 
 
 async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -> dict:
@@ -251,14 +252,22 @@ async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -
     rp          = risk_pct if risk_pct and risk_pct > 0 else 2.0
     risk_dollar = bal.balance * risk_fraction
     notional    = risk_dollar / (rp / 100)
-    margin      = notional / lev
 
-    # Cap a single position's margin; risk shrinks proportionally with the cap
+    # BUG-L4: cap notional per position so a tiny SL can't inflate size to a multiple of
+    # the wallet (tiny rp → huge notional → small adverse move = outsized $ loss).
+    max_notional = bal.balance * FUTURES_MAX_NOTIONAL_FRACTION
+    if notional > max_notional:
+        notional    = max_notional
+        risk_dollar = min(risk_dollar, notional * (rp / 100))
+    margin = notional / lev
+
+    # Cap a single position's margin. BUG-L9: use min() so capping never RAISES risk_dollar
+    # above the intended fixed-fractional risk (the old code re-derived it upward).
     max_margin = bal.balance * FUTURES_MAX_MARGIN_FRACTION
     if margin > max_margin:
         margin      = max_margin
         notional    = margin * lev
-        risk_dollar = notional * (rp / 100)
+        risk_dollar = min(risk_dollar, notional * (rp / 100))
 
     can_open = True
     reason   = "ok"
