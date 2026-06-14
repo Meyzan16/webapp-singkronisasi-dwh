@@ -28,9 +28,14 @@ SL_SLIPPAGE_PCT      = 0.10
 FUTURES_STARTING_BALANCE = 1_000.0   # paper wallet starting equity ($)
 FUTURES_RISK_PCT         = 0.01      # 1% risk per trade (fixed-fractional)
 
-# F15/F33: statuses that count toward realized balance & win-rate.
-# "expired" (stagnant/max-age closes) is deliberately EXCLUDED — not a real outcome.
+# F15/F33: statuses that count toward WIN-RATE only.
+# "expired" (stagnant/max-age closes) is EXCLUDED — not a real win/loss outcome.
 FUTURES_CLOSED_STATUSES = ("tp", "sl")
+
+# BUG-L19: statuses that count toward realized BALANCE / equity / drawdown.
+# Expired trades DID move real money (esp. after a TP1 partial sell), so the wallet must
+# include them — even though they're excluded from win-rate above.
+FUTURES_BALANCE_STATUSES = ("tp", "sl", "expired")
 
 
 def futures_notional(risk_pct: float | None) -> float:

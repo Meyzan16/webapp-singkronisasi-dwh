@@ -27,7 +27,7 @@ from app.models.paper_trade import PaperTrade
 from app.services.binance_urls import fapi
 from app.services.trading_costs import (
     FUTURES_STARTING_BALANCE,
-    FUTURES_CLOSED_STATUSES, futures_notional,   # Phase 9: fallback notional for legacy rows
+    FUTURES_BALANCE_STATUSES, futures_notional,   # Phase 9: fallback notional for legacy rows
 )
 
 logger = structlog.get_logger(__name__)
@@ -233,7 +233,7 @@ async def _update_futures_balance() -> None:
         total = (await session.execute(
             select(func.coalesce(func.sum(PaperTrade.pnl_dollar), 0.0)).where(
                 PaperTrade.style.in_(list(_FUTURES_STYLES)),
-                PaperTrade.status.in_(list(FUTURES_CLOSED_STATUSES)),
+                PaperTrade.status.in_(list(FUTURES_BALANCE_STATUSES)),   # BUG-L19: include expired
                 PaperTrade.pnl_dollar.isnot(None),
             )
         )).scalar() or 0.0
@@ -426,7 +426,9 @@ async def check_futures_positions() -> tuple[int, int]:
                 guard_pct  = _liq_guard_pct(leverage)  # F85: was fixed 8.0
                 if d_pct < guard_pct:
                     new_status   = "sl"
-                    close_price  = sl
+                    # BUG-L16: close at the current (near-liquidation) price, not the far-away
+                    # SL — using sl understated the loss when price had blown past it toward liq.
+                    close_price  = round(price, 8)
                     close_reason = "liq_guard"
                     _liq_guards += 1
                     logger.warning(

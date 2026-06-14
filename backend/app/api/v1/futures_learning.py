@@ -63,8 +63,14 @@ async def get_learning_stats() -> dict:
         )
         weights = list(weights_result.scalars().all())
 
-    closed  = [t for t in all_trades if t.status in ("tp", "sl")]   # expired excluded — not real outcomes
+    closed  = [t for t in all_trades if t.status in ("tp", "sl")]   # win-rate: expired excluded
     open_t  = [t for t in all_trades if t.status == "open"]
+    # BUG-L19: balance/equity must include expired (real money moved), sorted by close time —
+    # keeps the chart aligned with the wallet (which also counts expired). Win-rate stays tp/sl.
+    balance_closed = sorted(
+        [t for t in all_trades if t.status in ("tp", "sl", "expired")],
+        key=lambda t: t.closed_at or 0,
+    )
 
     def _is_real_win(t) -> bool:
         """BUG FIX: status=='tp' with negative net pnl is NOT a win."""
@@ -89,7 +95,7 @@ async def get_learning_stats() -> dict:
     # Balance simulation
     balance = wallet_base
     equity_points = []
-    for t in closed:
+    for t in balance_closed:        # BUG-L19: include expired so chart matches the wallet
         balance += _trade_pnl_dollar(t)
         equity_points.append({
             "trade_n": len(equity_points) + 1,

@@ -95,7 +95,7 @@ async def evaluate_risk_gate() -> None:
     from app.database import AsyncSessionLocal, is_db_available
     from app.models.paper_trade import PaperTrade
     from app.api.v1.balance import get_or_create_balance
-    from app.services.trading_costs import FUTURES_CLOSED_STATUSES
+    from app.services.trading_costs import FUTURES_BALANCE_STATUSES
 
     if not is_db_available():
         return  # keep existing state; don't block on DB unavailability
@@ -108,7 +108,7 @@ async def evaluate_risk_gate() -> None:
             closed_trades = list((await session.execute(
                 select(PaperTrade).where(
                     PaperTrade.style.in_(["futures_agent1", "futures_agent2", "futures_agent3"]),
-                    PaperTrade.status.in_(list(FUTURES_CLOSED_STATUSES)),
+                    PaperTrade.status.in_(list(FUTURES_BALANCE_STATUSES)),   # BUG-L19: include expired
                     PaperTrade.pnl_dollar.isnot(None),
                 ).order_by(PaperTrade.closed_at.asc())
             )).scalars().all())

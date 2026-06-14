@@ -17,7 +17,7 @@ from app.database import AsyncSessionLocal, is_db_available
 from app.models.paper_balance import PaperBalance
 from app.models.paper_trade import PaperTrade
 from app.models.balance_transaction import BalanceTransaction
-from app.services.trading_costs import FUTURES_STARTING_BALANCE, FUTURES_CLOSED_STATUSES
+from app.services.trading_costs import FUTURES_STARTING_BALANCE, FUTURES_BALANCE_STATUSES
 
 router = APIRouter(tags=["balance"])
 logger = structlog.get_logger(__name__)
@@ -235,7 +235,7 @@ async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -
         closed_pnls = (await dd_session.execute(
             select(PaperTrade.pnl_dollar).where(
                 PaperTrade.style.in_(_FUTURES_AGENT_STYLES),
-                PaperTrade.status.in_(list(FUTURES_CLOSED_STATUSES)),
+                PaperTrade.status.in_(list(FUTURES_BALANCE_STATUSES)),   # BUG-L19: include expired
                 PaperTrade.pnl_dollar.isnot(None),
                 PaperTrade.closed_at >= time.time() - 90 * 86400,
             ).order_by(PaperTrade.closed_at.asc())
