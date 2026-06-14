@@ -305,7 +305,7 @@ async def get_futures_positions(
         try:
             import json as _json
             async with httpx.AsyncClient(timeout=8) as c:
-                syms_param = _json.dumps(open_symbols)
+                syms_param = _json.dumps(open_symbols, separators=(",", ":"))  # BUG-L25: compact
                 r = await c.get(fapi("/fapi/v1/ticker/price"), params={"symbols": syms_param})
                 if r.status_code == 200:
                     data = r.json()
@@ -445,7 +445,7 @@ async def get_risk_dashboard() -> dict:
     if symbols:
         try:
             async with httpx.AsyncClient(timeout=8) as c:
-                syms_param = json.dumps(symbols)
+                syms_param = json.dumps(symbols, separators=(",", ":"))  # BUG-L25: compact
                 r = await c.get(fapi("/fapi/v1/ticker/price"), params={"symbols": syms_param})
                 if r.status_code == 200:
                     data = r.json()

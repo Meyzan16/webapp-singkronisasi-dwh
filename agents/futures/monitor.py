@@ -106,7 +106,7 @@ async def _fetch_futures_prices(symbols: list[str]) -> dict[str, float]:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             # Batch: /fapi/v1/ticker/price?symbols=[...] — weight=2 for all
-            syms_param = _json.dumps(symbols)
+            syms_param = _json.dumps(symbols, separators=(",", ":"))  # BUG-L25: compact (Binance rejects spaces)
             r = await client.get(
                 fapi("/fapi/v1/ticker/price"),
                 params={"symbols": syms_param},

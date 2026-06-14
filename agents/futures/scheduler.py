@@ -85,7 +85,7 @@ async def _fetch_extreme_funding_tickers(existing: list[dict]) -> list[dict]:
         # F101: fetch real 24h price change so change-based penalties/bonuses trigger
         if results:
             try:
-                syms_param = _json.dumps([r["symbol"] for r in results])
+                syms_param = _json.dumps([r["symbol"] for r in results], separators=(",", ":"))  # BUG-L25: compact
                 t_r = await c.get(fapi("/fapi/v1/ticker/24hr"), params={"symbols": syms_param})
                 if t_r.status_code == 200:
                     ticker_map = {t["symbol"]: t for t in t_r.json()}

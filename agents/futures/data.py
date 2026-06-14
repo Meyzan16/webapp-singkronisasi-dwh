@@ -210,7 +210,7 @@ async def fetch_top100_futures() -> list[dict]:
         # Step 2: fetch 24h ticker — v1 with symbols param (v2 returns 404 on binance.bh)
         # weight = 2×N for N≤20, proportional for more (much lighter than no-param weight=40)
         import json as _json
-        syms_param = _json.dumps(symbols[:200])  # cap at 200
+        syms_param = _json.dumps(symbols[:200], separators=(",", ":"))  # compact: Binance rejects spaces
         ticker_r = await c.get(
             fapi("/fapi/v1/ticker/24hr"),
             params={"symbols": syms_param},
@@ -285,15 +285,20 @@ async def fetch_new_listings(max_age_days: int = 14, limit: int = 25) -> list[di
 
             ticker_r = await c.get(
                 fapi("/fapi/v1/ticker/24hr"),
-                params={"symbols": _json.dumps(new_syms)},
+                params={"symbols": _json.dumps(new_syms, separators=(",", ":"))},
             )
             if ticker_r.status_code != 200:
                 return []
             data = ticker_r.json()
             if not isinstance(data, list):
                 return []
-            for t in data:
+            # BUG-L25: binance.bh IGNORES the `symbols` param on /ticker/24hr and returns the
+            # FULL market — filter client-side to the new-listing set (was flooding the universe
+            # with ~670 fake "new listings").
+            new_set = set(new_syms)
+            result = [t for t in data if t.get("symbol") in new_set]
+            for t in result:
                 t["is_new_listing"] = True   # tag for Lane C handling downstream
-            return data
+            return result
     except Exception:
         return []
