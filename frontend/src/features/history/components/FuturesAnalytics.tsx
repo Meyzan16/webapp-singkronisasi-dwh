@@ -9,6 +9,7 @@ interface LearningStats {
   overall:         { total: number; open: number; closed: number; wins: number; losses: number; win_rate: number };
   agent1:          { total: number; wins: number; losses: number; win_rate: number };
   agent2:          { total: number; wins: number; losses: number; win_rate: number };
+  agent3:          { total: number; wins: number; losses: number; win_rate: number };
   balance:         { starting: number; current: number; total_pnl: number; roi_pct: number };
   equity_points:   { trade_n: number; balance: number; symbol: string; win: boolean; agent: string; ts: number | null }[];
   conservative_equity: { trade_n: number; balance: number }[];
@@ -56,31 +57,6 @@ function winsNeeded(currentWins: number, totalClosed: number, target = TARGET): 
   const den = 1 - t;
   if (den <= 0) return 0;
   return num <= 0 ? 0 : Math.ceil(num / den);
-}
-
-// ── Mini bar chart (inline SVG-like div) ──────────────────────────────────────
-
-function BarCompare({
-  label1, val1, label2, val2, color1, color2, suffix = "%",
-}: {
-  label1: string; val1: number; label2: string; val2: number;
-  color1: string; color2: string; suffix?: string;
-}) {
-  const max = Math.max(val1, val2, 1);
-  return (
-    <div className="space-y-1.5">
-      {[{ label: label1, val: val1, color: color1 }, { label: label2, val: val2, color: color2 }].map(r => (
-        <div key={r.label} className="flex items-center gap-2">
-          <span className="text-[10px] w-20 text-neutral-500 font-semibold shrink-0">{r.label}</span>
-          <div className="flex-1 h-3 bg-neutral-100 rounded-full overflow-hidden">
-            <div className={`h-full ${r.color} rounded-full transition-all duration-700`}
-              style={{ width: `${(r.val / max) * 100}%` }} />
-          </div>
-          <span className="text-xs font-black w-12 text-right tabular-nums">{r.val.toFixed(1)}{suffix}</span>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 // ── Equity dual line chart ────────────────────────────────────────────────────
@@ -165,7 +141,7 @@ export function FuturesAnalytics() {
   const [weights,  setWeights] = useState<SignalWeight[]>([]);
   const [loading,  setLoading] = useState(true);
   const [lastUpd,  setLastUpd] = useState<Date | null>(null);
-  const [wAgent,   setWAgent]  = useState<"all" | "agent1" | "agent2">("all");
+  const [wAgent,   setWAgent]  = useState<"all" | "agent1" | "agent2" | "agent3">("all");
   const [wSort,    setWSort]   = useState<"win_rate" | "weight" | "total">("win_rate");
   const [updating, setUpdating]= useState(false);
 
@@ -259,17 +235,19 @@ export function FuturesAnalytics() {
       ══════════════════════════════════════════════════════════════════════ */}
       <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-neutral-100 bg-neutral-50">
-          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">🤖 Agent 1 vs 🧠 Agent 2</p>
+          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">🎯 Pre-Gainer vs 📦 Accumulation vs 🔥 Momentum</p>
         </div>
         <div className="p-5 space-y-5">
 
-          {/* Head-to-head summary cards */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Head-to-head summary cards (3 lanes) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { key: "agent1", label: "Agent 1 — AI Knowledge", emoji: "🤖",
+              { key: "agent1", label: "Agent 1 — Pre-Gainer", emoji: "🎯",
                 data: stats.agent1, color: "border-blue-200 bg-blue-50", badge: "bg-blue-100 text-blue-700" },
-              { key: "agent2", label: "Agent 2 — T0-T4",         emoji: "🧠",
+              { key: "agent2", label: "Agent 2 — Accumulation", emoji: "📦",
                 data: stats.agent2, color: "border-purple-200 bg-purple-50", badge: "bg-purple-100 text-purple-700" },
+              { key: "agent3", label: "Agent 3 — Momentum", emoji: "🔥",
+                data: stats.agent3, color: "border-orange-200 bg-orange-50", badge: "bg-orange-100 text-orange-700" },
             ].map(a => {
               const wr = a.data.win_rate;
               const wrColor = wr >= TARGET ? "text-green-600" : wr >= 50 ? "text-yellow-600" : "text-red-500";
@@ -308,21 +286,6 @@ export function FuturesAnalytics() {
             })}
           </div>
 
-          {/* Bar comparison: win rate + trade count */}
-          {stats.agent1.total > 0 && stats.agent2.total > 0 && (
-            <div className="space-y-3">
-              <BarCompare
-                label1="Agent 1 (AI)" val1={stats.agent1.win_rate}
-                label2="Agent 2 (T4)" val2={stats.agent2.win_rate}
-                color1="bg-blue-500" color2="bg-purple-500" suffix="%"
-              />
-              <BarCompare
-                label1="Agent 1" val1={stats.agent1.total}
-                label2="Agent 2" val2={stats.agent2.total}
-                color1="bg-blue-300" color2="bg-purple-300" suffix=" trades"
-              />
-            </div>
-          )}
 
           {/* Direction stats */}
           {(stats.direction_stats.long.total > 0 || stats.direction_stats.short.total > 0) && (
@@ -395,8 +358,9 @@ export function FuturesAnalytics() {
           {/* Per-agent progress */}
           <div className="space-y-3 pt-1 border-t border-neutral-100">
             {[
-              { label: "Agent 1 — AI", data: stats.agent1, bar: "bg-blue-500" },
-              { label: "Agent 2 — T4", data: stats.agent2, bar: "bg-purple-500" },
+              { label: "Agent 1 — Pre-Gainer",   data: stats.agent1, bar: "bg-blue-500" },
+              { label: "Agent 2 — Accumulation",  data: stats.agent2, bar: "bg-purple-500" },
+              { label: "Agent 3 — Momentum",      data: stats.agent3, bar: "bg-orange-500" },
             ].map(a => (
               <div key={a.label}>
                 <div className="flex justify-between text-xs mb-1">
@@ -531,12 +495,12 @@ export function FuturesAnalytics() {
           <div className="flex gap-2">
             {/* Agent filter */}
             <div className="flex gap-1 bg-neutral-100 p-0.5 rounded-lg">
-              {(["all", "agent1", "agent2"] as const).map(a => (
+              {(["all", "agent1", "agent2", "agent3"] as const).map(a => (
                 <button key={a} onClick={() => setWAgent(a)}
                   className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
                     wAgent === a ? "bg-white text-neutral-800 shadow-sm" : "text-neutral-500"
                   }`}>
-                  {a === "all" ? "All" : a === "agent1" ? "AI" : "T4"}
+                  {a === "all" ? "All" : a === "agent1" ? "Pre" : a === "agent2" ? "Accum" : "Momo"}
                 </button>
               ))}
             </div>
@@ -570,7 +534,7 @@ export function FuturesAnalytics() {
               {displayWeights.map((w, i) => {
                 const wrColor  = w.win_rate >= 70 ? "text-green-600" : w.win_rate >= 50 ? "text-yellow-600" : "text-red-500";
                 const wBadge   = w.weight >= 1.4 ? "bg-green-100 text-green-700" : w.weight >= 1.1 ? "bg-blue-100 text-blue-700" : w.weight < 0.9 ? "bg-red-100 text-red-600" : "bg-neutral-100 text-neutral-600";
-                const aBadge   = w.agent === "futures_agent1" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700";
+                const aBadge   = w.agent === "futures_agent1" ? "bg-blue-100 text-blue-700" : w.agent === "futures_agent3" ? "bg-orange-100 text-orange-700" : "bg-purple-100 text-purple-700";
                 return (
                   <div key={i} className="grid grid-cols-12 gap-2 px-5 py-2.5 hover:bg-neutral-50 items-center">
                     <div className="col-span-5 min-w-0">
@@ -578,7 +542,7 @@ export function FuturesAnalytics() {
                     </div>
                     <div className="col-span-2 text-center">
                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${aBadge}`}>
-                        {w.agent === "futures_agent1" ? "AI" : "T4"}
+                        {w.agent === "futures_agent1" ? "Pre" : w.agent === "futures_agent3" ? "Momo" : "Accum"}
                       </span>
                     </div>
                     <div className="col-span-2 text-right">

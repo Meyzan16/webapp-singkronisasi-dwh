@@ -90,9 +90,9 @@ function ScoreBubble({ score }: { score: number }) {
   );
 }
 
-function SignalCard({ s, isNew, isOpen, openPos, onClick }: {
+function SignalCard({ s, isNew, isOpen, openPos, onClick, autoThreshold }: {
   s: FuturesSignal; isNew: boolean; isOpen: boolean;
-  openPos?: OpenPosition; onClick: () => void
+  openPos?: OpenPosition; onClick: () => void; autoThreshold: number
 }) {
   const isLong = s.direction === "LONG";
   return (
@@ -121,7 +121,7 @@ function SignalCard({ s, isNew, isOpen, openPos, onClick }: {
                   OPEN {openPos.upnl_pct >= 0 ? "+" : ""}{openPos.upnl_pct.toFixed(1)}%
                 </span>
               )}
-              {s.score >= 72 && (
+              {s.score >= autoThreshold && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-100 text-teal-700 border border-teal-200">
                   🤖 AUTO
                 </span>
@@ -162,14 +162,15 @@ function SignalCard({ s, isNew, isOpen, openPos, onClick }: {
               OI {s.oi_change > 0 ? "+" : ""}{s.oi_change.toFixed(1)}%
             </span>
           )}
+          {/* UI-8: liquidation feed is a directional PROXY (not real USDT) — show arah, no fake $ */}
           {s.liq_long > 0.1 && (
-            <span className="text-[10px] text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-semibold">
-              Liq L ${s.liq_long.toFixed(1)}M
+            <span className="text-[10px] text-red-600 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded font-semibold" title="Proxy arah dari shift L/S-ratio, bukan USDT nyata">
+              Liq L ▼ proxy
             </span>
           )}
           {s.liq_short > 0.1 && (
-            <span className="text-[10px] text-green-600 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded font-semibold">
-              Liq S ${s.liq_short.toFixed(1)}M
+            <span className="text-[10px] text-green-600 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded font-semibold" title="Proxy arah dari shift L/S-ratio, bukan USDT nyata">
+              Liq S ▲ proxy
             </span>
           )}
         </div>
@@ -423,6 +424,7 @@ export default function ScannerFuturesPage() {
   const [newSymbols, setNewSymbols]   = useState<Set<string>>(new Set());
   // Auto-trade
   const [autoEnabled, setAutoEnabled]       = useState(true);
+  const [autoThreshold, setAutoThreshold]   = useState(72);   // UI-4: effective base threshold from API
   const [autoToggling, setAutoToggling]     = useState(false);
   // Open positions monitor
   const [openPositions, setOpenPositions]   = useState<OpenPosition[]>([]);
@@ -446,8 +448,9 @@ export default function ScannerFuturesPage() {
           fetch("/api/v1/futures/monitor/risk"),
         ]);
         if (autoRes.ok) {
-          const a = await autoRes.json() as { enabled: boolean };
+          const a = await autoRes.json() as { enabled: boolean; threshold?: number };
           setAutoEnabled(a.enabled);
+          if (typeof a.threshold === "number") setAutoThreshold(a.threshold);
         }
         if (riskRes.ok) {
           const r = await riskRes.json() as { positions: OpenPosition[] };
@@ -559,7 +562,7 @@ export default function ScannerFuturesPage() {
       (dirFilter === "ALL" || s.direction === dirFilter) &&
       (!q || s.symbol.toLowerCase().includes(q))
     );
-  }, [agent1, agent2, activeAgent, minScore, dirFilter, search]);
+  }, [agent1, agent2, agent3, activeAgent, minScore, dirFilter, search]);
 
   const cm = CONN_META[connState];
   const scanProg = nextScanDisplay != null
@@ -592,8 +595,8 @@ export default function ScannerFuturesPage() {
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-3xl">⚡</span>
                 <div>
-                  <h1 className="text-2xl font-bold">Futures Pre-Gainer Scanner</h1>
-                  <p className="text-xs text-neutral-400">Cari coin sebelum pump besar · BB Squeeze · Akumulasi · Funding neutral · OI building</p>
+                  <h1 className="text-2xl font-bold">Futures Scanner</h1>
+                  <p className="text-xs text-neutral-400">Pre-Move (sebelum pump) · Momentum (saat bergerak) · New Listing · satu wallet cross-margin</p>
                 </div>
               </div>
               <div className="flex gap-2 ml-12 flex-wrap">
@@ -696,7 +699,7 @@ export default function ScannerFuturesPage() {
             )}
           </div>
           <p className="text-[11px] text-neutral-500 mt-0.5">
-            Score ≥ 72pt → otomatis buka paper trade · Max 5 posisi per agent · Entry sebelum pump
+            Score ≥ {autoThreshold}pt → otomatis buka paper trade · Max 6 posisi (global, 1 wallet) · dedup per koin
           </p>
         </div>
         <button
@@ -744,13 +747,13 @@ export default function ScannerFuturesPage() {
       </div>
 
       {/* Loading */}
-      {loading && !agent1.length && !agent2.length && (
+      {loading && !agent1.length && !agent2.length && !agent3.length && (
         <div className="py-20 text-center space-y-3">
           <div className="w-14 h-14 rounded-full bg-teal-100 flex items-center justify-center mx-auto">
             <span className="text-3xl animate-bounce">⚡</span>
           </div>
           <p className="font-semibold text-neutral-700">Menghubungkan ke Pre-Gainer Scanner...</p>
-          <p className="text-xs text-neutral-400">Agent 1 (Pre-Gainer Scout) + Agent 2 (Accumulation Detector) · 150 USDT-M pairs</p>
+          <p className="text-xs text-neutral-400">Pre-Gainer + Accumulation + Momentum · 150 USDT-M pairs + new listings</p>
         </div>
       )}
 
@@ -771,6 +774,7 @@ export default function ScannerFuturesPage() {
                 isOpen={!!op}
                 openPos={op}
                 onClick={() => setSelected(s)}
+                autoThreshold={autoThreshold}
               />
             );
           })}
@@ -778,7 +782,7 @@ export default function ScannerFuturesPage() {
       )}
 
       {/* Empty */}
-      {!loading && filtered.length === 0 && (agent1.length > 0 || agent2.length > 0) && (
+      {!loading && filtered.length === 0 && (agent1.length > 0 || agent2.length > 0 || agent3.length > 0) && (
         <div className="text-center py-12 text-neutral-400">
           <p className="text-3xl mb-3">🔍</p>
           <p className="font-semibold">Tidak ada sinyal untuk filter ini</p>
@@ -786,7 +790,7 @@ export default function ScannerFuturesPage() {
             className="mt-3 text-sm text-teal-600 underline">Reset filter</button>
         </div>
       )}
-      {!loading && !scanning && !agent1.length && !agent2.length && (
+      {!loading && !scanning && !agent1.length && !agent2.length && !agent3.length && (
         <div className="space-y-4">
           <div className="text-center py-8 text-neutral-400">
             <p className="text-3xl mb-3">📡</p>

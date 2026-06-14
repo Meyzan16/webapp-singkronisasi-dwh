@@ -256,12 +256,13 @@ function GateBanner({ gate }: { gate: GateState | undefined }) {
 // ── Open Position Card — used in separated Agent 1 / Agent 2 panels ────────────
 
 function OpenPosCard({ p, risk, riskDollar }: { p: FuturesPosition; risk?: RiskPosition; riskDollar: number }) {
-  const upnl$   = tradePnlDollar(p, riskDollar);
-  const upnlPct = p.unrealized_pnl;
-  const notional = calcNotional(p.risk_pct, riskDollar);
-  const margin   = calcMargin(notional, p.leverage);
-  const liq     = calcLiqPrice(p.entry, p.leverage, p.direction);
-  const rStatus = risk?.risk_status ?? "SAFE";
+  // UI-5: prefer REAL backend values (balance-aware sizing) over client recompute from risk_pct
+  const notional = risk?.notional   ?? calcNotional(p.risk_pct, riskDollar);
+  const margin   = risk?.margin     ?? calcMargin(notional, p.leverage);
+  const liq      = risk?.liq_price  ?? calcLiqPrice(p.entry, p.leverage, p.direction);
+  const upnl$    = risk?.upnl_dollar ?? tradePnlDollar(p, riskDollar);
+  const upnlPct  = p.unrealized_pnl;
+  const rStatus  = risk?.risk_status ?? "SAFE";
 
   return (
     <div className={`rounded-xl border p-3 transition-all ${
