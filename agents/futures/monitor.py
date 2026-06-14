@@ -436,7 +436,7 @@ async def check_futures_positions() -> tuple[int, int]:
                 logger.info(
                     "futures_sl_trailed",
                     symbol=trade.symbol, direction=direction,
-                    event=event, old_sl=round(sl, 8), new_sl=round(new_sl, 8),
+                    sl_event=event, old_sl=round(sl, 8), new_sl=round(new_sl, 8),
                     price=price,
                 )
 
