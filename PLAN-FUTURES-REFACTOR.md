@@ -269,7 +269,7 @@ unrealized PnL ($ dan %), hold time, kesehatan tren (EMA/RSI/taker flow), regime
 | **P3** ✅ SELESAI | 📡 Data Baru (Lane B/C) | L14 L15 L18 ✅ | new-listing lane (onboardDate→universe), liq sintetis dineutralkan dari scoring, data OI/liq absen = netral. (market cap → P6 UI) |
 | **P4** ✅ SELESAI | 🧠 Learning & Regime & Gate | L2 L10 L11 L13 ✅ | recency window 30d, warm-start cache dari DB, regime per-coin, RAR_MIN_TRADES 5→12 |
 | **P5** ✅ SELESAI | 🔌 Backend Wiring 1-jalur | L20 L21 L22 ✅ | WS + status stream semua lane (agent3 tak lagi hilang dari UI live), P&L pakai position_size nyata. (reshape store→single-list ber-setup_type ditunda ke P6 bareng frontend) |
-| **P6** | 🖥️ Frontend 1-Scanner | UI-1..UI-8 | Scanner 3-tab→1 daftar + filter setup_type, Analytics per setup_type, pakai nilai backend, threshold dinamis |
+| **P6** ✅ SELESAI | 🖥️ Frontend 1-Scanner | UI-1..UI-8 ✅ | Analytics 3 lane + nama benar, dep agent3, threshold dinamis dari API, nilai dari backend, liq proxy. (Market cap display DITUNDA — butuh sumber data CoinGecko, di luar scope bug-fix) |
 | **P7** | ✅ Validasi | (DoD) | reset DB → jalankan siklus → konfirmasi: tak ada dup, tak ada SL <floor, WR terukur, agent3/momentum stabil di UI |
 
 > **Quick-win opsional sebelum P1:** L20 (WS agent3) + UI-2 (dep array) bisa difix 5 menit untuk

@@ -254,7 +254,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P6) |
 | **Akar** | [FuturesAnalytics.tsx](frontend/src/features/history/components/FuturesAnalytics.tsx): `LearningStats` (baris 10-11) tanpa agent3; `wAgent` state (168) `"all"\|"agent1"\|"agent2"`; header "Agent 1 vs Agent 2" (262); head-to-head cards (268-272); BarCompare (314-323); per-agent progress (397-400); weight filter (534) tanpa agent3; aBadge (573) agent3→ungu; label (581) agent3→"T4" |
 | **Dampak** | Seluruh analitik agent3 (Momentum) tak terlihat — win-rate, signal weight, perbandingan semua abaikan agent3. Tab Analytics dirender via subTab "analytics" → aktif dipakai |
 | **Fix** | Saat refactor 1 Scanner: analytics jadi per-`setup_type` (Pre-Move/Gainer/Loser/New), bukan per-agent. Untuk sementara: tambah agent3 |
@@ -263,7 +263,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P6) |
 | **Akar** | [scanner/page.tsx:562](frontend/src/features/scanner/page.tsx:562): deps `[agent1, agent2, activeAgent, minScore, dirFilter, search]` — `agent3` dipakai di body (554-555) tapi **tak ada di deps** |
 | **Dampak** | Saat data agent3 update via WS/scan, daftar sinyal tidak re-compute → sinyal momentum basi/tak muncul sampai trigger lain |
 | **Fix** | Tambah `agent3` ke dependency array |
@@ -272,7 +272,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P6) |
 | **Akar** | [scanner/page.tsx:747,781,789](frontend/src/features/scanner/page.tsx:747): `!agent1.length && !agent2.length` dan `(agent1.length > 0 \|\| agent2.length > 0)` — agent3 diabaikan |
 | **Dampak** | Jika hanya agent3 yang punya sinyal: spinner loading tetap tampil / pesan "belum ada data" salah muncul |
 | **Fix** | Sertakan agent3 di semua kondisi |
@@ -281,7 +281,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P6) |
 | **Akar** | SignalCard badge `s.score >= 72` ([scanner/page.tsx:124](frontend/src/features/scanner/page.tsx:124)); teks auto-trade "Score ≥ 72pt" (699); MIN select "72pt Auto" (729) |
 | **Dampak** | Threshold sebenarnya adaptif 70-77 per-agent ([weight_updater.py:120-131](agents/futures/weight_updater.py:120)). UI selalu tampil 72 → menyesatkan kapan coin benar-benar auto-open |
 | **Fix** | Ambil threshold efektif dari API (sudah ada `autoThreshold` state di FuturesTab F26/F10) dan tampilkan dinamis |
@@ -290,7 +290,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P6) |
 | **Akar** | [FuturesTab.tsx:261-263](frontend/src/features/history/components/FuturesTab.tsx:261): `calcNotional(p.risk_pct)`, `calcMargin`, `calcLiqPrice` hitung ulang dari `risk_pct` + fallback `$10`, bukan pakai `position_size`/`margin` tersimpan dari backend |
 | **Dampak** | Margin & liq yang ditampilkan **divergen** dari nilai sebenarnya (apalagi setelah BUG-L4: notional nyata membengkak). User lihat angka margin/liq palsu |
 | **Fix** | Pakai `position_size`/`margin`/`risk_dollar` dari API, jangan hitung ulang di client |
@@ -299,7 +299,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P6) |
 | **Akar** | Analytics pakai "Agent 1 — AI Knowledge", "Agent 2 — T0-T4" ([FuturesAnalytics.tsx:269-272](frontend/src/features/history/components/FuturesAnalytics.tsx:269)); Scanner pakai "Pre-Gainer/Accumulation/Momentum" |
 | **Dampak** | Agent yang sama bernama beda di tab berbeda → membingungkan |
 | **Fix** | Satu sumber penamaan (saat refactor: nama per setup_type) |
@@ -308,7 +308,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P6) |
 | **Akar** | [scanner/page.tsx:595-596](frontend/src/features/scanner/page.tsx:595) judul "Futures Pre-Gainer Scanner"; loading text "Agent 1 + Agent 2 · 150 pairs" (753) |
 | **Dampak** | Tak mencerminkan momentum/agent3 maupun new-listing |
 | **Fix** | Update copy saat refactor jadi 1 Scanner multi-lane |
@@ -317,7 +317,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P6) |
 | **Akar** | SignalCard [scanner/page.tsx:167,172](frontend/src/features/scanner/page.tsx:167): `Liq L ${s.liq_long.toFixed(1)}M` — tampilkan proksi sintetis (BUG-L14) sebagai "$X.XM" |
 | **Dampak** | User percaya itu likuidasi USDT nyata, padahal angka arbitrer dari ratio × 1jt |
 | **Fix** | Sembunyikan/labeli sebagai proksi sampai BUG-L14 (sumber data nyata) beres |
