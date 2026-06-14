@@ -459,7 +459,9 @@ async def get_risk_dashboard() -> dict:
 
         leverage   = t.leverage or meta.get("leverage", 5)
         risk_pct   = meta.get("risk_pct", 2.0)
-        notional   = _notional(risk_pct)
+        # BUG-L23: use the trade's REAL stored notional (balance-aware at open);
+        # fall back to the $1000-based helper only for legacy rows without position_size.
+        notional   = t.position_size or _notional(risk_pct)
         margin     = _margin(notional, leverage)
         entry      = t.entry_price
         sl         = t.trail_sl or t.stop_loss
