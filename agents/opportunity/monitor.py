@@ -48,9 +48,14 @@ logger = structlog.get_logger(__name__)
 INTERVAL_SEC       = 60
 STARTUP_DELAY      = 45
 MIN_HOLD_MINUTES   = 30
-MAX_AGE_DAYS       = 3            # §7C: momentum setups must resolve fast
+MAX_AGE_DAYS       = 7            # §7C: spot setups need 5-7 days to mature
 WICK_LOOKBACK_MIN  = 3            # 1m candles checked per cycle (covers restarts)
 WEIGHT_UPDATE_SEC  = 30 * 60      # time-based (§1.12), not cycle-based
+
+# Stagnant rotation — free capital from idle positions when better momentum exists
+STAGNANT_CHECK_DAYS = 3     # start checking from day 3 (give position initial runway)
+STAGNANT_DRIFT_PCT  = 3.0   # ±3% from entry = coin is not moving
+STAGNANT_SCORE_GAP  = 10    # candidate must score ≥ current_score + 10 AND ≥ 85
 
 _running      = False
 _cycle_count  = 0
@@ -69,6 +74,27 @@ def get_state() -> dict:
         "last_check":  _last_check,
         "last_error":  _last_error,
     }
+
+
+# ── Stagnant rotation helper ─────────────────────────────────────────────────
+
+def _has_better_candidate(current_score: float, exclude_symbol: str) -> bool:
+    """
+    True if the latest scan cache has an auto-open candidate with materially
+    higher score than the stagnant position being considered for rotation.
+    Requires: candidate.score >= current_score + STAGNANT_SCORE_GAP AND >= 85.
+    """
+    from agents.opportunity import store as opp_store
+    cached = opp_store.get_result()
+    if not cached:
+        return False
+    for c in cached.get("results", []):
+        if c.get("symbol") == exclude_symbol:
+            continue
+        c_score = c.get("raw_score") or c.get("opportunity_score") or 0
+        if c.get("auto_open") and c_score >= 85 and c_score >= current_score + STAGNANT_SCORE_GAP:
+            return True
+    return False
 
 
 # ── Math helpers ─────────────────────────────────────────────────────────────
@@ -448,6 +474,27 @@ async def _process_trade(
             logger.info("opportunity_risk_adjusted_close",
                         symbol=trade.symbol, reason=reason,
                         pnl_net=round(pnl_net, 2), hold_min=round(hold_minutes, 1))
+
+    # ── Layer 2.5: stagnant rotation ─────────────────────────────────────────
+    # Day 3+, price stuck ±3%, scanner has a materially better candidate →
+    # free this capital so the scheduler can open the live momentum play.
+    if new_status is None and entry_at_valid:
+        hold_days  = hold_minutes / (60 * 24)
+        drift_pct  = abs(price - entry) / entry * 100 if entry > 0 else 99.0
+        if hold_days >= STAGNANT_CHECK_DAYS and drift_pct <= STAGNANT_DRIFT_PCT:
+            trade_score = meta.get("raw_score") or trade.probability or 0
+            if _has_better_candidate(trade_score, trade.symbol):
+                pnl_net      = (price - entry) / entry * 100 - EXECUTION_COST_PCT
+                new_status   = "tp" if pnl_net > 0 else "sl"
+                close_price  = round(price, 8)
+                close_reason = "stagnant_rotation"
+                logger.info(
+                    "stagnant_rotation_triggered",
+                    symbol=trade.symbol,
+                    hold_days=round(hold_days, 1),
+                    drift_pct=round(drift_pct, 2),
+                    pnl_net=round(pnl_net, 2),
+                )
 
     # ── Apply close ───────────────────────────────────────────────────────────
     if new_status and close_price is not None and close_price > 0:

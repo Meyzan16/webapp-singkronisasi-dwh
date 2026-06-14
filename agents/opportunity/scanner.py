@@ -48,7 +48,7 @@ TIMEFRAMES        = ["15m", "1h", "4h"]
 CANDLE_LIMIT      = 100
 TOP_N             = 15     # hanya 15 terbaik — kualitas > kuantitas
 MIN_SCORE         = 65     # threshold lebih tinggi = hanya high-conviction
-AUTO_OPEN_SCORE   = 90     # auto-open untuk RAW score (pre-weight, tanpa cap)
+AUTO_OPEN_SCORE   = 85     # auto-open untuk RAW score (pre-weight, tanpa cap)
 MIN_QUOTE_VOLUME  = 5_000_000   # §11.7: likuiditas minimum supaya eksekutable
 
 # Gerbang arah untuk auto-open (§12.1)

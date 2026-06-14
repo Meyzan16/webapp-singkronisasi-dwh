@@ -3,7 +3,7 @@ Opportunity Scanner Scheduler — runs every 15 minutes.
 
 After each scan:
   - Results stored in opp_store (for frontend)
-  - Coins with score ≥ 95 → AUTO-OPEN posisi (high conviction only)
+  - Coins with score ≥ 85 → AUTO-OPEN posisi (high conviction only)
   - Others → recommendation only (manual open)
 """
 
