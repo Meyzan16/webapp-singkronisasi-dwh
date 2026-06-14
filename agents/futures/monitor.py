@@ -42,6 +42,11 @@ ROUND_TRIP    = TAKER_FEE * 2  # 0.10% total
 # Max position age in days — close stalled futures positions
 MAX_AGE_DAYS  = 3   # futures positions should resolve faster than spot
 
+# BUG-L8: wick detection — 1m candles checked per cycle so TP/SL touches BETWEEN the
+# 2-min polls aren't missed (spot monitor already does this; futures did not → a wick that
+# hit TP then pulled back was missed and the position later recorded as an SL loss).
+WICK_LOOKBACK_MIN = 3
+
 _running     = False
 _cycle_count = 0
 _last_check: Optional[float] = None
@@ -126,6 +131,36 @@ async def _fetch_futures_prices(symbols: list[str]) -> dict[str, float]:
     except Exception:
         pass
     return prices
+
+
+async def _fetch_futures_klines_1m(client: "httpx.AsyncClient", symbol: str) -> list:
+    """BUG-L8: last few 1m candles — wick detection for TP/SL touches between 2-min polls."""
+    try:
+        r = await client.get(
+            fapi(f"/fapi/v1/klines?symbol={symbol}&interval=1m&limit={WICK_LOOKBACK_MIN}")
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return []
+
+
+def _wick_extremes(klines_1m: list, entry_at: float) -> tuple[Optional[float], Optional[float]]:
+    """(low, high) across 1m candles that closed after entry. None if no data."""
+    lows, highs = [], []
+    for k in klines_1m:
+        try:
+            open_ms = float(k[0])
+            if open_ms / 1000 < entry_at - 60:
+                continue  # candle predates the position
+            lows.append(float(k[3]))
+            highs.append(float(k[2]))
+        except (IndexError, ValueError):
+            continue
+    if not lows:
+        return None, None
+    return min(lows), max(highs)
 
 
 # ── Trail SL logic ─────────────────────────────────────────────────────────────
@@ -265,10 +300,27 @@ async def check_futures_positions() -> tuple[int, int]:
         symbols = list({t.symbol for t in trades})
         prices  = await _fetch_futures_prices(symbols)
 
+        # BUG-L8: fetch 1m klines so TP/SL touches between 2-min polls aren't missed
+        klines_1m: dict[str, list] = {}
+        async with httpx.AsyncClient(timeout=15) as _kc:
+            _ktasks = {s: asyncio.create_task(_fetch_futures_klines_1m(_kc, s)) for s in symbols}
+            for s in symbols:
+                try:
+                    klines_1m[s] = await _ktasks[s]
+                except Exception:
+                    klines_1m[s] = []
+
         for trade in trades:
             price = prices.get(trade.symbol)
             if price is None:
                 continue
+
+            # BUG-L8: effective extremes since entry (wick low/high) — fall back to mark price
+            wick_low, wick_high = _wick_extremes(
+                klines_1m.get(trade.symbol, []), trade.entry_at or time.time()
+            )
+            eff_low  = min(price, wick_low)  if wick_low  is not None else price
+            eff_high = max(price, wick_high) if wick_high is not None else price
 
             try:
                 meta = json.loads(trade.signals_json or "{}")
@@ -346,23 +398,23 @@ async def check_futures_positions() -> tuple[int, int]:
                     close_price  = round(price, 8)
                     close_reason = "stagnant_48h"
 
-            # ── 1. Auto-close: SL or TP2 hit ─────────────────────────────────
+            # ── 1. Auto-close: SL or TP2 hit (BUG-L8: wick-aware; SL wins if both) ──
             if not new_status:
                 if direction == "LONG":
-                    if price <= sl:
+                    if eff_low <= sl:
                         new_status   = "sl"
                         close_price  = sl
                         close_reason = "sl_hit"
-                    elif price >= tp2:
+                    elif eff_high >= tp2:
                         new_status   = "tp"
                         close_price  = tp2
                         close_reason = "tp2_hit"
                 else:  # SHORT
-                    if price >= sl:
+                    if eff_high >= sl:
                         new_status   = "sl"
                         close_price  = sl
                         close_reason = "sl_hit"
-                    elif price <= tp2:
+                    elif eff_low <= tp2:
                         new_status   = "tp"
                         close_price  = tp2
                         close_reason = "tp2_hit"
@@ -442,8 +494,8 @@ async def check_futures_positions() -> tuple[int, int]:
 
             # ── 3a. TP1 Partial Close: lock 33% profit when TP1 first reached (F76) ──
             if not meta.get("tp1_partial_done"):
-                _tp1_hit = (direction == "LONG" and price >= tp1) or \
-                           (direction == "SHORT" and price <= tp1)
+                _tp1_hit = (direction == "LONG" and eff_high >= tp1) or \
+                           (direction == "SHORT" and eff_low <= tp1)
                 if _tp1_hit:
                     _partial_pnl_pct = ((tp1 - entry) / entry * 100 if direction == "LONG"
                                         else (entry - tp1) / entry * 100)
@@ -466,8 +518,8 @@ async def check_futures_positions() -> tuple[int, int]:
 
             # ── 4. TP Extension (F81: lock SL at TP1; F84: use current score) ──
             if tp3 and not meta.get("tp_extended"):
-                tp1_hit = (direction == "LONG" and price >= tp1) or \
-                          (direction == "SHORT" and price <= tp1)
+                tp1_hit = (direction == "LONG" and eff_high >= tp1) or \
+                          (direction == "SHORT" and eff_low <= tp1)
                 if tp1_hit:
                     # F84: prefer current score from store over stale entry score
                     _cur_score = 0
