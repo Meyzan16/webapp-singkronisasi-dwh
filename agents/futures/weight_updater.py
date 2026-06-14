@@ -28,6 +28,9 @@ logger = structlog.get_logger(__name__)
 _last_run:   Optional[float] = None
 _last_error: Optional[str]   = None
 MIN_RUN_INTERVAL = 5 * 60  # don't run more than once every 5 min
+# BUG-L10: only learn from RECENT trades so weights/thresholds adapt to the current regime
+# instead of being dragged forever by ancient outcomes.
+RECENCY_DAYS = 30
 
 # ── In-memory caches (read synchronously by agents during scoring) ─────────────
 
@@ -157,10 +160,13 @@ async def update_weights() -> int:
     try:
         async with AsyncSessionLocal() as session:
             # F70: include expired trades as negative signal (was only tp+sl)
+            # BUG-L10: only the last RECENCY_DAYS so learning adapts to the current regime
+            _cutoff = now - RECENCY_DAYS * 86400
             result = await session.execute(
                 select(PaperTrade).where(
                     PaperTrade.style.in_(["futures_agent1", "futures_agent2", "futures_agent3"]),
                     PaperTrade.status.in_(["tp", "sl", "expired"]),
+                    PaperTrade.closed_at >= _cutoff,
                 )
             )
             trades = list(result.scalars().all())

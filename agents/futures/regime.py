@@ -145,3 +145,14 @@ async def fetch_regime() -> str:
 def get_cached_regime() -> str:
     """Return last known regime without fetching (for sync contexts)."""
     return _cached_regime or "ranging"
+
+
+def detect_coin_regime(data) -> str:
+    """
+    BUG-L13: per-coin regime from the coin's OWN 1h OHLCV — altcoins frequently decouple
+    from BTC, so gating/scoring every alt by the BTC regime mis-classified valid setups.
+    Falls back to "ranging" when there isn't enough data (new listings, thin coins).
+    """
+    if not data or len(getattr(data, "closes", [])) < 50:
+        return "ranging"
+    return detect_from_ohlcv(data.opens, data.highs, data.lows, data.closes)

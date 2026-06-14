@@ -22,7 +22,8 @@ logger = structlog.get_logger(__name__)
 DD_HARD_STOP_PCT   = 20.0   # drawdown from peak > 20% → circuit breaker trips
 DD_RECOVER_PCT     = 10.0   # drawdown must fall below this before breaker resets (hysteresis)
 RAR_GATE_THRESHOLD = -0.5   # Sharpe proxy < −0.5 → RAR gate closes
-RAR_MIN_TRADES     = 5      # need >= 5 closed trades for Sharpe to be meaningful
+RAR_MIN_TRADES     = 12     # BUG-L2: need >= 12 closed trades — Sharpe from 5 SL in a row is
+                            #         noise, not signal (gate was firing on tiny samples)
 STATE_TTL          = 5 * 60 # state older than 5 min is considered stale
 
 # ── In-memory state ────────────────────────────────────────────────────────────

@@ -243,6 +243,17 @@ async def run_futures_loop() -> None:
 
     _running = True
     logger.info("futures_scanner_started", interval_min=INTERVAL_SEC // 60)
+
+    # BUG-L11: warm the in-memory learning caches (weights, adaptive thresholds, blacklist)
+    # from DB-persisted trades immediately on startup, so a restart doesn't reset thresholds
+    # to defaults / drop the coin blacklist until the first scan cycle runs.
+    try:
+        from agents.futures.weight_updater import update_weights
+        await update_weights()
+        logger.info("learning_caches_warm_started")
+    except Exception as exc:
+        logger.warning("warm_start_failed", error=str(exc)[:80])
+
     await asyncio.sleep(STARTUP_DELAY)
 
     while True:

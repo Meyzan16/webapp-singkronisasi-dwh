@@ -101,13 +101,15 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         symbol = r.get("symbol", "")
         if not symbol:
             continue
+        # BUG-L13: gate each candidate by ITS OWN coin regime (falls back to BTC market regime)
+        coin_regime = r.get("regime", regime)
         threshold = _effective_threshold(r.get("agent", ""))
-        if regime == "ranging":
+        if coin_regime == "ranging":
             threshold += 5
         if r.get("score", 0) < threshold:
             continue
         # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
-        if regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":
+        if coin_regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":
             continue
         cur = best_by_symbol.get(symbol)
         if cur is None or r.get("score", 0) > cur.get("score", 0):
@@ -217,7 +219,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 status           = "open",
                 leverage         = sig.get("leverage", 5),
                 margin_type      = "cross",
-                regime           = regime,
+                regime           = sig.get("regime", regime),   # BUG-L13: per-coin regime if present
                 trail_active     = False,
                 position_size    = pos_size,
                 risk_dollar      = risk_dollar_val,

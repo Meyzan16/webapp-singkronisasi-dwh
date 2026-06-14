@@ -533,11 +533,12 @@ def scan_symbol(
         return []
 
     from agents.futures import weight_updater
-    from agents.futures.regime import get_cached_regime
+    from agents.futures.regime import detect_coin_regime
     weight_cache  = weight_updater.get_weight_cache(AGENT_NAME)
     thresholds    = weight_updater.get_adaptive_thresholds(AGENT_NAME)
     effective_min = thresholds["min_score"]
-    regime        = get_cached_regime()
+    # BUG-L13: per-coin regime from the coin's own 1h OHLCV (was BTC-only for all alts)
+    regime        = detect_coin_regime(tf_map.get("1h") or ref)
 
     long_score,  long_sigs  = _score_momentum_long(tf_map, price, change_24h)
     short_score, short_sigs = _score_momentum_short(tf_map, price, change_24h)
@@ -586,6 +587,7 @@ def scan_symbol(
             "liq_short":    round(ref.liq_short_usdt / 1e6, 3),
             "agent":        AGENT_NAME,
             "setup_type":   "momentum",   # P2: lane tag for unified scanner
+            "regime":       regime,       # BUG-L13: per-coin regime (for trade.regime/learning)
             **levels,
         })
     return results
