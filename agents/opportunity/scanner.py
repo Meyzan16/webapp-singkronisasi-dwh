@@ -55,6 +55,13 @@ MIN_QUOTE_VOLUME  = 5_000_000   # §11.7: likuiditas minimum supaya eksekutable
 FASTTRACK_24H_PCT   = 8.0   # change_24h ≥ 8% → momentum nyata, tidak perlu score setinggi normal
 FASTTRACK_MIN_SCORE = 80    # masih butuh score ≥ 80 + direction gate — bukan open sembarang
 
+# R7: Momentum priority scan — inject high-momentum coins outside top-100 by volume
+MOMENTUM_SCAN_MIN_PCT   = 5.0   # change_24h ≥ 5% layak masuk supplement list
+MOMENTUM_SCAN_EXTRA     = 20    # max 20 coin tambahan di luar top-100 volume
+
+# R8: Momentum chase scoring — coin sudah bergerak ≥ 10%, pullback sehat, siap second leg
+MOMENTUM_CHASE_MIN_24H  = 10.0  # minimal 24h change sebelum dianggap "momentum chase"
+
 # Gerbang arah untuk auto-open (§12.1)
 DIRECTION_TAKER_MIN = 0.55
 
@@ -452,6 +459,30 @@ def _score_symbol(
         score += 5   # bonus on top of base EMA score
         signals.append("⚡ EMA bullish alignment semua TF — momentum sangat kuat")
 
+    # 12. R8 Momentum Chase — coin sudah naik ≥ 10%, pullback sehat, siap second leg
+    entry_mode = "fresh_setup"
+    if change_24h >= MOMENTUM_CHASE_MIN_24H:
+        d1h = tf_data.get("1h")
+        if d1h:
+            rsi_cooling  = 45 <= d1h.rsi <= 65
+            ema_holding  = d1h.ema9 > d1h.ema21 * 0.99   # EMA9 di atas EMA21 (buffer 1%)
+            # Volume declining selama pullback = konsolidasi sehat (bukan distribusi)
+            vol_healthy  = True
+            if len(d1h.volumes) >= 8:
+                recent_vol = sum(d1h.volumes[-3:]) / 3
+                prior_vol  = sum(d1h.volumes[-8:-3]) / 5
+                vol_healthy = recent_vol < prior_vol * 1.1   # tidak ada lonjakan volume saat turun
+            if rsi_cooling and ema_holding:
+                score += 15
+                entry_mode = "momentum_chase"
+                signals.append(
+                    f"🚀 Momentum pullback: +{change_24h:.1f}% 24h, "
+                    f"RSI {d1h.rsi:.0f} cooling, EMA holding"
+                )
+                if vol_healthy:
+                    score += 8
+                    signals.append("📉 Volume turun saat pullback — konsolidasi sehat, bukan distribusi")
+
     # ── Filter & finalize ─────────────────────────────────────────────────────
     clean_signals = [s for s in signals if not s.startswith("⚠️")]
     if score < MIN_SCORE or len(clean_signals) < 2:
@@ -486,6 +517,7 @@ def _score_symbol(
         "direction_confirmed": direction_confirmed,
         "auto_open":           auto_open,
         "momentum_fasttrack":  momentum_fasttrack,
+        "entry_mode":          entry_mode,
         "signals":             clean_signals[:5],
         "alert_type":          alert,
         "change_24h":          round(change_24h, 2),
@@ -638,6 +670,19 @@ async def run_opportunity_scan() -> dict:
 
     tickers    = [t for t in tickers if _liquid(t)]
     candidates = tickers[:100]
+
+    # R7: Momentum priority supplement — tambahkan coin di luar top-100 volume
+    # yang sedang bergerak kuat (change_24h ≥ 5%). Coin ini sering tidak masuk
+    # top-100 karena volume normalnya kecil, tapi saat pump volume melonjak.
+    momentum_supplement = sorted(
+        [t for t in tickers[100:] if float(t.get("priceChangePercent", 0)) >= MOMENTUM_SCAN_MIN_PCT],
+        key=lambda t: float(t.get("priceChangePercent", 0)),
+        reverse=True,
+    )[:MOMENTUM_SCAN_EXTRA]
+    if momentum_supplement:
+        logger.info("momentum_scan_supplement", extra=len(momentum_supplement),
+                    top_mover=momentum_supplement[0]["symbol"] if momentum_supplement else None)
+        candidates = candidates + momentum_supplement
 
     # BTC 24h change untuk regime gate (§12.5)
     btc_change_24h = 0.0
