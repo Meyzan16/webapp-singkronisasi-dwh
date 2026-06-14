@@ -78,7 +78,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P4) |
 | **Bukti** | RAR gate aktif (Sharpe -2.391) tapi 4 posisi tetap jalan tanpa de-risking |
 | **Perilaku skrg** | Gate HANYA blokir open baru ([auto_trader.py:82-89](agents/futures/auto_trader.py:82)). Posisi terbuka dibiarkan sampai TP/SL/expired. Tidak ada force-close (desain wajar) |
 | **Celah 1** | `RAR_MIN_TRADES=5` ([risk_gate.py:25](agents/futures/risk_gate.py:25)) terlalu kecil — Sharpe -2.391 dari 5 SL beruntun = noise, bukan sinyal andal |
@@ -155,7 +155,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P4) |
 | **Akar** | [weight_updater.py:160-164](agents/futures/weight_updater.py:160): query closed trades **tanpa filter waktu**. Signal weight & adaptive threshold dihitung dari seluruh sejarah |
 | **Dampak** | Sinyal yang gagal 50x sebulan lalu tetap dihukum selamanya; sistem "learning" tidak pernah beradaptasi ke perubahan regime. Bertentangan dengan tujuan adaptif |
 | **Fix** | Tambah jendela recency (mis. 30 hari / N trade terakhir) + decay bobot lama |
@@ -164,7 +164,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P4) |
 | **Akar** | [weight_updater.py:35-41](agents/futures/weight_updater.py:35): `_weight_cache`, `_adaptive_thresholds`, `_coin_blacklist` semua dict in-memory |
 | **Dampak** | Tiap restart backend: blacklist 24h hilang, threshold balik ke default 72, bobot kosong sampai siklus pertama. Coin yang baru 3x SL bisa langsung di-open lagi pasca-restart |
 | **Fix** | Persist ke DB (atau Redis) — blacklist & threshold harus survive restart |
@@ -182,7 +182,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P4) |
 | **Akar** | [regime.py](agents/futures/regime.py) deteksi hanya BTCUSDT; gate `ranging→+5 threshold`, `volatile→block` ([auto_trader.py:93-94](agents/futures/auto_trader.py:93)) dipakai untuk semua coin |
 | **Dampak** | Altcoin sering decouple dari BTC — setup alt yang valid salah di-gate karena regime BTC |
 | **Fix** | Pertimbangkan regime per-coin atau per-sektor, bukan murni BTC |
