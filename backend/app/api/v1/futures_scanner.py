@@ -17,8 +17,6 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from app.services.trading_costs import FUTURES_STARTING_BALANCE, FUTURES_RISK_PCT
-
 router = APIRouter(tags=["futures"])
 logger = structlog.get_logger(__name__)
 
@@ -187,11 +185,15 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
     from agents.futures.regime import get_cached_regime
     current_regime = get_cached_regime()
 
-    # F59: compute position sizing at open time (same formula as auto_trader)
-    _risk_pct        = body.risk_pct or 2.0
-    _notional        = FUTURES_STARTING_BALANCE * FUTURES_RISK_PCT / (_risk_pct / 100)
-    _pos_size        = round(_notional, 2)
-    _risk_dollar_val = round(_notional * (_risk_pct / 100), 2)
+    # Phase 9: size from the REAL shared futures wallet (balance-aware + portfolio heat).
+    from app.api.v1.balance import compute_futures_sizing
+    _risk_pct = body.risk_pct or 2.0
+    sizing    = await compute_futures_sizing(body.score, _risk_pct, body.leverage)
+    if not sizing["can_open"]:
+        raise HTTPException(status_code=422, detail=f"Wallet futures menolak: {sizing['reason']}")
+    _pos_size        = sizing["position_size"]
+    _risk_dollar_val = sizing["risk_dollar"]
+    _bal_snapshot    = sizing["balance"]
 
     async with AsyncSessionLocal() as session:
         trade = PaperTrade(
@@ -216,7 +218,7 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
             trail_active     = False,
             position_size    = _pos_size,
             risk_dollar      = _risk_dollar_val,
-            balance_snapshot = FUTURES_STARTING_BALANCE,
+            balance_snapshot = _bal_snapshot,
         )
         session.add(trade)
         await session.commit()
@@ -367,12 +369,8 @@ async def get_futures_status() -> dict:
 
 # ── Risk Monitor ──────────────────────────────────────────────────────────────
 
-# F33: shared balance math — single source of truth (monitor + learning use the same)
-from app.services.trading_costs import (
-    FUTURES_STARTING_BALANCE as STARTING_BALANCE,
-    FUTURES_RISK_PCT as RISK_PCT_DEFAULT,
-    futures_notional as _notional,
-)
+# F33/Phase 9: shared notional math; balance now comes from the real wallet
+from app.services.trading_costs import futures_notional as _notional
 
 def _liq_price(entry: float, leverage: int, direction: str) -> float:
     """Cross margin liquidation ≈ entry ± (95% of margin)."""
@@ -520,9 +518,14 @@ async def get_risk_dashboard() -> dict:
         })
 
     # ── Risk-Adjusted Return (simplified Calmar / Sharpe proxy) ─────────────────
+    # Phase 9: seed from the REAL futures wallet so current_balance matches deposits.
+    from app.api.v1.balance import get_or_create_balance
+    _wallet     = await get_or_create_balance("futures")
+    wallet_base = _wallet.initial_balance + _wallet.deposited_total - _wallet.withdrawn_total
+
     pnl_series: list[float] = []
-    balance     = STARTING_BALANCE
-    peak_bal    = STARTING_BALANCE
+    balance     = wallet_base
+    peak_bal    = wallet_base
     max_dd      = 0.0
 
     for t in closed_trades:
@@ -531,7 +534,8 @@ async def get_risk_dashboard() -> dict:
             risk_pct = meta.get("risk_pct", 2.0)
         except Exception:
             risk_pct = 2.0
-        pnl_d   = (t.pnl_pct or 0.0) / 100 * _notional(risk_pct)
+        # Use the stored dollar P&L (real sizing); fall back to recompute for legacy rows
+        pnl_d   = t.pnl_dollar if t.pnl_dollar is not None else (t.pnl_pct or 0.0) / 100 * _notional(risk_pct)
         balance += pnl_d
         pnl_series.append(pnl_d)
         if balance > peak_bal:
@@ -551,7 +555,7 @@ async def get_risk_dashboard() -> dict:
         except Exception:
             pass
 
-    total_closed_pnl = balance - STARTING_BALANCE
+    total_closed_pnl = balance - wallet_base
 
     return {
         "positions": positions,
@@ -564,7 +568,7 @@ async def get_risk_dashboard() -> dict:
             "max_drawdown_pct": round(max_dd, 2),
             "risk_adjusted_return": sharpe,
             "total_closed_pnl": round(total_closed_pnl, 2),
-            "starting_balance": STARTING_BALANCE,
+            "starting_balance": round(wallet_base, 2),
             "current_balance":  round(balance, 2),
         },
         "agent_breakdown": {

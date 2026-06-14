@@ -17,7 +17,6 @@ from sqlalchemy import func, select
 
 from app.database import AsyncSessionLocal, is_db_available
 from app.models.paper_trade import PaperTrade
-from app.services.trading_costs import FUTURES_STARTING_BALANCE, FUTURES_RISK_PCT
 from agents.futures.regime import get_cached_regime
 
 logger = structlog.get_logger(__name__)
@@ -145,12 +144,20 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
                 continue
 
             # F13: ensure risk_pct is never None/0 — use 2.0 as safe fallback
-            risk_pct = sig.get("risk_pct") or 2.0
+            risk_pct  = sig.get("risk_pct") or 2.0
+            leverage  = sig.get("leverage", 5)
 
-            # F51: compute position sizing at open time
-            notional         = FUTURES_STARTING_BALANCE * FUTURES_RISK_PCT / (risk_pct / 100)
-            pos_size         = round(notional, 2)
-            risk_dollar_val  = round(notional * (risk_pct / 100), 2)
+            # Phase 9: size from the REAL shared futures wallet (balance-aware + portfolio heat).
+            # Prior trades opened in this same cycle are committed below, so the wallet view stays current.
+            from app.api.v1.balance import compute_futures_sizing
+            sizing = await compute_futures_sizing(sig.get("score", 0), risk_pct, leverage)
+            if not sizing["can_open"]:
+                logger.info("auto_trade_sizing_blocked", agent=agent, symbol=symbol,
+                            reason=sizing["reason"])
+                break   # wallet limit reached (heat / concurrency / margin) — stop opening this cycle
+            pos_size        = sizing["position_size"]
+            risk_dollar_val = sizing["risk_dollar"]
+            bal_snapshot    = sizing["balance"]
 
             meta = {
                 "signals":      sig.get("signals", []),
@@ -194,9 +201,12 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
                 trail_active     = False,
                 position_size    = pos_size,
                 risk_dollar      = risk_dollar_val,
-                balance_snapshot = FUTURES_STARTING_BALANCE,
+                balance_snapshot = bal_snapshot,
             )
             session.add(trade)
+            # Commit per open so the next compute_futures_sizing sees this position's
+            # margin/risk (portfolio heat must account for trades opened earlier this cycle).
+            await session.commit()
             existing_syms.add(symbol)
             opened += 1
 
@@ -207,9 +217,7 @@ async def auto_open_positions(results: list[dict], agent: str) -> int:
                 score=sig.get("score"),
                 leverage=sig.get("leverage"),
                 entry=sig.get("entry"),
+                pos_size=pos_size, risk_dollar=risk_dollar_val,
             )
-
-        if opened > 0:
-            await session.commit()
 
     return opened

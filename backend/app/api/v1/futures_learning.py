@@ -16,11 +16,10 @@ from sqlalchemy import select
 router = APIRouter(tags=["futures-learning"])
 logger = structlog.get_logger(__name__)
 
-# F33: single source of truth for futures balance math (shared with monitor + risk dashboard)
+# F33/Phase 9: balance now comes from the real wallet; keep shared constants for the
+# conservative-equity baseline and the legacy-row P&L fallback.
 from app.services.trading_costs import (
-    FUTURES_STARTING_BALANCE as STARTING_BALANCE,
     FUTURES_RISK_PCT as RISK_PCT,
-    futures_notional as _notional,
     futures_pnl_dollar as _pnl_dollar,
 )
 
@@ -71,17 +70,27 @@ async def get_learning_stats() -> dict:
         """BUG FIX: status=='tp' with negative net pnl is NOT a win."""
         return t.status == "tp" and (t.pnl_pct or 0.0) > 0
 
-    # Balance simulation
-    balance = STARTING_BALANCE
-    equity_points = []
-    for t in closed:
+    # Phase 9: seed from the REAL futures wallet (initial + deposits − withdrawals),
+    # so the chart and the wallet agree and deposits are reflected.
+    from app.api.v1.balance import get_or_create_balance
+    _wallet      = await get_or_create_balance("futures")
+    wallet_base  = _wallet.initial_balance + _wallet.deposited_total - _wallet.withdrawn_total
+
+    def _trade_pnl_dollar(t) -> float:
+        """Stored real $ P&L; fall back to constant-based recompute for legacy rows."""
+        if t.pnl_dollar is not None:
+            return t.pnl_dollar
         try:
-            meta     = json.loads(t.signals_json or "{}")
-            risk_pct = meta.get("risk_pct", 2.0)
+            risk_pct = json.loads(t.signals_json or "{}").get("risk_pct", 2.0)
         except Exception:
             risk_pct = 2.0
-        pnl_d = _pnl_dollar(t.pnl_pct or 0.0, risk_pct)
-        balance += pnl_d
+        return _pnl_dollar(t.pnl_pct or 0.0, risk_pct)
+
+    # Balance simulation
+    balance = wallet_base
+    equity_points = []
+    for t in closed:
+        balance += _trade_pnl_dollar(t)
         equity_points.append({
             "trade_n": len(equity_points) + 1,
             "balance": round(balance, 2),
@@ -137,12 +146,7 @@ async def get_learning_stats() -> dict:
         entry["total"] += 1
         if _is_real_win(t):
             entry["wins"] += 1
-        try:
-            meta     = json.loads(t.signals_json or "{}")
-            risk_pct = meta.get("risk_pct", 2.0)
-        except Exception:
-            risk_pct = 2.0
-        entry["pnl_sum"] += _pnl_dollar(t.pnl_pct or 0.0, risk_pct)
+        entry["pnl_sum"] += _trade_pnl_dollar(t)   # Phase 9: real stored $ P&L
 
     regime_breakdown = [
         {
@@ -204,10 +208,11 @@ async def get_learning_stats() -> dict:
             },
         })
 
-    # Conservative (flat R:R 1:3) equity — F65: derive from constants, not hardcoded $30/$10
-    _risk_dollar = STARTING_BALANCE * RISK_PCT   # loss per trade
-    _win_dollar  = _risk_dollar * 3.0            # R:R 1:3 → win pays 3× risk
-    nc_balance = STARTING_BALANCE
+    # Conservative (flat R:R 1:3) equity — F65: derive from constants, not hardcoded $30/$10.
+    # Phase 9: scale off the real wallet base so it sits alongside the actual curve.
+    _risk_dollar = wallet_base * RISK_PCT   # loss per trade
+    _win_dollar  = _risk_dollar * 3.0       # R:R 1:3 → win pays 3× risk
+    nc_balance = wallet_base
     nc_points = []
     for ep in equity_points:
         win = ep["win"]
@@ -228,10 +233,10 @@ async def get_learning_stats() -> dict:
         "agent1":        agent_stats("futures_agent1"),
         "agent2":        agent_stats("futures_agent2"),
         "balance": {
-            "starting":  STARTING_BALANCE,
+            "starting":  round(wallet_base, 2),                     # Phase 9: real base (incl. deposits)
             "current":   round(balance, 2),
-            "total_pnl": round(balance - STARTING_BALANCE, 2),
-            "roi_pct":   round((balance - STARTING_BALANCE) / STARTING_BALANCE * 100, 2),
+            "total_pnl": round(balance - wallet_base, 2),
+            "roi_pct":   round((balance - wallet_base) / wallet_base * 100, 2) if wallet_base > 0 else 0.0,
         },
         "equity_points":   equity_points,         # F66: full journey from $start (no slice)
         "win_rate_trend":  trend[-20:],           # last 20 for trend chart

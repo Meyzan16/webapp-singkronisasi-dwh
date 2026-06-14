@@ -19,15 +19,15 @@ from typing import Optional
 
 import httpx
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import AsyncSessionLocal, is_db_available
 from app.models.paper_balance import PaperBalance
 from app.models.paper_trade import PaperTrade
 from app.services.binance_urls import fapi
 from app.services.trading_costs import (
-    FUTURES_STARTING_BALANCE, FUTURES_RISK_PCT,
-    FUTURES_CLOSED_STATUSES, futures_pnl_dollar,   # F33: single source of truth
+    FUTURES_STARTING_BALANCE,
+    FUTURES_CLOSED_STATUSES, futures_notional,   # Phase 9: fallback notional for legacy rows
 )
 
 logger = structlog.get_logger(__name__)
@@ -184,66 +184,49 @@ def _compute_trail(
 
 # ── Balance sync ──────────────────────────────────────────────────────────────
 
-async def _rebuild_futures_paper_balance(style_key: str) -> None:
+async def _update_futures_balance() -> None:
     """
-    Recompute PaperBalance for a futures style from all closed trades.
-    Matches the formula in futures_learning.py so balance API equals learning stats.
+    Phase 9: recompute the SINGLE `futures` wallet (both agents share it).
+    balance = initial + deposited − withdrawn + Σ pnl_dollar (tp/sl only, F15/F33).
+    Mirrors the spot pattern (agents/opportunity/monitor.py::_update_paper_balance) —
+    deposits/withdrawals are preserved, so "deposit and the agent works" holds.
     """
     if not is_db_available():
         return
 
     async with AsyncSessionLocal() as session:
-        # F33: tp+sl only — expired excluded from balance (F15), consistent with
-        # learning stats and risk dashboard which use the same status policy.
-        result = await session.execute(
-            select(PaperTrade).where(
-                PaperTrade.style == style_key,
+        total = (await session.execute(
+            select(func.coalesce(func.sum(PaperTrade.pnl_dollar), 0.0)).where(
+                PaperTrade.style.in_(list(_FUTURES_STYLES)),
                 PaperTrade.status.in_(list(FUTURES_CLOSED_STATUSES)),
-                PaperTrade.pnl_pct.isnot(None),
+                PaperTrade.pnl_dollar.isnot(None),
             )
-        )
-        closed = list(result.scalars().all())
+        )).scalar() or 0.0
 
-    total_pnl = 0.0
-    for t in closed:
-        try:
-            meta = json.loads(t.signals_json or "{}")
-        except Exception:
-            meta = {}
-        # F33: shared formula — identical to learning/risk dashboard
-        total_pnl += futures_pnl_dollar(t.pnl_pct, meta.get("risk_pct"))
-
-    new_balance = FUTURES_STARTING_BALANCE + total_pnl
-    now = time.time()
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(PaperBalance).where(PaperBalance.style == style_key)
-        )
-        bal = result.scalar_one_or_none()
+        bal = (await session.execute(
+            select(PaperBalance).where(PaperBalance.style == "futures")
+        )).scalar_one_or_none()
+        now = time.time()
         if bal is None:
             bal = PaperBalance(
-                style           = style_key,
-                balance         = new_balance,
+                style           = "futures",
+                balance         = round(FUTURES_STARTING_BALANCE + total, 2),
                 initial_balance = FUTURES_STARTING_BALANCE,
                 deposited_total = 0.0,
                 withdrawn_total = 0.0,
-                realized_pnl    = total_pnl,
+                realized_pnl    = round(total, 2),
                 updated_at      = now,
                 created_at      = now,
             )
             session.add(bal)
         else:
-            bal.balance      = new_balance
-            bal.realized_pnl = total_pnl
+            bal.balance = round(
+                bal.initial_balance + bal.deposited_total - bal.withdrawn_total + total, 2
+            )
+            bal.realized_pnl = round(total, 2)
             bal.updated_at   = now
         await session.commit()
-
-    logger.info("futures_balance_synced",
-                style=style_key,
-                balance=round(new_balance, 2),
-                realized_pnl=round(total_pnl, 2),
-                closed_count=len(closed))
+        logger.info("futures_balance_synced", balance=bal.balance, realized_pnl=bal.realized_pnl)
 
 
 # ── Main check ────────────────────────────────────────────────────────────────
@@ -414,7 +397,9 @@ async def check_futures_positions() -> tuple[int, int]:
                 except Exception:
                     pass
                 _risk_pct_meta  = meta.get("risk_pct") or 2.0
-                _notional_close = FUTURES_STARTING_BALANCE * FUTURES_RISK_PCT / (_risk_pct_meta / 100)
+                # Phase 9: dollars off the trade's REAL notional (balance-aware at open);
+                # fall back to the constant-based notional only for legacy rows.
+                _notional_close = trade.position_size or futures_notional(_risk_pct_meta)
                 # F76: if partial close already done at TP1, final close covers 67% remaining
                 if meta.get("tp1_partial_done"):
                     _partial_pnl = meta.get("tp1_partial_pnl_dollar", 0.0)
@@ -464,7 +449,8 @@ async def check_futures_positions() -> tuple[int, int]:
                                         else (entry - tp1) / entry * 100)
                     _partial_net     = _partial_pnl_pct - (ROUND_TRIP * 100 * 0.5)
                     _rp              = meta.get("risk_pct") or 2.0
-                    _notional_p      = FUTURES_STARTING_BALANCE * FUTURES_RISK_PCT / (_rp / 100)
+                    # Phase 9: real notional from the trade; fallback for legacy rows
+                    _notional_p      = trade.position_size or futures_notional(_rp)
                     _partial_dollar  = round((_partial_net / 100) * _notional_p * 0.33, 2)
                     meta["tp1_partial_done"]       = True
                     meta["tp1_partial_pnl_dollar"] = _partial_dollar
@@ -532,9 +518,8 @@ async def run_futures_monitor() -> None:
     logger.info("futures_monitor_started", interval_sec=INTERVAL_SEC)
     await asyncio.sleep(STARTUP_DELAY)
 
-    # Rebuild balance on startup so /balance/futures is accurate after restarts
-    for style_key in _FUTURES_STYLES:
-        await _rebuild_futures_paper_balance(style_key)
+    # Rebuild the single futures wallet on startup so /balance/futures is accurate after restarts
+    await _update_futures_balance()
 
     while True:
         # F61: reset closed_today counter at midnight
@@ -554,10 +539,9 @@ async def run_futures_monitor() -> None:
                 logger.info("futures_monitor_cycle", closed=closed_n, updated=updated_n,
                             cycle=_cycle_count,
                             liq_guards=_liq_guards, tp_extended=_tp_extended)
-            # F62: rebuild balance only every 10 cycles to reduce DB load
-            if _cycle_count % 10 == 0:
-                for style_key in _FUTURES_STYLES:
-                    await _rebuild_futures_paper_balance(style_key)
+            # Refresh the wallet after any close, plus a periodic safety resync
+            if closed_n > 0 or _cycle_count % 10 == 0:
+                await _update_futures_balance()
 
         except asyncio.CancelledError:
             logger.info("futures_monitor_stopped")

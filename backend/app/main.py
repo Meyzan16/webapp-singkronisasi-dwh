@@ -25,6 +25,7 @@ from app.api.v1.futures_market  import router as futures_market_router
 from app.api.v1.balance import router as balance_router
 from app.models.paper_trade import PaperTrade as _PaperTrade          # noqa: F401
 from app.models.paper_balance import PaperBalance as _PaperBalance    # noqa: F401
+from app.models.balance_transaction import BalanceTransaction as _BalTxn  # noqa: F401
 from app.models.signal_weight import AgentSignalWeight as _ASW         # noqa: F401
 from app.config import get_settings
 from app.database import create_db_schema, dispose_engine, set_db_available

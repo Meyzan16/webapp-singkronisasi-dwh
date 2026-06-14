@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { fmtPrice } from "@/lib/format";
 import { FuturesAnalytics } from "./FuturesAnalytics";
+import { FuturesWallet } from "./FuturesWallet";
 import { DBHistoryTable } from "@/features/health/components/DBHistoryTable";
 
 // ── Constants (F21: fallbacks only — runtime values from API) ─────────────────
@@ -651,6 +652,9 @@ export function FuturesTab() {
           )}
         </div>
       </div>
+
+      {/* ── Wallet: deposit / withdraw + balance sheet (Phase 9) ──────────────── */}
+      <FuturesWallet onChanged={() => void fetchPositions(true)} />
 
       {/* ── Agent 1 vs Agent 2 OPEN POSITIONS (separated) ────────────────────── */}
       {(stats.a1Open.length > 0 || stats.a2Open.length > 0) && (
