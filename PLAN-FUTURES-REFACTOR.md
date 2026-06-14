@@ -266,7 +266,7 @@ unrealized PnL ($ dan %), hold time, kesehatan tren (EMA/RSI/taker flow), regime
 |-------|------|-------------|--------|
 | **P1** ✅ SELESAI | 🩸 Stop Pendarahan (risiko/SL) | L3 L4 L5 L6 L7 L8 L9 L16 L17 L19 L23 | SL floor sadar-leverage, leverage↔SL direkonsiliasi, monitor wick detection, margin/liq dari posisi nyata. **3 agent lama berhenti bleed** — 6 commit |
 | **P2** ✅ SELESAI (inti) | 🔀 Konsolidasi Scanner 3→1 | L1 L12 L24 ✅ · L18 ⏳(P3) | Unified auto-open: ranking global + dedup global + setup_type tagging. Scoring tetap 3 lane; L18 (wiring discovery) menyusul di P3 |
-| **P3** | 📡 Data Baru (Lane B/C) | L14 L15 | onboardDate (new-listing), market cap, handling data OI/liq absen |
+| **P3** ✅ SELESAI | 📡 Data Baru (Lane B/C) | L14 L15 L18 ✅ | new-listing lane (onboardDate→universe), liq sintetis dineutralkan dari scoring, data OI/liq absen = netral. (market cap → P6 UI) |
 | **P4** | 🧠 Learning & Regime & Gate | L2 L10 L11 L13 | recency window, persist state, regime per-coin, RAR sample diperbesar |
 | **P5** | 🔌 Backend Wiring 1-jalur | L20 L21 L22 | satu store/WS/status/auto-open ber-setup_type (bukan per-agent), P&L dari wallet nyata |
 | **P6** | 🖥️ Frontend 1-Scanner | UI-1..UI-8 | Scanner 3-tab→1 daftar + filter setup_type, Analytics per setup_type, pakai nilai backend, threshold dinamis |

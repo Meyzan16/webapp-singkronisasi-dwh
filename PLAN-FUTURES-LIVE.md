@@ -191,7 +191,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM (= F1 di PLAN-FUTURES.md) |
+| **Status** | ✅ SELESAI (P3) (= F1 di PLAN-FUTURES.md) |
 | **Akar** | [data.py:96-121](agents/futures/data.py:96): `_fetch_liquidations` pakai `globalLongShortAccountRatio` × 1.000.000 sebagai proksi, bukan `/fapi/v1/forceOrders` (butuh auth) |
 | **Dampak** | `liq_long`/`liq_short` bukan USDT nyata; bonus/penalti skor agent1 berbasis angka tak bermakna. Dashboard tampilkan nilai liq palsu |
 | **Fix** | Pertimbangkan sumber likuidasi nyata, atau hapus dari scoring jika tak bisa diandalkan |
@@ -200,7 +200,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P3) |
 | **Akar** | `globalLongShortAccountRatio` & `openInterestHist` hanya tersedia untuk coin besar → new listing & small-cap return 0 |
 | **Dampak** | Justru coin yang ingin ditarget (new/momentum) tak punya data OI/liq → scoring pincang. Penting untuk Lane C |
 | **Fix** | Fallback/handling khusus saat OI/liq data absen (jangan beri penalti karena data kosong) |
@@ -227,7 +227,7 @@ Closed (semua SL): ENJ -11.41 · WLFI -3.06 · MANA -13.92 · HIVE -13.90
 
 | Field | Detail |
 |-------|--------|
-| **Status** | ❌ BELUM |
+| **Status** | ✅ SELESAI (P3) |
 | **Akar** | [futures_market.py:240-246](backend/app/api/v1/futures_market.py:240) hitung top_gainers/losers/new_listings/big_movers — **hanya untuk dashboard**. Scanner ([scheduler.py:110](agents/futures/scheduler.py:110)) jalan di universe **volume** + funding ekstrem, tak konsumsi daftar itu |
 | **Dampak** | (a) Top gainer di luar top-150 volume tak pernah dilihat agent; (b) top loser ekstrem (−59%) di luar rentang agent3; (c) **new listing ditampilkan tapi TIDAK ADA agent yang trading**; discovery yang sudah ada terbuang |
 | **Fix** | Inti refactor Lane B + Lane C: sambungkan discovery futures_market.py ke logika open-posisi (R-4, R-5, R-7) |
