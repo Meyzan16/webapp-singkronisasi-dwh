@@ -454,10 +454,13 @@ async def check_futures_positions() -> tuple[int, int]:
                 # Phase 9: dollars off the trade's REAL notional (balance-aware at open);
                 # fall back to the constant-based notional only for legacy rows.
                 _notional_close = trade.position_size or futures_notional(_risk_pct_meta)
-                # F76: if partial close already done at TP1, final close covers 67% remaining
+                # F76/BUG-L17: partial sold 33% at TP1. New rows ALSO shrank position_size to
+                # the 67% remainder (tp1_size_reduced) → no extra multiplier. Legacy partialed
+                # rows kept full size → still need ×0.67.
                 if meta.get("tp1_partial_done"):
                     _partial_pnl = meta.get("tp1_partial_pnl_dollar", 0.0)
-                    _final_pnl   = round((pnl_net / 100) * _notional_close * 0.67, 2)
+                    _rem         = 1.0 if meta.get("tp1_size_reduced") else 0.67
+                    _final_pnl   = round((pnl_net / 100) * _notional_close * _rem, 2)
                     _total_pnl   = round(_partial_pnl + _final_pnl, 2)
                 else:
                     _total_pnl = round((pnl_net / 100) * _notional_close, 2)
@@ -508,7 +511,11 @@ async def check_futures_positions() -> tuple[int, int]:
                     _partial_dollar  = round((_partial_net / 100) * _notional_p * 0.33, 2)
                     meta["tp1_partial_done"]       = True
                     meta["tp1_partial_pnl_dollar"] = _partial_dollar
+                    meta["tp1_size_reduced"]       = True   # BUG-L17 marker (see close-apply)
                     trade.pnl_dollar               = (trade.pnl_dollar or 0.0) + _partial_dollar
+                    # BUG-L17: shrink stored notional to the 33%-sold remainder so locked margin /
+                    # portfolio heat reflect the real reduced exposure (was kept at full size).
+                    trade.position_size            = round(_notional_p * 0.67, 2)
                     trade.signals_json             = json.dumps(meta, ensure_ascii=False)
                     updated += 1
                     logger.info(
