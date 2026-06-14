@@ -261,12 +261,12 @@ def _score_momentum_long(
     elif rsi_val > 75:
         score -= 8
 
-    # Short liq = squeeze fuel for LONG continuation
+    # BUG-L14: liquidation feed is a directional PROXY, not real USDT — small nudge only.
     if ref.liq_short_usdt > 2_000_000:
-        score += 8
-        signals.append(f"Short squeeze ${ref.liq_short_usdt/1e6:.1f}M — forced buying = momentum fuel")
+        score += 3
+        signals.append("Short squeeze terdeteksi (proxy arah) — forced buying = momentum fuel")
     elif ref.liq_short_usdt > 500_000:
-        score += 4
+        score += 2
 
     return score, signals[:5]
 
@@ -395,12 +395,12 @@ def _score_momentum_short(
     elif rsi_val < 28:
         score -= 8
 
-    # Long liq = bearish fuel for SHORT continuation
+    # BUG-L14: liquidation feed is a directional PROXY, not real USDT — small nudge only.
     if ref.liq_long_usdt > 2_000_000:
-        score += 8
-        signals.append(f"Long liq ${ref.liq_long_usdt/1e6:.1f}M — forced selling = bearish fuel")
+        score += 3
+        signals.append("Long liq terdeteksi (proxy arah) — forced selling = bearish fuel")
     elif ref.liq_long_usdt > 500_000:
-        score += 4
+        score += 2
 
     return score, signals[:5]
 

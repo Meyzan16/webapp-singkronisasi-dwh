@@ -344,13 +344,13 @@ def _score_accumulation(
                 # Strong selling pressure = bad for LONG
                 score -= 5
 
-    # ── Liquidation proxy bonus ───────────────────────────────────────────────
+    # ── Liquidation proxy (BUG-L14: directional only, not real USDT) ──────────
     if ref.liq_short_usdt > 100_000:
-        score += 5
-        signals.append(f"Short squeeze aktif — ${ref.liq_short_usdt/1e6:.1f}M short terliquidasi")
+        score += 2
+        signals.append("Short squeeze terdeteksi (proxy arah) — bias bullish")
     elif ref.liq_long_usdt > 300_000:
         # Long liquidation spike = capitulation = potential reversal bottom
-        score += 3
+        score += 1
 
     # ── Penalties: already big mover ─────────────────────────────────────────
     # If the coin already moved big, we're late — this is NOT pre-gainer anymore
@@ -486,13 +486,13 @@ def _score_distribution(
         elif rsi < 40:
             score -= 8   # oversold = wrong direction for SHORT
 
-    # ── Long liquidation pressure (0-8 pts) ───────────────────────────────────
+    # ── Long liquidation pressure (BUG-L14: directional proxy, not real USDT) ──
     if ref.liq_long_usdt > 300_000:
-        score += 8
-        signals.append(f"💥 Long liquidation ${ref.liq_long_usdt/1e6:.1f}M — bearish cascade in progress")
+        score += 3
+        signals.append("💥 Long liquidation terdeteksi (proxy arah) — bearish cascade")
     elif ref.liq_long_usdt > 100_000:
-        score += 4
-        signals.append(f"Long liq pressure ${ref.liq_long_usdt/1e6:.1f}M — momentum bearish")
+        score += 2
+        signals.append("Long liq pressure (proxy arah) — momentum bearish")
 
     # ── Sell pressure shift (0-5 pts) ─────────────────────────────────────────
     if primary and primary.opens and primary.closes and primary.volumes:

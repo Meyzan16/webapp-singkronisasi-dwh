@@ -351,13 +351,13 @@ def _score_pregainer(
     if fr > 0.05 / 100:
         pass   # already penalized above
 
-    # Liquidation short squeeze bonus (shorts getting liquidated = bullish fuel)
+    # BUG-L14: liquidation feed is a directional PROXY (L/S-ratio shift), NOT real USDT.
+    # Keep only a small directional nudge; no fake $ magnitude in score or labels.
     if ref.liq_short_usdt > 100_000:
-        score += 5
-        signals.append(f"Short squeeze aktif — ${ref.liq_short_usdt/1e6:.1f}M short terliquidasi")
+        score += 2
+        signals.append("Short squeeze terdeteksi (proxy arah) — bias bullish")
     elif ref.liq_long_usdt > 500_000:
-        # Massive long liq = capitulation bottom → reversal potential
-        score += 3
+        score += 1
 
     return score, signals[:5]
 
@@ -521,13 +521,13 @@ def _score_predump(
     if change_24h > 15:
         score -= 12
 
-    # Long liquidation = bearish fuel for SHORT
+    # BUG-L14: liquidation feed is a directional PROXY, not real USDT — small nudge only.
     if ref.liq_long_usdt > 100_000:
-        score += 5
-        signals.append(f"💥 Long liquidation ${ref.liq_long_usdt/1e6:.1f}M — bearish pressure")
+        score += 2
+        signals.append("💥 Long liquidation terdeteksi (proxy arah) — bias bearish")
     elif ref.liq_short_usdt > 500_000:
-        # Short liquidation = shorts getting squeezed = headwind for new SHORT
-        score -= 4
+        # Shorts getting squeezed = headwind for a new SHORT
+        score -= 2
 
     # Oversold RSI = avoid short (reuse rsi_val, no second _rsi() call)
     if rsi_val < 30:

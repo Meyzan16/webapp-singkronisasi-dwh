@@ -255,3 +255,45 @@ async def fetch_top100_futures() -> list[dict]:
         tickers = [t for t in tickers if _base(t.get("symbol", "")) not in _SKIP]
         tickers.sort(key=lambda t: float(t.get("quoteVolume", 0)), reverse=True)
         return tickers[:200]  # caller slices to desired universe size
+
+
+async def fetch_new_listings(max_age_days: int = 14, limit: int = 25) -> list[dict]:
+    """
+    P3 (Lane C): USDT-perp contracts listed within the last `max_age_days`, returned as
+    ticker dicts (with priceChangePercent) so they merge into the scan universe.
+
+    New listings rarely sit in the top-volume universe, so the agents never saw them before.
+    Symbols too new to have enough candles will simply fail _calc_levels and produce no signal.
+    """
+    import json as _json
+    now_ms   = time.time() * 1000
+    cutoff   = now_ms - max_age_days * 86400 * 1000
+    try:
+        async with httpx.AsyncClient(timeout=20) as c:
+            info_r = await c.get(fapi("/fapi/v1/exchangeInfo"))
+            if info_r.status_code != 200:
+                return []
+            new_syms = [
+                s["symbol"] for s in info_r.json().get("symbols", [])
+                if s.get("symbol", "").endswith("USDT")
+                and s.get("contractType") == "PERPETUAL"
+                and s.get("status") == "TRADING"
+                and (s.get("onboardDate") or 0) >= cutoff
+            ][:limit]
+            if not new_syms:
+                return []
+
+            ticker_r = await c.get(
+                fapi("/fapi/v1/ticker/24hr"),
+                params={"symbols": _json.dumps(new_syms)},
+            )
+            if ticker_r.status_code != 200:
+                return []
+            data = ticker_r.json()
+            if not isinstance(data, list):
+                return []
+            for t in data:
+                t["is_new_listing"] = True   # tag for Lane C handling downstream
+            return data
+    except Exception:
+        return []

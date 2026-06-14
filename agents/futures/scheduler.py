@@ -18,7 +18,7 @@ from app.services.binance_urls import fapi
 from agents.futures import agent2 as a2
 from agents.futures import agent3 as a3
 from agents.futures import store as futures_store
-from agents.futures.data import fetch_top100_futures, fetch_symbol_data
+from agents.futures.data import fetch_top100_futures, fetch_symbol_data, fetch_new_listings
 from agents.futures.weight_updater import is_blacklisted   # B4: top-level import
 
 logger = structlog.get_logger(__name__)
@@ -124,6 +124,18 @@ async def _run_scan() -> dict:
             logger.info("added_extreme_funding_coins", count=len(extreme_tickers))
     except Exception:
         pass  # non-critical — agent2 still scans top-100
+
+    # Step 1c (P3, Lane C / BUG-L18): add recent new-listings — they're rarely in the
+    # top-volume universe, so the agents never saw them. Wires discovery → trading.
+    try:
+        new_listings = await fetch_new_listings(max_age_days=14)
+        if new_listings:
+            existing_syms = {t["symbol"] for t in tickers}
+            added = [nl for nl in new_listings if nl["symbol"] not in existing_syms]
+            tickers.extend(added)
+            logger.info("added_new_listings", count=len(added))
+    except Exception:
+        pass  # non-critical — universe still has volume + funding coins
 
     # Step 2: fetch klines + futures data concurrently
     # Rate limit budget: ~941 weight/scan vs 2400/min Binance limit — safe to be faster
