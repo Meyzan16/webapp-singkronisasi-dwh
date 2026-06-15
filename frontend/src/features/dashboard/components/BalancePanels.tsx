@@ -94,9 +94,8 @@ export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futOpen, 
   learning: {
     balance: { total_pnl: number };
     equity_points: { balance: number; win: boolean }[];
-    overall: { open: number; wins: number; losses: number; closed: number };
+    overall: { open: number; wins: number; losses: number; closed: number; win_rate: number };
     regime?: string;
-    overall: { win_rate: number };
   } | null;
 }) {
   const pnl = balance - initial;

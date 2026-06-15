@@ -167,7 +167,7 @@ export function OverviewTab({ positions, riskDash, learning, startingBalance, ri
           const badgeCls  = a.color === "blue" ? "bg-blue-100 text-blue-700" : a.color === "purple" ? "bg-purple-100 text-purple-700" : "bg-orange-100 text-orange-700";
           const ringCls   = a.color === "blue" ? "ring-blue-400" : a.color === "purple" ? "ring-purple-400" : "ring-orange-400";
           return (
-            <div key={a.key} onClick={() => setAgentFilter(f => f === a.key ? "all" : a.key)}
+            <div key={a.key} onClick={() => setAgentFilter(agentFilter === a.key ? "all" : a.key)}
               className={`rounded-2xl border-2 p-4 cursor-pointer transition-all ${agentFilter === a.key ? `${borderCls} ring-2 ring-offset-1 ${ringCls}` : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
               <div className="flex items-center gap-2 mb-2">
                 <span className="text-lg">{a.emoji}</span>
