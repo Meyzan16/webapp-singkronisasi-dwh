@@ -235,6 +235,7 @@ async def fetch_top100_futures() -> list[dict]:
             "SPY",     # S&P 500 ETF
             "PAXG",    # Tokenized Gold
             "XAUT",    # Tether Gold
+            "XAU",     # L26: Gold (XAUUSDT) — TradFi, doesn't respond to crypto TA
             "COPPER",  # Copper futures
             "SILVER",  # Silver
             "GOLD",    # Gold

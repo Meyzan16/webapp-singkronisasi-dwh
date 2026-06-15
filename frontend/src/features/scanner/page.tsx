@@ -270,7 +270,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
                 <DirBadge dir={s.direction} />
                 <span className="text-[11px] bg-white/10 text-white px-2 py-0.5 rounded font-bold">{s.leverage}x Cross Margin</span>
                 <span className={`text-[11px] px-2 py-0.5 rounded font-bold border ${s.agent === "futures_agent1" ? "bg-blue-600/30 text-blue-300 border-blue-500/30" : s.agent === "futures_agent3" ? "bg-orange-600/30 text-orange-300 border-orange-500/30" : "bg-purple-600/30 text-purple-300 border-purple-500/30"}`}>
-                  {s.agent === "futures_agent1" ? "Agent 1 — Pre-Gainer Scout" : s.agent === "futures_agent3" ? "Agent 3 — Momentum Capture" : "Agent 2 — Accumulation Detector"}
+                  {s.agent === "futures_agent1" ? "Pre-Gainer" : s.agent === "futures_agent3" ? "Momentum" : "Accumulation"}
                 </span>
               </div>
             </div>
@@ -601,9 +601,9 @@ export default function ScannerFuturesPage() {
               </div>
               <div className="flex gap-2 ml-12 flex-wrap">
                 {[
-                  { key: "agent1" as const, label: "🎯 Agent 1 — Pre-Gainer Scout",      cls: "bg-blue-500/20 border-blue-400/40 text-blue-300"     },
-                  { key: "agent2" as const, label: "📦 Agent 2 — Accumulation Detector", cls: "bg-purple-500/20 border-purple-400/40 text-purple-300" },
-                  { key: "agent3" as const, label: "🔥 Agent 3 — Momentum Capture",      cls: "bg-orange-500/20 border-orange-400/40 text-orange-300" },
+                  { key: "agent1" as const, label: "🎯 Pre-Gainer",   cls: "bg-blue-500/20 border-blue-400/40 text-blue-300"     },
+                  { key: "agent2" as const, label: "📦 Accumulation", cls: "bg-purple-500/20 border-purple-400/40 text-purple-300" },
+                  { key: "agent3" as const, label: "🔥 Momentum",     cls: "bg-orange-500/20 border-orange-400/40 text-orange-300" },
                 ].map(a => (
                   <button key={a.key}
                     onClick={() => setActiveAgent(prev => prev === a.key ? "all" : a.key)}

@@ -31,7 +31,7 @@ export default function HistoryPage() {
               : "bg-white border border-neutral-200 text-neutral-600 hover:border-blue-300"
           }`}
         >
-          <span>⚡</span> Futures — Agent 1+2
+          <span>⚡</span> Futures
         </button>
       </div>
 

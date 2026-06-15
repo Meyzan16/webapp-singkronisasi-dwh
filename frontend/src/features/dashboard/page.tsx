@@ -525,17 +525,17 @@ export default function DashboardPage() {
               </div>
               <div className="grid grid-cols-3 gap-2 text-xs">
                 <div>
-                  <p className="text-neutral-400 text-[10px]">Agent 1 (Pre-Gainer)</p>
+                  <p className="text-neutral-400 text-[10px]">🎯 Pre-Gainer</p>
                   <p className="font-bold text-blue-600">{futStatus?.agent1_results ?? 0} sinyal</p>
                   <p className="text-[10px] text-neutral-400">{fmtRelTime(futStatus?.agent1_last_scan ?? null)}</p>
                 </div>
                 <div>
-                  <p className="text-neutral-400 text-[10px]">Agent 2 (Accumulation)</p>
+                  <p className="text-neutral-400 text-[10px]">📦 Accumulation</p>
                   <p className="font-bold text-purple-600">{futStatus?.agent2_results ?? 0} sinyal</p>
                   <p className="text-[10px] text-neutral-400">{fmtRelTime(futStatus?.agent2_last_scan ?? null)}</p>
                 </div>
                 <div>
-                  <p className="text-neutral-400 text-[10px]">Agent 3 (Momentum)</p>
+                  <p className="text-neutral-400 text-[10px]">🔥 Momentum</p>
                   <p className="font-bold text-orange-600">{futStatus?.agent3_results ?? 0} sinyal</p>
                   <p className="text-[10px] text-neutral-400">{fmtRelTime(futStatus?.agent3_last_scan ?? null)}</p>
                 </div>
@@ -862,14 +862,14 @@ export default function DashboardPage() {
           <div className="space-y-1.5">
             {[
               {
-                label: "Futures Agent 1 — Pre-Gainer",
+                label: "Futures Scanner — Pre-Gainer",
                 sub:   "Funding · OI · Liquidation · S/R",
                 ok:    !!(health?.futures_scanner?.running),
                 cycle: health?.futures_scanner?.cycle_count,
                 err:   health?.futures_scanner?.last_error,
               },
               {
-                label: "Futures Agent 2 — Accumulation",
+                label: "Futures Scanner — Accumulation",
                 sub:   "Wyckoff · Trend · Pattern · Trigger",
                 ok:    !!(health?.futures_scanner?.running) && (futStatus?.agent2_results ?? 0) > 0,
                 cycle: futStatus?.agent2_results,

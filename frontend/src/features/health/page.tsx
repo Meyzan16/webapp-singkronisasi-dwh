@@ -366,21 +366,21 @@ export default function HealthPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           <AgentCard
             icon="🎯"
-            label="Futures Agent 1 — Pre-Gainer"
+            label="Futures Scanner — Pre-Gainer"
             sub="agents/futures/agent1.py"
             color="blue"
             state={health?.futures_scanner}
           />
           <AgentCard
             icon="📦"
-            label="Futures Agent 2 — Accumulation"
+            label="Futures Scanner — Accumulation"
             sub="agents/futures/agent2.py"
             color="purple"
             state={health?.futures_scanner}
           />
           <AgentCard
             icon="🔥"
-            label="Futures Agent 3 — Momentum"
+            label="Futures Scanner — Momentum"
             sub="agents/futures/agent3.py"
             color="orange"
             state={health?.futures_scanner}

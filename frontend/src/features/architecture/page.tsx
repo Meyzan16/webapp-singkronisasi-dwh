@@ -44,14 +44,14 @@ function Tabs({ tabs, active, onChange }: { tabs: string[]; active: string; onCh
 export default function ArchitecturePage() {
   const [taTab, setTaTab]       = useState("BB Squeeze");
   const [styleTab, setStyleTab] = useState("Scalping");
-  const [agentTab, setAgentTab] = useState("Futures Agent 1");
+  const [agentTab, setAgentTab] = useState("Pre-Gainer");
   const [bugTab, setBugTab]     = useState("Fixed");
 
   const BUGS_FIXED = [
     { id: "B1", sev: "🔴", title: "Spot Monitor menutup posisi sebagai 'tp' walau net P&L negatif", fix: "Hanya tandai 'tp' jika pnl_net > 0 setelah fee 0.2%", file: "agents/opportunity/monitor.py" },
     { id: "B2", sev: "🔴", title: "Posisi ditutup dalam 53 detik — tidak ada minimum hold time", fix: "Tambah MIN_HOLD_MINUTES=30: risk-adjusted exits tidak bisa fire dalam 30 menit pertama", file: "agents/opportunity/monitor.py" },
     { id: "B3", sev: "🔴", title: "trend_reversal menembak saat EMA sudah bearish SEBELUM entry", fix: "Simpan entry_ema_bullish di meta saat buka posisi, monitor cek apakah terjadi reversal nyata", file: "agents/opportunity/monitor.py + scheduler.py" },
-    { id: "B4", sev: "🔴", title: "Futures Auto-trader buka posisi di regime VOLATILE → langsung SL", fix: "Blokir auto-open di regime volatile, threshold naik jadi 80 (dari 75), ranging = 85", file: "agents/futures/auto_trader.py" },
+    { id: "B4", sev: "🔴", title: "Futures Auto-trader buka posisi di regime VOLATILE → langsung SL", fix: "Regime volatile blokir lane Pre-Move (momentum tetap jalan), threshold adaptif 70-77, dasar 72", file: "agents/futures/auto_trader.py" },
     { id: "B5", sev: "🔴", title: "WBTCUSDT re-entry 3x berturut-turut tanpa jeda setelah SL", fix: "Cooldown 2 jam setelah SL hit — tidak bisa buka posisi yang sama dalam 2 jam", file: "agents/opportunity/monitor.py + scheduler.py" },
     { id: "B6", sev: "🟡", title: "Win-rate inflasi: 'tp' dengan pnl=-0.16% dihitung sebagai menang", fix: "Fungsi _is_real_win() diterapkan di history, learning stats, futures analytics", file: "backend/app/api/v1/history.py + futures_learning.py" },
     { id: "B7", sev: "🟡", title: "flow_reversal menutup terlalu agresif (taker < 0.40)", fix: "Naikkan threshold ke 0.38, minimum profit 1.0% net sebelum bisa menutup via flow_reversal", file: "agents/opportunity/monitor.py" },
@@ -59,23 +59,23 @@ export default function ArchitecturePage() {
   ];
 
   const NEW_FEATURES = [
-    { icon: "⚡", title: "Auto-Trade Futures (score ≥ 80)", desc: "Scanner otomatis buka paper trade jika score ≥ 80. Disabled di regime volatile, threshold 85 di ranging. Max 5 posisi per agent. Toggle on/off via API atau Scanner UI.", file: "agents/futures/auto_trader.py" },
+    { icon: "⚡", title: "Auto-Trade Futures (1 Scanner, score ≥ 72 adaptif)", desc: "Satu pipeline gabungan semua lane (Pre-Move + Momentum + New-Listing) buka paper trade jika score ≥ threshold adaptif (70-77 per win-rate). Dedup GLOBAL per-symbol (cross-margin = 1 posisi/koin), max 6 posisi global (1 wallet). Volatile blokir Pre-Move saja.", file: "agents/futures/auto_trader.py" },
     { icon: "🔍", title: "Futures Monitor — Risk Dashboard", desc: "GET /futures/monitor/risk: per posisi tampilkan liq_price, margin, liq_dist_pct, SAFE/WARNING/DANGER status. Portfolio: Sharpe proxy, max drawdown, total margin.", file: "backend/app/api/v1/futures_scanner.py" },
     { icon: "🚨", title: "Liquidation Guard", desc: "Monitor cek jarak ke liquidation price setiap 2 menit. Jika price dalam 8% dari liq price → tutup posisi di SL sekarang (sebelum diliquidasi exchange).", file: "agents/futures/monitor.py" },
     { icon: "📈", title: "TP Extension ke TP3", desc: "Jika TP1 sudah dicapai dan score masih ≥ 70, monitor otomatis extend TP2 ke TP3 untuk memaksimalkan profit. Satu kali per posisi.", file: "agents/futures/monitor.py" },
-    { icon: "📅", title: "Monthly Win Rate — Agent 1 vs 2", desc: "History Futures tab: bandingkan win rate Agent 1 (AI) vs Agent 2 (T0-T4) per bulan dengan selector bulan dan progress bar.", file: "backend/app/api/v1/futures_learning.py + FuturesTab.tsx" },
-    { icon: "🔵🟣", title: "Open Positions Terpisah per Agent", desc: "History Monitor tab: Agent 1 dan Agent 2 open positions ditampilkan di dua kolom berbeda. Setiap posisi menampilkan entry, current, liq price, SL/TP, margin, risk status.", file: "frontend/src/features/history/components/FuturesTab.tsx" },
+    { icon: "📅", title: "Monthly Win Rate — per Strategi", desc: "History Futures tab: bandingkan win rate per strategi (Pre-Gainer / Accumulation / Momentum) per bulan dengan selector bulan dan progress bar.", file: "backend/app/api/v1/futures_learning.py + FuturesTab.tsx" },
+    { icon: "🔵🟣", title: "Open Positions per Strategi", desc: "History Monitor tab: posisi terbuka dikelompokkan per strategi (Pre-Gainer / Accumulation / Momentum). Margin/liq/upnl dari nilai backend nyata (balance-aware), bukan hitung ulang client.", file: "frontend/src/features/history/components/FuturesTab.tsx" },
     { icon: "💼", title: "Spot Portfolio Real Holdings", desc: "Dashboard section: real Binance spot holdings dengan harga masuk rata-rata (FIFO dari trade history), unrealized PnL per koin, alokasi portfolio. Debug endpoint: /market/spot-debug.", file: "backend/app/api/v1/market.py" },
     { icon: "📊", title: "Scanner — Open Positions Monitor Banner", desc: "Futures Scanner page: banner aktif menampilkan semua posisi terbuka dengan unrealized PnL, risk status (SAFE/WARNING/DANGER), dan liq distance. Auto-refresh 30s.", file: "frontend/src/features/scanner/page.tsx" },
   ];
 
   const AGENTS = {
-    "Futures Agent 1": {
-      icon: "🤖", file: "agents/futures/agent1.py",
+    "Pre-Gainer": {
+      icon: "🎯", file: "agents/futures/agent1.py",
       color: "from-blue-500/10 to-indigo-500/10 border-blue-300",
-      status: "✅ Aktif 24/7", interval: "Setiap 15 menit",
+      status: "✅ Lane dari 1 Scanner", interval: "Setiap 2 menit",
       group: "⚡ Futures",
-      desc: "AI-based futures scanner — cek kondisi pasar via Funding Rate, Open Interest, Liquidations, dan Support/Resistance. Deteksi setup LONG/SHORT Futures dengan konfirmasi multi-faktor.",
+      desc: "Lane Pre-Move dari Scanner tunggal — cari koin SEBELUM bergerak via BB Squeeze, akumulasi volume, Funding/OI, S/R. SL floor sadar-leverage (min 1.5%), leverage direkonsiliasi dengan jarak SL.",
       pipeline: [
         "Ambil top-100 pair USDT Futures dari Binance (by volume)",
         "Fetch funding rate: terlalu tinggi (+) → SHORT bias, terlalu rendah (−) → LONG bias",
@@ -97,12 +97,12 @@ async def run_agent1_scan(symbols: list[str]) -> list[Signal]:
             results.append(signal)
     return results`,
     },
-    "Futures Agent 2": {
-      icon: "🔭", file: "agents/futures/agent2.py",
+    "Accumulation": {
+      icon: "📦", file: "agents/futures/agent2.py",
       color: "from-purple-500/10 to-violet-500/10 border-purple-300",
-      status: "✅ Aktif 24/7", interval: "Setiap 15 menit",
+      status: "✅ Lane dari 1 Scanner", interval: "Setiap 2 menit",
       group: "⚡ Futures",
-      desc: "TA-based futures scanner — pipeline T0–T4 penuh: Wyckoff phase detection, trend analysis, S/R zones, pattern recognition, trigger confirmation. Sama dengan TA Engine backend.",
+      desc: "Lane akumulasi (Wyckoff/T0-T4) dari Scanner tunggal — fase akumulasi sebelum markup. Skornya masuk pool ranking global yang sama; dedup per-symbol memilih lane skor tertinggi per koin.",
       pipeline: [
         "T0 — Wyckoff: deteksi phase Accumulation/Distribution/Markup/Markdown",
         "T1 — Trend: EMA alignment (9/21/50), ADX strength, multi-TF confluence",
@@ -125,12 +125,34 @@ async def run_agent2_scan(symbols: list[str]) -> list[Signal]:
         if score >= MIN_SCORE and rr >= 1.3:
             results.append(build_signal(...))`,
     },
+    "Momentum": {
+      icon: "🔥", file: "agents/futures/agent3.py",
+      color: "from-orange-500/10 to-amber-500/10 border-orange-300",
+      status: "✅ Lane dari 1 Scanner", interval: "Setiap 2 menit",
+      group: "⚡ Futures",
+      desc: "Lane Momentum dari Scanner tunggal — masuk SAAT gerakan sudah terbentuk (change 5-20%, volume + OI searah, RSI 55-72). Kebalikan Pre-Move. Leverage cap 10x, tetap pakai SL floor sadar-leverage.",
+      pipeline: [
+        "Reward koin yang sudah bergerak 5-20% dalam 24h (sweet spot 8-12%)",
+        "Konfirmasi volume surge + OI naik searah harga (konviksi, bukan squeeze kosong)",
+        "RSI 55-72 (LONG) / 28-45 (SHORT) — momentum ada, belum exhausted",
+        "Breakout di atas high / break di bawah low 30-candle",
+        "SL floor sadar-leverage + leverage cap 10x (already-moved = vol lebih tinggi)",
+        "Skor masuk pool ranking global yang sama dengan lane lain",
+      ],
+      code: `# agents/futures/agent3.py — Momentum Capture
+async def scan_symbol(sym, tf_map, change_24h):
+    regime = detect_coin_regime(tf_map["1h"])   # per-coin, bukan BTC
+    score  = score_momentum(change_24h, vol, oi, rsi)
+    levels = _calc_levels(...)                   # SL floor sadar-leverage
+    lev    = calc_leverage_momentum(atr, score, levels["risk_pct"])  # cap 10x
+    return [{ ..., "setup_type": "momentum", "regime": regime }]`,
+    },
     "Futures Monitor": {
       icon: "👁", file: "agents/futures/monitor.py",
       color: "from-indigo-500/10 to-blue-500/10 border-indigo-300",
       status: "✅ Aktif 24/7", interval: "Setiap 120 detik",
       group: "⚡ Futures",
-      desc: "Monitor risk-adjusted untuk semua posisi Futures. Fitur: Auto-close TP/SL, Liquidation Guard (tutup sebelum liquidasi exchange), Trail SL ke breakeven, TP Extension ke TP3 otomatis.",
+      desc: "Monitor risk-adjusted semua posisi Futures (1 monitor). Wick detection 1m (TP/SL antar-poll tak terlewat), SL+ lifecycle, Liquidation Guard (tutup di harga dekat-liq), TP1 partial kecilkan size, expired masuk balance.",
       pipeline: [
         "Query semua futures paper_trades dengan status='open'",
         "Batch fetch live prices dari Binance Futures",
@@ -338,7 +360,7 @@ Binance kline col[5] = total_volume
               <h1 className="text-3xl font-bold mb-1">📐 Arsitektur Sistem</h1>
               <p className="text-sm text-neutral-400 max-w-2xl leading-relaxed">
                 Crypto trading agent dengan <strong className="text-white">2 sistem independen</strong>:{" "}
-                <strong className="text-blue-400">Futures Scanner</strong> (AI + T0-T4, auto-trade, liq guard) dan{" "}
+                <strong className="text-blue-400">Futures</strong> (1 Scanner: Pre-Move/Momentum/New-Listing + 1 Monitor, dedup global, SL sadar-leverage) dan{" "}
                 <strong className="text-teal-400">Opportunity SPOT</strong> (risk-adjusted, fee-aware, cooldown).
                 Total <strong className="text-white">6 autonomous agents</strong> + adaptive learning + risk dashboard.
               </p>
@@ -355,9 +377,8 @@ Binance kline col[5] = total_volume
           {/* Agent pills */}
           <div className="flex gap-2 mt-5 flex-wrap">
             {[
-              { icon: "🤖", label: "Agent 1 — AI",      sub: "Futures · Funding/OI/Liq/S&R", color: "bg-blue-500/20 border-blue-400/30"   },
-              { icon: "🔭", label: "Agent 2 — T0-T4",   sub: "Futures · Wyckoff/Trend/TA",    color: "bg-purple-500/20 border-purple-400/30" },
-              { icon: "👁", label: "Futures Monitor",    sub: "Futures · TP/SL · 60s",         color: "bg-indigo-500/20 border-indigo-400/30" },
+              { icon: "⚡", label: "Futures Scanner",    sub: "1 agent · Pre-Move/Momentum/New", color: "bg-blue-500/20 border-blue-400/30"   },
+              { icon: "👁", label: "Futures Monitor",    sub: "1 agent · TP/SL/wick · 120s",     color: "bg-indigo-500/20 border-indigo-400/30" },
               { icon: "🧠", label: "Weight Updater",     sub: "Learning · 6jam",               color: "bg-green-500/20 border-green-400/30"  },
               { icon: "🚀", label: "Spot Opp Scanner",   sub: "Spot · 15m",                    color: "bg-teal-500/20 border-teal-400/30"    },
               { icon: "📍", label: "Spot Monitor",       sub: "Spot · TP/SL · 60s",            color: "bg-amber-500/20 border-amber-400/30"  },
@@ -383,7 +404,7 @@ Binance kline col[5] = total_volume
           {/* Group labels */}
           <div className="flex gap-2 mb-2 flex-wrap">
             <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">⚡ Futures:</span>
-            {["Futures Agent 1", "Futures Agent 2", "Futures Monitor", "Weight Updater"].map(t => (
+            {["Pre-Gainer", "Accumulation", "Momentum", "Futures Monitor", "Weight Updater"].map(t => (
               <button key={t} onClick={() => setAgentTab(t)}
                 className={`text-[10px] px-2 py-0.5 rounded-full font-semibold transition-all ${
                   agentTab === t ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-600 hover:bg-blue-100"
@@ -453,32 +474,28 @@ Binance kline col[5] = total_volume
                 <span className="w-2 h-2 rounded-full bg-blue-500" />
                 <p className="font-bold text-sm text-blue-700">Sistem 1 — Futures Scanner (2 Agents)</p>
               </div>
-              <Code>{`Binance Futures API (100 pair USDT)
+              <Code>{`Binance Futures API (150 pair + new listings)
          │
-         ▼  ⏱ setiap 15 menit
-  ┌──────┴──────┐
-  │  Agent 1   │  Funding · OI · Liquidation · S/R
-  │  (AI)      │  → score + LONG/SHORT signal
-  └──────┬──────┘
+         ▼  ⏱ setiap 2 menit
+  ┌──────────────────────────┐
+  │   FUTURES SCANNER (1)     │
+  │  ├ Pre-Move (a1+a2)       │  BB squeeze · akumulasi · OI
+  │  ├ Momentum  (a3)         │  change 5-20% · vol · breakout
+  │  └ New-Listing            │  onboardDate ≤ 14h
+  └──────────┬───────────────┘
+             ▼  ranking GLOBAL + setup_type
+   dedup per-symbol (cross-margin = 1 posisi/koin)
+             ▼  SL floor sadar-leverage · sizing 1 wallet
+  paper_trades (style=futures_agent1/2/3 utk win-rate)
          │
-  ┌──────┴──────┐
-  │  Agent 2   │  T0-T4 Pipeline: Wyckoff → Trend
-  │  (T0-T4)   │  → S/R → Pattern → Trigger
-  └──────┬──────┘
-         │
-         ▼
-  paper_trades (PostgreSQL)
-  agent='futures_agent1' / 'futures_agent2'
-         │
-         ▼  ⏱ setiap 60 detik
-  Futures Monitor → auto TP/SL
+         ▼  ⏱ setiap 120 detik
+  FUTURES MONITOR (1) → wick 1m · SL+ · liq guard
          │
          ▼
-  Weight Updater (tiap 6 jam)
-  → signal_weights (adaptive learning)
+  Weight Updater → recency 30d + warm-start dari DB
          │
          ▼
-  History — Futures tab · Win rate · P&L`}
+  History — Futures tab · Win rate per strategi · P&L`}
               </Code>
               <p className="text-xs text-neutral-500 mt-2">📌 Fully automatic — tidak butuh interaksi user</p>
             </div>
@@ -519,14 +536,13 @@ Layer 4: History — Spot Opp tab
           {/* 3 kolom summary */}
           <div className="mt-4 grid md:grid-cols-3 gap-3 text-xs">
             {[
-              { icon: "🤖", title: "6 Agents (background)", color: "bg-purple-50 border-purple-200",
+              { icon: "🤖", title: "Agents (background)", color: "bg-purple-50 border-purple-200",
                 items: [
-                  "Futures Agent 1 — AI (Funding/OI/Liq/S&R)",
-                  "Futures Agent 2 — T0-T4 (Wyckoff→Trigger)",
-                  "Futures Monitor — auto TP/SL setiap 60s",
-                  "Weight Updater — adaptive learning tiap 6jam",
-                  "Spot Opp Scanner — 9 sinyal, top-30, WS",
-                  "Spot Monitor — auto TP/SL, flag TP1",
+                  "Futures Scanner — 1 agent, lane Pre-Move/Momentum/New-Listing",
+                  "Futures Monitor — 1 agent, wick 1m · SL+ · liq guard · 120s",
+                  "Weight Updater — recency 30d + warm-start dari DB",
+                  "Spot Opp Scanner — momentum + rotation, top-30, WS",
+                  "Spot Monitor — auto TP/SL, max-age 7d, flag TP1",
                 ]},
               { icon: "⚙️", title: "Backend (API layer)", color: "bg-teal-50 border-teal-200",
                 items: [
@@ -771,29 +787,30 @@ Layer 4: History → Opportunity SPOT tab
             <div>
               <Code>{`# agents/futures/auto_trader.py
 
-AUTO_OPEN_THRESHOLD = 80      # score minimal untuk auto-open
-VOLATILE_THRESHOLD  = 88      # lebih tinggi di volatile (belum aktif)
-MAX_AUTO_POSITIONS  = 5       # max posisi terbuka per agent
+AUTO_OPEN_THRESHOLD = 72      # dasar; adaptif 70-77 per win-rate
+MAX_AUTO_POSITIONS  = 6       # max posisi GLOBAL (1 wallet, semua lane)
+
+Pool digabung dari SEMUA lane → ranking global by score →
+dedup per-symbol (cross-margin = 1 posisi/koin, lane skor tertinggi menang)
 
 BLOKIR auto-open jika:
-  regime == "volatile"        → semua sinyal unreliable
-  regime == "ranging"         → threshold naik ke 85
-  open_count >= 5             → sudah max posisi
-  symbol sudah open           → dedup per symbol+agent
+  coin_regime == "volatile"   → blokir Pre-Move (Momentum tetap jalan)
+  coin_regime == "ranging"    → threshold +5
+  open_count >= 6 (global)    → sudah max posisi
+  symbol sudah open di lane manapun → dedup global
 
 BOLEH auto-open jika:
-  score >= 80 (trending_up/trending_down)
-  score >= 85 (ranging)
-  regime != "volatile"
-  < 5 posisi terbuka per agent`}
+  score >= threshold adaptif (per-coin regime)
+  sizing.can_open (heat/margin/notional ok)
+  bukan dalam cooldown SL global`}
               </Code>
             </div>
             <div className="space-y-2">
               {[
-                { regime: "trending_up",   threshold: "≥ 80",  action: "✅ Buka LONG priority",       cls: "bg-green-50 border-green-200" },
-                { regime: "trending_down", threshold: "≥ 80",  action: "✅ Buka SHORT priority",      cls: "bg-red-50 border-red-200"     },
-                { regime: "ranging",       threshold: "≥ 85",  action: "⚠️ Buka tapi threshold naik", cls: "bg-yellow-50 border-yellow-200" },
-                { regime: "volatile",      threshold: "BLOKIR", action: "🚫 Auto-trade dinonaktifkan", cls: "bg-orange-50 border-orange-300 font-bold" },
+                { regime: "trending_up",   threshold: "≥ 72",  action: "✅ Buka LONG priority",       cls: "bg-green-50 border-green-200" },
+                { regime: "trending_down", threshold: "≥ 72",  action: "✅ Buka SHORT priority",      cls: "bg-red-50 border-red-200"     },
+                { regime: "ranging",       threshold: "≥ 77",  action: "⚠️ Buka tapi threshold +5",   cls: "bg-yellow-50 border-yellow-200" },
+                { regime: "volatile",      threshold: "Momentum saja", action: "🔥 Pre-Move diblokir, Momentum jalan", cls: "bg-orange-50 border-orange-300 font-bold" },
               ].map(r => (
                 <div key={r.regime} className={`rounded-xl border p-3 ${r.cls}`}>
                   <div className="flex items-center justify-between">

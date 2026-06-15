@@ -242,11 +242,11 @@ export function FuturesAnalytics() {
           {/* Head-to-head summary cards (3 lanes) */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {[
-              { key: "agent1", label: "Agent 1 — Pre-Gainer", emoji: "🎯",
+              { key: "agent1", label: "Pre-Gainer", emoji: "🎯",
                 data: stats.agent1, color: "border-blue-200 bg-blue-50", badge: "bg-blue-100 text-blue-700" },
-              { key: "agent2", label: "Agent 2 — Accumulation", emoji: "📦",
+              { key: "agent2", label: "Accumulation", emoji: "📦",
                 data: stats.agent2, color: "border-purple-200 bg-purple-50", badge: "bg-purple-100 text-purple-700" },
-              { key: "agent3", label: "Agent 3 — Momentum", emoji: "🔥",
+              { key: "agent3", label: "Momentum", emoji: "🔥",
                 data: stats.agent3, color: "border-orange-200 bg-orange-50", badge: "bg-orange-100 text-orange-700" },
             ].map(a => {
               const wr = a.data.win_rate;
@@ -358,9 +358,9 @@ export function FuturesAnalytics() {
           {/* Per-agent progress */}
           <div className="space-y-3 pt-1 border-t border-neutral-100">
             {[
-              { label: "Agent 1 — Pre-Gainer",   data: stats.agent1, bar: "bg-blue-500" },
-              { label: "Agent 2 — Accumulation",  data: stats.agent2, bar: "bg-purple-500" },
-              { label: "Agent 3 — Momentum",      data: stats.agent3, bar: "bg-orange-500" },
+              { label: "Pre-Gainer",   data: stats.agent1, bar: "bg-blue-500" },
+              { label: "Accumulation", data: stats.agent2, bar: "bg-purple-500" },
+              { label: "Momentum",     data: stats.agent3, bar: "bg-orange-500" },
             ].map(a => (
               <div key={a.label}>
                 <div className="flex justify-between text-xs mb-1">

@@ -16,7 +16,7 @@ const pathnameMap = {
   },
   "history": {
     title: "📋 History",
-    description: "Paper trading history — Spot Scanner · Spot Opportunity · Futures Agent 1+2",
+    description: "Paper trading history — Spot Scanner · Spot Opportunity · Futures",
   },
   "signals": {
     title: "Signal Feed",

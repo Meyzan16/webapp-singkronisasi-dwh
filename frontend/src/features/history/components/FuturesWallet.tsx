@@ -79,7 +79,7 @@ export function FuturesWallet({ onChanged }: { onChanged?: () => void }) {
       <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
         <div>
           <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">💼 Dompet Futures</p>
-          <p className="text-[10px] text-neutral-400 mt-0.5">Satu wallet cross-margin untuk Agent 1/2/3 · deposit lalu agen bekerja</p>
+          <p className="text-[10px] text-neutral-400 mt-0.5">Satu wallet cross-margin · 1 Scanner (semua strategi) · deposit lalu agen bekerja</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => { setMode("deposit"); setAmt(""); setErr(""); }}

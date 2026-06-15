@@ -551,9 +551,9 @@ export function FuturesTab() {
             {ab && (
               <div className="grid grid-cols-3 gap-3">
                 {([
-                  { key: "agent1", label: "🤖 Agent 1 AI",   color: "blue",   data: ab.agent1 },
-                  { key: "agent2", label: "🧠 Agent 2 T4",   color: "purple", data: ab.agent2 },
-                  { key: "agent3", label: "🔥 Agent 3 Momentum", color: "orange", data: ab.agent3 },
+                  { key: "agent1", label: "🎯 Pre-Gainer",   color: "blue",   data: ab.agent1 },
+                  { key: "agent2", label: "📦 Accumulation", color: "purple", data: ab.agent2 },
+                  { key: "agent3", label: "🔥 Momentum",     color: "orange", data: ab.agent3 },
                 ] as const).filter(a => a.data).map(a => (
                   <div key={a.key} className={`bg-white/5 rounded-xl p-3 border ${(a.data!.at_risk ?? 0) > 0 ? "border-red-700/40" : "border-white/5"}`}>
                     <p className={`text-[10px] font-bold mb-2 ${a.color === "blue" ? "text-blue-300" : a.color === "purple" ? "text-purple-300" : "text-orange-300"}`}>{a.label}</p>
@@ -584,7 +584,7 @@ export function FuturesTab() {
             {/* Agent 1 */}
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200">🤖 Agent 1 — AI</span>
+                <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200">🎯 Pre-Gainer</span>
                 <span className="text-xs text-neutral-500">{stats.a1Open.length} posisi</span>
                 {ab && (ab.agent1.at_risk ?? 0) > 0 && (
                   <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent1.at_risk}</span>
@@ -601,7 +601,7 @@ export function FuturesTab() {
             {/* Agent 2 */}
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">🧠 Agent 2 — T4</span>
+                <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full border border-purple-200">📦 Accumulation</span>
                 <span className="text-xs text-neutral-500">{stats.a2Open.length} posisi</span>
                 {ab && (ab.agent2.at_risk ?? 0) > 0 && (
                   <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent2.at_risk}</span>
@@ -618,7 +618,7 @@ export function FuturesTab() {
             {/* Agent 3 */}
             <div>
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">🔥 Agent 3 — Momentum Capture</span>
+                <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full border border-orange-200">🔥 Momentum</span>
                 <span className="text-xs text-neutral-500">{stats.a3Open.length} posisi</span>
                 {ab && ab.agent3 && (ab.agent3.at_risk ?? 0) > 0 && (
                   <span className="text-[10px] text-red-600 font-bold">⚠️ {ab.agent3.at_risk}</span>
@@ -751,11 +751,11 @@ export function FuturesTab() {
         <div>
           <h3 className="text-sm font-bold text-neutral-700 mb-3 flex items-center gap-2">
             🔵 Posisi Terbuka ({stats.open})
-            <span className="text-[10px] text-neutral-400 font-normal">— Dipisah per agent</span>
+            <span className="text-[10px] text-neutral-400 font-normal">— Dipisah per strategi</span>
             {agentFilter !== "all" && (
               <button onClick={() => setAgentFilter("all")}
                 className="text-[10px] text-teal-600 font-semibold underline ml-1">
-                Filter: {agentFilter === "agent1" ? "Agent 1" : agentFilter === "agent2" ? "Agent 2" : "Agent 3"} ✕
+                Filter: {agentFilter === "agent1" ? "Pre-Gainer" : agentFilter === "agent2" ? "Accumulation" : "Momentum"} ✕
               </button>
             )}
           </h3>
@@ -764,7 +764,7 @@ export function FuturesTab() {
             {agentFilter !== "agent2" && agentFilter !== "agent3" && (
             <div className="bg-blue-50 border border-blue-100 rounded-2xl overflow-hidden">
               <div className="px-4 py-2.5 border-b border-blue-100 flex items-center gap-2">
-                <span className="text-xs font-bold text-blue-700">🤖 Agent 1 — AI</span>
+                <span className="text-xs font-bold text-blue-700">🎯 Pre-Gainer</span>
                 <span className="ml-auto text-[10px] text-blue-500">{stats.a1Open.length} open</span>
                 {(riskDash?.agent_breakdown.agent1.at_risk ?? 0) > 0 && (
                   <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1.5 py-0.5 rounded">⚠️ AT RISK</span>
@@ -784,7 +784,7 @@ export function FuturesTab() {
             {agentFilter !== "agent1" && agentFilter !== "agent3" && (
             <div className="bg-purple-50 border border-purple-100 rounded-2xl overflow-hidden">
               <div className="px-4 py-2.5 border-b border-purple-100 flex items-center gap-2">
-                <span className="text-xs font-bold text-purple-700">📦 Agent 2 — Accumulation</span>
+                <span className="text-xs font-bold text-purple-700">📦 Accumulation</span>
                 <span className="ml-auto text-[10px] text-purple-500">{stats.a2Open.length} open</span>
                 {(riskDash?.agent_breakdown.agent2.at_risk ?? 0) > 0 && (
                   <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1.5 py-0.5 rounded">⚠️ AT RISK</span>
@@ -804,7 +804,7 @@ export function FuturesTab() {
             {agentFilter !== "agent1" && agentFilter !== "agent2" && (
             <div className="bg-orange-50 border border-orange-100 rounded-2xl overflow-hidden">
               <div className="px-4 py-2.5 border-b border-orange-100 flex items-center gap-2">
-                <span className="text-xs font-bold text-orange-700">🔥 Agent 3 — Momentum</span>
+                <span className="text-xs font-bold text-orange-700">🔥 Momentum</span>
                 <span className="ml-auto text-[10px] text-orange-500">{stats.a3Open.length} open</span>
                 {(riskDash?.agent_breakdown.agent3?.at_risk ?? 0) > 0 && (
                   <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1.5 py-0.5 rounded">⚠️ AT RISK</span>
@@ -826,9 +826,9 @@ export function FuturesTab() {
       {/* ── Agent comparison ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-3 gap-3">
         {[
-          { key: "agent1" as const, label: "Agent 1 — Pre-Gainer",   color: "blue",   emoji: "🎯", data: stats.a1 },
-          { key: "agent2" as const, label: "Agent 2 — Accumulation", color: "purple", emoji: "📦", data: stats.a2 },
-          { key: "agent3" as const, label: "Agent 3 — Momentum",     color: "orange", emoji: "🔥", data: stats.a3 },
+          { key: "agent1" as const, label: "Pre-Gainer",   color: "blue",   emoji: "🎯", data: stats.a1 },
+          { key: "agent2" as const, label: "Accumulation", color: "purple", emoji: "📦", data: stats.a2 },
+          { key: "agent3" as const, label: "Momentum",     color: "orange", emoji: "🔥", data: stats.a3 },
         ].map(a => {
           const rateColor = a.data.rate >= 60 ? "text-green-600" : a.data.rate >= 50 ? "text-yellow-600" : a.data.total > 0 ? "text-red-500" : "text-neutral-400";
           const border    = a.color === "blue" ? "border-blue-200 bg-blue-50" : a.color === "purple" ? "border-purple-200 bg-purple-50" : "border-orange-200 bg-orange-50";
@@ -861,7 +861,7 @@ export function FuturesTab() {
       {learning?.monthly_stats && learning.monthly_stats.length > 0 && (
         <div className="bg-white border border-neutral-200 rounded-2xl p-4">
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">📅 Win Rate Bulanan — Agent 1 vs 2 vs 3</p>
+            <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">📅 Win Rate Bulanan — per Strategi</p>
             <select
               value={selectedMonth}
               onChange={e => setSelectedMonth(e.target.value)}
@@ -887,9 +887,9 @@ export function FuturesTab() {
                   </div>
                 </div>
                 <div className="space-y-1.5">
-                  <WinRateBar rate={m.agent1.win_rate} label={`🤖 Agent 1: ${m.agent1.win_rate.toFixed(0)}%`} />
-                  <WinRateBar rate={m.agent2.win_rate} label={`🧠 Agent 2: ${m.agent2.win_rate.toFixed(0)}%`} />
-                  {m.agent3 && <WinRateBar rate={m.agent3.win_rate} label={`🔥 Agent 3: ${m.agent3.win_rate.toFixed(0)}%`} />}
+                  <WinRateBar rate={m.agent1.win_rate} label={`🎯 Pre-Gainer: ${m.agent1.win_rate.toFixed(0)}%`} />
+                  <WinRateBar rate={m.agent2.win_rate} label={`📦 Accumulation: ${m.agent2.win_rate.toFixed(0)}%`} />
+                  {m.agent3 && <WinRateBar rate={m.agent3.win_rate} label={`🔥 Momentum: ${m.agent3.win_rate.toFixed(0)}%`} />}
                 </div>
               </div>
             ))}
