@@ -5,12 +5,13 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install deps (context = repo root)
+# Same deps as backend (context = repo root)
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend app + agents (agents/ is imported by main.py)
+# Backend app (models, database, services — imported by agents)
 COPY backend/app ./app
+# Agent code
 COPY agents      ./agents
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "agents"]

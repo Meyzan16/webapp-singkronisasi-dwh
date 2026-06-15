@@ -4,6 +4,10 @@ import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+# When agents run in a separate container, set AGENTS_STANDALONE=true to skip
+# starting them here. Health endpoint still imports agent state for monitoring.
+_AGENTS_STANDALONE = os.getenv("AGENTS_STANDALONE", "false").lower() == "true"
+
 # Make agents/ importable whether backend is run from:
 #   cd backend && uvicorn app.main:app        ← adds repo root to sys.path
 #   cd agents-trading && python backend/...   ← repo root already in path
@@ -59,6 +63,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("database_unavailable", error=str(exc)[:120])
 
     # ── Background agents ─────────────────────────────────────────────────────
+    if _AGENTS_STANDALONE:
+        logger.info("agents_mode", mode="standalone", msg="agents run in separate container")
+        yield
+        await dispose_engine()
+        return
+
+    # Embedded mode: all agents run inside this process
     opportunity_task     = asyncio.create_task(run_opportunity_loop())
     monitor_task         = asyncio.create_task(run_opportunity_monitor())
     futures_task         = asyncio.create_task(run_futures_loop())

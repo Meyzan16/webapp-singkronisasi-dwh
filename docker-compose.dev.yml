@@ -1,0 +1,30 @@
+# Development overrides — hot reload via volume mounts
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# What this changes vs docker-compose.yml:
+#   backend  — uvicorn --reload + source volumes mounted
+#   agents   — source volumes mounted (auto-restarts on code change via watchdog if desired)
+#   frontend — npm run dev (HMR) + source volumes mounted
+
+services:
+
+  backend:
+    volumes:
+      - ./backend/app:/app/app
+      - ./agents:/app/agents
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  agents:
+    volumes:
+      - ./backend/app:/app/app
+      - ./agents:/app/agents
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    command: npm run dev
