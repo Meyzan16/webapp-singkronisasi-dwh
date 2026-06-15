@@ -95,14 +95,15 @@ export function FuturesWallet({ onChanged }: { onChanged?: () => void }) {
 
       {/* Balance summary */}
       {info && (
-        <div className="grid grid-cols-3 gap-2 mb-3 text-center">
+        <div className="grid grid-cols-4 gap-2 mb-3 text-center">
           {[
-            { label: "Saldo",     value: info.balance,       cls: "text-neutral-900" },
-            { label: "Bebas",     value: info.available,     cls: "text-green-600" },
-            { label: "Terkunci",  value: info.locked_margin, cls: "text-orange-600" },
+            { label: "Saldo",    value: `$${info.balance.toFixed(2)}`,       cls: "text-neutral-900" },
+            { label: "Bebas",    value: `$${info.available.toFixed(2)}`,     cls: "text-green-600" },
+            { label: "Terkunci", value: `$${info.locked_margin.toFixed(2)}`, cls: "text-orange-600" },
+            { label: "Posisi",   value: `${info.open_positions}`,            cls: info.open_positions > 0 ? "text-blue-600" : "text-neutral-400" },
           ].map(x => (
             <div key={x.label} className="bg-neutral-50 rounded-xl p-2">
-              <p className={`text-lg font-black tabular-nums ${x.cls}`}>${x.value.toFixed(2)}</p>
+              <p className={`text-lg font-black tabular-nums ${x.cls}`}>{x.value}</p>
               <p className="text-[9px] text-neutral-400">{x.label}</p>
             </div>
           ))}

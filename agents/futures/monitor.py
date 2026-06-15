@@ -404,7 +404,9 @@ async def check_futures_positions() -> tuple[int, int]:
                     if eff_low <= sl:
                         new_status   = "sl"
                         close_price  = sl
-                        close_reason = "sl_hit"
+                        # F114: SL trail moved above entry → close at profit, label as sl_plus
+                        _pnl_chk = (sl - entry) / entry * 100 if entry > 0 else 0
+                        close_reason = "sl_plus" if (trail_active and _pnl_chk > 0) else "sl_hit"
                     elif eff_high >= tp2:
                         new_status   = "tp"
                         close_price  = tp2
@@ -413,7 +415,9 @@ async def check_futures_positions() -> tuple[int, int]:
                     if eff_high >= sl:
                         new_status   = "sl"
                         close_price  = sl
-                        close_reason = "sl_hit"
+                        # F114: SL trail moved below entry → close at profit, label as sl_plus
+                        _pnl_chk = (entry - sl) / entry * 100 if entry > 0 else 0
+                        close_reason = "sl_plus" if (trail_active and _pnl_chk > 0) else "sl_hit"
                     elif eff_low <= tp2:
                         new_status   = "tp"
                         close_price  = tp2

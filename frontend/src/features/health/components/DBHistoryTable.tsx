@@ -77,9 +77,11 @@ function TypeBadge({ style }: { style: string }) {
   if (style === "opportunity_spot")
     return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200 shrink-0">🎯 SPOT</span>;
   if (style === "futures_agent1")
-    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 shrink-0">🤖 A1</span>;
+    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 shrink-0">🎯 Pre-Gainer</span>;
   if (style === "futures_agent2")
-    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200 shrink-0">🧠 A2</span>;
+    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200 shrink-0">📦 Accumulation</span>;
+  if (style === "futures_agent3")
+    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 shrink-0">🔥 Momentum</span>;
   return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200 shrink-0">{style}</span>;
 }
 
@@ -91,12 +93,18 @@ function StatusBadge({ status, pnl }: { status: string; pnl: number | null }) {
       ? <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">✅ TP</span>
       : <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 border border-yellow-200">⚠️ TP-</span>;
   }
-  if (status === "sl") return <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200">🛑 SL</span>;
+  if (status === "sl") {
+    // F114: SL+ = trail moved above entry, closed at profit
+    if ((pnl ?? 0) > 0)
+      return <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200">🛡 SL+</span>;
+    return <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-600 border border-red-200">🛑 SL</span>;
+  }
   return <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-500 border border-neutral-200">{status}</span>;
 }
 
 const CLOSE_REASON_META: Record<string, { label: string; color: string; emoji: string }> = {
   sl_hit:           { label: "SL Hit",         color: "bg-red-100 text-red-700",      emoji: "🛑" },
+  sl_plus:          { label: "SL+ Profit",     color: "bg-teal-100 text-teal-700",    emoji: "🛡" },
   tp2_hit:          { label: "TP2 Hit",         color: "bg-green-100 text-green-700",  emoji: "✅" },
   tp3_hit:          { label: "TP3 Hit",         color: "bg-emerald-100 text-emerald-700", emoji: "🎯" },
   trend_reversal:   { label: "Trend Reversal",  color: "bg-orange-100 text-orange-700",emoji: "↩️" },
@@ -126,17 +134,29 @@ function SortIcon({ col, active, dir }: { col: string; active: string; dir: stri
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
+interface StyleOption { key: string; label: string }
+
 interface DBHistoryTableProps {
-  defaultStyle?:  "all" | "spot" | "agent1" | "agent2" | "futures";
+  defaultStyle?:  "all" | "spot" | "agent1" | "agent2" | "agent3" | "futures";
   hideStyleTabs?: boolean;
+  styleOptions?:  StyleOption[];   // F115: override default style tabs (e.g. futures-only)
   compact?:       boolean;
   autoRefresh?:   number;   // polling interval ms — 0 or undefined = disabled
   days?:          number;   // §16.6: window riwayat (default 90 hari)
 }
 
+const DEFAULT_STYLE_TABS: StyleOption[] = [
+  { key: "all",    label: "Semua" },
+  { key: "spot",   label: "🎯 Spot" },
+  { key: "agent1", label: "🎯 Pre-Gainer" },
+  { key: "agent2", label: "📦 Accumulation" },
+  { key: "agent3", label: "🔥 Momentum" },
+];
+
 export function DBHistoryTable({
   defaultStyle  = "all",
   hideStyleTabs = false,
+  styleOptions,
   compact:      _compact = false,  // eslint-disable-line @typescript-eslint/no-unused-vars
   autoRefresh   = 0,
   days          = 90,
@@ -146,7 +166,7 @@ export function DBHistoryTable({
   const [page,        setPage]        = useState(1);
   const [search,      setSearch]      = useState("");
   const [debouncedQ,  setDebouncedQ]  = useState("");
-  const [styleFilter, setStyleFilter] = useState(defaultStyle);
+  const [styleFilter, setStyleFilter] = useState<string>(defaultStyle);
   const [statusFilter,setStatusFilter]= useState("all");
   const [sortBy,      setSortBy]      = useState("entry_at");
   const [sortDir,     setSortDir]     = useState<"desc"|"asc">("desc");
@@ -264,15 +284,9 @@ export function DBHistoryTable({
         {/* Style tabs — hidden when embedded in specific tab */}
         {!hideStyleTabs && (
           <div className="flex bg-neutral-100 rounded-xl p-1 gap-0.5">
-            {[
-              { key: "all",     label: "Semua" },
-              { key: "spot",    label: "🎯 Spot" },
-              { key: "agent1",  label: "🤖 A1"  },
-              { key: "agent2",  label: "🧠 A2"  },
-              { key: "futures", label: "⚡ Fut"  },
-            ].map(f => (
+            {(styleOptions ?? DEFAULT_STYLE_TABS).map(f => (
               <button key={f.key}
-                onClick={() => { setStyleFilter(f.key as typeof styleFilter); setPage(1); }}
+                onClick={() => { setStyleFilter(f.key); setPage(1); }}
                 className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
                   styleFilter === f.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"
                 }`}>{f.label}</button>
@@ -336,7 +350,7 @@ export function DBHistoryTable({
             Tutup <SortIcon col="closed_at" active={sortBy} dir={sortDir} />
           </button>
           <span className="w-16 text-center">Durasi</span>
-          <span className="w-16 text-right">Margin</span>
+          <span className="w-16 text-right">Notional</span>
           <button className="w-20 text-right flex items-center justify-end hover:text-neutral-600" onClick={() => handleSort("pnl_pct")}>
             P&L% <SortIcon col="pnl_pct" active={sortBy} dir={sortDir} />
           </button>
@@ -364,8 +378,9 @@ export function DBHistoryTable({
               const duration = fmtDuration(t.entry_at, t.closed_at);
               // §3: pakai pnl_dollar TERSIMPAN dari API (margin riil), bukan rumus hardcode
               const pnl$     = t.pnl_dollar ?? null;
-              const isWin    = t.status === "tp" && (t.pnl_pct ?? 0) > 0;
-              const isLoss   = t.status === "sl" || (t.status === "tp" && (t.pnl_pct ?? 0) <= 0);
+              // F114: SL+ (trail above entry, closed at profit) counts as win
+              const isWin    = (t.pnl_pct ?? 0) > 0 && (t.status === "tp" || t.status === "sl");
+              const isLoss   = (t.status === "sl" && (t.pnl_pct ?? 0) <= 0) || (t.status === "tp" && (t.pnl_pct ?? 0) <= 0);
               const isOpen   = t.status === "open";
               const isExpanded = expanded === t.id;
 
@@ -432,12 +447,19 @@ export function DBHistoryTable({
                       </span>
                     </div>
 
-                    {/* Margin (§3) */}
+                    {/* Notional + margin (F116) */}
                     <div className="w-16 text-right">
                       {t.position_size != null ? (
-                        <span className="text-[10px] font-mono font-bold text-neutral-600 tabular-nums">
-                          ${t.position_size.toFixed(0)}
-                        </span>
+                        <div>
+                          <p className="text-[10px] font-mono font-bold text-neutral-600 tabular-nums">
+                            ${t.position_size.toFixed(0)}
+                          </p>
+                          {t.leverage != null && (
+                            <p className="text-[9px] text-neutral-400 tabular-nums">
+                              ${Math.round(t.position_size / t.leverage)} mrg
+                            </p>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-neutral-300 text-xs">—</span>
                       )}
@@ -482,7 +504,8 @@ export function DBHistoryTable({
                           { label: "Score",        val: `${t.score.toFixed(0)} pt` },
                           { label: "R:R",          val: t.rr_ratio ? `1:${t.rr_ratio}` : "—" },
                           { label: "Risk %",       val: `${t.risk_pct.toFixed(2)}%` },
-                          { label: "Margin",       val: t.position_size != null ? `$${t.position_size.toFixed(2)}` : "—" },
+                          { label: "Notional",     val: t.position_size != null ? `$${t.position_size.toFixed(2)}` : "—" },
+                          { label: "Margin (Jaminan)", val: (t.position_size != null && t.leverage != null) ? `$${(t.position_size / t.leverage).toFixed(2)}` : "—" },
                           { label: "Risk $",       val: t.risk_dollar != null ? `$${t.risk_dollar.toFixed(2)}` : "—" },
                           { label: "Leverage",     val: t.leverage ? `${t.leverage}x` : "—" },
                           { label: "P&L Gross",    val: t.pnl_gross_pct != null ? `${t.pnl_gross_pct >= 0 ? "+" : ""}${t.pnl_gross_pct.toFixed(2)}%` : "—" },

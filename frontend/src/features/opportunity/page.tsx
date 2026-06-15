@@ -8,6 +8,7 @@ import {
 } from "./components/OpportunityCard";
 import { CoinModal } from "./components/CoinModal";
 import { MarketIntelBanner } from "@/components/MarketIntelBanner";
+import { type ConnState, CONN_META } from "@/components/ui/live-badge";
 
 // §11.6: WS URL dinamis — ikut host & protokol halaman (wss saat https)
 function wsUrl(): string {
@@ -33,21 +34,12 @@ interface ScannerConfig {
   max_concurrent:     number;
 }
 
-type ConnState = "connecting" | "connected" | "reconnecting" | "paused";
-
 const ALERT_FILTERS = [
   { key: "ALL",          label: "Semua" },
   { key: "squeeze",      label: "⚡ Squeeze" },
   { key: "accumulation", label: "📦 Akumulasi" },
   { key: "breakout",     label: "🎯 Breakout" },
 ];
-
-const CONN_META: Record<ConnState, { dot: string; label: string; color: string }> = {
-  connected:    { dot: "bg-green-400",              label: "LIVE",         color: "text-green-400 border-green-500/40 bg-green-500/10" },
-  connecting:   { dot: "bg-yellow-400 animate-pulse", label: "CONNECTING", color: "text-yellow-400 border-yellow-500/40 bg-yellow-500/10" },
-  reconnecting: { dot: "bg-orange-400 animate-pulse", label: "RECONNECTING", color: "text-orange-400 border-orange-500/40 bg-orange-500/10" },
-  paused:       { dot: "bg-neutral-500",             label: "PAUSED",       color: "text-neutral-400 border-neutral-600 bg-neutral-700/50" },
-};
 
 function fmtCountdown(secs: number | null): string {
   if (secs === null) return "--:--";

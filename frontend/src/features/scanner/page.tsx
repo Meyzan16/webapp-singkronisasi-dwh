@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { fmtPrice } from "@/lib/format";
 import { MarketIntelBanner } from "@/components/MarketIntelBanner";
+import { DirBadge, AgentBadge } from "@/components/ui/trading-badges";
+import { type ConnState, CONN_META } from "@/components/ui/live-badge";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -46,7 +48,6 @@ interface OpenPosition {
   auto_opened:  boolean;
 }
 
-type ConnState = "connecting" | "connected" | "reconnecting" | "paused";
 const INTERVAL_SEC  = 2 * 60;
 
 // F111: derive WS URL from env or current host so non-localhost deployments connect
@@ -57,28 +58,7 @@ function futuresWsUrl(): string {
   return "ws://localhost:8000/ws/futures";
 }
 
-const CONN_META: Record<ConnState, { dot: string; label: string; color: string }> = {
-  connected:    { dot: "bg-green-400",               label: "LIVE",        color: "text-green-400 border-green-500/40 bg-green-500/10"   },
-  connecting:   { dot: "bg-yellow-400 animate-pulse", label: "CONNECTING", color: "text-yellow-400 border-yellow-500/40 bg-yellow-500/10" },
-  reconnecting: { dot: "bg-orange-400 animate-pulse", label: "RECONN...",  color: "text-orange-400 border-orange-500/40 bg-orange-500/10" },
-  paused:       { dot: "bg-neutral-500",              label: "PAUSED",     color: "text-neutral-400 border-neutral-600 bg-neutral-700/50" },
-};
-
 // ── Sub-components ─────────────────────────────────────────────────────────────
-
-function DirBadge({ dir }: { dir: "LONG" | "SHORT" }) {
-  return dir === "LONG"
-    ? <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-300">▲ LONG</span>
-    : <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-300">▼ SHORT</span>;
-}
-
-function AgentBadge({ agent }: { agent: string }) {
-  if (agent === "futures_agent1")
-    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Pre-Gainer</span>;
-  if (agent === "futures_agent3")
-    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">Momentum</span>;
-  return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Accum.</span>;
-}
 
 function ScoreBubble({ score }: { score: number }) {
   const cls = score >= 80 ? "bg-green-500" : score >= 65 ? "bg-yellow-500" : "bg-neutral-400";

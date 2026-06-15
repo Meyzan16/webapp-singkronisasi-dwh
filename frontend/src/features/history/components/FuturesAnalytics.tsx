@@ -500,7 +500,7 @@ export function FuturesAnalytics() {
                   className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
                     wAgent === a ? "bg-white text-neutral-800 shadow-sm" : "text-neutral-500"
                   }`}>
-                  {a === "all" ? "All" : a === "agent1" ? "Pre" : a === "agent2" ? "Accum" : "Momo"}
+                  {a === "all" ? "Semua" : a === "agent1" ? "Pre-Gainer" : a === "agent2" ? "Accumulation" : "Momentum"}
                 </button>
               ))}
             </div>
@@ -542,7 +542,7 @@ export function FuturesAnalytics() {
                     </div>
                     <div className="col-span-2 text-center">
                       <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${aBadge}`}>
-                        {w.agent === "futures_agent1" ? "Pre" : w.agent === "futures_agent3" ? "Momo" : "Accum"}
+                        {w.agent === "futures_agent1" ? "Pre-Gainer" : w.agent === "futures_agent3" ? "Momentum" : "Accumulation"}
                       </span>
                     </div>
                     <div className="col-span-2 text-right">

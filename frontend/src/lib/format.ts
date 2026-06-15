@@ -22,3 +22,12 @@ export const fmtVolBare = (v: number): string =>
   v >= 1e9 ? `${(v / 1e9).toFixed(1)}B`
   : v >= 1e6 ? `${(v / 1e6).toFixed(0)}M`
   : `${(v / 1e3).toFixed(0)}K`;
+
+export const fmtRelTime = (ts: number | null | undefined): string => {
+  if (!ts) return "—";
+  const diff = Math.floor(Date.now() / 1000 - ts);
+  if (diff < 5)    return "baru saja";
+  if (diff < 60)   return `${diff}d lalu`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m lalu`;
+  return `${Math.floor(diff / 3600)}j lalu`;
+};
