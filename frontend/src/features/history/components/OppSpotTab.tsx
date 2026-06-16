@@ -432,6 +432,7 @@ export function OppSpotTab() {
             hideStyleTabs={true}
             compact={true}
             autoRefresh={15000}
+            reasonScope="spot"
           />
         </div>
       </div>

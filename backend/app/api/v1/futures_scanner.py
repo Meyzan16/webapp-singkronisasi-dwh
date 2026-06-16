@@ -72,6 +72,7 @@ async def get_futures_scan(
             fs.set_result("agent1", result["agent1"])
             fs.set_result("agent2", result["agent2"])
             fs.set_result("agent3", result["agent3"])
+            fs.set_big_movers(result["big_movers"])   # PLAN-SIGNAL-GAP P4
             cached = fs.get_all_results()
         except Exception as exc:
             fs.set_scanning(False)
@@ -99,11 +100,31 @@ async def force_futures_scan(
         fs.set_result("agent1", result["agent1"])
         fs.set_result("agent2", result["agent2"])
         fs.set_result("agent3", result["agent3"])
+        fs.set_big_movers(result["big_movers"])   # PLAN-SIGNAL-GAP P4
         return _filter_results(fs.get_all_results(), agent, direction, min_score, limit)
     except Exception as exc:
         fs.set_scanning(False)
         logger.error("futures_force_scan_error", error=str(exc))
         raise HTTPException(status_code=503, detail=str(exc)[:100])
+
+
+@router.get("/futures/big-movers")
+async def get_big_movers(
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    """
+    PLAN-SIGNAL-GAP P4: coins with |change_24h| >= 10% seen in the last scan cycle,
+    tagged with whether they qualified for any lane (and at what score) or not, plus
+    a heuristic reason. Informational only — never auto-opens a position.
+    """
+    from agents.futures import store as fs
+
+    movers = fs.get_big_movers()
+    return {
+        "movers":       movers[:limit],
+        "total":        len(movers),
+        "generated_at": fs.last_scan_ts("agent3"),
+    }
 
 
 # ── Layer 2: Open position ─────────────────────────────────────────────────────

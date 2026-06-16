@@ -143,6 +143,7 @@ def _score_momentum_long(
     tf_map:     dict[str, FuturesData],
     price:      float,
     change_24h: float,
+    regime:     str = "neutral",
 ) -> tuple[float, list[str]]:
     """Score a symbol for momentum LONG (coin already pumping, ride the wave)."""
     score   = 0.0
@@ -155,7 +156,16 @@ def _score_momentum_long(
     if not ref:
         return 0.0, []
 
+    # PLAN-SIGNAL-GAP P2: 1h change — distinguishes "still chasing" from "pullback after
+    # a big 24h move" for coins that already moved a lot (change_24h alone can't tell).
+    change_1h = 0.0
+    if d1h and len(d1h.closes) >= 5 and d1h.closes[-4] > 0:
+        change_1h = (d1h.closes[-1] - d1h.closes[-4]) / d1h.closes[-4] * 100
+
     # ── 1. 24h move in sweet spot (0-20 pts) ─────────────────────────────────
+    # PLAN-SIGNAL-GAP P1: ceiling extended to 50% — coins like ZRO +30%, EVAA +114%
+    # previously got ZERO positive points here (bracket stopped at 25%), making them
+    # mathematically unable to reach MIN_SCORE even with perfect other signals.
     if 8 <= change_24h <= 12:
         score += 20
         signals.append(f"🚀 Momentum +{change_24h:.1f}% — sweet spot entry: terbangun tapi belum exhausted")
@@ -168,6 +178,29 @@ def _score_momentum_long(
     elif 18 < change_24h <= 25:
         score += 8
         signals.append(f"Momentum tinggi +{change_24h:.1f}% — waspadai exhaustion candle")
+    elif 25 < change_24h <= 35:
+        score += 5
+        signals.append(f"Momentum extended +{change_24h:.1f}% — masih ada room tapi risk lebih tinggi")
+    elif 35 < change_24h <= 50:
+        score += 2
+        signals.append(f"Momentum sangat extended +{change_24h:.1f}% — high-risk, butuh konfirmasi kuat dari sinyal lain")
+
+    # PLAN-SIGNAL-GAP P2: pullback vs still-chasing modifier for extended moves.
+    if change_24h > 25:
+        if change_1h < -2:
+            score += 8
+            signals.append(f"📉 Pullback {change_1h:.1f}% (1h) setelah momentum +{change_24h:.1f}% — entry lebih aman dari chase")
+        elif change_1h > 3:
+            score -= 5
+            signals.append(f"⚠️ Masih naik kencang +{change_1h:.1f}% (1h) — risk chase tinggi")
+
+    # PLAN-SIGNAL-GAP P3: pullback-to-momentum — big 24h move + 15m retracement = ideal
+    # re-entry zone (safer than chasing a coin that's still running).
+    if d15 and len(d15.closes) >= 5 and d15.closes[-3] > 0:
+        last_3_change = (d15.closes[-1] - d15.closes[-3]) / d15.closes[-3] * 100
+        if change_24h > 25 and -8 <= last_3_change <= -2:
+            score += 10
+            signals.append(f"📉 Pullback {last_3_change:.1f}% (15m) setelah momentum +{change_24h:.1f}% — re-entry zone")
 
     # ── 2. Volume surge confirming direction (0-25 pts) ───────────────────────
     best_vol = 0
@@ -250,16 +283,28 @@ def _score_momentum_long(
             break
 
     # ── Penalties ─────────────────────────────────────────────────────────────
+    # PLAN-SIGNAL-GAP P1: non-stacking (was 3 separate `if`s — a coin >35% got BOTH
+    # the -15 "overextended" AND -25 "parabolic" penalty = -40 total before any other
+    # signal, making it mathematically impossible to reach MIN_SCORE).
     if change_24h < 5.0:
         score -= 15   # not enough momentum — pre-gainers better handles this
-    if change_24h > 25.0:
-        score -= 15   # overextended
-    if change_24h > 35.0:
-        score -= 25   # parabolic = extreme reversal risk
+    elif change_24h > 50.0:
+        score -= 20   # parabolic >50% → exit risk tinggi
+    elif change_24h > 35.0:
+        score -= 8    # extended, tapi tidak as harsh
+    elif change_24h > 25.0:
+        score -= 5    # sedikit extended
+
     if rsi_val > 80:
         score -= 15   # overbought
     elif rsi_val > 75:
         score -= 8
+
+    # PLAN-SIGNAL-GAP P5: relax overbought penalty when the broader market is
+    # trending strongly up — RSI 75-80 is still valid momentum on a strong trend day.
+    if regime == "trending_up" and rsi_val > 75:
+        score += 5
+        signals.append(f"RSI {rsi_val:.0f} overbought tapi market trending_up kuat — relaxed")
 
     # BUG-L14: liquidation feed is a directional PROXY, not real USDT — small nudge only.
     if ref.liq_short_usdt > 2_000_000:
@@ -277,6 +322,7 @@ def _score_momentum_short(
     tf_map:     dict[str, FuturesData],
     price:      float,
     change_24h: float,
+    regime:     str = "neutral",
 ) -> tuple[float, list[str]]:
     """Score a symbol for momentum SHORT (coin already dumping, ride the wave down)."""
     score   = 0.0
@@ -289,7 +335,14 @@ def _score_momentum_short(
     if not ref:
         return 0.0, []
 
+    # PLAN-SIGNAL-GAP P2: 1h change — distinguishes "still dumping hard" from "bounce
+    # after a big 24h drop" for coins that already moved a lot.
+    change_1h = 0.0
+    if d1h and len(d1h.closes) >= 5 and d1h.closes[-4] > 0:
+        change_1h = (d1h.closes[-1] - d1h.closes[-4]) / d1h.closes[-4] * 100
+
     # ── 1. 24h drop in sweet spot (0-20 pts) ─────────────────────────────────
+    # PLAN-SIGNAL-GAP P1: ceiling extended to 50% (mirror of LONG side).
     drop = -change_24h  # positive value = how much it dropped
     if 8 <= drop <= 12:
         score += 20
@@ -303,6 +356,29 @@ def _score_momentum_short(
     elif 18 < drop <= 25:
         score += 8
         signals.append(f"Dump besar {change_24h:.1f}% — waspadai bouncing oversold")
+    elif 25 < drop <= 35:
+        score += 5
+        signals.append(f"Dump extended {change_24h:.1f}% — masih ada room turun tapi risk lebih tinggi")
+    elif 35 < drop <= 50:
+        score += 2
+        signals.append(f"Dump sangat extended {change_24h:.1f}% — high-risk, butuh konfirmasi kuat dari sinyal lain")
+
+    # PLAN-SIGNAL-GAP P2: bounce vs still-dumping modifier for extended drops.
+    if drop > 25:
+        if change_1h > 2:
+            score += 8
+            signals.append(f"📈 Bounce +{change_1h:.1f}% (1h) setelah dump {change_24h:.1f}% — entry short lebih aman dari chase")
+        elif change_1h < -3:
+            score -= 5
+            signals.append(f"⚠️ Masih turun kencang {change_1h:.1f}% (1h) — risk chase tinggi")
+
+    # PLAN-SIGNAL-GAP P3: pullback-to-momentum mirror — big drop + 15m bounce = ideal
+    # short re-entry zone (safer than chasing a coin still in free-fall).
+    if d15 and len(d15.closes) >= 5 and d15.closes[-3] > 0:
+        last_3_change = (d15.closes[-1] - d15.closes[-3]) / d15.closes[-3] * 100
+        if drop > 25 and 2 <= last_3_change <= 8:
+            score += 10
+            signals.append(f"📈 Bounce {last_3_change:.1f}% (15m) setelah dump {change_24h:.1f}% — re-entry short zone")
 
     # ── 2. Volume surge on the drop (0-25 pts) ────────────────────────────────
     best_vol = 0
@@ -384,16 +460,26 @@ def _score_momentum_short(
             break
 
     # ── Penalties ─────────────────────────────────────────────────────────────
+    # PLAN-SIGNAL-GAP P1: non-stacking (mirror of LONG side fix).
     if drop < 5.0:
         score -= 15   # not enough downward momentum
-    if drop > 25.0:
-        score -= 15   # oversold — bounce risk very high
-    if drop > 35.0:
-        score -= 25   # capitulation = dangerous to short here
+    elif drop > 50.0:
+        score -= 20   # capitulation = dangerous to short here
+    elif drop > 35.0:
+        score -= 8
+    elif drop > 25.0:
+        score -= 5    # oversold-ish — bounce risk elevated but not disqualifying
+
     if rsi_val < 22:
         score -= 15   # extreme oversold = reversal imminent
     elif rsi_val < 28:
         score -= 8
+
+    # PLAN-SIGNAL-GAP P5: relax oversold penalty when market is trending strongly
+    # down — RSI 22-28 is still valid continuation short on a strong downtrend day.
+    if regime == "trending_down" and rsi_val < 28:
+        score += 5
+        signals.append(f"RSI {rsi_val:.0f} oversold tapi market trending_down kuat — relaxed")
 
     # BUG-L14: liquidation feed is a directional PROXY, not real USDT — small nudge only.
     if ref.liq_long_usdt > 2_000_000:
@@ -540,8 +626,8 @@ def scan_symbol(
     # BUG-L13: per-coin regime from the coin's own 1h OHLCV (was BTC-only for all alts)
     regime        = detect_coin_regime(tf_map.get("1h") or ref)
 
-    long_score,  long_sigs  = _score_momentum_long(tf_map, price, change_24h)
-    short_score, short_sigs = _score_momentum_short(tf_map, price, change_24h)
+    long_score,  long_sigs  = _score_momentum_long(tf_map, price, change_24h, regime)
+    short_score, short_sigs = _score_momentum_short(tf_map, price, change_24h, regime)
 
     results = []
     for direction, score, signals in [

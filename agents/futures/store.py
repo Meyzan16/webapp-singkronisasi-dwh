@@ -17,6 +17,12 @@ _scanning: bool = False
 
 _subscribers: list[asyncio.Queue] = []
 
+# PLAN-SIGNAL-GAP P4: Big Movers monitor — coins with large 24h change that the
+# scanner saw this cycle, with their score/qualification status, regardless of
+# whether they made it into any agent's accepted results.
+_big_movers:    list[Any] = []
+_big_movers_ts: float     = 0.0
+
 
 # ── Write ──────────────────────────────────────────────────────────────────────
 
@@ -37,6 +43,13 @@ def set_scanning(flag: bool) -> None:
 def clear_results() -> None:
     _results.clear()
     _ts.clear()
+
+
+def set_big_movers(movers: list) -> None:
+    """PLAN-SIGNAL-GAP P4: called by scheduler after each scan cycle."""
+    global _big_movers, _big_movers_ts
+    _big_movers    = movers
+    _big_movers_ts = time.time()
 
 
 # ── Read ───────────────────────────────────────────────────────────────────────
@@ -60,6 +73,13 @@ def get_all_results() -> dict:
 
 def last_scan_ts(agent: str) -> Optional[float]:
     return _ts.get(agent)
+
+
+def get_big_movers() -> list:
+    """PLAN-SIGNAL-GAP P4: stale-checked like agent results (5 min TTL)."""
+    if time.time() - _big_movers_ts > STALE_SEC:
+        return []
+    return _big_movers
 
 
 def is_scanning() -> bool:

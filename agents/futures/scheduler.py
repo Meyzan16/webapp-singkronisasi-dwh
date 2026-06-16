@@ -194,9 +194,17 @@ async def _run_scan() -> dict:
     a1_results.sort(key=lambda x: x["score"], reverse=True)
     a2_results.sort(key=lambda x: x["score"], reverse=True)
     a3_results.sort(key=lambda x: x["score"], reverse=True)
+    a1_results_full = a1_results            # PLAN-SIGNAL-GAP P4: keep full list for big-movers match
+    a2_results_full = a2_results
+    a3_results_full = a3_results
     a1_results = a1_results[:TOP_N]
     a2_results = a2_results[:TOP_N]
     a3_results = a3_results[:TOP_N]
+
+    # PLAN-SIGNAL-GAP P4: Big Movers — every scanned coin with |change_24h| >= threshold,
+    # tagged with whether it qualified for any lane (and at what score) or not.
+    # Lets the frontend show WHY a 50%+ gainer didn't open a position, instead of nothing.
+    big_movers = _build_big_movers(tickers, a1_results_full + a2_results_full + a3_results_full)
 
     elapsed  = round(time.time() - start, 1)
     gen_time = int(time.time())
@@ -223,6 +231,7 @@ async def _run_scan() -> dict:
             "generated_at": gen_time,
             "elapsed_sec":  elapsed,
         },
+        "big_movers": big_movers,   # PLAN-SIGNAL-GAP P4
     }
 
     logger.info(
@@ -230,10 +239,67 @@ async def _run_scan() -> dict:
         agent1=len(a1_results),
         agent2=len(a2_results),
         agent3=len(a3_results),
+        big_movers=len(big_movers),
         scanned=len(tickers),
         elapsed_sec=elapsed,
     )
     return result
+
+
+# ── Big Movers helper (PLAN-SIGNAL-GAP P4) ─────────────────────────────────────
+
+BIG_MOVER_THRESHOLD = 10.0   # |change_24h| % — matches the screenshot's "Big Movers" panel
+
+
+def _build_big_movers(tickers: list[dict], all_results: list[dict]) -> list[dict]:
+    """
+    Build the Big Movers list: every scanned ticker with |change_24h| >= threshold,
+    tagged with whether it qualified for any lane this cycle (and at what score),
+    or a heuristic reason why not — so the frontend can explain "kenapa tidak masuk posisi"
+    instead of just showing nothing.
+    """
+    matched: dict[str, list[dict]] = {}
+    for r in all_results:
+        matched.setdefault(r["symbol"], []).append({
+            "agent":     r["agent"],
+            "direction": r["direction"],
+            "score":     r["score"],
+        })
+
+    movers = []
+    for ticker in tickers:
+        symbol = ticker.get("symbol", "")
+        try:
+            change_24h = float(ticker.get("priceChangePercent", 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(change_24h) < BIG_MOVER_THRESHOLD:
+            continue
+
+        matches = matched.get(symbol, [])
+        if matches:
+            best   = max(matches, key=lambda m: m["score"])
+            status = "lolos"
+            reason = f"Lolos {best['agent']} ({best['direction']}) score {best['score']}"
+        else:
+            status = "tidak_lolos"
+            if abs(change_24h) > 50:
+                reason = "24h change >50% — di luar jangkauan scoring saat ini (parabolic, risk reversal tinggi)"
+            elif abs(change_24h) > 25:
+                reason = "24h change >25% — extended move, kemungkinan RSI overbought/oversold atau volume sudah turun dari peak"
+            else:
+                reason = "Sinyal lain (volume/OI/RSI/breakout) belum cukup kuat untuk lolos threshold"
+
+        movers.append({
+            "symbol":     symbol,
+            "change_24h": round(change_24h, 2),
+            "status":     status,
+            "reason":     reason,
+            "matches":    matches,
+        })
+
+    movers.sort(key=lambda x: abs(x["change_24h"]), reverse=True)
+    return movers[:60]
 
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
@@ -265,6 +331,7 @@ async def run_futures_loop() -> None:
             futures_store.set_result("agent1", result["agent1"])
             futures_store.set_result("agent2", result["agent2"])
             futures_store.set_result("agent3", result["agent3"])   # Phase 11
+            futures_store.set_big_movers(result["big_movers"])     # PLAN-SIGNAL-GAP P4
             futures_store.set_scanning(False)
 
             _last_scan   = time.time()

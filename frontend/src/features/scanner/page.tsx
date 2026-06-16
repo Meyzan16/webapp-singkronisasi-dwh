@@ -4,6 +4,7 @@ import { fmtPrice } from "@/lib/format";
 import { MarketIntelBanner } from "@/components/MarketIntelBanner";
 import { DirBadge, AgentBadge } from "@/components/ui/trading-badges";
 import { type ConnState, CONN_META } from "@/components/ui/live-badge";
+import { BigMoversPanel } from "./components/BigMoversPanel";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -739,6 +740,9 @@ export default function ScannerFuturesPage() {
 
       {/* Market Intel Banner */}
       <MarketIntelBanner mode="futures" />
+
+      {/* PLAN-SIGNAL-GAP P4: Big Movers Monitor — informational, no auto-open */}
+      <BigMoversPanel />
 
       {/* Cards */}
       {filtered.length > 0 && (

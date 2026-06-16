@@ -406,22 +406,43 @@ async def check_futures_positions() -> tuple[int, int]:
                         close_price  = sl
                         # F114: SL trail moved above entry → close at profit, label as sl_plus
                         _pnl_chk = (sl - entry) / entry * 100 if entry > 0 else 0
-                        close_reason = "sl_plus" if (trail_active and _pnl_chk > 0) else "sl_hit"
+                        # PLAN-SIGNAL-GAP F4: SL sitting exactly at the breakeven trail stage
+                        # (entry, before the post-TP1 75% lock) is not a real loss — it's the
+                        # trail protecting capital. Distinguish it from a genuine SL hit so the
+                        # history table doesn't show it as a full 1.5%+ loss.
+                        _is_breakeven = trail_active and entry > 0 and abs(sl - entry) / entry < 0.001
+                        if trail_active and _pnl_chk > 0:
+                            close_reason = "sl_plus"
+                        elif _is_breakeven:
+                            close_reason = "breakeven_stop"
+                        else:
+                            close_reason = "sl_hit"
                     elif eff_high >= tp2:
                         new_status   = "tp"
                         close_price  = tp2
-                        close_reason = "tp2_hit"
+                        # PLAN-SIGNAL-GAP F2: tp2 here is trade.take_profit, which can already
+                        # be the extended TP3 level (see TP Extension below) — was hardcoded
+                        # "tp2_hit" even when the level actually hit was the extended TP3.
+                        close_reason = "tp3_hit" if meta.get("tp_extended") else "tp2_hit"
                 else:  # SHORT
                     if eff_high >= sl:
                         new_status   = "sl"
                         close_price  = sl
                         # F114: SL trail moved below entry → close at profit, label as sl_plus
                         _pnl_chk = (entry - sl) / entry * 100 if entry > 0 else 0
-                        close_reason = "sl_plus" if (trail_active and _pnl_chk > 0) else "sl_hit"
+                        # PLAN-SIGNAL-GAP F4: mirror of LONG breakeven detection above.
+                        _is_breakeven = trail_active and entry > 0 and abs(sl - entry) / entry < 0.001
+                        if trail_active and _pnl_chk > 0:
+                            close_reason = "sl_plus"
+                        elif _is_breakeven:
+                            close_reason = "breakeven_stop"
+                        else:
+                            close_reason = "sl_hit"
                     elif eff_low <= tp2:
                         new_status   = "tp"
                         close_price  = tp2
-                        close_reason = "tp2_hit"
+                        # PLAN-SIGNAL-GAP F2: mirror of LONG tp3_hit fix above.
+                        close_reason = "tp3_hit" if meta.get("tp_extended") else "tp2_hit"
 
             # ── 2. Liquidation guard (F85: adaptive threshold per leverage) ───
             if not new_status:

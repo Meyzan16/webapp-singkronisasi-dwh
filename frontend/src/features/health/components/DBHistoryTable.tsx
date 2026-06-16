@@ -63,8 +63,10 @@ function fmtDateTime(ts: number | null): { date: string; time: string } {
 function fmtDuration(entry_at: number, closed_at: number | null): string {
   if (!closed_at) return "Open";
   const secs = Math.floor(closed_at - entry_at);
-  if (secs < 60)    return `${secs}d`;
-  if (secs < 3600)  return `${Math.floor(secs / 60)}m ${secs % 60}d`;
+  // PLAN-SIGNAL-GAP F3: was "d" for seconds-remainder, easily misread as "days"
+  // since "hr" (hari) is used for actual days a few lines below — now "dtk" (detik).
+  if (secs < 60)    return `${secs}dtk`;
+  if (secs < 3600)  return `${Math.floor(secs / 60)}m ${secs % 60}dtk`;
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
   return h < 24 ? `${h}j ${m}m` : `${Math.floor(h / 24)}hr ${h % 24}j`;
@@ -102,18 +104,29 @@ function StatusBadge({ status, pnl }: { status: string; pnl: number | null }) {
   return <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-500 border border-neutral-200">{status}</span>;
 }
 
-const CLOSE_REASON_META: Record<string, { label: string; color: string; emoji: string }> = {
-  sl_hit:           { label: "SL Hit",         color: "bg-red-100 text-red-700",      emoji: "🛑" },
-  sl_plus:          { label: "SL+ Profit",     color: "bg-teal-100 text-teal-700",    emoji: "🛡" },
-  tp2_hit:          { label: "TP2 Hit",         color: "bg-green-100 text-green-700",  emoji: "✅" },
-  tp3_hit:          { label: "TP3 Hit",         color: "bg-emerald-100 text-emerald-700", emoji: "🎯" },
-  trend_reversal:   { label: "Trend Reversal",  color: "bg-orange-100 text-orange-700",emoji: "↩️" },
-  profit_protection:{ label: "Profit Guard",    color: "bg-yellow-100 text-yellow-700",emoji: "🛡" },
-  flow_reversal:    { label: "Flow Reversal",   color: "bg-purple-100 text-purple-700",emoji: "🔄" },
-  risk_adjusted:    { label: "Risk Adjusted",   color: "bg-pink-100 text-pink-700",    emoji: "⚖️" },
-  liq_guard:        { label: "Liq Guard",       color: "bg-red-200 text-red-800",      emoji: "🚨" },
-  opportunity_lost: { label: "Opp Lost",        color: "bg-neutral-100 text-neutral-600", emoji: "📉" },
-  max_age_expired:  { label: "Max Age",         color: "bg-neutral-100 text-neutral-500", emoji: "⏰" },
+// PLAN-SIGNAL-GAP F1: `scope` marks which trade type can actually produce this reason —
+// "both" reasons exist in both monitors; "spot"/"futures" only exist in one. The legend
+// at the bottom filters by `reasonScope` so a Futures-only table doesn't show Spot-only
+// reasons (trend_reversal etc.) that can never appear there, and vice versa.
+// Removed `opportunity_lost` — grepped the whole backend, never produced anywhere (dead).
+// Added `tp1_breakeven`, `stagnant_rotation` (spot) and `stagnant_48h`, `breakeven_stop`
+// (futures) — these close reasons exist in the monitors but were missing from this map,
+// so they fell back to the raw-string badge instead of a proper label.
+const CLOSE_REASON_META: Record<string, { label: string; color: string; emoji: string; scope: "spot" | "futures" | "both" }> = {
+  sl_hit:            { label: "SL Hit",          color: "bg-red-100 text-red-700",         emoji: "🛑", scope: "both" },
+  sl_plus:           { label: "SL+ Profit",      color: "bg-teal-100 text-teal-700",       emoji: "🛡", scope: "futures" },
+  breakeven_stop:    { label: "Breakeven Stop",  color: "bg-neutral-200 text-neutral-600", emoji: "⏸",  scope: "futures" },
+  tp1_breakeven:     { label: "TP1 Breakeven",   color: "bg-teal-100 text-teal-700",       emoji: "🛡", scope: "spot" },
+  tp2_hit:           { label: "TP2 Hit",         color: "bg-green-100 text-green-700",     emoji: "✅", scope: "both" },
+  tp3_hit:           { label: "TP3 Hit",         color: "bg-emerald-100 text-emerald-700", emoji: "🎯", scope: "both" },
+  trend_reversal:    { label: "Trend Reversal",  color: "bg-orange-100 text-orange-700",   emoji: "↩️", scope: "spot" },
+  profit_protection: { label: "Profit Guard",    color: "bg-yellow-100 text-yellow-700",   emoji: "🛡", scope: "spot" },
+  flow_reversal:     { label: "Flow Reversal",   color: "bg-purple-100 text-purple-700",   emoji: "🔄", scope: "spot" },
+  risk_adjusted:     { label: "Risk Adjusted",   color: "bg-pink-100 text-pink-700",       emoji: "⚖️", scope: "spot" },
+  stagnant_rotation: { label: "Stagnant Rotate", color: "bg-neutral-100 text-neutral-500", emoji: "🔁", scope: "spot" },
+  liq_guard:         { label: "Liq Guard",       color: "bg-red-200 text-red-800",         emoji: "🚨", scope: "futures" },
+  stagnant_48h:      { label: "Stagnant 48h",    color: "bg-neutral-100 text-neutral-500", emoji: "💤", scope: "futures" },
+  max_age_expired:   { label: "Max Age",         color: "bg-neutral-100 text-neutral-500", emoji: "⏰", scope: "both" },
 };
 
 function CloseReasonBadge({ reason }: { reason: string | null }) {
@@ -143,6 +156,7 @@ interface DBHistoryTableProps {
   compact?:       boolean;
   autoRefresh?:   number;   // polling interval ms — 0 or undefined = disabled
   days?:          number;   // §16.6: window riwayat (default 90 hari)
+  reasonScope?:   "all" | "spot" | "futures";   // PLAN-SIGNAL-GAP F1: filters the legend
 }
 
 const DEFAULT_STYLE_TABS: StyleOption[] = [
@@ -160,6 +174,7 @@ export function DBHistoryTable({
   compact:      _compact = false,  // eslint-disable-line @typescript-eslint/no-unused-vars
   autoRefresh   = 0,
   days          = 90,
+  reasonScope   = "all",
 }: DBHistoryTableProps = {}) {
   const [data,        setData]        = useState<TradeResponse | null>(null);
   const [loading,     setLoading]     = useState(true);
@@ -598,7 +613,9 @@ export function DBHistoryTable({
           Legenda Alasan Tutup Posisi
         </summary>
         <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-          {Object.entries(CLOSE_REASON_META).map(([key, meta]) => (
+          {Object.entries(CLOSE_REASON_META)
+            .filter(([, meta]) => reasonScope === "all" || meta.scope === "both" || meta.scope === reasonScope)
+            .map(([key, meta]) => (
             <div key={key} className={`rounded-xl px-3 py-2 border ${meta.color.replace("text-", "border-").replace(/[-\d]+$/, "200")}`}>
               <p className={`text-xs font-bold mb-0.5 ${meta.color}`}>{meta.emoji} {meta.label}</p>
               <p className="text-[9px] text-neutral-500 font-mono">{key}</p>

@@ -359,6 +359,7 @@ export function OverviewTab({ positions, riskDash, learning, startingBalance, ri
             defaultStyle="futures"
             hideStyleTabs={false}
             compact={true}
+            reasonScope="futures"
             styleOptions={[
               { key: "futures", label: "Semua" },
               { key: "agent1",  label: "🎯 Pre-Gainer" },
