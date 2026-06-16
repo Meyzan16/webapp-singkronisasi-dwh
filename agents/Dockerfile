@@ -14,4 +14,4 @@ COPY backend/app ./app
 # Agent code
 COPY agents      ./agents
 
-CMD ["python", "-m", "agents"]
+CMD ["python", "-m", "agents.main"]

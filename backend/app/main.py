@@ -18,6 +18,9 @@ if _repo_root not in sys.path:
 import structlog
 from fastapi import FastAPI, WebSocket
 
+from app.logging_config import configure_logging
+configure_logging("backend")   # JSON-to-stdout, no file writes — see logging_config.py
+
 from app.api.v1.market import router as market_router
 from app.api.v1.history import router as history_router
 from app.api.v1.opportunity import router as opportunity_router

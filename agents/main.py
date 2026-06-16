@@ -14,6 +14,9 @@ import structlog
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"))
 
+from app.logging_config import configure_logging
+configure_logging("agents")   # JSON-to-stdout, no file writes — see backend/app/logging_config.py
+
 logger = structlog.get_logger(__name__)
 
 

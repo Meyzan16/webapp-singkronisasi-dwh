@@ -1,3 +1,10 @@
+#docker compose down
+#docker compose build --no-cache backend agents frontend
+#docker compose up -d
+#docker compose ps
+#docker compose logs -f backend agents
+#docker compose -f docker-compose.yml -f docker-compose.logging.yml up -d
+
 services:
 
   # ── Infrastructure ───────────────────────────────────────────────────────────
