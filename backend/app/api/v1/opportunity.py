@@ -167,6 +167,7 @@ class OpenTradeRequest(BaseModel):
     signals:           list[str] = []
     taker_ratio:       float = Field(default=0.5, ge=0, le=1)
     confidence:        int   = Field(default=50, ge=0, le=100)
+    entry_mode:        str   = Field(default="fresh_setup")
 
     @model_validator(mode="after")
     def _validate_levels(self) -> "OpenTradeRequest":
@@ -265,6 +266,7 @@ async def open_opportunity_trade(body: OpenTradeRequest) -> dict:
         "alert_type":        body.alert_type,
         "taker_ratio":       body.taker_ratio,
         "confidence":        body.confidence,
+        "entry_mode":        body.entry_mode,
     }
 
     async with AsyncSessionLocal() as session:

@@ -126,7 +126,8 @@ const CLOSE_REASON_META: Record<string, { label: string; color: string; emoji: s
   stagnant_rotation: { label: "Stagnant Rotate", color: "bg-neutral-100 text-neutral-500", emoji: "🔁", scope: "spot" },
   liq_guard:         { label: "Liq Guard",       color: "bg-red-200 text-red-800",         emoji: "🚨", scope: "futures" },
   stagnant_48h:      { label: "Stagnant 48h",    color: "bg-neutral-100 text-neutral-500", emoji: "💤", scope: "futures" },
-  max_age_expired:   { label: "Max Age",         color: "bg-neutral-100 text-neutral-500", emoji: "⏰", scope: "both" },
+  max_age_expired:      { label: "Max Age",          color: "bg-neutral-100 text-neutral-500", emoji: "⏰", scope: "both" },
+  trend_structure_broken: { label: "Structure Break", color: "bg-orange-100 text-orange-700",   emoji: "📉", scope: "spot" },
 };
 
 function CloseReasonBadge({ reason }: { reason: string | null }) {

@@ -193,6 +193,35 @@ async def _fetch_klines_1m(client: httpx.AsyncClient, symbol: str) -> list:
     return []
 
 
+async def _fetch_klines_4h(client: httpx.AsyncClient, symbol: str, limit: int = 60) -> list:
+    """4h candles — used for trailing-structure-stop in momentum_chase trades."""
+    try:
+        r = await client.get(
+            spot(f"/api/v3/klines?symbol={symbol}&interval=4h&limit={limit}")
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return []
+
+
+def _compute_trailing_sl(klines_4h: list, current_sl: float) -> float:
+    """
+    Ratchet trailing stop for momentum_chase trades post-TP1.
+    Candidate = max(EMA21(4h)*0.99, swing_low_10_candles(4h)*0.99).
+    Only ever moves UP — never returns below current_sl.
+    """
+    if len(klines_4h) < 22:
+        return current_sl
+    closes    = [float(k[4]) for k in klines_4h]
+    lows      = [float(k[3]) for k in klines_4h]
+    ema21     = _ema(closes, 21)
+    swing_low = min(lows[-10:])
+    candidate = max(ema21 * 0.99, swing_low * 0.99)
+    return max(current_sl, candidate)
+
+
 def _wick_extremes(klines_1m: list, entry_at: float) -> tuple[Optional[float], Optional[float]]:
     """(low, high) across 1m candles that closed after entry. None if no data."""
     lows, highs = [], []
@@ -314,9 +343,11 @@ async def check_positions() -> int:
     prices = await _fetch_prices(symbols)
     klines_1h: dict[str, list] = {}
     klines_1m: dict[str, list] = {}
+    klines_4h: dict[str, list] = {}
     async with httpx.AsyncClient(timeout=15) as client:
         tasks_1h = {s: asyncio.create_task(_fetch_klines_1h(client, s)) for s in symbols}
         tasks_1m = {s: asyncio.create_task(_fetch_klines_1m(client, s)) for s in symbols}
+        tasks_4h = {s: asyncio.create_task(_fetch_klines_4h(client, s)) for s in symbols}
         for s in symbols:
             try:
                 klines_1h[s] = await tasks_1h[s]
@@ -326,6 +357,10 @@ async def check_positions() -> int:
                 klines_1m[s] = await tasks_1m[s]
             except Exception:
                 klines_1m[s] = []
+            try:
+                klines_4h[s] = await tasks_4h[s]
+            except Exception:
+                klines_4h[s] = []
 
     # Prune price history to open symbols only (§1.6)
     for stale in [s for s in _price_history if s not in symbols]:
@@ -343,6 +378,7 @@ async def check_positions() -> int:
                     prices.get(snapshot.symbol),
                     klines_1h.get(snapshot.symbol, []),
                     klines_1m.get(snapshot.symbol, []),
+                    klines_4h.get(snapshot.symbol, []),
                 )
                 closed  += n_closed
                 updated += n_updated
@@ -365,6 +401,7 @@ async def _process_trade(
     price: Optional[float],
     k1h: list,
     k1m: list,
+    k4h: list,
 ) -> tuple[int, int]:
     """Evaluate one position. Returns (closed, updated) as 0/1 each."""
     if price is None:
@@ -396,6 +433,17 @@ async def _process_trade(
     if not entry or entry <= 0 or not sl or sl <= 0 or not tp2 or tp2 <= 0:
         logger.warning("monitor_invalid_levels", id=trade.id, symbol=trade.symbol)
         return 0, 0
+
+    # ── Trailing SL ratchet for momentum_chase trades post-TP1 ──────────────
+    # Runs every cycle to ratchet the SL up as price climbs. Only moves UP.
+    is_momentum_chase = meta.get("entry_mode") == "momentum_chase"
+    if is_momentum_chase and meta.get("tp1_hit") and len(k4h) >= 22:
+        new_trail = _compute_trailing_sl(k4h, sl)
+        if new_trail > sl:
+            sl = new_trail
+            meta["current_sl"] = round(sl, 8)
+            trade.stop_loss    = round(sl, 8)
+            trade.signals_json = json.dumps(meta, ensure_ascii=False)
 
     # Wick extremes since entry (§12.3) — fall back to spot price only
     wick_low, wick_high = _wick_extremes(k1m, trade.entry_at or time.time())
@@ -432,6 +480,22 @@ async def _process_trade(
             close_reason = "sl_hit"
         pnl_probe  = (close_price - entry) / entry * 100 - EXECUTION_COST_PCT
         new_status = "tp" if (meta.get("tp1_hit") and pnl_probe > 0) else "sl"
+    elif is_momentum_chase and meta.get("tp1_hit"):
+        # Trailing mode: skip hard TP2/TP3 targets (let winner run further).
+        # Only close on trend structure break: EMA9(4h) crosses below EMA21(4h).
+        if len(k4h) >= 21:
+            closes4h = [float(k[4]) for k in k4h]
+            ema9_4h  = _ema(closes4h, 9)
+            ema21_4h = _ema(closes4h, 21)
+            if ema9_4h < ema21_4h * 0.995:
+                pnl_probe = (price - entry) / entry * 100 - EXECUTION_COST_PCT
+                new_status   = "tp" if pnl_probe > 0 else "sl"
+                close_price  = round(price, 8)
+                close_reason = "trend_structure_broken"
+                logger.info("momentum_chase_structure_break",
+                            symbol=trade.symbol,
+                            ema9=round(ema9_4h, 6), ema21=round(ema21_4h, 6),
+                            pnl_net=round(pnl_probe, 2))
     elif tp3 and eff_high >= tp3:
         new_status, close_price, close_reason = "tp", tp3, "tp3_hit"
     elif eff_high >= tp2:

@@ -62,6 +62,15 @@ MOMENTUM_SCAN_EXTRA     = 20    # max 20 coin tambahan di luar top-100 volume
 # R8: Momentum chase scoring — coin sudah bergerak ≥ 10%, pullback sehat, siap second leg
 MOMENTUM_CHASE_MIN_24H  = 10.0  # minimal 24h change sebelum dianggap "momentum chase"
 
+# PLAN-SPOT-GAP S4: weekly-momentum universe supplement — koin yang sudah "selesai
+# moon" minggu ini lalu sekarang sepi (change_24h kecil) tidak pernah masuk top-100
+# volume MAUPUN R7 momentum supplement (yang cuma lihat 24h). Pass terpisah ini
+# fetch HANYA klines 4h (murah) untuk pool lebih luas, semata untuk ukur change_7d.
+WEEKLY_SCAN_POOL        = 150       # ranking volume 100..250 dicek change_7d-nya
+WEEKLY_SCAN_MIN_VOLUME  = 1_000_000 # likuiditas lebih relaks dari MIN_QUOTE_VOLUME
+WEEKLY_CHANGE_MIN_PCT   = 20.0      # change_7d minimal untuk masuk supplement
+WEEKLY_SCAN_EXTRA       = 15        # max coin tambahan dari jalur ini
+
 # Gerbang arah untuk auto-open (§12.1)
 DIRECTION_TAKER_MIN = 0.55
 
@@ -88,6 +97,13 @@ STABLECOIN_BLACKLIST = {
     "FRXETH", "ANKRBNB", "SFRXETH",
     # Stable algorithmic (FRAX/LUSD/USDD sudah di atas)
     "MKUSD", "CRVUSD",
+}
+
+# PLAN-SPOT-GAP S6: token komoditas/TradFi — tidak respons ke sinyal TA crypto
+# (Wyckoff/EMA/BB), sama seperti exclude list di agents/futures/data.py.
+COMMODITY_BLACKLIST = {
+    "PAXG", "XAUT", "XAU",       # tokenized gold
+    "COPPER", "SILVER", "GOLD", "OIL", "WTI", "CORN", "WHEAT", "NATGAS",
 }
 
 # Biaya eksekusi penuh (fee + spread + slippage) dari satu sumber (§15.1).
@@ -320,11 +336,16 @@ def _score_symbol(
     tf_data: dict[str, TFData],
     change_24h: float,
     change_1h: float,
+    change_7d: float = 0.0,
 ) -> Optional[dict]:
     """Score a symbol and return opportunity dict, or None if score < MIN_SCORE."""
     score   = 0.0
     signals: list[str] = []
     alert   = "accumulation"
+    # PLAN-SPOT-GAP: koin dengan weekly momentum kuat dapat keringanan di gate
+    # RSI(4h) dan penalty change_24h>20% — sebelumnya kedua gate ini membuang
+    # SEMUA top-gainer mingguan tanpa pengecualian (lihat RC-1/RC-2/RC-5).
+    strong_weekly_momentum = change_7d >= 20.0
 
     ref = tf_data.get("15m") or tf_data.get("1h")
     if not ref:
@@ -373,13 +394,24 @@ def _score_symbol(
             signals.append("💪 Volume naik saat harga turun — hidden strength")
 
     # 3. RSI Zone + REM OVERBOUGHT timeframe besar (§10.4) ────────────────────
-    # Rem dulu: RSI 4h sangat tinggi = parabolic, pola klasik beli di pucuk
+    # Rem dulu: RSI 4h sangat tinggi = parabolic, pola klasik beli di pucuk.
+    # PLAN-SPOT-GAP RC-1/RC-2: gate ini dulu membuang TOTAL setiap koin yang
+    # sudah naik kuat minggu ini (RSI 4h hampir pasti tinggi setelah weekly pump),
+    # padahal itu justru target utama lane ini. Kalau ada weekly momentum kuat,
+    # turunkan jadi penalty ringan — jangan buang total.
     d4h_rsi = tf_data["4h"].rsi if "4h" in tf_data else None
     if d4h_rsi is not None and d4h_rsi > 82:
-        return None   # skip total — jangan tampil sebagai rekomendasi pun
-    if d4h_rsi is not None and d4h_rsi > 75:
-        score -= 15
-        signals.append(f"⚠️ RSI(4h) {d4h_rsi:.0f} — overbought berat, risiko pucuk")
+        if not strong_weekly_momentum:
+            return None   # skip total — jangan tampil sebagai rekomendasi pun
+        score -= 10
+        signals.append(f"⚠️ RSI(4h) {d4h_rsi:.0f} sangat overbought, tapi weekly +{change_7d:.1f}% — tetap dipertimbangkan hati-hati")
+    elif d4h_rsi is not None and d4h_rsi > 75:
+        if strong_weekly_momentum:
+            score -= 5
+            signals.append(f"RSI(4h) {d4h_rsi:.0f} tinggi, tapi weekly momentum +{change_7d:.1f}% kuat — penalty dikurangi")
+        else:
+            score -= 15
+            signals.append(f"⚠️ RSI(4h) {d4h_rsi:.0f} — overbought berat, risiko pucuk")
 
     for tf, d in tf_data.items():
         if 35 <= d.rsi <= 55:
@@ -423,12 +455,19 @@ def _score_symbol(
             break
 
     # 7. Momentum 24h ──────────────────────────────────────────────────────────
+    # PLAN-SPOT-GAP RC-5: kalau >20% itu adalah BAGIAN dari weekly top-gainer
+    # move (bukan parabolic dadakan hari ini), penalty diringankan jauh —
+    # "sudah naik" itu justru tujuan lane ini, bukan alasan untuk membuang.
     if 3 <= change_24h <= 20:
         score += 8
         signals.append(f"Momentum +{change_24h:.1f}% (24h) — mulai bergerak")
     elif change_24h > 20:
-        score -= 10
-        signals.append(f"⚠️ Sudah naik {change_24h:.1f}% (entry terlambat?)")
+        if strong_weekly_momentum:
+            score -= 3
+            signals.append(f"🚀 Sudah naik {change_24h:.1f}% (24h) + {change_7d:.1f}% (7d) — top gainer momentum, bukan FOMO dadakan")
+        else:
+            score -= 10
+            signals.append(f"⚠️ Sudah naik {change_24h:.1f}% (entry terlambat?)")
 
     # 8. Short-term momentum ───────────────────────────────────────────────────
     if 1 <= change_1h <= 5:
@@ -460,11 +499,17 @@ def _score_symbol(
         signals.append("⚡ EMA bullish alignment semua TF — momentum sangat kuat")
 
     # 12. R8 Momentum Chase — coin sudah naik ≥ 10%, pullback sehat, siap second leg
+    # PLAN-SPOT-GAP S3/RC-6: gate lama cuma lihat change_24h — koin yang pump-nya
+    # terjadi hari ke-2/3 minggu ini lalu flat 2 hari terakhir (change_24h kecil)
+    # tidak pernah ke-trigger, padahal itu setup continuation paling sehat yang
+    # ingin dicari lane ini. Trigger sekarang JUGA via change_7d.
     entry_mode = "fresh_setup"
-    if change_24h >= MOMENTUM_CHASE_MIN_24H:
+    if change_24h >= MOMENTUM_CHASE_MIN_24H or strong_weekly_momentum:
         d1h = tf_data.get("1h")
         if d1h:
-            rsi_cooling  = 45 <= d1h.rsi <= 65
+            # Band RSI sedikit dilebarkan (40-65, dari 45-65) untuk weekly mover
+            # yang baru mulai cooling tapi belum sepenuhnya turun ke zona "fresh".
+            rsi_cooling  = 40 <= d1h.rsi <= 65
             ema_holding  = d1h.ema9 > d1h.ema21 * 0.99   # EMA9 di atas EMA21 (buffer 1%)
             # Volume declining selama pullback = konsolidasi sehat (bukan distribusi)
             vol_healthy  = True
@@ -476,7 +521,7 @@ def _score_symbol(
                 score += 15
                 entry_mode = "momentum_chase"
                 signals.append(
-                    f"🚀 Momentum pullback: +{change_24h:.1f}% 24h, "
+                    f"🚀 Momentum pullback: +{change_24h:.1f}% 24h / +{change_7d:.1f}% 7d, "
                     f"RSI {d1h.rsi:.0f} cooling, EMA holding"
                 )
                 if vol_healthy:
@@ -522,6 +567,7 @@ def _score_symbol(
         "alert_type":          alert,
         "change_24h":          round(change_24h, 2),
         "change_1h":           round(change_1h, 2),
+        "change_7d":           round(change_7d, 2),
         "vol_ratio":           round(best.vol_ratio if best else 1.0, 2),
         "avg_taker":           round(avg_taker, 3),
         "bb_width_15m":        round(tf_data["15m"].bb_width * 100, 2) if "15m" in tf_data else None,
@@ -648,6 +694,16 @@ async def run_opportunity_scan() -> dict:
 
     tickers = [t for t in tickers if not _is_stablecoin(t["symbol"])]
 
+    # PLAN-SPOT-GAP S6: exclude commodity/TradFi tokens (XAUT, PAXG, dst) — sinyal
+    # TA crypto (BB Squeeze, taker ratio, dst) tidak relevan untuk instrumen ini.
+    def _is_commodity(sym: str) -> bool:
+        base = sym.upper()
+        if base.endswith("USDT"):
+            base = base[:-4]
+        return base in COMMODITY_BLACKLIST
+
+    tickers = [t for t in tickers if not _is_commodity(t["symbol"])]
+
     # Filter 2: price-range guard — if price ≈ $1 and barely moving, skip
     # Catches new stablecoins not yet in the blacklist
     def _is_pegged(t: dict) -> bool:
@@ -683,6 +739,49 @@ async def run_opportunity_scan() -> dict:
         logger.info("momentum_scan_supplement", extra=len(momentum_supplement),
                     top_mover=momentum_supplement[0]["symbol"] if momentum_supplement else None)
         candidates = candidates + momentum_supplement
+
+    # PLAN-SPOT-GAP S4: weekly-momentum supplement — pool lebih luas (rank 100-250
+    # by volume), cek change_7d via klines 4h SAJA (murah, 1 TF bukan 3) sebelum
+    # diputuskan masuk candidates penuh. Skip simbol yang sudah ada di candidates.
+    existing_syms = {c["symbol"] for c in candidates}
+    weekly_pool   = [
+        t for t in tickers[100:100 + WEEKLY_SCAN_POOL]
+        if t["symbol"] not in existing_syms
+        and float(t.get("quoteVolume", 0)) >= WEEKLY_SCAN_MIN_VOLUME
+    ]
+    if weekly_pool:
+        _wsem = asyncio.Semaphore(15)
+
+        async def _fetch_4h_only(client: httpx.AsyncClient, sym: str) -> tuple[str, list]:
+            async with _wsem:
+                return sym, await _fetch_klines(client, sym, "4h")
+
+        async with httpx.AsyncClient(timeout=20) as wclient:
+            wtasks = [asyncio.create_task(_fetch_4h_only(wclient, t["symbol"])) for t in weekly_pool]
+            weekly_klines: dict[str, list] = {}
+            for task in wtasks:
+                sym, kl = await task
+                weekly_klines[sym] = kl
+
+        weekly_movers = []
+        for t in weekly_pool:
+            kl = weekly_klines.get(t["symbol"], [])
+            if len(kl) < 43:   # butuh 42 candle selesai + 1 candle berjalan
+                continue
+            closes = [float(k[4]) for k in kl[:-1]]   # buang candle berjalan (§10.1)
+            if len(closes) < 42 or closes[-42] <= 0:
+                continue
+            chg7d = (closes[-1] - closes[-42]) / closes[-42] * 100
+            if chg7d >= WEEKLY_CHANGE_MIN_PCT:
+                weekly_movers.append((chg7d, t))
+
+        weekly_movers.sort(key=lambda x: x[0], reverse=True)
+        weekly_supplement = [t for _, t in weekly_movers[:WEEKLY_SCAN_EXTRA]]
+        if weekly_supplement:
+            logger.info("weekly_momentum_supplement", extra=len(weekly_supplement),
+                        top_mover=weekly_supplement[0]["symbol"],
+                        top_change_7d=round(weekly_movers[0][0], 1))
+            candidates = candidates + weekly_supplement
 
     # BTC 24h change untuk regime gate (§12.5)
     btc_change_24h = 0.0
@@ -735,7 +834,15 @@ async def run_opportunity_scan() -> dict:
         if d1h and len(d1h.closes) >= 2:
             change_1h = (d1h.closes[-1] - d1h.closes[-2]) / (d1h.closes[-2] + 1e-10) * 100
 
-        result = _score_symbol(symbol, tf_data, change_24h, change_1h)
+        # PLAN-SPOT-GAP S1: change_7d dari klines 4h yang sudah ditarik (42 candle
+        # 4h ≈ 7 hari). Data ini sudah ada di memory (CANDLE_LIMIT=100), cuma
+        # sebelumnya tidak pernah dipakai untuk mengukur performa mingguan.
+        d4h       = tf_data.get("4h")
+        change_7d = 0.0
+        if d4h and len(d4h.closes) >= 42 and d4h.closes[-42] > 0:
+            change_7d = (d4h.closes[-1] - d4h.closes[-42]) / d4h.closes[-42] * 100
+
+        result = _score_symbol(symbol, tf_data, change_24h, change_1h, change_7d)
         if result is None:
             continue
 

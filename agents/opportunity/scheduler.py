@@ -255,6 +255,11 @@ async def _auto_open_position(coin: dict) -> bool:
             "ev_per_risk":       coin.get("ev_per_risk"),
             "direction_confirmed": coin.get("direction_confirmed"),
             "entry_hour_wib":    int((time.time() / 3600 + 7) % 24),
+            # PLAN-SPOT-GAP: entry_mode menentukan exit logic di monitor.py —
+            # "momentum_chase" trades pakai trailing-structure-stop (return
+            # maksimal), "fresh_setup" tetap pakai TP1/TP2/TP3 tetap (existing).
+            "entry_mode":        coin.get("entry_mode", "fresh_setup"),
+            "change_7d":         coin.get("change_7d", 0.0),
         }
 
         trade = PaperTrade(
