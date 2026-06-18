@@ -584,6 +584,9 @@ def scan_symbol(
         elif regime == "trending_down" and direction == "LONG":
             score -= 5
 
+        # F92: per-coin win rate bonus/penalty (±5 pts, needs ≥3 historical trades)
+        score += weight_updater.get_coin_bonus(symbol)
+
         if score < effective_min:   # F69: adaptive threshold
             continue
         levels = _calc_levels(direction, tf_map, price)

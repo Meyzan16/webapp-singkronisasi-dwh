@@ -184,7 +184,7 @@
 | 🔴 HIGH | 23 | F3 ✅, F8 ✅, F17 ✅, F18 ✅, F21 ✅, F22 ✅ selesai · F34, F35, F41, F42, F51, F52, F53, F58, F59, F60, F68, F69, F70, F86, F87, F88, F89 pending |
 | 🟡 MEDIUM | 54 | F14 ✅, F15 ✅, F19 ✅, F23 ✅ selesai · F1, F5, F6, F9-F13, F24, F25, F27-F31, F36-F38, F43-F48, F54-F56, F61-F66, F71-F74, F76-F83, F90-F93, F96-F98, F100-F103, F105 pending |
 | 🟢 LOW | 29 | F4 ✅, F16 ✅ selesai · F2, F7, F20, F26, F32, F33, F39, F40, F49, F50, F57, F67, F75, F84, F85, F94, F95, F99, F104, F106 pending |
-| **Total** | **106** | **12 selesai ✅ · 94 pending ❌** |
+| **Total** | **106** | **~100 selesai ✅ · F88 F89-F95 pending (backlog)** |
 
 ---
 
@@ -494,7 +494,7 @@ F23 ✅ unrealized_pnl open positions tidak kurangi fee → deduct 0.10% round t
 
 ---
 
-### 🔴 Phase 1 — Data Integrity & Model Foundation
+### ✅ Phase 1 — Data Integrity & Model Foundation (SELESAI)
 
 ```
 Kerjakan Phase 1 dari PLAN-FUTURES.md. Ini adalah prasyarat semua phase lain —
@@ -548,7 +548,7 @@ Setelah semua fix di atas selesai dan verified, berikan SQL reset DB:
 
 ---
 
-### 🔴 Phase 2 — Core Agent Signal Quality
+### ✅ Phase 2 — Core Agent Signal Quality (SELESAI)
 
 ```
 Kerjakan Phase 2 dari PLAN-FUTURES.md. Perbaiki kualitas sinyal kedua agent futures.
@@ -616,7 +616,7 @@ F106 — agents/futures/agent1.py fungsi _score_pregainer()
 
 ---
 
-### 🟠 Phase 3 — Monitor & Position Management
+### ✅ Phase 3 — Monitor & Position Management (SELESAI)
 
 ```
 Kerjakan Phase 3 dari PLAN-FUTURES.md. Perbaiki lifecycle posisi futures.
@@ -684,7 +684,7 @@ F107 — agents/futures/store.py fungsi set_result()
 
 ---
 
-### 🟠 Phase 4 — Learning Feedback Loop
+### ✅ Phase 4 — Learning Feedback Loop (SELESAI)
 
 ```
 Kerjakan Phase 4 dari PLAN-FUTURES.md. Buat adaptive learning loop jadi nyata — saat ini
@@ -763,7 +763,7 @@ F32 — agents/futures/store.py
 
 ---
 
-### 🟡 Phase 5 — Backend API Corrections
+### ✅ Phase 5 — Backend API Corrections (SELESAI)
 
 ```
 Kerjakan Phase 5 dari PLAN-FUTURES.md. Perbaiki endpoint yang return data salah atau tidak konsisten.
@@ -848,7 +848,7 @@ F24 — backend/app/api/v1/futures_scanner.py endpoint GET /futures/positions
 
 ---
 
-### 🟡 Phase 6 — Frontend Corrections
+### ✅ Phase 6 — Frontend Corrections (SELESAI)
 
 ```
 Kerjakan Phase 6 dari PLAN-FUTURES.md. Perbaiki UI yang hardcode, win rate inflate, dan state mati.
@@ -927,7 +927,7 @@ F49 — FuturesTab.tsx
 
 ---
 
-### 🟢 Phase 7 — Market Overview & Cleanup
+### ✅ Phase 7 — Market Overview & Cleanup (SELESAI)
 
 ```
 Kerjakan Phase 7 dari PLAN-FUTURES.md. Market overview improvements dan minor fixes.
@@ -988,17 +988,23 @@ F113 — agents/futures/scheduler.py
 
 ### Ringkasan Phase
 
-| Phase | Focus | Bug | Effort |
+| Phase | Focus | Bug | Status |
 |-------|-------|-----|--------|
-| ✅ Phase 0 | Sudah selesai | 12 ✅ | — |
-| 🔴 Phase 1 | Model & data foundation | F108 F51 F59 F58 F13 | ~1 jam |
-| 🔴 Phase 2 | Core agent signal quality | F34 F52 F100 F101 F5 F6 F35 F37 F2 F106 | ~3 jam |
-| 🟠 Phase 3 | Monitor & position lifecycle | F83 F76 F77 F81 F84 F85 F79 F80 F61 F62 F107 | ~3 jam |
-| 🟠 Phase 4 | Learning feedback loop | F68 F69 F60 F70 F73 F75 F71 F72 F63 F64 F32 | ~4 jam |
-| 🟡 Phase 5 | Backend API corrections | F102 F103 F105 F109 F110 F27 F28 F29 F41 F42 F44 F45 F48 F50 F53 F9 F20 F24 | ~3 jam |
-| 🟡 Phase 6 | Frontend corrections | F104 F43 F46 F47 F26 F10 F38 F39 F40 F111 F30 F31 F65 F66 F25 F49 | ~3 jam |
-| 🟢 Phase 7 | Market overview & cleanup | F96 F97 F98 F99 F12 F11 F55 F33 F7 F112 F113 | ~2 jam |
-| **Total** | | **101 bug** | **~19 jam** |
+| ✅ Phase 0 | Foundation fixes | F3 F4 F8 F14 F15 F16 F17 F18 F19 F21 F22 F23 | Selesai |
+| ✅ Phase 1 | Model & data foundation | F108 F51 F59 F58 F13 | Selesai |
+| ✅ Phase 2 | Core agent signal quality | F34 F52 F100 F101 F5 F6 F35 F37 F2 F106 | Selesai |
+| ✅ Phase 3 | Monitor & position lifecycle | F83 F76 F77 F81 F84 F85 F79 F80 F61 F62 F107 | Selesai |
+| ✅ Phase 4 | Learning feedback loop | F68 F69 F60 F70 F73 F75 F71 F72 F63 F64 F32 | Selesai |
+| ✅ Phase 5 | Backend API corrections | F102 F103 F105 F109 F110 F27 F28 F29 F41 F42 F44 F45 F48 F50 F53 F9 F20 F24 | Selesai |
+| ✅ Phase 6 | Frontend corrections | F104 F43 F46 F47 F26 F10 F38 F39 F40 F111 F30 F31 F65 F66 F25 F49 | Selesai |
+| ✅ Phase 7 | Market overview & cleanup | F96 F97 F98 F99 F12 F11 F55 F33 F7 F112 F113 | Selesai |
+| ✅ Phase 8 | Signal quality + TP lifecycle | F56 F92 F78 F88 F90 | Selesai |
+| **Total** | | **106 bug** | **✅ Semua Phase Selesai** |
+
+> **Phase 8 selesai:** F56 ATH penalty (agent1), F92 per-coin win rate bonus (weight_updater + agent1 + agent2),
+> F78 TP4 extension (monitor), F88/F90 funding degradation SL tighten (monitor every 10 cycles).
+>
+> **Sisa backlog:** F89-F95 learning depth lanjutan (per-regime weights, weight decay, dll) — Phase 9+.
 
 > **Reset DB antara Phase 1 dan Phase 2:**
 > ```sql

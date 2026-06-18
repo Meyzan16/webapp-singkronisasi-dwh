@@ -68,9 +68,10 @@ export function scoreLabel(s: number) {
 }
 
 export const TYPE_META: Record<string, { label: string; bg: string; dot: string }> = {
-  squeeze:      { label: "⚡ Squeeze",   bg: "bg-purple-100 text-purple-700 border-purple-200", dot: "bg-purple-500" },
-  accumulation: { label: "📦 Akumulasi", bg: "bg-teal-100 text-teal-700 border-teal-200",       dot: "bg-teal-500"   },
-  breakout:     { label: "🎯 Breakout",  bg: "bg-amber-100 text-amber-700 border-amber-200",    dot: "bg-amber-500"  },
+  squeeze:       { label: "⚡ Squeeze",       bg: "bg-purple-100 text-purple-700 border-purple-200", dot: "bg-purple-500" },
+  accumulation:  { label: "📦 Akumulasi",     bg: "bg-teal-100 text-teal-700 border-teal-200",       dot: "bg-teal-500"   },
+  breakout:      { label: "🎯 Breakout",      bg: "bg-amber-100 text-amber-700 border-amber-200",    dot: "bg-amber-500"  },
+  breakout_pump: { label: "🚀 Breakout Pump", bg: "bg-orange-100 text-orange-700 border-orange-200", dot: "bg-orange-500" },
 };
 
 // ── RSI zone label ────────────────────────────────────────────────────────────

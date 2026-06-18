@@ -2,14 +2,16 @@
 Futures Risk Monitor — runs every 2 minutes.
 
 For each open futures paper trade:
-  1. Auto-close: SL or TP2 hit
+  1. Auto-close: SL or TP2/TP3/TP4 hit
   2. Trail SL: 50% to TP1 → breakeven; TP1 hit → 75% gain locked; 50% TP1→TP2 → TP1 locked
   3. TP1 partial close: 33% of position closed at TP1
   4. Liquidation guard: adaptive per leverage — close early to protect capital
-  5. TP extension: if at TP1 and current score >= 70, extend TP to TP3 + lock SL at TP1
-  6. Regime SL: on first check, widen SL in volatile / tighten in ranging
-  7. Stagnant 48h: close if no progress (< 20% toward TP1) after 48 hours
-  8. Updates trade record in DB
+  5. TP3 extension: score ≥ 70 at TP1 → extend to TP3, lock SL at TP1
+  6. TP4 extension (F78): score ≥ 65 at TP3 → extend to TP4, lock SL at TP2
+  7. Regime SL: on first check, widen SL in volatile / tighten in ranging
+  8. Stagnant 48h: close if no progress (< 20% toward TP1) after 48 hours
+  9. Funding degradation (F88/F90): every 10 cycles, tighten SL to breakeven if funding flips
+ 10. Updates trade record in DB
 """
 
 import asyncio
@@ -131,6 +133,30 @@ async def _fetch_futures_prices(symbols: list[str]) -> dict[str, float]:
     except Exception:
         pass
     return prices
+
+
+async def _fetch_funding_rates(symbols: list[str]) -> dict[str, float]:
+    """F88/F90: fetch current funding rates (%) for degradation check."""
+    if not symbols:
+        return {}
+    import json as _json
+    rates: dict[str, float] = {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            syms_param = _json.dumps(symbols, separators=(",", ":"))
+            r = await client.get(
+                fapi("/fapi/v1/premiumIndex"),
+                params={"symbols": syms_param},
+            )
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, list):
+                    for item in data:
+                        rates[item["symbol"]] = float(item.get("lastFundingRate", 0)) * 100
+                    return rates
+    except Exception:
+        pass
+    return rates
 
 
 async def _fetch_futures_klines_1m(client: "httpx.AsyncClient", symbol: str) -> list:
@@ -310,6 +336,11 @@ async def check_futures_positions() -> tuple[int, int]:
                 except Exception:
                     klines_1m[s] = []
 
+        # F88/F90: every 10 cycles fetch funding rates for signal degradation check
+        funding_rates: dict[str, float] = {}
+        if _cycle_count % 10 == 0:
+            funding_rates = await _fetch_funding_rates(symbols)
+
         for trade in trades:
             price = prices.get(trade.symbol)
             if price is None:
@@ -356,16 +387,7 @@ async def check_futures_positions() -> tuple[int, int]:
                                 trade.stop_loss = round(trade.stop_loss - _atr_dist * 0.5, 8)
                             else:
                                 trade.stop_loss = round(trade.stop_loss + _atr_dist * 0.5, 8)
-                        elif _regime == "ranging":
-                            # tighten SL toward entry, but never past it
-                            if direction == "LONG":
-                                _cand = trade.stop_loss + _atr_dist * 0.3
-                                if _cand < entry:
-                                    trade.stop_loss = round(_cand, 8)
-                            else:
-                                _cand = trade.stop_loss - _atr_dist * 0.3
-                                if _cand > entry:
-                                    trade.stop_loss = round(_cand, 8)
+                        # ranging: keep SL unchanged — tightening caused premature SL hits from range oscillation
                 except Exception:
                     pass
                 meta["regime_sl_adjusted"] = True
@@ -398,6 +420,50 @@ async def check_futures_positions() -> tuple[int, int]:
                     close_price  = round(price, 8)
                     close_reason = "stagnant_48h"
 
+            # ── 0b. TP4 extension (F78) — must run before auto-close so tp2 is updated ──
+            if (not new_status
+                    and meta.get("tp_extended")
+                    and not meta.get("tp4_extended")):
+                _tp3_hit = (direction == "LONG" and eff_high >= tp2) or \
+                           (direction == "SHORT" and eff_low <= tp2)
+                if _tp3_hit:
+                    _cur_score4 = 0
+                    try:
+                        from agents.futures import store as futures_store
+                        _cur4 = futures_store.get_result(trade.style)
+                        if _cur4:
+                            for _r4 in _cur4.get("results", []):
+                                if _r4.get("symbol") == trade.symbol and \
+                                   _r4.get("direction") == direction:
+                                    _cur_score4 = _r4.get("score", 0)
+                                    break
+                    except Exception:
+                        pass
+                    _score4 = _cur_score4 or (trade.probability or 0)
+                    _orig_tp2 = float(meta.get("tp2") or 0)
+                    if _score4 >= 65 and _orig_tp2 > 0:
+                        # tp2 local var currently = tp3 level (after TP3 extension)
+                        _tp3_level = tp2
+                        if direction == "LONG":
+                            _tp4 = round(_tp3_level + (_tp3_level - _orig_tp2) * 1.2, 8)
+                        else:
+                            _tp4 = round(_tp3_level - (_orig_tp2 - _tp3_level) * 1.2, 8)
+                        trade.take_profit  = _tp4
+                        tp2                = _tp4   # update local var so step 1 sees new target
+                        trade.trail_sl     = round(_orig_tp2, 8)  # lock SL at original TP2
+                        trade.trail_active = True
+                        meta["tp4_extended"] = True
+                        meta["tp4"]          = _tp4
+                        trade.signals_json   = json.dumps(meta, ensure_ascii=False)
+                        _tp_extended += 1
+                        updated      += 1
+                        logger.info(
+                            "tp_extended_to_tp4",
+                            symbol=trade.symbol, direction=direction,
+                            tp3=round(_tp3_level, 6), tp4=round(_tp4, 6),
+                            sl_locked_at=round(_orig_tp2, 6), score=_score4,
+                        )
+
             # ── 1. Auto-close: SL or TP2 hit (BUG-L8: wick-aware; SL wins if both) ──
             if not new_status:
                 if direction == "LONG":
@@ -423,7 +489,12 @@ async def check_futures_positions() -> tuple[int, int]:
                         # PLAN-SIGNAL-GAP F2: tp2 here is trade.take_profit, which can already
                         # be the extended TP3 level (see TP Extension below) — was hardcoded
                         # "tp2_hit" even when the level actually hit was the extended TP3.
-                        close_reason = "tp3_hit" if meta.get("tp_extended") else "tp2_hit"
+                        if meta.get("tp4_extended"):
+                            close_reason = "tp4_hit"
+                        elif meta.get("tp_extended"):
+                            close_reason = "tp3_hit"
+                        else:
+                            close_reason = "tp2_hit"
                 else:  # SHORT
                     if eff_high >= sl:
                         new_status   = "sl"
@@ -442,7 +513,12 @@ async def check_futures_positions() -> tuple[int, int]:
                         new_status   = "tp"
                         close_price  = tp2
                         # PLAN-SIGNAL-GAP F2: mirror of LONG tp3_hit fix above.
-                        close_reason = "tp3_hit" if meta.get("tp_extended") else "tp2_hit"
+                        if meta.get("tp4_extended"):
+                            close_reason = "tp4_hit"
+                        elif meta.get("tp_extended"):
+                            close_reason = "tp3_hit"
+                        else:
+                            close_reason = "tp2_hit"
 
             # ── 2. Liquidation guard (F85: adaptive threshold per leverage) ───
             if not new_status:
@@ -548,6 +624,29 @@ async def check_futures_positions() -> tuple[int, int]:
                         symbol=trade.symbol, direction=direction,
                         partial_pnl_dollar=_partial_dollar,
                         tp1=round(tp1, 6), price=price,
+                    )
+
+            # ── F88/F90: funding rate degradation → tighten SL to breakeven ──────
+            if (not new_status
+                    and funding_rates
+                    and not meta.get("sl_tightened_degradation")):
+                _cur_fr = funding_rates.get(trade.symbol, 0.0)
+                _entry_fr = float(meta.get("funding_rate") or 0.0)  # % at trade open
+                _degraded = False
+                if direction == "LONG" and _entry_fr <= 0 and _cur_fr > 0.05:
+                    _degraded = True  # funding flipped positive — longs now crowded
+                elif direction == "SHORT" and _entry_fr >= 0 and _cur_fr < -0.03:
+                    _degraded = True  # funding flipped negative — shorts now crowded
+                if _degraded:
+                    trade.trail_sl     = round(entry, 8)
+                    trade.trail_active = True
+                    meta["sl_tightened_degradation"] = True
+                    trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                    updated += 1
+                    logger.info(
+                        "sl_tightened_funding_degradation",
+                        symbol=trade.symbol, direction=direction,
+                        entry_fr=_entry_fr, cur_fr=_cur_fr,
                     )
 
             # ── 4. TP Extension (F81: lock SL at TP1; F84: use current score) ──

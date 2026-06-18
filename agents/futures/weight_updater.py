@@ -43,6 +43,9 @@ _adaptive_thresholds: dict[str, dict] = {}
 # F71: per-coin blacklist  {symbol: blacklist_until_ts}
 _coin_blacklist: dict[str, float] = {}
 
+# F92: per-coin win rate  {symbol: {"wins": int, "total": int}}
+_coin_win_rates: dict[str, dict] = {}
+
 
 # ── Public cache accessors ─────────────────────────────────────────────────────
 
@@ -64,6 +67,22 @@ def is_blacklisted(symbol: str) -> bool:
 def normalize_signal_key(raw: str) -> str:
     """F73: Expose normalizer so agents use identical keys to weight_updater."""
     return _normalize_signal(raw)
+
+
+def get_coin_bonus(symbol: str) -> float:
+    """F92: Score bonus/penalty based on per-coin historical win rate.
+    Requires ≥3 closed trades to activate — below that, neutral (0.0).
+    """
+    data = _coin_win_rates.get(symbol, {})
+    total = data.get("total", 0)
+    if total < 3:
+        return 0.0
+    wr = data.get("wins", 0) / total
+    if wr >= 0.70:
+        return 5.0    # proven winner — boost score
+    if wr < 0.30:
+        return -5.0   # consistently losing — penalise
+    return 0.0
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────────
@@ -104,6 +123,19 @@ def _update_coin_blacklist(trades: list) -> None:
             until = time.time() + 24 * 3600
             _coin_blacklist[symbol] = until
             logger.info("coin_blacklisted", symbol=symbol, hours=24)
+
+
+def _compute_coin_win_rates(trades: list) -> None:
+    """F92: Build per-coin win rate from closed tp/sl trades."""
+    global _coin_win_rates
+    by_symbol: dict = defaultdict(lambda: {"wins": 0, "total": 0})
+    for t in trades:
+        if t.status not in ("tp", "sl"):
+            continue  # exclude expired from win rate
+        by_symbol[t.symbol]["total"] += 1
+        if t.status == "tp" and (t.pnl_pct or 0.0) > 0:
+            by_symbol[t.symbol]["wins"] += 1
+    _coin_win_rates = dict(by_symbol)
 
 
 def _compute_adaptive_thresholds(trades: list) -> None:
@@ -177,6 +209,7 @@ async def update_weights() -> int:
 
         # ── Update in-memory caches before DB write ─────────────────────────
         _update_coin_blacklist(trades)       # F71
+        _compute_coin_win_rates(trades)      # F92
         _compute_adaptive_thresholds(trades) # F69
 
         # ── Build (agent, signal_key, regime) → {wins, total} map ──────────
@@ -282,4 +315,9 @@ def get_state() -> dict:
         "cached_agents": list(_weight_cache.keys()),
         "blacklisted_coins": [s for s, t in _coin_blacklist.items()
                                if time.time() < t],
+        "coin_win_rates": {
+            s: {"wins": d["wins"], "total": d["total"],
+                "wr": round(d["wins"] / d["total"], 3) if d["total"] else 0}
+            for s, d in _coin_win_rates.items()
+        },
     }

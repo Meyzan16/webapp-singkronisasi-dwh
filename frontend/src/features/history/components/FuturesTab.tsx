@@ -54,6 +54,7 @@ export function FuturesTab() {
       if (riskRes.ok) {
         const rd = await riskRes.json() as RiskDashboard;
         if (!("error" in rd)) setRiskDash(rd);
+        // always update when no "error" key — let MonitorTab handle empty portfolio gracefully
       }
       if (autoRes.ok) {
         const ad = await autoRes.json() as { threshold?: number };

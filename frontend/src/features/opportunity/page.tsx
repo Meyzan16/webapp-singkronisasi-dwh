@@ -35,10 +35,10 @@ interface ScannerConfig {
 }
 
 const ALERT_FILTERS = [
-  { key: "ALL",          label: "Semua" },
-  { key: "squeeze",      label: "⚡ Squeeze" },
-  { key: "accumulation", label: "📦 Akumulasi" },
-  { key: "breakout",     label: "🎯 Breakout" },
+  { key: "ALL",           label: "Semua" },
+  { key: "squeeze",       label: "⚡ Squeeze" },
+  { key: "accumulation",  label: "📦 Akumulasi" },
+  { key: "breakout_pump", label: "🚀 Breakout" },
 ];
 
 function fmtCountdown(secs: number | null): string {
@@ -238,10 +238,11 @@ export default function OpportunityPage() {
     finally { setScanning(false); }
   }, [applySnapshot]);
 
-  // Filters
+  // Filters — breakout_pump always shown in dedicated section below, not in main list
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return results.filter(r => {
+      if (r.alert_type === "breakout_pump") return false;
       if (alertFilter !== "ALL" && r.alert_type !== alertFilter) return false;
       if (r.opportunity_score < minScore) return false;
       if (q && !r.symbol.toLowerCase().includes(q)) return false;
@@ -249,8 +250,17 @@ export default function OpportunityPage() {
     });
   }, [results, alertFilter, minScore, search]);
 
+  const filteredBreakout = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return results.filter(r => {
+      if (r.alert_type !== "breakout_pump") return false;
+      if (q && !r.symbol.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [results, search]);
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { ALL: results.length };
+    const c: Record<string, number> = { ALL: results.filter(r => r.alert_type !== "breakout_pump").length };
     results.forEach(r => { c[r.alert_type] = (c[r.alert_type] ?? 0) + 1; });
     return c;
   }, [results]);
@@ -568,8 +578,51 @@ export default function OpportunityPage() {
         </>
       )}
 
+      {/* ── Breakout Hunter section ────────────────────────────────────────── */}
+      {!loading && filteredBreakout.length > 0 && (
+        <div className="space-y-3">
+          {/* Section header */}
+          <div className="rounded-2xl bg-gradient-to-r from-orange-900/80 via-orange-800/70 to-amber-900/80 border border-orange-700/50 px-5 py-3.5">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xl">🚀</span>
+                  <h2 className="text-white font-bold text-base">Breakout Hunter</h2>
+                  <span className="text-[10px] bg-orange-500/30 text-orange-200 border border-orange-500/40 px-2 py-0.5 rounded-full font-bold">
+                    {filteredBreakout.length} sinyal
+                  </span>
+                </div>
+                <p className="text-orange-200/70 text-[11px] leading-relaxed max-w-lg">
+                  Entry <strong className="text-orange-100">SETELAH</strong> breakout dimulai — momentum trade, bukan setup akumulasi.
+                  SL lebih ketat (ATR-based), hold max 6 jam, profil risiko berbeda dari lane akumulasi.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] text-orange-300/60 bg-orange-900/50 border border-orange-700/40 px-3 py-1.5 rounded-xl flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse" />
+                  Vol spike + momentum
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Breakout cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {filteredBreakout.slice(0, 8).map((r, i) => (
+              <OpportunityFeatured
+                key={r.symbol}
+                r={r}
+                rank={i + 1}
+                isNew={newSymbols.has(r.symbol)}
+                onClick={() => setSelectedCoin(r)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Empty ─────────────────────────────────────────────────────────── */}
-      {!loading && filtered.length === 0 && results.length > 0 && (
+      {!loading && filtered.length === 0 && results.length > 0 && filteredBreakout.length === 0 && (
         <div className="text-center py-12 text-neutral-400">
           <p className="text-3xl mb-3">🔍</p>
           <p className="font-semibold">Tidak ada hasil untuk filter ini</p>

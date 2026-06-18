@@ -174,11 +174,35 @@ async def _auto_open_position(coin: dict) -> bool:
                 coin[key] = coin[key] * factor
         coin["entry"], coin["sl"], coin["tp2"] = entry, sl, tp2
 
+    is_breakout = coin.get("alert_type") == "breakout_pump"
+
+    # B7: breakout_pump — skip auto-open jika change_24h > 100% (parabolic)
+    if is_breakout and coin.get("change_24h", 0) > 100.0:
+        logger.info("auto_open_parabolic_skip", symbol=symbol,
+                    change_24h=coin.get("change_24h"))
+        return False
+
+    # B7: max 1 breakout_pump position open at a time
+    if is_breakout:
+        async with AsyncSessionLocal() as bck:
+            bp_open = (await bck.execute(
+                select(PaperTrade).where(
+                    PaperTrade.style      == "opportunity_spot",
+                    PaperTrade.status     == "open",
+                    PaperTrade.alert_type == "breakout_pump",
+                ).limit(1)
+            )).scalar_one_or_none()
+            if bp_open is not None:
+                logger.info("auto_open_breakout_limit", symbol=symbol,
+                            already_open=bp_open.symbol)
+                return False
+
     # Cooldown via DB — survives restarts.
     # SL: 2 jam (jangan re-entry setup yang baru gagal).
     # §12.7: TP juga 45 menit — jangan langsung beli lagi di puncak pump yang sama.
-    COOLDOWN_SL_HOURS = 2.0
-    COOLDOWN_TP_HOURS = 0.33   # 20 menit — kurangi miss second leg pasca-TP
+    # B7: breakout_pump cooldown lebih pendek: 30 menit TP/SL
+    COOLDOWN_SL_HOURS = 0.5  if is_breakout else 2.0
+    COOLDOWN_TP_HOURS = 0.5  if is_breakout else 0.33   # 30 menit untuk breakout
     async with AsyncSessionLocal() as ck:
         last_close_q = await ck.execute(
             select(PaperTrade).where(

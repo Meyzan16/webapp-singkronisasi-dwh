@@ -20,7 +20,7 @@ Runs every 60s. For each open opportunity_spot trade:
     - "risk_adjusted" loss-cutter (RSI>75 + loss>2%) still fires — cutting losses
       early is good for expectancy
 
-  Layer 3 — Max age: 3 days → close at market, label "max_age_expired"
+  Layer 3 — Max age: fresh_setup=10d, momentum_chase=5d → close at market, label "max_age_expired"
             (excluded from learning)
 
 All P&L is net of EXECUTION_COST_PCT (fee+spread+slippage, §15.1).
@@ -48,7 +48,9 @@ logger = structlog.get_logger(__name__)
 INTERVAL_SEC       = 60
 STARTUP_DELAY      = 45
 MIN_HOLD_MINUTES   = 30
-MAX_AGE_DAYS       = 7            # §7C: spot setups need 5-7 days to mature
+# BM7: per entry_mode — accumulation needs more time, failed momentum exits faster
+MAX_AGE_DAYS_FRESH_SETUP    = 10   # akumulasi butuh waktu lebih lama untuk resolve
+MAX_AGE_DAYS_MOMENTUM_CHASE = 5    # momentum yang gagal bergerak = capital idle, exit lebih cepat
 WICK_LOOKBACK_MIN  = 3            # 1m candles checked per cycle (covers restarts)
 WEIGHT_UPDATE_SEC  = 30 * 60      # time-based (§1.12), not cycle-based
 
@@ -252,8 +254,9 @@ def _risk_signal(
 ) -> Optional[str]:
     """
     Risk-adjusted close conditions.
-    Profit-protecting exits require pnl_net ≥ 50% of TP2 net distance (§12.2) —
-    never clip a winner that hasn't earned most of its target yet.
+    BM2: trend_reversal (EMA cross) fires without profit floor — it's a structure
+    signal, not a profit-protection exit. Guard: ≥60 min hold to avoid noise.
+    profit_protection and flow_reversal still require pnl_net ≥ 50% of TP2 (§12.2).
     Loss-cutting "risk_adjusted" keeps firing early.
     """
     if hold_minutes < MIN_HOLD_MINUTES or len(klines) < 15:
@@ -269,7 +272,11 @@ def _risk_signal(
 
     profit_floor = max(0.5 * tp2_net_pct, EXECUTION_COST_PCT * 2)
 
-    if entry_ema_bullish and ema9 < ema21 * 0.998 and pnl_net >= profit_floor:
+    # BM2: trend_reversal is a STRUCTURE signal — EMA cross bearish means the
+    # setup that justified the entry is broken. No profit floor: we don't wait
+    # for the position to be profitable before exiting a broken structure.
+    # Guard: only fire after ≥60 min hold (not on normal open-candle noise).
+    if entry_ema_bullish and ema9 < ema21 * 0.998 and hold_minutes >= 60:
         return "trend_reversal"
 
     if rsi > 80 and pnl_net >= profit_floor:
@@ -436,7 +443,10 @@ async def _process_trade(
 
     # ── Trailing SL ratchet for momentum_chase trades post-TP1 ──────────────
     # Runs every cycle to ratchet the SL up as price climbs. Only moves UP.
-    is_momentum_chase = meta.get("entry_mode") == "momentum_chase"
+    _entry_mode_early = meta.get("entry_mode", "fresh_setup")
+    is_momentum_chase = _entry_mode_early == "momentum_chase"
+    is_momentum_entry = _entry_mode_early == "momentum_entry"
+
     if is_momentum_chase and meta.get("tp1_hit") and len(k4h) >= 22:
         new_trail = _compute_trailing_sl(k4h, sl)
         if new_trail > sl:
@@ -444,6 +454,20 @@ async def _process_trade(
             meta["current_sl"] = round(sl, 8)
             trade.stop_loss    = round(sl, 8)
             trade.signals_json = json.dumps(meta, ensure_ascii=False)
+
+    # B6: momentum_entry — move SL to breakeven after +3% gain
+    if is_momentum_entry and not meta.get("breakeven_set") and entry > 0:
+        pnl_now_pct = (price - entry) / entry * 100
+        if pnl_now_pct >= 3.0:
+            new_sl_be = entry * 1.001   # 0.1% buffer above entry
+            if new_sl_be > sl:
+                sl = new_sl_be
+                meta["current_sl"] = round(sl, 8)
+                meta["breakeven_set"] = True
+                trade.stop_loss    = round(sl, 8)
+                trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                logger.info("momentum_entry_breakeven_set", symbol=trade.symbol,
+                            pnl_pct=round(pnl_now_pct, 2), new_sl=round(sl, 8))
 
     # Wick extremes since entry (§12.3) — fall back to spot price only
     wick_low, wick_high = _wick_extremes(k1m, trade.entry_at or time.time())
@@ -458,8 +482,15 @@ async def _process_trade(
     close_price:  Optional[float] = None
     close_reason: Optional[str]   = None
 
-    # ── Layer 3: max age (3 days) ───────────────────────────────────────────
-    if entry_at_valid and hold_minutes / (60 * 24) > MAX_AGE_DAYS:
+    # ── Layer 3: max age — BM7: per entry_mode ──────────────────────────────
+    _entry_mode = meta.get("entry_mode", "fresh_setup")
+    if _entry_mode == "momentum_entry":
+        _age_expired = entry_at_valid and hold_minutes > 6 * 60   # B6: 6-hour max
+    elif _entry_mode == "momentum_chase":
+        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > MAX_AGE_DAYS_MOMENTUM_CHASE
+    else:
+        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > MAX_AGE_DAYS_FRESH_SETUP
+    if _age_expired:
         pnl_now = (price - entry) / entry * 100
         new_status   = "tp" if pnl_now > EXECUTION_COST_PCT else "sl"
         close_price  = round(price, 8)
@@ -514,6 +545,17 @@ async def _process_trade(
         meta["tp1_partial_dollar"] = partial_dlr
         meta["remaining_fraction"] = 1.0 - sell_frac
         meta["current_sl"]         = round(new_sl, 8)
+
+        # BM6: if fresh_setup TP1 hit with volume spike → upgrade to momentum_chase
+        # trailing stop so the position can ride a real pump instead of exiting at TP2
+        if _entry_mode == "fresh_setup" and not meta.get("upgraded_to_trailing"):
+            _vol_spike_now = _vol_ratio([float(k[5]) for k in k1h]) if k1h else 1.0
+            if _vol_spike_now >= 5.0:
+                meta["entry_mode"]          = "momentum_chase"
+                meta["upgraded_to_trailing"] = True
+                logger.info("fresh_setup_upgraded_to_trailing",
+                            symbol=trade.symbol, vol_spike=round(_vol_spike_now, 1))
+
         trade.signals_json = json.dumps(meta, ensure_ascii=False)
         trade.stop_loss    = round(new_sl, 8)   # §1.11: keep column in sync
         logger.info("opportunity_tp1_partial", symbol=trade.symbol,
@@ -547,7 +589,9 @@ async def _process_trade(
         drift_pct  = abs(price - entry) / entry * 100 if entry > 0 else 99.0
         if hold_days >= STAGNANT_CHECK_DAYS and drift_pct <= STAGNANT_DRIFT_PCT:
             trade_score = meta.get("raw_score") or trade.probability or 0
-            if _has_better_candidate(trade_score, trade.symbol):
+            # BM1: cap at 80 so high-score positions (e.g. 99) don't require
+            # an impossible candidate score of 109+ to trigger rotation
+            if _has_better_candidate(min(trade_score, 80), trade.symbol):
                 pnl_net      = (price - entry) / entry * 100 - EXECUTION_COST_PCT
                 new_status   = "tp" if pnl_net > 0 else "sl"
                 close_price  = round(price, 8)
@@ -635,7 +679,9 @@ async def run_opportunity_monitor() -> None:
 
     _running = True
     logger.info("opportunity_monitor_started",
-                interval_sec=INTERVAL_SEC, max_age_days=MAX_AGE_DAYS,
+                interval_sec=INTERVAL_SEC,
+                max_age_fresh=MAX_AGE_DAYS_FRESH_SETUP,
+                max_age_momentum=MAX_AGE_DAYS_MOMENTUM_CHASE,
                 execution_cost_pct=EXECUTION_COST_PCT)
     await asyncio.sleep(STARTUP_DELAY)
 

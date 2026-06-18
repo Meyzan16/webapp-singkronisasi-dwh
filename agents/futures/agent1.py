@@ -359,6 +359,18 @@ def _score_pregainer(
     elif ref.liq_long_usdt > 500_000:
         score += 1
 
+    # F56: ATH penalty — near 7-day high is late entry, not pre-gainer setup
+    if d4h and len(d4h.highs) >= 42:
+        ath_7d = max(d4h.highs[-42:])
+        if ath_7d > 0:
+            pct_from_ath = (price - ath_7d) / ath_7d
+            if pct_from_ath >= -0.02:   # within 2% of 7-day high
+                score -= 20
+                signals.append(f"⚠️ Near 7d ATH ({pct_from_ath:+.1%}) — late entry risk")
+            elif pct_from_ath >= -0.05:  # within 5%
+                score -= 10
+                signals.append(f"Dekat 7d ATH ({pct_from_ath:+.1%}) — cautious")
+
     return score, signals[:5]
 
 
@@ -694,6 +706,9 @@ def scan_symbol(
             score -= 5
         elif regime == "trending_down" and direction == "LONG":
             score -= 5
+
+        # F92: per-coin win rate bonus/penalty (±5 pts, needs ≥3 historical trades)
+        score += weight_updater.get_coin_bonus(symbol)
 
         if score < effective_min:   # F69: adaptive threshold
             continue

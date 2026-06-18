@@ -110,6 +110,20 @@ COMMODITY_BLACKLIST = {
 # Sizing TIDAK dihitung di sini — compute_spot_sizing (balance.py) adalah
 # satu-satunya sumber ukuran posisi dari balance real (§10.3).
 
+# ── Breakout Hunter lane (PLAN-SPOT-BREAKOUT B1-B3) ──────────────────────────
+# Lane terpisah dari akumulasi — tangkap coin di AWAL pump, bukan sebelum pump.
+BREAKOUT_VOL_SPIKE_MIN    = 5.0     # 15m volume > 5x average = momentum mulai
+BREAKOUT_VOL_SPIKE_STRONG = 10.0   # > 10x = pump baru dimulai (full score)
+BREAKOUT_CHANGE_24H_GATE  = 3.0    # minimum change_24h untuk masuk breakout pool
+BREAKOUT_CHANGE_24H_MAX   = 100.0  # > 100% = parabolic, skip auto-open
+BREAKOUT_MIN_VOLUME       = 500_000  # $500K 24h min (lebih relaks dari $5M akumulasi)
+BREAKOUT_SCAN_POOL        = 50      # ambil top-50 mover sebagai kandidat
+BREAKOUT_MIN_SCORE        = 60      # min score untuk tampil
+BREAKOUT_AUTO_SCORE       = 75      # auto-open threshold (lebih rendah dari akumulasi 85)
+BREAKOUT_ATR_MULTIPLIER   = 1.5    # SL = price − ATR(14) × 1.5
+BREAKOUT_RISK_MIN_PCT     = 2.0    # min SL distance
+BREAKOUT_RISK_MAX_PCT     = 12.0   # max SL distance (lebih lebar dari akumulasi 5%)
+
 
 # ── Math helpers ───────────────────────────────────────────────────────────────
 
@@ -157,6 +171,24 @@ def _vol_ratio(volumes: list[float]) -> float:
         return 1.0
     avg = sum(volumes[-21:-1]) / 20
     return volumes[-1] / avg if avg > 0 else 1.0
+
+
+def _calc_atr(klines: list, period: int = 14) -> float:
+    """Average True Range — used for ATR-based SL in Breakout Hunter lane."""
+    if len(klines) < period + 1:
+        return 0.0
+    trs = []
+    for i in range(1, len(klines)):
+        try:
+            high       = float(klines[i][2])
+            low        = float(klines[i][3])
+            prev_close = float(klines[i - 1][4])
+            trs.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+        except (IndexError, ValueError):
+            continue
+    if len(trs) < period:
+        return sum(trs) / len(trs) if trs else 0.0
+    return sum(trs[-period:]) / period
 
 
 def _round_price(price: float, ref: float) -> float:
@@ -326,6 +358,210 @@ def _calc_trade_levels(tf_data: dict[str, TFData], entry: float) -> Optional[dic
         "tp2_net_pct": net_pct(tp2),
         "tp3_net_pct": net_pct(tp3),
         "rr_ratio":    round(rr, 1),
+    }
+
+
+# ── Breakout trade levels (ATR-based SL) ──────────────────────────────────────
+
+def _calc_trade_levels_breakout(klines_15m: list, entry: float) -> Optional[dict]:
+    """
+    ATR-based trade levels for Breakout Hunter lane (B2).
+    SL = price − ATR(14) × 1.5 — survives normal volatility noise.
+    R:R to TP2 ≥ 3.0 required.
+    """
+    atr = _calc_atr(klines_15m, 14)
+    if atr <= 0 or entry <= 0:
+        return None
+
+    sl       = entry - atr * BREAKOUT_ATR_MULTIPLIER
+    risk     = entry - sl
+    risk_pct = risk / entry * 100
+
+    if risk_pct < BREAKOUT_RISK_MIN_PCT or risk_pct > BREAKOUT_RISK_MAX_PCT:
+        return None
+
+    tp1 = entry + risk * 2.0   # quick partial — 2× risk
+    tp2 = entry + risk * 3.5   # primary target
+    tp3 = entry + risk * 6.0   # extended — let momentum run
+
+    rr = (tp2 - entry) / risk
+    if rr < 3.0:
+        return None
+
+    rp = _round_price
+
+    def net_pct(tp: float) -> float:
+        return round((tp - entry) / entry * 100 - EXECUTION_COST_PCT, 2)
+
+    return {
+        "entry":       rp(entry, entry),
+        "sl":          rp(sl, entry),
+        "tp1":         rp(tp1, entry),
+        "tp2":         rp(tp2, entry),
+        "tp3":         rp(tp3, entry),
+        "risk_pct":    round(risk_pct, 2),
+        "tp1_pct":     round((tp1 - entry) / entry * 100, 2),
+        "tp2_pct":     round((tp2 - entry) / entry * 100, 2),
+        "tp3_pct":     round((tp3 - entry) / entry * 100, 2),
+        "tp1_net_pct": net_pct(tp1),
+        "tp2_net_pct": net_pct(tp2),
+        "tp3_net_pct": net_pct(tp3),
+        "rr_ratio":    round(rr, 1),
+    }
+
+
+# ── Breakout scoring (B3) ──────────────────────────────────────────────────────
+
+def _score_breakout(
+    symbol:     str,
+    tf_data:    dict[str, "TFData"],
+    change_24h: float,
+    change_1h:  float,
+) -> Optional[dict]:
+    """
+    Score a symbol for Breakout Hunter lane (B3).
+    Focus: volume explosion + early price movement, NOT pre-pump accumulation.
+    BM5: BB squeeze uses relative threshold (P20 of coin's own history).
+    """
+    score   = 0.0
+    signals: list[str] = []
+
+    d15 = tf_data.get("15m")
+    d1h = tf_data.get("1h")
+    ref = d15 or d1h
+    if not ref:
+        return None
+
+    current_price = ref.live_price or ref.closes[-1]
+
+    # 1. Volume spike 15m — primary signal (B1)
+    vol_spike_15m = 0.0
+    if d15 and len(d15.volumes) >= 21:
+        avg15 = sum(d15.volumes[-21:-1]) / 20
+        if avg15 > 0:
+            vol_spike_15m = d15.volumes[-1] / avg15
+
+    if vol_spike_15m >= BREAKOUT_VOL_SPIKE_STRONG:
+        score += 40
+        signals.append(f"🔥 Volume spike 15m {vol_spike_15m:.0f}x normal — pump baru dimulai")
+    elif vol_spike_15m >= BREAKOUT_VOL_SPIKE_MIN:
+        score += 20
+        signals.append(f"Volume spike 15m {vol_spike_15m:.1f}x — momentum mulai")
+    else:
+        return None   # no volume explosion = not a breakout candidate
+
+    # 2. Volume spike 1h
+    vol_spike_1h = 0.0
+    if d1h and len(d1h.volumes) >= 21:
+        avg1h = sum(d1h.volumes[-21:-1]) / 20
+        if avg1h > 0:
+            vol_spike_1h = d1h.volumes[-1] / avg1h
+
+    if vol_spike_1h >= 5.0:
+        score += 25
+        signals.append(f"🚀 Volume 1h {vol_spike_1h:.0f}x — institutional surge")
+    elif vol_spike_1h >= 3.0:
+        score += 12
+        signals.append(f"Volume 1h {vol_spike_1h:.1f}x rata-rata")
+
+    # 3. Price change 1h
+    if change_1h >= 5.0:
+        score += 15
+        signals.append(f"🟢 +{change_1h:.1f}% dalam 1 jam — momentum kuat")
+    elif change_1h >= 3.0:
+        score += 10
+        signals.append(f"+{change_1h:.1f}% dalam 1 jam")
+    elif change_1h >= 2.0:
+        score += 5
+
+    # 4. Price change 15m
+    change_15m = 0.0
+    if d15 and len(d15.closes) >= 2 and d15.closes[-2] > 0:
+        change_15m = (d15.closes[-1] - d15.closes[-2]) / d15.closes[-2] * 100
+    if change_15m >= 3.0:
+        score += 10
+        signals.append(f"Candle 15m +{change_15m:.1f}% — breakout candle")
+    elif change_15m >= 2.0:
+        score += 5
+
+    # 5. EMA9 > EMA21 di 15m
+    if d15 and d15.ema9 > d15.ema21:
+        score += 10
+        signals.append("EMA9 > EMA21 (15m) — short-term trend up")
+
+    # 6. Taker buy ratio
+    taker_vals = [d.taker_ratio for d in tf_data.values()]
+    avg_taker  = sum(taker_vals) / len(taker_vals) if taker_vals else 0.5
+    if avg_taker >= 0.65:
+        score += 15
+        signals.append(f"🟢 Taker buy {avg_taker:.0%} — aggressive buyers masuk")
+    elif avg_taker >= 0.60:
+        score += 10
+        signals.append(f"Taker buy {avg_taker:.0%} — buyer dominan")
+    elif avg_taker >= 0.55:
+        score += 5
+
+    # 7. BM5: relative BB squeeze — compare vs coin's own P20 history
+    if d15 and len(d15.closes) >= 50:
+        historical_bws = [
+            _bb_width(d15.closes[i - 20:i])
+            for i in range(20, len(d15.closes))
+        ]
+        if historical_bws:
+            p20_thresh = sorted(historical_bws)[max(0, len(historical_bws) // 5)]
+            current_bw = _bb_width(d15.closes)
+            if current_bw < p20_thresh:
+                score += 10
+                signals.append(f"BB Squeeze (15m) vs historis — kompresi sebelum ledakan")
+
+    # 8. 24h context
+    if change_24h < 20.0:
+        score += 10
+        signals.append(f"24h +{change_24h:.1f}% — early mover, belum terlambat")
+    elif change_24h > 50.0:
+        score -= 20
+        signals.append(f"⚠️ Sudah naik {change_24h:.1f}% (24h) — risiko FOMO tinggi")
+
+    # ── Filter ────────────────────────────────────────────────────────────────
+    if score < BREAKOUT_MIN_SCORE:
+        return None
+    clean_signals = [s for s in signals if not s.startswith("⚠️")]
+    if len(clean_signals) < 2:
+        return None
+
+    raw_score = round(score, 1)
+    auto_open = (
+        raw_score >= BREAKOUT_AUTO_SCORE
+        and change_24h <= BREAKOUT_CHANGE_24H_MAX
+        and avg_taker >= 0.55
+    )
+
+    d1h_ref = tf_data.get("1h")
+    return {
+        "symbol":              symbol,
+        "current_price":       round(current_price, 8),
+        "opportunity_score":   round(min(score, 99), 1),
+        "raw_score":           raw_score,
+        "direction_confirmed": avg_taker >= 0.55,
+        "auto_open":           auto_open,
+        "entry_mode":          "momentum_entry",
+        "signals":             clean_signals[:5],
+        "alert_type":          "breakout_pump",
+        "change_24h":          round(change_24h, 2),
+        "change_1h":           round(change_1h, 2),
+        "change_7d":           0.0,
+        "vol_ratio":           round(vol_spike_15m, 2),
+        "avg_taker":           round(avg_taker, 3),
+        "vol_spike_15m":       round(vol_spike_15m, 1),
+        "vol_spike_1h":        round(vol_spike_1h, 1),
+        "ema_bullish":         bool(d15 and d15.ema9 > d15.ema21),
+        "squeeze_tfs":         [],
+        # Fields required by frontend card components
+        "tfs_confirmed":       list(tf_data.keys()),
+        "bb_width_15m":        round(d15.bb_width * 100, 2) if d15 else None,
+        "rsi_1h":              round(d1h_ref.rsi, 1) if d1h_ref else None,
+        "weight_applied":      1.0,
+        "banned_by_learning":  False,
     }
 
 
@@ -717,6 +953,11 @@ async def run_opportunity_scan() -> dict:
 
     tickers = [t for t in tickers if not _is_pegged(t)]
 
+    # Simpan semua tickers setelah name-filter (sebelum liquidity filter).
+    # Breakout Hunter lane pakai threshold lebih rendah ($500K), bukan $5M,
+    # sehingga harus baca dari sini — bukan dari `tickers` post-liquidity.
+    tickers_all = tickers[:]
+
     # Filter 3 (§11.7): likuiditas minimum — rekomendasi harus eksekutable
     def _liquid(t: dict) -> bool:
         try:
@@ -871,28 +1112,128 @@ async def run_opportunity_scan() -> dict:
         result["ev_per_risk"] = _ev_per_risk(result)
         results.append(result)
 
+    # ── PLAN-SPOT-BREAKOUT B4: Breakout Hunter pass ───────────────────────────
+    # Scan ALL movers (change_24h >= 3%, vol >= $500K) for sudden volume explosion.
+    # Separate from accumulation lane — different SL, scoring, entry_mode.
+    # BUG-FIX: use tickers_all (pre-liquidity-filter) so low-vol coins like CREAM
+    # ($276K) and PNT ($262K) can enter — that's the whole point of BREAKOUT_MIN_VOLUME.
+    _accum_syms     = {c["symbol"] for c in candidates}
+    _all_ticker_map = {t["symbol"]: t for t in tickers_all}
+    _breakout_done  = {r["symbol"] for r in results}
+
+    # Pool: all movers not in main candidates (rank 101+) + main candidates as re-score
+    _extra_movers = sorted(
+        [
+            t for t in tickers_all
+            if float(t.get("priceChangePercent", 0)) >= BREAKOUT_CHANGE_24H_GATE
+            and float(t.get("quoteVolume", 0)) >= BREAKOUT_MIN_VOLUME
+            and t["symbol"] not in _accum_syms   # not already fetched in main scan
+        ],
+        key=lambda t: float(t.get("priceChangePercent", 0)),
+        reverse=True,
+    )[:BREAKOUT_SCAN_POOL]
+
+    # Fetch klines for extra movers not in main scan
+    if _extra_movers:
+        _bsem = asyncio.Semaphore(10)
+
+        async def _fetch_b(sym: str, tf: str) -> list:
+            async with _bsem:
+                return await _fetch_klines(_bclient, sym, tf)
+
+        async with httpx.AsyncClient(timeout=25) as _bclient:
+            _btasks = {
+                (t["symbol"], tf): asyncio.create_task(_fetch_b(t["symbol"], tf))
+                for t in _extra_movers
+                for tf in TIMEFRAMES
+            }
+            for (bsym, btf), btask in _btasks.items():
+                try:
+                    klines_map[(bsym, btf)] = await btask
+                except Exception:
+                    klines_map[(bsym, btf)] = []
+
+    # Score breakout candidates: main candidates + extra movers
+    _breakout_pool = (
+        [c["symbol"] for c in candidates]        # already have klines
+        + [t["symbol"] for t in _extra_movers]   # just fetched
+    )
+    breakout_results: list[dict] = []
+
+    for bsym in _breakout_pool:
+        if bsym in _breakout_done:
+            continue   # already in accumulation results, skip duplicate
+        bticker = _all_ticker_map.get(bsym)
+        if not bticker:
+            continue
+        bchange_24h = float(bticker.get("priceChangePercent", 0))
+        if bchange_24h < BREAKOUT_CHANGE_24H_GATE:
+            continue
+
+        btf_data: dict[str, TFData] = {}
+        for tf in TIMEFRAMES:
+            bd = _analyze_tf(tf, klines_map.get((bsym, tf), []))
+            if bd:
+                btf_data[tf] = bd
+        if not btf_data:
+            continue
+
+        bd1h      = btf_data.get("1h")
+        bchange_1h = 0.0
+        if bd1h and len(bd1h.closes) >= 2 and bd1h.closes[-2] > 0:
+            bchange_1h = (bd1h.closes[-1] - bd1h.closes[-2]) / bd1h.closes[-2] * 100
+
+        bres = _score_breakout(bsym, btf_data, bchange_24h, bchange_1h)
+        if bres is None:
+            continue
+
+        blevels = _calc_trade_levels_breakout(
+            klines_map.get((bsym, "15m"), []), bres["current_price"]
+        )
+        if blevels is None:
+            continue
+
+        bres.update(blevels)
+        bres["ev_per_risk"] = _ev_per_risk(bres)
+        breakout_results.append(bres)
+        _breakout_done.add(bsym)
+
+    logger.info("breakout_scan_done", found=len(breakout_results),
+                pool=len(_breakout_pool))
+
     # §12.5: regime gate BTC — auto-open OFF saat market memusuhi LONG
     regime, auto_allowed = _btc_regime(btc_tf_data, btc_change_24h)
     if not auto_allowed:
         for r_ in results:
             r_["auto_open"] = False
+        for r_ in breakout_results:
+            r_["auto_open"] = False
         logger.info("scan_regime_gate_active", regime=regime,
                     btc_24h=btc_change_24h)
 
-    # §11.4: ranking & TOP_N berdasarkan EV per unit risk — bukan score
+    # §11.4: ranking & TOP_N — accumulation lane sorted by EV per risk
     results.sort(key=lambda x: x.get("ev_per_risk", 0), reverse=True)
     results = results[:TOP_N]
 
+    # Breakout lane: sort by raw_score, cap at 10 results
+    breakout_results.sort(key=lambda x: x.get("raw_score", 0), reverse=True)
+    breakout_results = breakout_results[:10]
+
+    all_results = results + breakout_results
+
     elapsed = round(time.time() - start, 1)
     logger.info("opportunity_scan_done",
-                found=len(results), scanned=len(candidates),
+                found=len(all_results), scanned=len(candidates),
+                breakout_found=len(breakout_results),
                 regime=regime, elapsed_sec=elapsed)
 
     return {
-        "results":      results,
-        "scanned":      len(candidates),
-        "found":        len(results),
-        "btc_regime":   regime,
-        "generated_at": int(time.time()),
-        "elapsed_sec":  elapsed,
+        "results":          all_results,
+        "scanned":          len(candidates),
+        "found":            len(all_results),
+        "found_accumulation": len(results),
+        "found_breakout":   len(breakout_results),
+        "btc_regime":       regime,
+        "generated_at":     int(time.time()),
+        "elapsed_sec":      elapsed,
     }

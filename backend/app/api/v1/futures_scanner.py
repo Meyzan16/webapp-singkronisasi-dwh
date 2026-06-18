@@ -451,11 +451,11 @@ async def get_risk_dashboard() -> dict:
         )
         open_trades = list(result.scalars().all())
 
-        # Also get all closed for risk-adjusted return
+        # Also get all closed for risk-adjusted return (include expired so balance matches Overview)
         closed_result = await session.execute(
             select(PaperTrade).where(
                 PaperTrade.style.in_(_ALL_STYLES),
-                PaperTrade.status.in_(["tp", "sl"]),
+                PaperTrade.status.in_(["tp", "sl", "expired"]),
             ).order_by(PaperTrade.entry_at)
         )
         closed_trades = list(closed_result.scalars().all())
