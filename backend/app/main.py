@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 # When agents run in a separate container, set AGENTS_STANDALONE=true to skip
 # starting them here. Health endpoint still imports agent state for monitoring.
 _AGENTS_STANDALONE = os.getenv("AGENTS_STANDALONE", "false").lower() == "true"
+_AGENTS_HEALTH_URL = os.getenv("AGENTS_HEALTH_URL", "http://agents:8001")
 
 # Make agents/ importable whether backend is run from:
 #   cd backend && uvicorn app.main:app        ← adds repo root to sys.path
@@ -117,6 +118,7 @@ async def ws_futures(websocket: WebSocket) -> None:
 @app.get("/health")
 async def health() -> dict:
     """Health check — DB + all agent statuses."""
+    import httpx
     from app.database import is_db_available
     from agents.opportunity.scheduler  import get_state as opp_sched_state
     from agents.opportunity.monitor    import get_state as opp_mon_state
@@ -125,11 +127,24 @@ async def health() -> dict:
     from agents.futures.weight_updater import get_state as weight_state
     db_ok = is_db_available()
 
-    opp_s = opp_sched_state()
-    opp_m = opp_mon_state()
-    fut_s = fut_sched_state()
-    fut_m = fut_mon_state()
-    w_s   = weight_state()
+    # In standalone mode agents run in a separate container — fetch their live
+    # state from the agents health server (port 8001) instead of reading local
+    # in-memory modules that were never started.
+    agent_data: dict = {}
+    if _AGENTS_STANDALONE:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as hc:
+                r = await hc.get(f"{_AGENTS_HEALTH_URL}/health")
+                if r.status_code == 200:
+                    agent_data = r.json()
+        except Exception:
+            pass  # agents not ready yet — fall back to empty (shows "Stopped")
+
+    opp_s = agent_data.get("spot_scanner",    opp_sched_state())
+    opp_m = agent_data.get("spot_monitor",    opp_mon_state())
+    fut_s = agent_data.get("futures_scanner", fut_sched_state())
+    fut_m = agent_data.get("futures_monitor", fut_mon_state())
+    w_s   = agent_data.get("weight_updater",  weight_state())
 
     # Record status changes for health log
     try:

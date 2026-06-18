@@ -1,38 +1,72 @@
-# webapp-singkronisasi-dwh
+# agents-trading
 
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create/create-next-app).
+Crypto trading agent — multi-timeframe TA pipeline, Binance Futures scanner,
+paper trading history with win-rate tracking.
 
-## Getting Started
+## Architecture
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+postgres  redis  ←── infrastructure
+backend         ←── FastAPI API + WebSocket (port 8000)
+agents          ←── Scanner + Monitor loops (health port 8001)
+frontend        ←── Next.js UI (port 3000)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Running with Docker (production)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# 1. Build all images
+docker compose build --no-cache backend agents frontend
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# 2. Start everything
+docker compose up -d
 
-## Learn More
+# 3. Check status
+docker compose ps
 
-To learn more about Next.js, take a look at the following resources:
+# 4. View logs
+docker compose logs -f backend agents
+docker compose logs -f frontend
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Running with Docker (development — hot reload)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+# Mounts source code as volumes — edits take effect without rebuild
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
 
-## Deploy on Vercel
+Changes to `backend/app/` and `agents/` reload automatically.
+Frontend uses `npm run dev` with HMR.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Running locally (without Docker)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+# 1. Start infrastructure
+docker compose up postgres redis -d
+
+# 2. Backend (includes embedded agents)
+cd backend
+.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 3. Frontend
+cd frontend
+npm run dev
+```
+
+## Endpoints
+
+| Service  | URL                        |
+|----------|----------------------------|
+| Frontend | http://localhost:3000       |
+| Backend  | http://localhost:8000       |
+| Health   | http://localhost:8000/health |
+| Agents health | http://localhost:8001/health |
+
+## Optional: ELK logging overlay
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.logging.yml up -d
+```
+
+Starts Elasticsearch + Kibana + Filebeat. Kibana at http://localhost:5601.

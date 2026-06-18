@@ -19,6 +19,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Inject backend URL at build time so Next.js rewrites point to the right host
+ARG BACKEND_URL=http://localhost:8000
+ENV BACKEND_URL=$BACKEND_URL
 RUN npm run build
 
 # ── Stage 4: Production runner (standalone output) ────────────────────────────
