@@ -20,7 +20,10 @@ logger = structlog.get_logger(__name__)
 
 _db = Depends(require_db)
 
-_FUTURES_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
+_FUTURES_STYLES = [
+    "futures_agent1", "futures_agent2", "futures_agent3",
+    "futures_agent_bigmover",   # Phase 2 BM1
+]
 
 
 def _parse_rr(rr: Optional[str]) -> float:

@@ -12,7 +12,17 @@ class Base(DeclarativeBase):
 
 
 settings = get_settings()
-engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+# EC4: multiple concurrent agents (scanner + monitor + auto_trader + risk_gate +
+# weight_updater) hit the DB simultaneously.  Raise the pool to 20 + allow 10
+# overflow connections; add a 5s wait timeout so exhaustion surfaces as a clear
+# TimeoutError rather than a silent hang.
+engine = create_async_engine(
+    settings.database_url,
+    pool_pre_ping  = True,
+    pool_size      = 20,
+    max_overflow   = 10,
+    pool_timeout   = 5,
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 # ── DB availability flag ───────────────────────────────────────────────────────
@@ -79,6 +89,14 @@ async def _migrate_columns(connection) -> None:
         # partial unique index menutup race manual open vs auto-open
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_open_position_per_symbol "
         "ON paper_trades (style, symbol) WHERE status = 'open'",
+        # SP1: signal performance enrichment columns
+        "ALTER TABLE agent_signal_weights ADD COLUMN IF NOT EXISTS avg_pnl_pct FLOAT DEFAULT 0.0",
+        "ALTER TABLE agent_signal_weights ADD COLUMN IF NOT EXISTS sample_count_raw INTEGER DEFAULT 0",
+        # Phase 1 T4: big_mover_log forward-PnL horizons + dedup index
+        "CREATE INDEX IF NOT EXISTS ix_big_mover_log_ts_symbol ON big_mover_log (ts, symbol)",
+        "CREATE INDEX IF NOT EXISTS ix_big_mover_log_backfill ON big_mover_log (last_backfill_at)",
+        # Phase 1 B1.2: force-open rate limit
+        "CREATE INDEX IF NOT EXISTS ix_force_open_log_ts ON force_open_log (ts)",
     ]
     for sql in migrations:
         try:

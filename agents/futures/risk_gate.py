@@ -38,13 +38,18 @@ _state: dict = {
     "override":      None,   # None = auto | True = force-open | False = force-closed
 }
 
+# G10: emergency close-all flag — set on NEW circuit breaker activation, consumed by monitor.
+_emergency_tighten_pending = False
+_prev_circuit_breaker_active = False   # tracks transition to avoid re-firing
+
 
 def update_gate_state(drawdown_pct: float, rar: float, n_trades: int) -> None:
     """
     Refresh gate state from pre-computed metrics.
     Called from get_risk_dashboard() — frontend polls this every 15 s.
+    G10: fires emergency_tighten on NEW circuit breaker activation (transition only).
     """
-    global _state
+    global _state, _emergency_tighten_pending, _prev_circuit_breaker_active
     _state["drawdown_pct"] = drawdown_pct
     _state["rar"]          = rar
     _state["n_trades"]     = n_trades
@@ -55,9 +60,15 @@ def update_gate_state(drawdown_pct: float, rar: float, n_trades: int) -> None:
         _state["active"]    = not _state["override"]   # override=True → gate open → active=False
         _state["gate_type"] = "override"
         _state["reason"]    = f"manual override: gate {'open' if _state['override'] else 'closed'}"
+        _prev_circuit_breaker_active = False
         return
 
     if drawdown_pct > DD_HARD_STOP_PCT:
+        # G10: fire emergency tighten only on the FIRST transition into circuit breaker
+        if not _prev_circuit_breaker_active:
+            _emergency_tighten_pending = True
+            logger.warning("emergency_tighten_requested", drawdown_pct=round(drawdown_pct, 2))
+        _prev_circuit_breaker_active = True
         _state["active"]    = True
         _state["gate_type"] = "circuit_breaker"
         _state["reason"]    = (
@@ -74,6 +85,7 @@ def update_gate_state(drawdown_pct: float, rar: float, n_trades: int) -> None:
             f"Strategi sedang negatif risk-adjusted."
         )
     else:
+        _prev_circuit_breaker_active = False
         _state["active"]    = False
         _state["gate_type"] = "none"
         _state["reason"]    = "ok"
@@ -108,7 +120,10 @@ async def evaluate_risk_gate() -> None:
         async with AsyncSessionLocal() as session:
             closed_trades = list((await session.execute(
                 select(PaperTrade).where(
-                    PaperTrade.style.in_(["futures_agent1", "futures_agent2", "futures_agent3"]),
+                    PaperTrade.style.in_([
+                        "futures_agent1", "futures_agent2", "futures_agent3",
+                        "futures_agent_bigmover",   # Phase 2 BM1
+                    ]),
                     PaperTrade.status.in_(list(FUTURES_BALANCE_STATUSES)),   # BUG-L19: include expired
                     PaperTrade.pnl_dollar.isnot(None),
                 ).order_by(PaperTrade.closed_at.asc())
@@ -141,6 +156,18 @@ async def evaluate_risk_gate() -> None:
 
     except Exception as exc:
         logger.warning("risk_gate_evaluate_failed", error=str(exc))
+
+
+def consume_emergency_tighten() -> bool:
+    """
+    G10: returns True and clears the flag if an emergency tighten is pending.
+    Called at the start of each futures monitor cycle.
+    """
+    global _emergency_tighten_pending
+    if _emergency_tighten_pending:
+        _emergency_tighten_pending = False
+        return True
+    return False
 
 
 def is_gate_open() -> tuple[bool, str]:

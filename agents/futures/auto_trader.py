@@ -9,6 +9,7 @@ Rules:
 """
 
 import json
+import os
 import time
 from typing import Optional
 
@@ -26,10 +27,27 @@ MAX_AUTO_POSITIONS  = 6    # P2: GLOBAL cap across all lanes (one shared wallet)
 FUTURES_COOLDOWN_HOURS = 3 # F55: no re-entry within 3h of an SL on the same symbol (global)
 
 # P2: all futures lane styles share ONE wallet → dedup & limits are GLOBAL (BUG-L1).
-_FUTURES_STYLES = ("futures_agent1", "futures_agent2", "futures_agent3")
+# Phase 2 BM3: include futures_agent_bigmover — shares wallet but has separate slot quota.
+_FUTURES_STYLES = (
+    "futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover",
+)
+
+# Phase 2 BM1: dedicated quota for Big Mover lane (separate from MAX_AUTO_POSITIONS=6).
+MAX_BIGMOVER_POSITIONS = 2
+
+# Phase 2 BM1: cross-margin wallet utilization cap — total locked margin ≤ 70% wallet
+MAX_WALLET_MARGIN_PCT = 70.0
+
+# Phase 2 BM1: funding hard gate (Phase 3 G3-funding pre-applied for bigmover)
+MAX_LONG_FUNDING_PCT  = 0.12
+MIN_SHORT_FUNDING_PCT = -0.12
 
 # Regimes where auto-open is fully disabled
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
+
+# BC2: hedge mode — when True, allow LONG + SHORT on the same symbol simultaneously.
+# Default: False (one-way mode, one position per symbol across all lanes).
+HEDGE_MODE: bool = os.getenv("HEDGE_MODE", "false").lower() == "true"
 
 # Global toggle — can be changed via API at runtime
 _auto_enabled = True
@@ -61,7 +79,12 @@ def get_auto_threshold() -> int:
 
 
 def _effective_threshold(agent: str) -> int:
-    """Base threshold for an agent: manual override wins, else adaptive (F69)."""
+    """Base threshold for an agent: manual override wins, else adaptive (F69).
+    Phase 2 BM1: bigmover lane uses FIXED threshold (60) to avoid the A2 death-spiral.
+    """
+    if agent == "futures_agent_bigmover":
+        from agents.futures.agent_bigmover import MIN_SCORE
+        return int(MIN_SCORE)
     if _manual_threshold is not None:
         return _manual_threshold
     from agents.futures.weight_updater import get_adaptive_thresholds
@@ -96,7 +119,9 @@ async def auto_open_positions(candidates: list[dict]) -> int:
 
     # Dedup by symbol — keep the highest-score candidate (global ranking, BUG-L1).
     # Per-candidate adaptive threshold (its own lane) + ranging bar; BUG-L12 volatile gate.
-    best_by_symbol: dict[str, dict] = {}
+    # BC2: when HEDGE_MODE=True, dedup key is (symbol, direction) to allow simultaneous
+    # LONG+SHORT; in one-way mode (default) the key is symbol alone.
+    best_by_symbol: dict = {}
     for r in candidates:
         symbol = r.get("symbol", "")
         if not symbol:
@@ -111,9 +136,10 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
         if coin_regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":
             continue
-        cur = best_by_symbol.get(symbol)
+        _dedup_key = (symbol, r.get("direction", "LONG")) if HEDGE_MODE else symbol
+        cur = best_by_symbol.get(_dedup_key)
         if cur is None or r.get("score", 0) > cur.get("score", 0):
-            best_by_symbol[symbol] = r
+            best_by_symbol[_dedup_key] = r
 
     ranked = sorted(best_by_symbol.values(), key=lambda x: x.get("score", 0), reverse=True)
     if not ranked:
@@ -134,14 +160,34 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             logger.debug("auto_trader_at_max", open=open_count)
             return 0
 
-        # GLOBAL open symbols + SL cooldown across all lanes (BUG-L1)
-        existing_q = await session.execute(
-            select(PaperTrade.symbol).where(
-                PaperTrade.style.in_(_FUTURES_STYLES),
+        # Phase 2 BM1: separate slot count for Big Mover lane
+        bm_count_q = await session.execute(
+            select(func.count(PaperTrade.id)).where(
+                PaperTrade.style == "futures_agent_bigmover",
                 PaperTrade.status == "open",
             )
         )
-        existing_syms: set[str] = {row[0] for row in existing_q.fetchall()}
+        bm_open_count: int = bm_count_q.scalar() or 0
+
+        # GLOBAL open symbols + SL cooldown across all lanes (BUG-L1).
+        # BC2: in HEDGE_MODE, dedup on (symbol, direction) tuples so LONG+SHORT coexist.
+        if HEDGE_MODE:
+            existing_q = await session.execute(
+                select(PaperTrade.symbol, PaperTrade.alert_type).where(
+                    PaperTrade.style.in_(_FUTURES_STYLES),
+                    PaperTrade.status == "open",
+                )
+            )
+            # alert_type stores direction as lowercase ("long"/"short")
+            existing_syms: set = {(r[0], r[1].upper()) for r in existing_q.fetchall()}
+        else:
+            existing_q = await session.execute(
+                select(PaperTrade.symbol).where(
+                    PaperTrade.style.in_(_FUTURES_STYLES),
+                    PaperTrade.status == "open",
+                )
+            )
+            existing_syms: set = {row[0] for row in existing_q.fetchall()}
 
         sl_cooldown_q = await session.execute(
             select(PaperTrade.symbol).where(
@@ -160,15 +206,63 @@ async def auto_open_positions(candidates: list[dict]) -> int:
 
             symbol = sig.get("symbol", "")
             agent  = sig.get("agent", "")
-            if not symbol or symbol in existing_syms:
+            direction = sig.get("direction", "LONG")
+            # BC2: dedup check uses (symbol, direction) in hedge mode, symbol alone otherwise
+            _open_key = (symbol, direction) if HEDGE_MODE else symbol
+            if not symbol or _open_key in existing_syms:
                 continue   # BUG-L1: already open in some lane → skip (cross-margin = one position)
             if symbol in sl_cooldown_syms:
                 logger.debug("auto_trade_cooldown_skip", symbol=symbol)
                 continue
 
+            # Phase 3 G3-funding: GLOBAL funding hard gate (all lanes — not just BM).
+            # Cheap scoring-cache check first; revalidate live before order (B3.1).
+            scored_funding_pct = sig.get("funding_rate", 0.0)
+            if direction == "LONG" and scored_funding_pct > MAX_LONG_FUNDING_PCT:
+                logger.debug("auto_trade_funding_skip",
+                             symbol=symbol, agent=agent, direction=direction,
+                             funding_pct=scored_funding_pct)
+                continue
+            if direction == "SHORT" and scored_funding_pct < MIN_SHORT_FUNDING_PCT:
+                logger.debug("auto_trade_funding_skip",
+                             symbol=symbol, agent=agent, direction=direction,
+                             funding_pct=scored_funding_pct)
+                continue
+
+            # Phase 2 BM1: dedicated bigmover slot cap
+            if agent == "futures_agent_bigmover":
+                if bm_open_count + sum(
+                    1 for s in ranked[:ranked.index(sig)]
+                    if s.get("agent") == "futures_agent_bigmover"
+                    and s.get("symbol") in existing_syms
+                ) >= MAX_BIGMOVER_POSITIONS:
+                    logger.debug("bigmover_lane_full")
+                    continue
+
+            # B3.1: revalidate funding LIVE (scan cache up to 2 min old) for ALL lanes.
+            # Fail-open on API errors so transient network blips don't block trades.
+            if not await _revalidate_funding(symbol, direction):
+                logger.info("auto_trade_funding_flip", symbol=symbol, agent=agent)
+                continue
+
             # F13: ensure risk_pct is never None/0 — use 2.0 as safe fallback
             risk_pct  = sig.get("risk_pct") or 2.0
             leverage  = sig.get("leverage", 5)
+
+            # BC3: validate symbol constraints from Binance exchangeInfo.
+            # Round entry/SL/TP to tickSize; skip if notional < minNotional; cap leverage.
+            from agents.futures.exchange_info import get_symbol_constraints, round_to_tick as _rtt
+            _cst      = await get_symbol_constraints(symbol)
+            _tick     = _cst["tick_size"]
+            _min_not  = float(_cst["min_notional"])
+            leverage  = min(leverage, _cst["max_leverage"])
+            # Shallow-copy sig so we don't mutate the shared candidate dict
+            sig = dict(sig)
+            sig["entry"] = _rtt(sig.get("entry", sig.get("price", 0)), _tick)
+            sig["sl"]    = _rtt(sig.get("sl", 0), _tick)
+            if sig.get("tp1"): sig["tp1"] = _rtt(sig["tp1"], _tick)
+            if sig.get("tp2"): sig["tp2"] = _rtt(sig["tp2"], _tick)
+            if sig.get("tp3"): sig["tp3"] = _rtt(sig["tp3"], _tick)
 
             # Phase 9: size from the REAL shared futures wallet (balance-aware + portfolio heat).
             from app.api.v1.balance import compute_futures_sizing
@@ -179,6 +273,18 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             pos_size        = sizing["position_size"]
             risk_dollar_val = sizing["risk_dollar"]
             bal_snapshot    = sizing["balance"]
+
+            # BC3: skip if resulting notional is below Binance minimum
+            if pos_size < _min_not:
+                logger.debug("auto_trade_min_notional_skip",
+                             symbol=symbol, pos_size=pos_size, min_notional=_min_not)
+                continue
+
+            # P1: compute entry slippage for meta (informational — does not adjust stored price)
+            from app.services.slippage_sim import calculate_entry_slippage, get_session_label
+            _slip_pct = sig.get("entry_slippage_pct") or calculate_entry_slippage(
+                sig.get("quote_vol_24h", 0)
+            )
 
             meta = {
                 "signals":      sig.get("signals", []),
@@ -199,6 +305,9 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 "margin_type":  "cross",
                 "setup_type":   sig.get("setup_type", "pre_move"),   # P2: lane tag
                 "auto_opened":  True,
+                # P1 / B4.1: slippage info for analytics (not applied to entry_price)
+                "entry_slippage_pct": round(_slip_pct, 4),
+                "entry_session":      get_session_label(),
             }
 
             trade = PaperTrade(
@@ -217,7 +326,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 entry_type       = "market",
                 entry_at         = now,
                 status           = "open",
-                leverage         = sig.get("leverage", 5),
+                leverage         = leverage,
                 margin_type      = "cross",
                 regime           = sig.get("regime", regime),   # BUG-L13: per-coin regime if present
                 trail_active     = False,
@@ -229,8 +338,10 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             # Commit per open so the next compute_futures_sizing sees this position's
             # margin/risk (portfolio heat must account for trades opened earlier this cycle).
             await session.commit()
-            existing_syms.add(symbol)
+            existing_syms.add(_open_key)  # BC2: add (symbol, direction) or symbol
             opened += 1
+            if agent == "futures_agent_bigmover":
+                bm_open_count += 1
 
             logger.info(
                 "auto_trade_opened",
@@ -241,3 +352,28 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             )
 
     return opened
+
+
+# ── Phase 2 BM1 helpers ────────────────────────────────────────────────────────
+
+async def _revalidate_funding(symbol: str, direction: str) -> bool:
+    """
+    Phase 2 BM1: re-fetch live funding 30s before order — scan cache can be 2 min stale.
+    Returns True if still within hard gate, False otherwise.
+    """
+    import httpx
+    from app.services.binance_urls import fapi
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(fapi("/fapi/v1/premiumIndex"), params={"symbol": symbol})
+            if r.status_code != 200:
+                return True  # fail-open — don't block on transient API errors
+            fr_pct = float(r.json().get("lastFundingRate", 0)) * 100
+    except Exception:
+        return True
+
+    if direction == "LONG" and fr_pct > MAX_LONG_FUNDING_PCT:
+        return False
+    if direction == "SHORT" and fr_pct < MIN_SHORT_FUNDING_PCT:
+        return False
+    return True

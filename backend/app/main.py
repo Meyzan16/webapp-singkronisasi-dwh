@@ -32,18 +32,28 @@ from app.api.v1.binance_status import router as binance_status_router
 from app.api.v1.futures_market  import router as futures_market_router
 from app.api.v1.spot_market     import router as spot_market_router
 from app.api.v1.balance import router as balance_router
+from app.api.v1.signals import router as signals_router
+from app.api.v1.futures_eligibility import router as futures_eligibility_router
+from app.api.v1.big_mover_log import router as big_mover_log_router
+from app.api.v1.backtest import router as backtest_router
 from app.models.paper_trade import PaperTrade as _PaperTrade          # noqa: F401
 from app.models.paper_balance import PaperBalance as _PaperBalance    # noqa: F401
 from app.models.balance_transaction import BalanceTransaction as _BalTxn  # noqa: F401
 from app.models.signal_weight import AgentSignalWeight as _ASW         # noqa: F401
+from app.models.big_mover_log import BigMoverLog as _BML               # noqa: F401
+from app.models.force_open_log import ForceOpenLog as _FOL             # noqa: F401
+from app.models.backtest_result import WeeklyBacktestResult as _WBR   # noqa: F401
 from app.config import get_settings
 from app.database import create_db_schema, dispose_engine, set_db_available
-from agents.opportunity.scheduler import run_opportunity_loop
+from agents.opportunity.scheduler import run_opportunity_loop, run_bigmover_fastpass
 from agents.opportunity.monitor import run_opportunity_monitor
 from agents.futures.scheduler import run_futures_loop
 from agents.futures.monitor import run_futures_monitor
+from agents.futures.ws_big_mover_feed import run_ws_big_mover_feed   # Phase 2 BM4 / G21
+from agents.futures.delisting_monitor import run_delisting_monitor   # G17
 from app.ws.opportunity_stream import opportunity_stream
 from app.ws.futures_stream import futures_stream
+from app.ws.big_mover_alerts import big_mover_alert_stream   # G12
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -79,11 +89,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     monitor_task         = asyncio.create_task(run_opportunity_monitor())
     futures_task         = asyncio.create_task(run_futures_loop())
     futures_monitor_task = asyncio.create_task(run_futures_monitor())
+    # Phase 2 BM3 / G13: 60s fastpass for SPOT big-mover lane
+    bigmover_fastpass_task = asyncio.create_task(run_bigmover_fastpass())
+    # Phase 2 BM4 / G21: real-time WebSocket big-mover feed
+    ws_big_mover_task = asyncio.create_task(run_ws_big_mover_feed())
+    # G17: delisting risk monitor (poll every 6h)
+    delisting_task = asyncio.create_task(run_delisting_monitor())
 
     yield  # ← app is running
 
     # ── Shutdown ───────────────────────────────────────────────────────────────
-    for task in [opportunity_task, monitor_task, futures_task, futures_monitor_task]:
+    for task in [
+        opportunity_task, monitor_task, futures_task, futures_monitor_task,
+        bigmover_fastpass_task, ws_big_mover_task, delisting_task,
+    ]:
         task.cancel()
         try:
             await task
@@ -105,6 +124,10 @@ app.include_router(binance_status_router,   prefix=settings.api_v1_prefix)
 app.include_router(futures_market_router,   prefix=settings.api_v1_prefix)
 app.include_router(spot_market_router,      prefix=settings.api_v1_prefix)
 app.include_router(balance_router,          prefix=settings.api_v1_prefix)
+app.include_router(signals_router,          prefix=settings.api_v1_prefix)
+app.include_router(futures_eligibility_router, prefix=settings.api_v1_prefix)
+app.include_router(big_mover_log_router,    prefix=settings.api_v1_prefix)
+app.include_router(backtest_router,         prefix=settings.api_v1_prefix)
 
 
 @app.websocket("/ws/opportunity")
@@ -115,6 +138,11 @@ async def ws_opportunity(websocket: WebSocket) -> None:
 @app.websocket("/ws/futures")
 async def ws_futures(websocket: WebSocket) -> None:
     await futures_stream(websocket)
+
+
+@app.websocket("/ws/big-movers")
+async def ws_big_movers(websocket: WebSocket) -> None:
+    await big_mover_alert_stream(websocket)
 
 
 @app.get("/health")

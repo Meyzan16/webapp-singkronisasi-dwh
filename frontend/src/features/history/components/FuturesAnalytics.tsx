@@ -7,9 +7,10 @@ interface LearningStats {
   regime:          string;
   target_win_rate: number;
   overall:         { total: number; open: number; closed: number; wins: number; losses: number; win_rate: number };
-  agent1:          { total: number; wins: number; losses: number; win_rate: number };
-  agent2:          { total: number; wins: number; losses: number; win_rate: number };
-  agent3:          { total: number; wins: number; losses: number; win_rate: number };
+  agent1:           { total: number; wins: number; losses: number; win_rate: number };
+  agent2:           { total: number; wins: number; losses: number; win_rate: number };
+  agent3?:          { total: number; wins: number; losses: number; win_rate: number };
+  agent_bigmover?:  { total: number; wins: number; losses: number; win_rate: number };  // EC6
   balance:         { starting: number; current: number; total_pnl: number; roi_pct: number };
   equity_points:   { trade_n: number; balance: number; symbol: string; win: boolean; agent: string; ts: number | null }[];
   conservative_equity: { trade_n: number; balance: number }[];
@@ -23,17 +24,6 @@ interface LearningStats {
   };
   leverage_dist:   Record<string, number>;
   monitor:         { running: boolean; cycle_count: number; closed_today: number };
-}
-
-interface SignalWeight {
-  agent:       string;
-  signal_key:  string;
-  weight:      number;
-  win_rate:    number;
-  win_count:   number;
-  total_count: number;
-  regime:      string;
-  updated_at:  number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -138,27 +128,17 @@ function EquityDualChart({
 
 export function FuturesAnalytics() {
   const [stats,    setStats]   = useState<LearningStats | null>(null);
-  const [weights,  setWeights] = useState<SignalWeight[]>([]);
   const [loading,  setLoading] = useState(true);
   const [lastUpd,  setLastUpd] = useState<Date | null>(null);
-  const [wAgent,   setWAgent]  = useState<"all" | "agent1" | "agent2" | "agent3">("all");
-  const [wSort,    setWSort]   = useState<"win_rate" | "weight" | "total">("win_rate");
   const [updating, setUpdating]= useState(false);
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [sRes, wRes] = await Promise.all([
-        fetch("/api/v1/futures/learning/stats"),
-        fetch("/api/v1/futures/learning/weights"),
-      ]);
+      const sRes = await fetch("/api/v1/futures/learning/stats");
       if (sRes.ok) {
         const d = await sRes.json() as LearningStats;
         if (!("error" in d)) setStats(d);
-      }
-      if (wRes.ok) {
-        const d = await wRes.json() as { weights: SignalWeight[] };
-        setWeights(d.weights ?? []);
       }
       setLastUpd(new Date());
     } catch { /* silent */ }
@@ -175,21 +155,10 @@ export function FuturesAnalytics() {
 
   useEffect(() => {
     void fetchAll();
-    // F31: auto-refresh every 60s so analytics stay live without manual Update
+    // auto-refresh every 60s so analytics stay live without manual Update
     const poll = setInterval(() => { void fetchAll(true); }, 60_000);
     return () => clearInterval(poll);
   }, [fetchAll]);
-
-  // ── Derived ────────────────────────────────────────────────────────────────
-
-  const displayWeights = [...weights]
-    .filter(w => wAgent === "all" || w.agent === `futures_${wAgent}`)
-    .filter(w => w.regime === "all")
-    .sort((a, b) =>
-      wSort === "win_rate" ? b.win_rate - a.win_rate :
-      wSort === "weight"   ? b.weight - a.weight :
-      b.total_count - a.total_count
-    );
 
   // ── Loading / no data ──────────────────────────────────────────────────────
 
@@ -246,8 +215,10 @@ export function FuturesAnalytics() {
                 data: stats.agent1, color: "border-blue-200 bg-blue-50", badge: "bg-blue-100 text-blue-700" },
               { key: "agent2", label: "Accumulation", emoji: "📦",
                 data: stats.agent2, color: "border-purple-200 bg-purple-50", badge: "bg-purple-100 text-purple-700" },
-              { key: "agent3", label: "Momentum", emoji: "🔥",
-                data: stats.agent3, color: "border-orange-200 bg-orange-50", badge: "bg-orange-100 text-orange-700" },
+              ...(stats.agent3 ? [{ key: "agent3", label: "Momentum", emoji: "🔥",
+                data: stats.agent3, color: "border-orange-200 bg-orange-50", badge: "bg-orange-100 text-orange-700" }] : []),
+              ...(stats.agent_bigmover ? [{ key: "agent_bigmover", label: "Big Mover", emoji: "🚀",
+                data: stats.agent_bigmover, color: "border-yellow-200 bg-yellow-50", badge: "bg-yellow-100 text-yellow-700" }] : []),
             ].map(a => {
               const wr = a.data.win_rate;
               const wrColor = wr >= TARGET ? "text-green-600" : wr >= 50 ? "text-yellow-600" : "text-red-500";
@@ -360,7 +331,8 @@ export function FuturesAnalytics() {
             {[
               { label: "Pre-Gainer",   data: stats.agent1, bar: "bg-blue-500" },
               { label: "Accumulation", data: stats.agent2, bar: "bg-purple-500" },
-              { label: "Momentum",     data: stats.agent3, bar: "bg-orange-500" },
+              ...(stats.agent3 ? [{ label: "Momentum",  data: stats.agent3,        bar: "bg-orange-500" }] : []),
+              ...(stats.agent_bigmover ? [{ label: "Big Mover", data: stats.agent_bigmover, bar: "bg-yellow-500" }] : []),
             ].map(a => (
               <div key={a.label}>
                 <div className="flex justify-between text-xs mb-1">
@@ -485,82 +457,6 @@ export function FuturesAnalytics() {
           </div>
         </div>
       )}
-
-      {/* ══════════════════════════════════════════════════════════════════════
-          E. SIGNAL PERFORMANCE TABLE
-      ══════════════════════════════════════════════════════════════════════ */}
-      <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-neutral-100 bg-neutral-50 flex items-center justify-between flex-wrap gap-2">
-          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">🔬 Signal Performance Table</p>
-          <div className="flex gap-2">
-            {/* Agent filter */}
-            <div className="flex gap-1 bg-neutral-100 p-0.5 rounded-lg">
-              {(["all", "agent1", "agent2", "agent3"] as const).map(a => (
-                <button key={a} onClick={() => setWAgent(a)}
-                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
-                    wAgent === a ? "bg-white text-neutral-800 shadow-sm" : "text-neutral-500"
-                  }`}>
-                  {a === "all" ? "Semua" : a === "agent1" ? "Pre-Gainer" : a === "agent2" ? "Accumulation" : "Momentum"}
-                </button>
-              ))}
-            </div>
-            {/* Sort */}
-            <select value={wSort} onChange={e => setWSort(e.target.value as typeof wSort)}
-              className="text-[10px] border border-neutral-200 rounded-lg px-2 py-1 bg-white focus:outline-none">
-              <option value="win_rate">Sort: Win Rate</option>
-              <option value="weight">Sort: Weight</option>
-              <option value="total">Sort: Trades</option>
-            </select>
-          </div>
-        </div>
-
-        {displayWeights.length === 0 ? (
-          <div className="text-center py-10 text-neutral-400 text-sm">
-            {weights.length === 0
-              ? "Belum ada signal weights — klik Update Weights setelah ada closed trades"
-              : "Tidak ada signal untuk filter ini"}
-          </div>
-        ) : (
-          <>
-            {/* Header */}
-            <div className="hidden sm:grid grid-cols-12 gap-2 px-5 py-2 bg-neutral-50 border-b text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
-              <span className="col-span-5">Signal</span>
-              <span className="col-span-2 text-center">Agent</span>
-              <span className="col-span-2 text-right">Win Rate</span>
-              <span className="col-span-1 text-right">Weight</span>
-              <span className="col-span-2 text-right">Trades</span>
-            </div>
-            <div className="divide-y divide-neutral-50 max-h-80 overflow-y-auto">
-              {displayWeights.map((w, i) => {
-                const wrColor  = w.win_rate >= 70 ? "text-green-600" : w.win_rate >= 50 ? "text-yellow-600" : "text-red-500";
-                const wBadge   = w.weight >= 1.4 ? "bg-green-100 text-green-700" : w.weight >= 1.1 ? "bg-blue-100 text-blue-700" : w.weight < 0.9 ? "bg-red-100 text-red-600" : "bg-neutral-100 text-neutral-600";
-                const aBadge   = w.agent === "futures_agent1" ? "bg-blue-100 text-blue-700" : w.agent === "futures_agent3" ? "bg-orange-100 text-orange-700" : "bg-purple-100 text-purple-700";
-                return (
-                  <div key={i} className="grid grid-cols-12 gap-2 px-5 py-2.5 hover:bg-neutral-50 items-center">
-                    <div className="col-span-5 min-w-0">
-                      <p className="text-xs text-neutral-700 truncate">{w.signal_key.replace(/_/g, " ")}</p>
-                    </div>
-                    <div className="col-span-2 text-center">
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${aBadge}`}>
-                        {w.agent === "futures_agent1" ? "Pre-Gainer" : w.agent === "futures_agent3" ? "Momentum" : "Accumulation"}
-                      </span>
-                    </div>
-                    <div className="col-span-2 text-right">
-                      <p className={`text-sm font-black tabular-nums ${wrColor}`}>{w.win_rate.toFixed(0)}%</p>
-                    </div>
-                    <div className="col-span-1 text-right">
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${wBadge}`}>×{w.weight.toFixed(1)}</span>
-                    </div>
-                    <div className="col-span-2 text-right">
-                      <p className="text-xs text-neutral-500">{w.win_count}/{w.total_count}</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
 
     </div>
   );

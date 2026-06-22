@@ -75,7 +75,14 @@ WEEKLY_SCAN_EXTRA       = 15        # max coin tambahan dari jalur ini
 DIRECTION_TAKER_MIN = 0.55
 
 # Regime gate BTC (§12.5)
-BTC_REGIME_24H_MIN  = -3.0   # BTC 24h di bawah ini → auto-open OFF
+# Phase 3 G3-regime: 3-state OPEN / REDUCED / CLOSED (was binary).
+# CLOSED:  hard stop, no auto-open
+# REDUCED: max 1 open per cycle (was 3), system konservatif
+# OPEN:    normal full quota
+BTC_REGIME_CLOSED_24H  = -5.0    # BTC 24h ≤ −5% → CLOSED
+BTC_REGIME_REDUCED_24H = -3.0    # BTC 24h ≤ −3% (and > −5%) → REDUCED
+BTC_REGIME_DOUBLE_CONFIRM_24H = -1.0  # 4h EMA bearish + 24h < −1% → REDUCED
+BTC_REGIME_24H_MIN  = BTC_REGIME_REDUCED_24H   # legacy alias (kept for back-compat)
 
 # Stablecoin / fiat / low-vol token blacklist
 # BB Width secara natural sempit → false squeeze signals
@@ -123,6 +130,24 @@ BREAKOUT_AUTO_SCORE       = 75      # auto-open threshold (lebih rendah dari aku
 BREAKOUT_ATR_MULTIPLIER   = 1.5    # SL = price − ATR(14) × 1.5
 BREAKOUT_RISK_MIN_PCT     = 2.0    # min SL distance
 BREAKOUT_RISK_MAX_PCT     = 12.0   # max SL distance (lebih lebar dari akumulasi 5%)
+
+# ── Big Mover Chase lane (PLAN-BIG-MOVERS Phase 2 BM2) ───────────────────────
+# Lane LONG-only untuk coin yang sudah pump ≥ 20% 24h atau ≥ 30% 7d. Simplified
+# scoring tanpa BB Squeeze (irrelevant di breakout). B2.3: hapus full direction
+# gate, ganti dengan lighter check (change_1h>0 + 5m majority green).
+BIGMOVER_MIN_CHANGE_24H   = 20.0   # ≥20% qualifies
+BIGMOVER_MIN_CHANGE_7D    = 30.0   # ≥30% weekly qualifies
+BIGMOVER_MAX_CHANGE_24H   = 150.0  # >150% parabolic — skip
+BIGMOVER_MIN_VOLUME       = 1_000_000   # $1M min (plan spec)
+BIGMOVER_AUTO_SCORE       = 65     # auto-open threshold
+BIGMOVER_MIN_SCORE        = 55     # min display score
+BIGMOVER_RISK_PCT_DEFAULT = 0.7    # 0.7% per-trade risk (separuh accumulation 1%)
+BIGMOVER_SL_PCT_MAX       = 5.0    # SL floor 5%
+BIGMOVER_TP1_PCT          = 3.0
+BIGMOVER_TP2_PCT          = 6.0
+BIGMOVER_TP3_PCT          = 10.0
+BIGMOVER_GAP_5M_LIMIT     = 5.0    # skip kalau gap antar candle 5m > 5%
+BIGMOVER_ENTRY_TRAP_30M   = 15.0   # G18 entry-trap: change_30m > 15% same dir = puncak
 
 
 # ── Math helpers ───────────────────────────────────────────────────────────────
@@ -363,6 +388,68 @@ def _calc_trade_levels(tf_data: dict[str, TFData], entry: float) -> Optional[dic
 
 # ── Breakout trade levels (ATR-based SL) ──────────────────────────────────────
 
+# ── Big Mover Chase trade levels — fixed % bracket ───────────────────────────
+
+def _calc_trade_levels_bigmover(
+    klines_15m: list,
+    entry: float,
+) -> Optional[dict]:
+    """
+    SL = max(1.5% below swing-low 15m, -5%) — wider than accumulation.
+    TP: fixed +3%/+6%/+10% (R:R ≥ 1.2 to TP1, ≥ 1.5 to TP2 even at max SL).
+    """
+    if entry <= 0 or len(klines_15m) < 20:
+        return None
+
+    # Swing low — lowest low over last 12 candles (~3 hours)
+    try:
+        lows = [float(k[3]) for k in klines_15m[-13:-1]]   # exclude current candle
+    except (IndexError, ValueError):
+        return None
+    if not lows:
+        return None
+    swing_low = min(lows)
+
+    sl_from_swing = swing_low * 0.985    # 1.5% below swing-low
+    sl_from_floor = entry * (1 - BIGMOVER_SL_PCT_MAX / 100)
+    sl = max(sl_from_swing, sl_from_floor)   # take the tighter (HIGHER for LONG)
+    if sl >= entry:
+        sl = entry * (1 - BIGMOVER_SL_PCT_MAX / 100)
+
+    risk     = entry - sl
+    risk_pct = risk / entry * 100
+    if risk_pct < 1.0 or risk_pct > BIGMOVER_SL_PCT_MAX + 0.5:
+        return None
+
+    tp1 = entry * (1 + BIGMOVER_TP1_PCT / 100)
+    tp2 = entry * (1 + BIGMOVER_TP2_PCT / 100)
+    tp3 = entry * (1 + BIGMOVER_TP3_PCT / 100)
+
+    rr = (tp2 - entry) / risk
+    if rr < 1.2:
+        return None
+
+    rp = _round_price
+    def net_pct(tp: float) -> float:
+        return round((tp - entry) / entry * 100 - EXECUTION_COST_PCT, 2)
+
+    return {
+        "entry":       rp(entry, entry),
+        "sl":          rp(sl, entry),
+        "tp1":         rp(tp1, entry),
+        "tp2":         rp(tp2, entry),
+        "tp3":         rp(tp3, entry),
+        "risk_pct":    round(risk_pct, 2),
+        "tp1_pct":     BIGMOVER_TP1_PCT,
+        "tp2_pct":     BIGMOVER_TP2_PCT,
+        "tp3_pct":     BIGMOVER_TP3_PCT,
+        "tp1_net_pct": net_pct(tp1),
+        "tp2_net_pct": net_pct(tp2),
+        "tp3_net_pct": net_pct(tp3),
+        "rr_ratio":    round(rr, 1),
+    }
+
+
 def _calc_trade_levels_breakout(klines_15m: list, entry: float) -> Optional[dict]:
     """
     ATR-based trade levels for Breakout Hunter lane (B2).
@@ -560,6 +647,173 @@ def _score_breakout(
         "tfs_confirmed":       list(tf_data.keys()),
         "bb_width_15m":        round(d15.bb_width * 100, 2) if d15 else None,
         "rsi_1h":              round(d1h_ref.rsi, 1) if d1h_ref else None,
+        "weight_applied":      1.0,
+        "banned_by_learning":  False,
+    }
+
+
+# ── Big Mover Chase scoring (PLAN-BIG-MOVERS Phase 2 BM2) ─────────────────────
+
+def _score_bigmover_chase(
+    symbol:     str,
+    tf_data:    dict[str, "TFData"],
+    change_24h: float,
+    change_1h:  float,
+    change_7d:  float,
+) -> Optional[dict]:
+    """
+    LONG-only lane untuk coin yang sudah pump kuat. Simplified scoring:
+      vol_ratio + RSI bracket + EMA bullish + buy pressure.
+    TIDAK pakai BB Squeeze (irrelevant di breakout).
+    B2.3 lighter direction gate: change_1h > 0 AND 3-candle 5m majority green.
+    G14 noise filter: skip gap 5m > 5%, candle 5m zero-vol.
+    G18 entry-trap: skip kalau change_30m > 15% (puncak literal).
+    """
+    score   = 0.0
+    signals: list[str] = []
+
+    d15 = tf_data.get("15m")
+    d1h = tf_data.get("1h")
+    ref = d15 or d1h
+    if not ref:
+        return None
+
+    current_price = ref.live_price or ref.closes[-1]
+    if current_price <= 0:
+        return None
+
+    # ── G14 noise filter ──────────────────────────────────────────────────────
+    if d15 and len(d15.closes) >= 3:
+        # Gap between last 2 candles > 5%
+        prev2 = d15.closes[-2]
+        if prev2 > 0:
+            gap_pct = abs(d15.closes[-1] - prev2) / prev2 * 100
+            if gap_pct > BIGMOVER_GAP_5M_LIMIT:
+                return None
+        # Zero-vol candle count
+        zero_vol = sum(1 for v in d15.volumes[-5:] if v == 0)
+        if zero_vol >= 2:
+            return None
+
+    # ── G18 entry-trap (puncak literal) ───────────────────────────────────────
+    if d15 and len(d15.closes) >= 7:
+        # change_30m = 2 × 15m
+        prev30 = d15.closes[-3]
+        if prev30 > 0:
+            chg_30m = (d15.closes[-1] - prev30) / prev30 * 100
+            if chg_30m > BIGMOVER_ENTRY_TRAP_30M:
+                return None
+        # recent_high_5m == current (literal top)
+        if current_price >= max(d15.highs[-5:]) * 0.999:
+            return None
+
+    # ── B2.3 lighter direction gate ───────────────────────────────────────────
+    # change_1h > 0 AND last 3 (15m) candles majority green
+    if change_1h <= 0:
+        return None
+    if d15 and len(d15.opens) >= 3 and len(d15.closes) >= 3:
+        green = sum(1 for i in (-3, -2, -1) if d15.closes[i] >= d15.opens[i])
+        if green < 2:
+            return None
+
+    # ── 1. Volume ratio (0-25 pts) ────────────────────────────────────────────
+    best_vol = 0.0
+    if d15 and d15.vol_ratio >= 3.0:
+        best_vol = 25
+        signals.append(f"Volume 15m {d15.vol_ratio:.1f}× — pressure dikonfirmasi")
+    elif d15 and d15.vol_ratio >= 2.0:
+        best_vol = 18
+        signals.append(f"Volume 15m {d15.vol_ratio:.1f}× rata-rata")
+    elif d15 and d15.vol_ratio >= 1.3:
+        best_vol = 10
+    score += best_vol
+
+    # ── 2. RSI < 80 sweet zone (0-15 pts) ─────────────────────────────────────
+    rsi_val = d1h.rsi if d1h else (d15.rsi if d15 else 50)
+    if 55 <= rsi_val <= 72:
+        score += 15
+        signals.append(f"RSI {rsi_val:.0f} — momentum zone, masih ada room")
+    elif 50 <= rsi_val < 55:
+        score += 10
+    elif 72 < rsi_val <= 80:
+        score += 7
+        signals.append(f"RSI {rsi_val:.0f} extended — hati-hati exhaustion")
+    elif rsi_val > 80:
+        return None   # overbought hard skip
+
+    # ── 3. EMA alignment (0-15 pts) ───────────────────────────────────────────
+    aligned = sum(1 for d in tf_data.values() if d.ema9 > d.ema21)
+    if aligned >= 3:
+        score += 15
+        signals.append("EMA bullish 3 TF — trend kuat semua")
+    elif aligned == 2:
+        score += 10
+    elif aligned == 1:
+        score += 4
+
+    # ── 4. Buy pressure (taker ratio) (0-15 pts) ──────────────────────────────
+    taker_vals = [d.taker_ratio for d in tf_data.values()]
+    avg_taker  = sum(taker_vals) / len(taker_vals) if taker_vals else 0.5
+    if avg_taker >= 0.62:
+        score += 15
+        signals.append(f"Taker buy {avg_taker:.0%} — buyer agresif")
+    elif avg_taker >= 0.55:
+        score += 9
+
+    # ── 5. Momentum context (0-20 pts) ────────────────────────────────────────
+    if 20 <= change_24h < 35:
+        score += 12
+        signals.append(f"Δ24h +{change_24h:.1f}% — wave matang, room masih ada")
+    elif 35 <= change_24h < 70:
+        score += 18
+        signals.append(f"💥 Δ24h +{change_24h:.1f}% — momentum kuat")
+    elif 70 <= change_24h <= 100:
+        score += 20
+        signals.append(f"🚀 Δ24h +{change_24h:.1f}% — parabolic ride")
+    elif change_24h > BIGMOVER_MAX_CHANGE_24H:
+        return None
+    # Weekly bonus
+    if change_7d >= 50:
+        score += 8
+        signals.append(f"7d +{change_7d:.0f}% — weekly momentum kuat")
+    elif change_7d >= 30:
+        score += 5
+
+    # ── 6. 1h confirm (0-10 pts) ──────────────────────────────────────────────
+    if change_1h >= 3:
+        score += 10
+        signals.append(f"1h +{change_1h:.1f}% — masih chasing")
+    elif change_1h >= 1:
+        score += 5
+
+    # ── Finalize ──────────────────────────────────────────────────────────────
+    if score < BIGMOVER_MIN_SCORE:
+        return None
+    clean_signals = [s for s in signals if not s.startswith("⚠")]
+
+    raw_score = round(score, 1)
+    auto_open = raw_score >= BIGMOVER_AUTO_SCORE   # B2.3: direction gate sudah lighter, OK to auto
+
+    return {
+        "symbol":              symbol,
+        "current_price":       round(current_price, 8),
+        "opportunity_score":   round(min(score, 99), 1),
+        "raw_score":           raw_score,
+        "direction_confirmed": True,    # passed lighter gate above
+        "auto_open":           auto_open,
+        "entry_mode":          "bigmover_chase",
+        "signals":             clean_signals[:5],
+        "alert_type":          "bigmover_chase",
+        "change_24h":          round(change_24h, 2),
+        "change_1h":           round(change_1h, 2),
+        "change_7d":           round(change_7d, 2),
+        "vol_ratio":           round(d15.vol_ratio if d15 else 1.0, 2),
+        "avg_taker":           round(avg_taker, 3),
+        "ema_bullish":         bool(d1h and d1h.ema9 > d1h.ema21),
+        "squeeze_tfs":         [],
+        "tfs_confirmed":       list(tf_data.keys()),
+        "bb_width_15m":        round(d15.bb_width * 100, 2) if d15 else None,
+        "rsi_1h":              round(d1h.rsi, 1) if d1h else None,
         "weight_applied":      1.0,
         "banned_by_learning":  False,
     }
@@ -879,21 +1133,31 @@ def _ev_per_risk(result: dict) -> float:
     return round(ev / risk, 3)
 
 
-def _btc_regime(tf_data_btc: Optional[dict], btc_change_24h: float) -> tuple[str, bool]:
+def _btc_regime(tf_data_btc: Optional[dict], btc_change_24h: float) -> tuple[str, str]:
     """
-    Regime BTC (§12.5): saat BTC turun tajam, hampir semua alt LONG gagal serentak.
-    Returns (label, auto_open_allowed).
+    Phase 3 G3-regime: graceful 3-state degradation (was binary open/closed).
+
+    Returns (label, status) where status ∈ {"OPEN", "REDUCED", "CLOSED"}.
+
+    - CLOSED:  btc_change_24h ≤ −5%                          → no auto-open
+    - REDUCED: btc_change_24h ≤ −3%                          → 1 open/cycle, not 3
+    - REDUCED: BTC 4h EMA bearish AND btc_change_24h < −1%   → double-confirm
+    - OPEN:    everything else (incl. mildly red days)       → normal full quota
     """
-    if btc_change_24h < BTC_REGIME_24H_MIN:
-        return "bearish_24h", False
+    if btc_change_24h <= BTC_REGIME_CLOSED_24H:
+        return "bearish_24h_severe", "CLOSED"
+    if btc_change_24h <= BTC_REGIME_REDUCED_24H:
+        return "bearish_24h", "REDUCED"
+
     if tf_data_btc:
         d4h = tf_data_btc.get("4h")
-        if d4h and d4h.ema9 < d4h.ema21:
-            return "bearish_4h", False
+        if (d4h and d4h.ema9 < d4h.ema21
+                and btc_change_24h < BTC_REGIME_DOUBLE_CONFIRM_24H):
+            return "bearish_4h_double_confirm", "REDUCED"
         d1h = tf_data_btc.get("1h")
         if d1h and d1h.ema9 > d1h.ema21:
-            return "bull", True
-    return "flat", True
+            return "bull", "OPEN"
+    return "flat", "OPEN"
 
 
 async def run_opportunity_scan() -> dict:
@@ -1083,6 +1347,9 @@ async def run_opportunity_scan() -> dict:
         if d4h and len(d4h.closes) >= 42 and d4h.closes[-42] > 0:
             change_7d = (d4h.closes[-1] - d4h.closes[-42]) / d4h.closes[-42] * 100
 
+        # P1: store 24h quote volume so scheduler + auto_open can compute slippage
+        quote_vol = float(ticker.get("quoteVolume", 0) or 0)
+
         result = _score_symbol(symbol, tf_data, change_24h, change_1h, change_7d)
         if result is None:
             continue
@@ -1109,7 +1376,16 @@ async def run_opportunity_scan() -> dict:
             continue  # skip coins without valid Entry/SL/TP
 
         result.update(levels)
-        result["ev_per_risk"] = _ev_per_risk(result)
+        result["quote_vol_24h"] = quote_vol
+        result["ev_per_risk"]   = _ev_per_risk(result)
+
+        # P2: MIN_NET_EV gate — TP2 net profit must be ≥ 1.5% after fees + dynamic slippage
+        from app.services.slippage_sim import calculate_entry_slippage as _cslip
+        _SPOT_FIXED_COST = 0.26   # 0.10%×2 taker + 0.06% spread
+        _net_tp2 = result.get("tp2_pct", 0) - _SPOT_FIXED_COST - _cslip(quote_vol)
+        if _net_tp2 < 1.5:
+            continue
+
         results.append(result)
 
     # ── PLAN-SPOT-BREAKOUT B4: Breakout Hunter pass ───────────────────────────
@@ -1194,22 +1470,132 @@ async def run_opportunity_scan() -> dict:
             continue
 
         bres.update(blevels)
-        bres["ev_per_risk"] = _ev_per_risk(bres)
+        bres["quote_vol_24h"] = float((_all_ticker_map.get(bsym) or {}).get("quoteVolume", 0) or 0)
+        bres["ev_per_risk"]   = _ev_per_risk(bres)
+        # P2: MIN_NET_EV gate
+        from app.services.slippage_sim import calculate_entry_slippage as _cslip
+        if bres.get("tp2_pct", 0) - 0.26 - _cslip(bres["quote_vol_24h"]) < 1.5:
+            continue
         breakout_results.append(bres)
         _breakout_done.add(bsym)
 
     logger.info("breakout_scan_done", found=len(breakout_results),
                 pool=len(_breakout_pool))
 
-    # §12.5: regime gate BTC — auto-open OFF saat market memusuhi LONG
-    regime, auto_allowed = _btc_regime(btc_tf_data, btc_change_24h)
-    if not auto_allowed:
+    # ── PLAN-BIG-MOVERS Phase 2 BM2: Big Mover Chase pass ─────────────────────
+    # LONG-only. Pool: change_24h ≥ 20% OR change_7d ≥ 30%. Min vol $1M.
+    # B2.4: dedup via _breakout_done (shared across accumulation + breakout + bigmover).
+    bigmover_results: list[dict] = []
+    bm_extra_movers = [
+        t for t in tickers_all
+        if (
+            float(t.get("priceChangePercent", 0)) >= BIGMOVER_MIN_CHANGE_24H
+            and float(t.get("quoteVolume", 0)) >= BIGMOVER_MIN_VOLUME
+            and t["symbol"] not in _breakout_done
+            and t["symbol"] not in _accum_syms
+        )
+    ][:30]
+
+    if bm_extra_movers:
+        # Fetch klines for extras not already pulled
+        _bm_sem = asyncio.Semaphore(10)
+
+        async def _fetch_bm(client: httpx.AsyncClient, sym: str, tf: str) -> list:
+            async with _bm_sem:
+                return await _fetch_klines(client, sym, tf)
+
+        async with httpx.AsyncClient(timeout=25) as _bm_client:
+            _bm_tasks = {
+                (t["symbol"], tf): asyncio.create_task(_fetch_bm(_bm_client, t["symbol"], tf))
+                for t in bm_extra_movers
+                for tf in TIMEFRAMES
+            }
+            for (bsym, btf), btask in _bm_tasks.items():
+                try:
+                    klines_map[(bsym, btf)] = await btask
+                except Exception:
+                    klines_map[(bsym, btf)] = []
+
+    # Score: main candidates already in candidates list + extras
+    _bm_pool = (
+        [c["symbol"] for c in candidates]
+        + [t["symbol"] for t in bm_extra_movers]
+    )
+    for bsym in _bm_pool:
+        if bsym in _breakout_done:
+            continue
+        bticker = _all_ticker_map.get(bsym)
+        if not bticker:
+            continue
+        try:
+            bm_change_24h = float(bticker.get("priceChangePercent", 0))
+        except (TypeError, ValueError):
+            continue
+        if bm_change_24h < BIGMOVER_MIN_CHANGE_24H:
+            continue
+
+        bm_tf: dict[str, TFData] = {}
+        for tf in TIMEFRAMES:
+            bd = _analyze_tf(tf, klines_map.get((bsym, tf), []))
+            if bd:
+                bm_tf[tf] = bd
+        if not bm_tf:
+            continue
+
+        bm_d1h = bm_tf.get("1h")
+        bm_change_1h = 0.0
+        if bm_d1h and len(bm_d1h.closes) >= 2 and bm_d1h.closes[-2] > 0:
+            bm_change_1h = (bm_d1h.closes[-1] - bm_d1h.closes[-2]) / bm_d1h.closes[-2] * 100
+
+        bm_d4h = bm_tf.get("4h")
+        bm_change_7d = 0.0
+        if bm_d4h and len(bm_d4h.closes) >= 42 and bm_d4h.closes[-42] > 0:
+            bm_change_7d = (bm_d4h.closes[-1] - bm_d4h.closes[-42]) / bm_d4h.closes[-42] * 100
+
+        # Qualify: ≥20% 24h OR ≥30% 7d
+        if bm_change_24h < BIGMOVER_MIN_CHANGE_24H and bm_change_7d < BIGMOVER_MIN_CHANGE_7D:
+            continue
+
+        bm_res = _score_bigmover_chase(
+            bsym, bm_tf, bm_change_24h, bm_change_1h, bm_change_7d,
+        )
+        if bm_res is None:
+            continue
+
+        bm_levels = _calc_trade_levels_bigmover(
+            klines_map.get((bsym, "15m"), []), bm_res["current_price"],
+        )
+        if bm_levels is None:
+            continue
+
+        bm_res.update(bm_levels)
+        bm_res["quote_vol_24h"] = float((_all_ticker_map.get(bsym) or {}).get("quoteVolume", 0) or 0)
+        bm_res["ev_per_risk"]   = _ev_per_risk(bm_res)
+        # P2: MIN_NET_EV gate
+        from app.services.slippage_sim import calculate_entry_slippage as _cslip
+        if bm_res.get("tp2_pct", 0) - 0.26 - _cslip(bm_res["quote_vol_24h"]) < 1.5:
+            continue
+        bigmover_results.append(bm_res)
+        _breakout_done.add(bsym)   # B2.4: shared dedup across all passes
+
+    bigmover_results.sort(key=lambda x: x.get("raw_score", 0), reverse=True)
+    bigmover_results = bigmover_results[:10]
+    logger.info("bigmover_chase_scan_done", found=len(bigmover_results),
+                pool=len(_bm_pool), extras=len(bm_extra_movers))
+
+    # §12.5 + Phase 3 G3-regime: 3-state — CLOSED kills auto-open, REDUCED keeps
+    # auto_open flag (scheduler enforces lower quota), OPEN normal.
+    regime, regime_status = _btc_regime(btc_tf_data, btc_change_24h)
+    if regime_status == "CLOSED":
         for r_ in results:
             r_["auto_open"] = False
         for r_ in breakout_results:
             r_["auto_open"] = False
-        logger.info("scan_regime_gate_active", regime=regime,
-                    btc_24h=btc_change_24h)
+        for r_ in bigmover_results:
+            r_["auto_open"] = False
+        logger.info("scan_regime_gate_closed", regime=regime, btc_24h=btc_change_24h)
+    elif regime_status == "REDUCED":
+        logger.info("scan_regime_gate_reduced", regime=regime, btc_24h=btc_change_24h)
 
     # §11.4: ranking & TOP_N — accumulation lane sorted by EV per risk
     results.sort(key=lambda x: x.get("ev_per_risk", 0), reverse=True)
@@ -1219,21 +1605,25 @@ async def run_opportunity_scan() -> dict:
     breakout_results.sort(key=lambda x: x.get("raw_score", 0), reverse=True)
     breakout_results = breakout_results[:10]
 
-    all_results = results + breakout_results
+    all_results = results + breakout_results + bigmover_results
 
     elapsed = round(time.time() - start, 1)
     logger.info("opportunity_scan_done",
                 found=len(all_results), scanned=len(candidates),
                 breakout_found=len(breakout_results),
+                bigmover_found=len(bigmover_results),
                 regime=regime, elapsed_sec=elapsed)
 
     return {
-        "results":          all_results,
-        "scanned":          len(candidates),
-        "found":            len(all_results),
+        "results":            all_results,
+        "scanned":            len(candidates),
+        "found":              len(all_results),
         "found_accumulation": len(results),
-        "found_breakout":   len(breakout_results),
-        "btc_regime":       regime,
-        "generated_at":     int(time.time()),
-        "elapsed_sec":      elapsed,
+        "found_breakout":     len(breakout_results),
+        "found_bigmover":     len(bigmover_results),
+        "btc_regime":         regime,
+        "regime_status":      regime_status,    # Phase 3 G3-regime: OPEN | REDUCED | CLOSED
+        "btc_change_24h":     round(btc_change_24h, 2),
+        "generated_at":       int(time.time()),
+        "elapsed_sec":        elapsed,
     }

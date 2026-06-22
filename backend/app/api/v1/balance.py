@@ -29,7 +29,10 @@ STYLE_MAP = {
 }
 
 # Trades are tagged per agent, but they all settle into the single "futures" wallet.
-_FUTURES_AGENT_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
+_FUTURES_AGENT_STYLES = [
+    "futures_agent1", "futures_agent2", "futures_agent3",
+    "futures_agent_bigmover",   # Phase 2 BM1 — shares one wallet
+]
 
 
 def _wallet_trade_styles(style_key: str) -> list[str]:
@@ -52,7 +55,7 @@ CONVICTION_FLOOR   = 90.0    # raw (uncapped, pre-weight) score where scaling st
 CONVICTION_CEIL    = 120.0   # raw score for full conviction
 
 # Portfolio discipline (§7B, §12.4, §14.3)
-MAX_CONCURRENT_POSITIONS = 3      # capital concentrated in best setups only
+MAX_CONCURRENT_POSITIONS = 5      # capital concentrated in best setups only
 MIN_NOTIONAL_ABS         = 150.0  # never open dust positions
 MIN_NOTIONAL_FRACTION    = 0.15   # ...or 15% of balance, whichever is higher
 MAX_NOTIONAL_FRACTION    = 0.40   # one position never exceeds 40% of balance

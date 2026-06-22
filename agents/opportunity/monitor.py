@@ -48,6 +48,17 @@ logger = structlog.get_logger(__name__)
 INTERVAL_SEC       = 60
 STARTUP_DELAY      = 45
 MIN_HOLD_MINUTES   = 30
+
+# G5b: absolute profit lock tiers — same as futures monitor
+_PROFIT_LOCK_TIERS_SPOT = [
+    (40.0, 0.75),
+    (25.0, 0.70),
+    (15.0, 0.60),
+]
+
+# G5: dynamic TP extension thresholds
+G5_MIN_SCORE      = 75
+G5_MIN_VOL_RATIO  = 1.5
 # BM7: per entry_mode — accumulation needs more time, failed momentum exits faster
 MAX_AGE_DAYS_FRESH_SETUP    = 10   # akumulasi butuh waktu lebih lama untuk resolve
 MAX_AGE_DAYS_MOMENTUM_CHASE = 5    # momentum yang gagal bergerak = capital idle, exit lebih cepat
@@ -55,9 +66,12 @@ WICK_LOOKBACK_MIN  = 3            # 1m candles checked per cycle (covers restart
 WEIGHT_UPDATE_SEC  = 30 * 60      # time-based (§1.12), not cycle-based
 
 # Stagnant rotation — free capital from idle positions when better momentum exists
-STAGNANT_CHECK_DAYS = 3     # start checking from day 3 (give position initial runway)
+STAGNANT_CHECK_DAYS = 2     # start checking from day 2 (give position initial runway)
 STAGNANT_DRIFT_PCT  = 3.0   # ±3% from entry = coin is not moving
 STAGNANT_SCORE_GAP  = 10    # candidate must score ≥ current_score + 10 AND ≥ 85
+URGENT_ROTATION_DAYS = 1.0  # urgent: rotate after 1 day if candidate is much better
+URGENT_SCORE_GAP     = 25   # candidate must outscore by ≥ 25 (clear opportunity cost)
+URGENT_SCORE_MIN     = 90   # minimum candidate score for urgent rotation
 
 _running      = False
 _cycle_count  = 0
@@ -80,11 +94,16 @@ def get_state() -> dict:
 
 # ── Stagnant rotation helper ─────────────────────────────────────────────────
 
-def _has_better_candidate(current_score: float, exclude_symbol: str) -> bool:
+def _has_better_candidate(
+    current_score: float,
+    exclude_symbol: str,
+    min_gap: float = STAGNANT_SCORE_GAP,
+    min_score: float = 85,
+) -> bool:
     """
     True if the latest scan cache has an auto-open candidate with materially
     higher score than the stagnant position being considered for rotation.
-    Requires: candidate.score >= current_score + STAGNANT_SCORE_GAP AND >= 85.
+    Requires: candidate.score >= current_score + min_gap AND >= min_score.
     """
     from agents.opportunity import store as opp_store
     cached = opp_store.get_result()
@@ -94,7 +113,7 @@ def _has_better_candidate(current_score: float, exclude_symbol: str) -> bool:
         if c.get("symbol") == exclude_symbol:
             continue
         c_score = c.get("raw_score") or c.get("opportunity_score") or 0
-        if c.get("auto_open") and c_score >= 85 and c_score >= current_score + STAGNANT_SCORE_GAP:
+        if c.get("auto_open") and c_score >= min_score and c_score >= current_score + min_gap:
             return True
     return False
 
@@ -239,6 +258,28 @@ def _wick_extremes(klines_1m: list, entry_at: float) -> tuple[Optional[float], O
     if not lows:
         return None, None
     return min(lows), max(highs)
+
+
+def _vol_ratio(volumes: list[float]) -> float:
+    """Current vol / avg of prior candles. Returns 1.0 if insufficient data."""
+    if len(volumes) < 2:
+        return 1.0
+    avg = sum(volumes[:-1]) / max(len(volumes) - 1, 1)
+    return volumes[-1] / avg if avg > 0 else 1.0
+
+
+def _get_current_spot_score(symbol: str) -> float:
+    """G5: lookup latest scanner score from opportunity cache."""
+    try:
+        from agents.opportunity import store as opp_store
+        cached = opp_store.get_result()
+        if cached:
+            for c in cached.get("results", []):
+                if c.get("symbol") == symbol:
+                    return float(c.get("raw_score") or c.get("opportunity_score") or 0)
+    except Exception:
+        pass
+    return 0.0
 
 
 # ── Risk-adjusted exit signals ───────────────────────────────────────────────
@@ -482,6 +523,28 @@ async def _process_trade(
     close_price:  Optional[float] = None
     close_reason: Optional[str]   = None
 
+    # ── G5b: Absolute profit lock — prevent large give-back from peak ────────
+    _pnl_now_spot = (price - entry) / entry * 100 - EXECUTION_COST_PCT if entry > 0 else 0.0
+    _peak_pnl_spot = float(meta.get("peak_pnl_pct", 0.0))
+    if _pnl_now_spot > _peak_pnl_spot:
+        _peak_pnl_spot = round(_pnl_now_spot, 3)
+        meta["peak_pnl_pct"] = _peak_pnl_spot
+        trade.signals_json   = json.dumps(meta, ensure_ascii=False)
+    for _pt, _lf in _PROFIT_LOCK_TIERS_SPOT:
+        if _peak_pnl_spot >= _pt and _pnl_now_spot <= _peak_pnl_spot * _lf:
+            pnl_pct, pnl_dollar = _final_pnl(entry, price, trade.position_size or 0.0, meta)
+            meta["close_reason"]  = "absolute_profit_lock"
+            meta["peak_pnl_pct"]  = _peak_pnl_spot
+            trade.status       = "tp"
+            trade.close_price  = round(price, 8)
+            trade.closed_at    = time.time()
+            trade.pnl_pct      = pnl_pct
+            trade.pnl_dollar   = pnl_dollar
+            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+            logger.info("absolute_profit_lock_spot", symbol=trade.symbol,
+                        peak_pnl=round(_peak_pnl_spot, 2), current_pnl=round(_pnl_now_spot, 2))
+            return 1, 0
+
     # ── Layer 3: max age — BM7: per entry_mode ──────────────────────────────
     _entry_mode = meta.get("entry_mode", "fresh_setup")
     if _entry_mode == "momentum_entry":
@@ -527,8 +590,32 @@ async def _process_trade(
                             symbol=trade.symbol,
                             ema9=round(ema9_4h, 6), ema21=round(ema21_4h, 6),
                             pnl_net=round(pnl_probe, 2))
-    elif tp3 and eff_high >= tp3:
-        new_status, close_price, close_reason = "tp", tp3, "tp3_hit"
+    elif tp3 and eff_high >= tp3 and not meta.get("tp3_hit"):
+        # ── G5: Dynamic TP extension — ride winner past TP3 if still strong ──
+        _g5_score    = _get_current_spot_score(trade.symbol)
+        _vols_1h     = [float(k[5]) for k in k1h] if k1h else []
+        _g5_vol      = _vol_ratio(_vols_1h)
+        if (not meta.get("tp_extended")
+                and _g5_score >= G5_MIN_SCORE
+                and _g5_vol >= G5_MIN_VOL_RATIO):
+            # Convert to momentum_chase trailing mode instead of closing
+            meta["tp_extended"]         = True
+            meta["tp3_hit"]             = True
+            meta["tp3_hit_at"]          = time.time()
+            meta["entry_mode"]          = "momentum_chase"
+            meta["tp1_hit"]             = meta.get("tp1_hit", True)  # enable trailing SL
+            meta["current_sl"]          = round(tp3 * 0.98, 8)       # initial trail = 2% below TP3
+            trade.stop_loss             = round(tp3 * 0.98, 8)
+            trade.signals_json          = json.dumps(meta, ensure_ascii=False)
+            logger.info(
+                "g5_dynamic_tp_extension",
+                symbol=trade.symbol, tp3=tp3, score=_g5_score, vol_ratio=round(_g5_vol, 2),
+            )
+            return 0, 1
+        else:
+            # Conditions not met — close at TP3 as normal
+            meta["tp3_hit"] = True
+            new_status, close_price, close_reason = "tp", tp3, "tp3_hit"
     elif eff_high >= tp2:
         new_status, close_price, close_reason = "tp", tp2, "tp2_hit"
     elif tp1 and eff_high >= tp1 and not meta.get("tp1_hit"):
@@ -581,28 +668,41 @@ async def _process_trade(
                         symbol=trade.symbol, reason=reason,
                         pnl_net=round(pnl_net, 2), hold_min=round(hold_minutes, 1))
 
-    # ── Layer 2.5: stagnant rotation ─────────────────────────────────────────
-    # Day 3+, price stuck ±3%, scanner has a materially better candidate →
-    # free this capital so the scheduler can open the live momentum play.
+    # ── Layer 2.5: stagnant / urgent rotation ────────────────────────────────
+    # Normal: day 2+, price stuck ±3%, scanner has a materially better candidate.
+    # Urgent: day 1+, candidate outscores by 25+ regardless of drift — clear
+    #         opportunity cost from holding a position while a much better one waits.
     if new_status is None and entry_at_valid:
-        hold_days  = hold_minutes / (60 * 24)
-        drift_pct  = abs(price - entry) / entry * 100 if entry > 0 else 99.0
+        hold_days   = hold_minutes / (60 * 24)
+        drift_pct   = abs(price - entry) / entry * 100 if entry > 0 else 99.0
+        trade_score = meta.get("raw_score") or trade.probability or 0
+        # BM1: cap at 80 so high-score positions (e.g. 99) don't require
+        # an impossible candidate score of 109+ to trigger rotation
+        capped_score = min(trade_score, 80)
+
+        _rotate     = False
+        _rotate_why = "stagnant_rotation"
         if hold_days >= STAGNANT_CHECK_DAYS and drift_pct <= STAGNANT_DRIFT_PCT:
-            trade_score = meta.get("raw_score") or trade.probability or 0
-            # BM1: cap at 80 so high-score positions (e.g. 99) don't require
-            # an impossible candidate score of 109+ to trigger rotation
-            if _has_better_candidate(min(trade_score, 80), trade.symbol):
-                pnl_net      = (price - entry) / entry * 100 - EXECUTION_COST_PCT
-                new_status   = "tp" if pnl_net > 0 else "sl"
-                close_price  = round(price, 8)
-                close_reason = "stagnant_rotation"
-                logger.info(
-                    "stagnant_rotation_triggered",
-                    symbol=trade.symbol,
-                    hold_days=round(hold_days, 1),
-                    drift_pct=round(drift_pct, 2),
-                    pnl_net=round(pnl_net, 2),
-                )
+            if _has_better_candidate(capped_score, trade.symbol):
+                _rotate = True
+        elif hold_days >= URGENT_ROTATION_DAYS:
+            if _has_better_candidate(capped_score, trade.symbol,
+                                     min_gap=URGENT_SCORE_GAP, min_score=URGENT_SCORE_MIN):
+                _rotate     = True
+                _rotate_why = "urgent_rotation"
+
+        if _rotate:
+            pnl_net      = (price - entry) / entry * 100 - EXECUTION_COST_PCT
+            new_status   = "tp" if pnl_net > 0 else "sl"
+            close_price  = round(price, 8)
+            close_reason = _rotate_why
+            logger.info(
+                _rotate_why,
+                symbol=trade.symbol,
+                hold_days=round(hold_days, 1),
+                drift_pct=round(drift_pct, 2),
+                pnl_net=round(pnl_net, 2),
+            )
 
     # ── Apply close ───────────────────────────────────────────────────────────
     if new_status and close_price is not None and close_price > 0:

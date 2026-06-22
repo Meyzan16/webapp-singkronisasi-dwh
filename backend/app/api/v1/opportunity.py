@@ -168,6 +168,8 @@ class OpenTradeRequest(BaseModel):
     taker_ratio:       float = Field(default=0.5, ge=0, le=1)
     confidence:        int   = Field(default=50, ge=0, le=100)
     entry_mode:        str   = Field(default="fresh_setup")
+    force_open:        bool  = False         # Phase 1 T2 — manual override
+    session_id:        str   | None = None   # B1.2 — rate limit
 
     @model_validator(mode="after")
     def _validate_levels(self) -> "OpenTradeRequest":
@@ -200,6 +202,18 @@ async def open_opportunity_trade(body: OpenTradeRequest) -> dict:
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="Database tidak tersedia")
+
+    # Phase 1 B1.2: DB-persistent force-open rate limit (5/jam per session)
+    if body.force_open:
+        from app.services.force_open_limiter import can_force_open, record_force_open
+        sess = (body.session_id or "default").strip()[:64] or "default"
+        allowed, used, _ = await can_force_open(sess)
+        if not allowed:
+            await record_force_open(sess, body.symbol, "LONG", "spot", accepted=False)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit force-open: {used}/5 dipakai dalam 1 jam terakhir.",
+            )
 
     # ── Entry price validation: must be within 2% of current market price ──────
     market_prices = await _fetch_spot_prices([body.symbol.upper()])
@@ -267,6 +281,7 @@ async def open_opportunity_trade(body: OpenTradeRequest) -> dict:
         "taker_ratio":       body.taker_ratio,
         "confidence":        body.confidence,
         "entry_mode":        body.entry_mode,
+        "manual":            bool(body.force_open),
     }
 
     async with AsyncSessionLocal() as session:
@@ -305,7 +320,13 @@ async def open_opportunity_trade(body: OpenTradeRequest) -> dict:
 
     logger.info("opportunity_trade_opened",
                 symbol=body.symbol, entry=body.entry, sl=body.sl,
-                tp2=body.tp2, rr=body.rr_ratio)
+                tp2=body.tp2, rr=body.rr_ratio, force_open=body.force_open)
+
+    # Phase 1 B1.2: record successful force-open against rate limit
+    if body.force_open:
+        from app.services.force_open_limiter import record_force_open
+        sess = (body.session_id or "default").strip()[:64] or "default"
+        await record_force_open(sess, body.symbol, "LONG", "spot", accepted=True)
 
     return {
         "id":             trade.id,

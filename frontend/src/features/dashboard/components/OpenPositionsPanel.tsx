@@ -12,15 +12,24 @@ interface OppPos {
 
 interface FutPos {
   id: number; symbol: string; direction: "LONG" | "SHORT"; agent: string;
-  entry: number; current_price: number | null; unrealized_pnl: number | null; leverage: number;
+  entry: number; current_price: number | null;
+  unrealized_pnl: number | null; unrealized_pnl_dollar: number | null; leverage: number;
 }
 
-function UnrealizedBadge({ pct }: { pct: number | null }) {
+function UnrealizedBadge({ pct, dollar }: { pct: number | null; dollar?: number | null }) {
   if (pct == null) return <span className="text-neutral-400 text-xs">—</span>;
+  const positive = pct >= 0;
   return (
-    <span className={`text-xs font-black tabular-nums px-1.5 py-0.5 rounded ${pct >= 0 ? "text-green-700 bg-green-50" : "text-red-600 bg-red-50"}`}>
-      {pct >= 0 ? "+" : ""}{pct.toFixed(2)}%
-    </span>
+    <div className={`text-right px-1.5 py-0.5 rounded ${positive ? "text-green-700 bg-green-50" : "text-red-600 bg-red-50"}`}>
+      <p className="text-xs font-black tabular-nums leading-tight">
+        {positive ? "+" : ""}{pct.toFixed(2)}%
+      </p>
+      {dollar != null && (
+        <p className="text-[9px] font-semibold tabular-nums leading-tight opacity-80">
+          {positive ? "+" : ""}${Math.abs(dollar).toFixed(2)}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -85,7 +94,7 @@ export function OpenPositionsPanel({ oppOpen, futOpen }: { oppOpen: OppPos[]; fu
                 sub=""
                 entry={p.entry}
                 currentPrice={p.current_price}
-                pnlBadge={<UnrealizedBadge pct={p.unrealized_pnl} />}
+                pnlBadge={<UnrealizedBadge pct={p.unrealized_pnl} dollar={p.unrealized_pnl_dollar} />}
               />
             );
           })}

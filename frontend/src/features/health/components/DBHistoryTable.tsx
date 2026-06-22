@@ -495,9 +495,15 @@ export function DBHistoryTable({
                     {/* PnL $ */}
                     <div className="w-20 text-right">
                       {pnl$ != null ? (
-                        <span className={`text-xs font-black tabular-nums ${pnl$ > 0 ? "text-green-600" : pnl$ < 0 ? "text-red-500" : "text-neutral-400"}`}>
-                          {pnl$ >= 0 ? "+" : ""}${Math.abs(pnl$).toFixed(2)}
-                        </span>
+                        isOpen ? (
+                          <span className="text-xs tabular-nums text-neutral-400">
+                            ~{pnl$ >= 0 ? "+" : ""}${Math.abs(pnl$).toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className={`text-xs font-black tabular-nums ${pnl$ > 0 ? "text-green-600" : pnl$ < 0 ? "text-red-500" : "text-neutral-400"}`}>
+                            {pnl$ >= 0 ? "+" : ""}${Math.abs(pnl$).toFixed(2)}
+                          </span>
+                        )
                       ) : (
                         <span className="text-neutral-300 text-xs">—</span>
                       )}

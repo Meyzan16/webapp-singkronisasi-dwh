@@ -23,22 +23,30 @@ function AgentRow({ label, sub, ok, cycle, err, color = "text-green-600" }: {
   );
 }
 
-function BinanceApiRow({ label, ok, latency, weightPct, weightUsed, bannedUntil, error }: {
+function BinanceApiRow({ label, ok, latency, weightPct, weightUsed, bannedUntil, error, emergencyThreshold, warningThreshold }: {
   label: string; ok: boolean; latency: number | null; weightPct: number;
   weightUsed: number; bannedUntil: number | null; error: string | null;
+  emergencyThreshold?: number; warningThreshold?: number;
 }) {
-  const banned = bannedUntil != null;
-  const hot    = weightPct > 70;
-  const warn   = weightPct > 40 && !hot;
-  const barColor = banned ? "bg-red-500" : hot ? "bg-orange-500" : warn ? "bg-yellow-400" : "bg-green-400";
+  const banned    = bannedUntil != null;
+  const emergency = emergencyThreshold != null && weightUsed > emergencyThreshold;
+  const hot       = weightPct > 70 || (warningThreshold != null && weightUsed > warningThreshold);
+  const warn      = weightPct > 40 && !hot;
+  const barColor  = banned ? "bg-red-500" : emergency ? "bg-red-500" : hot ? "bg-orange-500" : warn ? "bg-yellow-400" : "bg-green-400";
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs text-neutral-700 font-semibold">{label}</span>
-        <span className={`text-[10px] font-bold flex items-center gap-1 ${banned ? "text-red-600" : ok ? "text-green-600" : "text-red-500"}`}>
-          <StatusDot ok={ok && !banned} />
-          {banned ? "BANNED" : ok ? `OK${latency != null ? ` · ${latency}ms` : ""}` : "Down"}
-        </span>
+        <div className="flex items-center gap-1.5">
+          {emergency && <span className="text-[9px] font-bold bg-red-100 text-red-700 px-1 py-0.5 rounded">EMERGENCY</span>}
+          {!emergency && hot && warningThreshold != null && weightUsed > warningThreshold && (
+            <span className="text-[9px] font-bold bg-orange-100 text-orange-700 px-1 py-0.5 rounded">WARN</span>
+          )}
+          <span className={`text-[10px] font-bold flex items-center gap-1 ${banned ? "text-red-600" : ok ? "text-green-600" : "text-red-500"}`}>
+            <StatusDot ok={ok && !banned} />
+            {banned ? "BANNED" : ok ? `OK${latency != null ? ` · ${latency}ms` : ""}` : "Down"}
+          </span>
+        </div>
       </div>
       {!banned && (
         <div className="flex items-center gap-1.5">
@@ -60,11 +68,12 @@ function BinanceApiRow({ label, ok, latency, weightPct, weightUsed, bannedUntil,
   );
 }
 
-export function SystemHealthPanel({ health, binance, closedToday, futResultsA2 }: {
+export function SystemHealthPanel({ health, binance, closedToday, futResultsA2, futResultsA3 }: {
   health: Health | null;
   binance: BinanceStatus | null;
   closedToday?: number;
   futResultsA2?: number;
+  futResultsA3?: number;
 }) {
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4">
@@ -96,7 +105,8 @@ export function SystemHealthPanel({ health, binance, closedToday, futResultsA2 }
         <BinanceApiRow label="Futures API"
           ok={binance?.futures_ok ?? false} latency={binance?.futures_latency_ms ?? null}
           weightPct={binance?.futures_weight_pct ?? 0} weightUsed={binance?.futures_weight_used ?? 0}
-          bannedUntil={binance?.futures_banned_until ?? null} error={binance?.futures_error ?? null} />
+          bannedUntil={binance?.futures_banned_until ?? null} error={binance?.futures_error ?? null}
+          warningThreshold={1800} emergencyThreshold={2100} />
         {!binance && <p className="text-[10px] text-neutral-400 italic">Memuat status Binance...</p>}
       </div>
 
@@ -114,8 +124,12 @@ export function SystemHealthPanel({ health, binance, closedToday, futResultsA2 }
       <div className="space-y-1.5">
         <AgentRow label="Futures Scanner — Pre-Gainer" sub="Funding · OI · Liquidation · S/R"
           ok={!!health?.futures_scanner?.running} cycle={health?.futures_scanner?.cycle_count} err={health?.futures_scanner?.last_error} color="text-blue-600" />
-        <AgentRow label="Futures Scanner — Accumulation" sub="Wyckoff · Trend · Pattern · Trigger"
-          ok={!!health?.futures_scanner?.running && (futResultsA2 ?? 0) > 0} cycle={futResultsA2} color="text-blue-600" />
+        <AgentRow label="Futures Scanner — Accumulation"
+          sub={`Wyckoff · Trend · Pattern · Trigger${futResultsA2 != null ? ` · ${futResultsA2} sinyal` : ""}`}
+          ok={!!health?.futures_scanner?.running} color="text-blue-600" />
+        <AgentRow label="Futures Scanner — Momentum"
+          sub={`Breakout · Momentum · Trigger${futResultsA3 != null ? ` · ${futResultsA3} sinyal` : ""}`}
+          ok={!!health?.futures_scanner?.running} color="text-blue-600" />
         <AgentRow label="Futures Position Monitor" sub="Monitor TP/SL posisi futures"
           ok={!!health?.futures_monitor?.running} cycle={health?.futures_monitor?.cycle_count} err={health?.futures_monitor?.last_error} color="text-blue-600" />
         <AgentRow label="Weight Updater" sub="Adaptive learning — bobot sinyal"

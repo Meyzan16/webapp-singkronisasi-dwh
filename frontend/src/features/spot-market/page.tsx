@@ -4,6 +4,7 @@ import { fmtVol } from "@/lib/format";
 import { PctBadge } from "@/components/ui/trading-badges";
 import { type SpotOverview, fmtChangeColor } from "./components/types";
 import { SpotCoinRow, HeatTile } from "./components/SpotCoinRow";
+import { SpotBigMoversWatchlist } from "./components/SpotBigMoversWatchlist";
 
 type TabKey = "overview" | "gainers" | "losers" | "volume" | "heatmap";
 
@@ -157,6 +158,9 @@ export default function SpotMarketPage() {
       {/* Overview Tab */}
       {tab === "overview" && data && (
         <div className="space-y-4">
+          {data.big_movers.length > 0 && (
+            <SpotBigMoversWatchlist movers={data.big_movers} />
+          )}
           {data.big_movers.length > 0 && (
             <div className="bg-orange-50 border border-orange-200 rounded-2xl p-4">
               <div className="flex items-center gap-2 mb-3">

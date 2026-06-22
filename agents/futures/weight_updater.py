@@ -1,13 +1,21 @@
 """
-Signal Weight Updater — runs after each scan cycle.
+Signal Weight Updater — Adaptive Learning for futures agents.
 
-Reads all closed futures trades, maps signals → win/loss,
-then upserts agent_signal_weights table.
+SP2: Upgraded to match SPOT updater sophistication:
+  - Training data: closed tp/sl/expired from last RECENCY_DAYS (30d)
+  - Recency decay: each sample weighted by exp(-age / half_life), half_life 14d
+    (futures trades run longer than SPOT — slower decay appropriate)
+  - Laplace smoothing: win_rate_adj = (wins+1)/(total+2) — tiny samples stay neutral
+  - Confidence scaling: weight influence grows proportionally to min(1, n/10)
+  - Step cap: weight moves at most ±STEP_CAP per run (anti-oscillation)
+  - Zombie pruning: keys absent from current data decay → neutral, deleted after 45d
+  - avg_pnl_pct: tracks average realized PnL% of winning trades per signal
 
 Also maintains in-memory caches used synchronously by agents:
-  - _weight_cache:       {agent: {signal_key: weight}}
+  - _weight_cache:        {agent: {signal_key: weight}}
   - _adaptive_thresholds: {agent: {min_score, auto_threshold}}
-  - _coin_blacklist:     {symbol: blacklist_until_ts}
+  - _coin_blacklist:      {symbol: blacklist_until_ts}
+  - _coin_win_rates:      {symbol: {wins, total}}
 """
 
 import json
@@ -27,61 +35,55 @@ logger = structlog.get_logger(__name__)
 
 _last_run:   Optional[float] = None
 _last_error: Optional[str]   = None
-MIN_RUN_INTERVAL = 5 * 60  # don't run more than once every 5 min
-# BUG-L10: only learn from RECENT trades so weights/thresholds adapt to the current regime
-# instead of being dragged forever by ancient outcomes.
-RECENCY_DAYS = 30
+
+MIN_RUN_INTERVAL  = 5 * 60
+RECENCY_DAYS      = 30
+DECAY_HALF_LIFE_D = 14.0   # futures trades longer-lived → slower decay than SPOT (7d)
+STEP_CAP          = 0.10   # max weight move per run
+STALE_KEY_MAX_D   = 45     # zombie pruning threshold
+MIN_SAMPLE_RAW    = 3      # raw trades required before weight moves from neutral
+
+FUTURES_AGENTS = [
+    "futures_agent1", "futures_agent2", "futures_agent3",
+    "futures_agent_bigmover",   # Phase 2 BM1 — tracked but uses fixed threshold (no death spiral)
+]
 
 # ── In-memory caches (read synchronously by agents during scoring) ─────────────
 
-# F68: signal weight cache  {agent: {signal_key: weight}}
-_weight_cache: dict[str, dict[str, float]] = {}
-
-# F69: adaptive thresholds  {agent: {min_score: int, auto_threshold: int}}
-_adaptive_thresholds: dict[str, dict] = {}
-
-# F71: per-coin blacklist  {symbol: blacklist_until_ts}
-_coin_blacklist: dict[str, float] = {}
-
-# F92: per-coin win rate  {symbol: {"wins": int, "total": int}}
-_coin_win_rates: dict[str, dict] = {}
+_weight_cache:        dict[str, dict[str, float]] = {}
+_adaptive_thresholds: dict[str, dict]             = {}
+_coin_blacklist:      dict[str, float]            = {}
+_coin_win_rates:      dict[str, dict]             = {}
 
 
 # ── Public cache accessors ─────────────────────────────────────────────────────
 
 def get_weight_cache(agent: str) -> dict[str, float]:
-    """F68: Return weight dict for agent — read synchronously during scoring."""
     return _weight_cache.get(agent, {})
 
 
 def get_adaptive_thresholds(agent: str) -> dict:
-    """F69: Return adaptive min_score and auto_threshold for agent."""
     return _adaptive_thresholds.get(agent, {"min_score": 52, "auto_threshold": 72})
 
 
 def is_blacklisted(symbol: str) -> bool:
-    """F71: True if symbol is blacklisted due to consecutive losses."""
     return time.time() < _coin_blacklist.get(symbol, 0)
 
 
 def normalize_signal_key(raw: str) -> str:
-    """F73: Expose normalizer so agents use identical keys to weight_updater."""
     return _normalize_signal(raw)
 
 
 def get_coin_bonus(symbol: str) -> float:
-    """F92: Score bonus/penalty based on per-coin historical win rate.
-    Requires ≥3 closed trades to activate — below that, neutral (0.0).
-    """
-    data = _coin_win_rates.get(symbol, {})
+    data  = _coin_win_rates.get(symbol, {})
     total = data.get("total", 0)
     if total < 3:
         return 0.0
     wr = data.get("wins", 0) / total
     if wr >= 0.70:
-        return 5.0    # proven winner — boost score
+        return 5.0
     if wr < 0.30:
-        return -5.0   # consistently losing — penalise
+        return -5.0
     return 0.0
 
 
@@ -89,31 +91,32 @@ def get_coin_bonus(symbol: str) -> float:
 
 def _normalize_signal(raw: str) -> str:
     """
-    F73: Convert signal string to a stable lookup key.
-    Preserves numbers to keep timeframe info: "BB Squeeze 1H" ≠ "BB Squeeze 4H".
-    Removes emojis / punctuation, lowercases, joins with underscore.
+    Convert signal string to stable lookup key.
+    Strips numbers (like SPOT updater) so "BB Squeeze 4H" == "BB Squeeze 1H"
+    at the cross-agent level. Preserves signal semantics.
     """
-    # Remove everything that isn't a word char or space (preserves digits)
-    cleaned = re.sub(r"[^\w\s]", " ", raw)
-    words   = cleaned.strip().lower().split()[:5]
-    return "_".join(w for w in words if w)
+    cleaned = re.sub(r"[^\w\s%+.\-]", "", raw)
+    cleaned = re.sub(r"\d+\.?\d*", "N", cleaned)
+    words   = cleaned.strip().split()[:4]
+    return "_".join(w.lower() for w in words if w)
 
 
-def _weight_from_rate(win_rate: float, total: int) -> float:
-    """F75: Smooth linear interpolation instead of step function.
-    win_rate=0   → 0.70  (heavy reduce)
-    win_rate=0.5 → 1.10  (slight boost)
-    win_rate=1.0 → 1.50  (max boost)
-    """
-    if total < 3:
-        return 1.0  # not enough data → neutral
-    return round(max(0.7, min(1.5, 0.7 + win_rate * 0.8)), 3)
+def _decay_factor(closed_at: Optional[float], now: float) -> float:
+    if not closed_at:
+        return 1.0
+    age_days = max(0.0, (now - closed_at) / 86400)
+    return 0.5 ** (age_days / DECAY_HALF_LIFE_D)
+
+
+def _target_weight(win_rate_adj: float) -> float:
+    if win_rate_adj >= 0.70: return 1.5
+    if win_rate_adj >= 0.55: return 1.2
+    if win_rate_adj >= 0.40: return 1.0
+    return 0.7
 
 
 def _update_coin_blacklist(trades: list) -> None:
-    """F71: Blacklist coins with 3 consecutive SL trades (24h cooldown)."""
     by_symbol: dict = defaultdict(list)
-    # B2: sort by closed_at, not entry_at — consecutive means last 3 CLOSED, not opened
     for t in sorted(trades, key=lambda x: x.closed_at or x.entry_at or 0):
         by_symbol[t.symbol].append(t)
 
@@ -124,60 +127,87 @@ def _update_coin_blacklist(trades: list) -> None:
             _coin_blacklist[symbol] = until
             logger.info("coin_blacklisted", symbol=symbol, hours=24)
 
+    # G23: prune stale blacklist entries (expired >30d ago) — prevents unbounded growth
+    _cutoff = time.time() - 30 * 86400
+    stale_bl = [s for s, until in _coin_blacklist.items() if until < _cutoff]
+    for s in stale_bl:
+        del _coin_blacklist[s]
+    if stale_bl:
+        logger.debug("blacklist_pruned", count=len(stale_bl))
+
 
 def _compute_coin_win_rates(trades: list) -> None:
-    """F92: Build per-coin win rate from closed tp/sl trades."""
     global _coin_win_rates
     by_symbol: dict = defaultdict(lambda: {"wins": 0, "total": 0})
     for t in trades:
         if t.status not in ("tp", "sl"):
-            continue  # exclude expired from win rate
+            continue
         by_symbol[t.symbol]["total"] += 1
         if t.status == "tp" and (t.pnl_pct or 0.0) > 0:
             by_symbol[t.symbol]["wins"] += 1
     _coin_win_rates = dict(by_symbol)
 
+    # G23: prune _coin_win_rates for symbols absent from the current training window —
+    # avoids unbounded growth as new symbols rotate in/out of the universe.
+    active_symbols = {t.symbol for t in trades}
+    stale_wr = [s for s in list(_coin_win_rates) if s not in active_symbols]
+    for s in stale_wr:
+        del _coin_win_rates[s]
+    if stale_wr:
+        logger.debug("coin_win_rates_pruned", count=len(stale_wr))
+
 
 def _compute_adaptive_thresholds(trades: list) -> None:
-    """F69: Compute per-agent adaptive thresholds from recent win rate."""
+    """
+    Phase 3 G3-threshold (anti death-spiral):
+      - cap auto_threshold at 75 (was 77 — A2 death spiral could push it higher)
+      - skip recompute if n < 30 trades (statistical significance, was 10)
+      - B3.2 rollback rule: high-WR threshold (70 / 50) only when n ≥ 50 AND WR > 60%
+        — prevents stuck-at-70 with tiny samples skewing WR up
+    """
     agent_wins:  dict[str, int] = defaultdict(int)
     agent_total: dict[str, int] = defaultdict(int)
 
     for t in trades:
         a = t.style
         agent_total[a] += 1
-        # Use same is_win definition as weight update (F60: pnl_pct > 0)
         if t.status == "tp" and (t.pnl_pct or 0.0) > 0:
             agent_wins[a] += 1
 
     for agent_name, total in agent_total.items():
-        if total < 10:  # not enough data → defaults
+        # Phase 3 G3-threshold: require n ≥ 30 for statistical significance
+        # (was 10 — tiny sample WR is too noisy to drive threshold changes)
+        if total < 30:
             _adaptive_thresholds[agent_name] = {"min_score": 52, "auto_threshold": 72}
             continue
 
         wr = agent_wins[agent_name] / total
         if wr < 0.40:
-            thresholds = {"min_score": 57, "auto_threshold": 77}
+            # Cap 75 (was 77) — A2 death spiral safeguard
+            thresholds = {"min_score": 56, "auto_threshold": 75}
         elif wr < 0.55:
             thresholds = {"min_score": 54, "auto_threshold": 74}
         elif wr <= 0.65:
             thresholds = {"min_score": 52, "auto_threshold": 72}
-        else:  # > 0.65 — performing well, slightly lower bar
+        elif total >= 50 and wr > 0.60:
+            # B3.2: only roll back to the most-relaxed bracket when sample is solid
+            # AND WR demonstrably > 60% (not 70%). Old WR>0.65 was too strict for n=10.
             thresholds = {"min_score": 50, "auto_threshold": 70}
+        else:
+            # Solid WR but small sample → stay at default to keep flow
+            thresholds = {"min_score": 52, "auto_threshold": 72}
 
         _adaptive_thresholds[agent_name] = thresholds
-        logger.info("adaptive_thresholds_updated",
-                    agent=agent_name, win_rate=round(wr, 3),
-                    min_score=thresholds["min_score"],
-                    auto_threshold=thresholds["auto_threshold"])
+        logger.info("adaptive_thresholds_updated", agent=agent_name,
+                    n=total, win_rate=round(wr, 3), **thresholds)
 
 
 # ── Main update ────────────────────────────────────────────────────────────────
 
 async def update_weights() -> int:
     """
-    Re-compute signal weights from all closed futures trades.
-    Also updates in-memory caches: weight_cache, adaptive_thresholds, coin_blacklist.
+    Re-compute signal weights from recent closed futures trades.
+    SP2: upgraded with recency decay, Laplace smoothing, step cap, zombie pruning.
     Returns number of rows upserted.
     """
     global _last_run, _last_error
@@ -187,18 +217,16 @@ async def update_weights() -> int:
 
     now = time.time()
     if _last_run and (now - _last_run) < MIN_RUN_INTERVAL:
-        return 0  # too soon
+        return 0
 
     try:
         async with AsyncSessionLocal() as session:
-            # F70: include expired trades as negative signal (was only tp+sl)
-            # BUG-L10: only the last RECENCY_DAYS so learning adapts to the current regime
-            _cutoff = now - RECENCY_DAYS * 86400
+            cutoff = now - RECENCY_DAYS * 86400
             result = await session.execute(
                 select(PaperTrade).where(
-                    PaperTrade.style.in_(["futures_agent1", "futures_agent2", "futures_agent3"]),
+                    PaperTrade.style.in_(FUTURES_AGENTS),
                     PaperTrade.status.in_(["tp", "sl", "expired"]),
-                    PaperTrade.closed_at >= _cutoff,
+                    PaperTrade.closed_at >= cutoff,
                 )
             )
             trades = list(result.scalars().all())
@@ -207,13 +235,23 @@ async def update_weights() -> int:
             _last_run = now
             return 0
 
-        # ── Update in-memory caches before DB write ─────────────────────────
-        _update_coin_blacklist(trades)       # F71
-        _compute_coin_win_rates(trades)      # F92
-        _compute_adaptive_thresholds(trades) # F69
+        _update_coin_blacklist(trades)
+        _compute_coin_win_rates(trades)
+        _compute_adaptive_thresholds(trades)
 
-        # ── Build (agent, signal_key, regime) → {wins, total} map ──────────
+        # ── Build (agent, signal_key, regime) → stats with recency decay ──────
+        # stats[key] = {wins: float, total: float, raw_n: int, pnl_sum: float, win_n: int}
         stats: dict[tuple, dict] = {}
+
+        def _add(key: tuple, is_win: bool, decay: float, pnl_pct: float) -> None:
+            s = stats.setdefault(key, {"wins": 0.0, "total": 0.0, "raw_n": 0,
+                                       "pnl_sum": 0.0, "win_n": 0})
+            s["total"] += decay
+            s["raw_n"] += 1
+            if is_win:
+                s["wins"]    += decay
+                s["pnl_sum"] += pnl_pct
+                s["win_n"]   += 1
 
         for trade in trades:
             try:
@@ -225,81 +263,111 @@ async def update_weights() -> int:
             if not signals:
                 continue
 
-            agent  = trade.style
-            regime = trade.regime or "all"
-
-            # F60: real win requires status=="tp" AND pnl_pct > 0
-            # F70: expired treated as loss (is_win = False)
-            is_win = trade.status == "tp" and (trade.pnl_pct or 0.0) > 0
+            agent   = trade.style
+            regime  = trade.regime or "all"
+            is_win  = trade.status == "tp" and (trade.pnl_pct or 0.0) > 0
+            decay   = _decay_factor(trade.closed_at, now)
+            pnl_pct = trade.pnl_pct or 0.0
 
             for raw_sig in signals:
-                sig_key    = _normalize_signal(raw_sig)
+                sig_key = _normalize_signal(raw_sig)
                 if not sig_key:
                     continue
-                key_all    = (agent, sig_key, "all")
-                key_regime = (agent, sig_key, regime)
+                for key in [(agent, sig_key, "all"), (agent, sig_key, regime)]:
+                    _add(key, is_win, decay, pnl_pct)
 
-                for k in [key_all, key_regime]:
-                    entry = stats.setdefault(k, {"wins": 0, "total": 0})
-                    entry["total"] += 1
-                    if is_win:
-                        entry["wins"] += 1
-
-        # ── Update in-memory weight cache (F68: agents read synchronously) ──
+        # ── Update in-memory weight cache (aggregate "all" only) ──────────────
         new_cache: dict[str, dict[str, float]] = {}
         for (agent_name, signal_key, regime_key), v in stats.items():
             if regime_key != "all":
-                continue  # cache uses aggregate "all" weights
-            win_rate = v["wins"] / v["total"] if v["total"] > 0 else 0.5
-            w = _weight_from_rate(win_rate, v["total"])
+                continue
+            if v["raw_n"] < MIN_SAMPLE_RAW:
+                continue
+            n_eff    = v["total"]
+            wr_adj   = (v["wins"] + 1.0) / (n_eff + 2.0)   # Laplace
+            target   = _target_weight(wr_adj)
+            conf     = min(1.0, n_eff / 10.0)
+            desired  = 1.0 + (target - 1.0) * conf
+            weight   = round(max(0.70, min(1.50, desired)), 3)
             if agent_name not in new_cache:
                 new_cache[agent_name] = {}
-            new_cache[agent_name][signal_key] = w
+            new_cache[agent_name][signal_key] = weight
         _weight_cache.update(new_cache)
 
-        # ── Upsert to DB ─────────────────────────────────────────────────────
+        # ── Upsert to DB with step cap ────────────────────────────────────────
         upserted = 0
         async with AsyncSessionLocal() as session:
-            for (agent, signal_key, regime), v in stats.items():
-                win_rate = v["wins"] / v["total"] if v["total"] > 0 else 0.0
-                weight   = _weight_from_rate(win_rate, v["total"])
-
-                existing = await session.execute(
-                    select(AgentSignalWeight).where(
-                        AgentSignalWeight.agent      == agent,
-                        AgentSignalWeight.signal_key == signal_key,
-                        AgentSignalWeight.regime     == regime,
-                    ).limit(1)
+            # Load existing rows for step cap
+            existing_map: dict[tuple, AgentSignalWeight] = {}
+            ex_result = await session.execute(
+                select(AgentSignalWeight).where(
+                    AgentSignalWeight.agent.in_(FUTURES_AGENTS)
                 )
-                row = existing.scalar_one_or_none()
+            )
+            for row in ex_result.scalars().all():
+                existing_map[(row.agent, row.signal_key, row.regime)] = row
 
-                if row:
-                    row.win_count   = v["wins"]
-                    row.total_count = v["total"]
-                    row.win_rate    = round(win_rate, 4)
-                    row.weight      = round(weight, 4)
-                    row.updated_at  = now
-                else:
+            for (agent, signal_key, regime), v in stats.items():
+                if v["raw_n"] < MIN_SAMPLE_RAW and regime == "all":
+                    continue  # not enough data for "all" rows
+                n_eff      = v["total"]
+                wr_adj     = (v["wins"] + 1.0) / (n_eff + 2.0)
+                target     = _target_weight(wr_adj)
+                conf       = min(1.0, n_eff / 10.0)
+                desired    = 1.0 + (target - 1.0) * conf
+                win_rate   = v["wins"] / n_eff if n_eff > 0 else 0.0
+                avg_pnl    = v["pnl_sum"] / v["win_n"] if v["win_n"] > 0 else 0.0
+
+                key = (agent, signal_key, regime)
+                row = existing_map.get(key)
+
+                if row is None:
+                    initial = 1.0 + max(-STEP_CAP, min(STEP_CAP, desired - 1.0))
                     session.add(AgentSignalWeight(
-                        agent       = agent,
-                        signal_key  = signal_key,
-                        regime      = regime,
-                        win_count   = v["wins"],
-                        total_count = v["total"],
-                        win_rate    = round(win_rate, 4),
-                        weight      = round(weight, 4),
-                        updated_at  = now,
+                        agent            = agent,
+                        signal_key       = signal_key,
+                        regime           = regime,
+                        weight           = round(initial, 3),
+                        win_count        = int(round(v["wins"])),
+                        total_count      = v["raw_n"],
+                        win_rate         = round(win_rate, 4),
+                        avg_pnl_pct      = round(avg_pnl, 3),
+                        sample_count_raw = v["raw_n"],
+                        updated_at       = now,
                     ))
+                else:
+                    step         = max(-STEP_CAP, min(STEP_CAP, desired - row.weight))
+                    row.weight           = round(row.weight + step, 3)
+                    row.win_count        = int(round(v["wins"]))
+                    row.total_count      = v["raw_n"]
+                    row.win_rate         = round(win_rate, 4)
+                    row.avg_pnl_pct      = round(avg_pnl, 3)
+                    row.sample_count_raw = v["raw_n"]
+                    row.updated_at       = now
                 upserted += 1
+
+            # Zombie pruning: keys absent from current data
+            for key, row in existing_map.items():
+                if key in stats:
+                    continue
+                stale_days = (now - (row.updated_at or 0)) / 86400
+                if stale_days > STALE_KEY_MAX_D:
+                    await session.delete(row)
+                    upserted += 1
+                elif abs(row.weight - 1.0) > 0.01:
+                    row.weight = round(
+                        max(1.0, row.weight - STEP_CAP) if row.weight > 1.0
+                        else min(1.0, row.weight + STEP_CAP),
+                        3
+                    )
+                    upserted += 1
 
             await session.commit()
 
         _last_run   = now
         _last_error = None
-        logger.info("weights_updated", rows=upserted, trades=len(trades),
-                    cache_agents=list(_weight_cache.keys()),
-                    blacklisted=len([s for s, t in _coin_blacklist.items()
-                                    if time.time() < t]))
+        logger.info("futures_weights_updated", rows=upserted, trades=len(trades),
+                    cache_agents=list(_weight_cache.keys()))
         return upserted
 
     except Exception as exc:

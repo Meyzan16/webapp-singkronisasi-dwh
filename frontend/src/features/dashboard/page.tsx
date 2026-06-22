@@ -27,7 +27,8 @@ interface OppPos {
 interface FutPos {
   id: number; symbol: string; direction: "LONG" | "SHORT"; agent: string;
   status: string; entry: number; current_price: number | null;
-  unrealized_pnl: number | null; pnl_pct: number | null;
+  unrealized_pnl: number | null; unrealized_pnl_dollar: number | null;
+  pnl_pct: number | null; pnl_dollar: number | null; position_size: number | null;
   tp2_pct: number; risk_pct: number; rr_ratio: number; leverage: number;
   score: number; signals: string[]; entry_at: number; closed_at: number | null;
 }
@@ -84,7 +85,7 @@ export default function DashboardPage() {
     try {
       const [ctxR, oppR, futR, learnR, statR, spotR, healthR, binanceR, balR, futBalR] = await Promise.allSettled([
         fetch("/api/v1/market/context"),
-        fetch("/api/v1/opportunity/positions"),
+        fetch("/api/v1/opportunity/positions?days=3650"),
         fetch("/api/v1/futures/positions?status=all"),
         fetch("/api/v1/futures/learning/stats"),
         fetch("/api/v1/futures/status"),
@@ -122,7 +123,8 @@ export default function DashboardPage() {
     } catch { /* silent */ }
   }, []);
 
-  useEffect(() => { void fetchAll(); }, [fetchAll]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { fetchAll().catch(() => {}); }, [fetchAll]);
   useEffect(() => {
     const poll = setInterval(() => {
       void fetchAll();
@@ -175,11 +177,19 @@ export default function DashboardPage() {
     () => oppOpen.reduce((s, p) => s + ((p.unrealized_pnl_pct ?? 0) / 100 * (p.position_size ?? 0)), 0),
     [oppOpen],
   );
-  const futUnrealizedPnl = useMemo(() => futOpen.reduce((s, p) => s + (p.unrealized_pnl ?? 0), 0), [futOpen]);
+  const futUnrealizedPnl = useMemo(
+    () => futOpen.reduce((s, p) => {
+      if (p.unrealized_pnl_dollar != null) return s + p.unrealized_pnl_dollar;
+      if (p.unrealized_pnl == null || !p.position_size) return s;
+      return s + (p.unrealized_pnl / 100) * p.position_size;
+    }, 0),
+    [futOpen],
+  );
 
-  const futBalance   = learning?.balance.current ?? BALANCE_START;
-  const initialFut   = learning?.balance.starting ?? BALANCE_START;
-  const combinedPnl  = (oppBalance - initialOpp) + (futBalance - initialFut);
+  const futBalance  = futBal?.balance ?? learning?.balance.current ?? BALANCE_START;
+  const initialFut  = futBal?.initial_balance ?? learning?.balance.starting ?? BALANCE_START;
+  const oppTradingPnl = spotBal != null ? spotBal.total_pnl : (oppBalance - initialOpp);
+  const combinedPnl = oppTradingPnl + (futBalance - initialFut);
 
   const oppWinRate = useMemo(() => {
     const tpSl = oppClosedAll.filter(p => p.status === "tp" || p.status === "sl");
@@ -206,7 +216,7 @@ export default function DashboardPage() {
     const f: RecentTrade[] = futClosed.map(p => ({
       id: `f-${p.id}`, symbol: p.symbol, type: "fut", dir: p.direction,
       status: p.status, entry: p.entry, pnl_pct: p.pnl_pct,
-      "pnl$": p.pnl_pct != null ? pnlDollar(p.pnl_pct, p.risk_pct) : 0,
+      "pnl$": p.pnl_dollar ?? (p.pnl_pct != null ? pnlDollar(p.pnl_pct, p.risk_pct) : 0),
       agent: p.agent, leverage: p.leverage, entry_at: p.entry_at, closed_at: p.closed_at,
     }));
     return [...s, ...f].sort((a, b) => (b.closed_at ?? 0) - (a.closed_at ?? 0)).slice(0, 10);
@@ -262,12 +272,13 @@ export default function DashboardPage() {
         />
         <FuturesBalancePanel
           balance={futBalance} initial={initialFut} unrealizedPnl={futUnrealizedPnl}
-          futOpen={futOpen} learning={learning as Parameters<typeof FuturesBalancePanel>[0]["learning"]}
+          futBal={futBal} futOpen={futOpen} learning={learning as Parameters<typeof FuturesBalancePanel>[0]["learning"]}
         />
         <SystemHealthPanel
           health={health} binance={binance}
           closedToday={learning?.monitor.closed_today}
           futResultsA2={futStatus?.agent2_results}
+          futResultsA3={futStatus?.agent3_results}
         />
       </div>
 

@@ -556,10 +556,16 @@ def scan_symbol(
     thresholds    = weight_updater.get_adaptive_thresholds(AGENT_NAME)
     effective_min = thresholds["min_score"]
     # BUG-L13: per-coin regime from the coin's own 1h OHLCV (was BTC-only for all alts)
-    regime        = detect_coin_regime(tf_map.get("1h") or ref)
+    try:
+        regime = detect_coin_regime(tf_map.get("1h") or ref)
+    except Exception:
+        regime = "neutral"
 
-    long_score,  long_sigs  = _score_accumulation(tf_map, price, change_24h)
-    short_score, short_sigs = _score_distribution(tf_map, price, change_24h)
+    try:
+        long_score,  long_sigs  = _score_accumulation(tf_map, price, change_24h)
+        short_score, short_sigs = _score_distribution(tf_map, price, change_24h)
+    except Exception:
+        return []
 
     results = []
     for direction, score, signals in [
@@ -585,7 +591,10 @@ def scan_symbol(
             score -= 5
 
         # F92: per-coin win rate bonus/penalty (±5 pts, needs ≥3 historical trades)
-        score += weight_updater.get_coin_bonus(symbol)
+        try:
+            score += weight_updater.get_coin_bonus(symbol)
+        except Exception:
+            pass
 
         if score < effective_min:   # F69: adaptive threshold
             continue

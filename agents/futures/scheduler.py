@@ -17,6 +17,7 @@ from agents.futures import agent1 as a1
 from app.services.binance_urls import fapi
 from agents.futures import agent2 as a2
 from agents.futures import agent3 as a3
+from agents.futures import agent_bigmover as a_bm   # Phase 2 BM1
 from agents.futures import store as futures_store
 from agents.futures.data import fetch_top100_futures, fetch_symbol_data, fetch_new_listings
 from agents.futures.weight_updater import is_blacklisted   # B4: top-level import
@@ -159,10 +160,11 @@ async def _run_scan() -> dict:
                     all_tf_maps[symbol] = {}
             await asyncio.sleep(BATCH_SLEEP)
 
-    # Step 3: score all three agents
+    # Step 3: score all agents
     a1_results: list[dict] = []
     a2_results: list[dict] = []
     a3_results: list[dict] = []
+    bm_results: list[dict] = []   # Phase 2 BM1
 
     for ticker in tickers:
         symbol     = ticker["symbol"]
@@ -190,21 +192,34 @@ async def _run_scan() -> dict:
         if r3_list:
             a3_results.extend(r3_list)
 
+        # Phase 2 BM1: Big Mover lane (≥±15% only — early gate avoids wasted scoring)
+        if abs(change_24h) >= a_bm.MIN_CHANGE_24H:
+            quote_vol = float(ticker.get("quoteVolume", 0) or 0)
+            r_bm = a_bm.scan_symbol(symbol, tf_map, change_24h, quote_vol_24h=quote_vol)
+            if r_bm:
+                bm_results.extend(r_bm)
+
     # Sort by score, take top N
     a1_results.sort(key=lambda x: x["score"], reverse=True)
     a2_results.sort(key=lambda x: x["score"], reverse=True)
     a3_results.sort(key=lambda x: x["score"], reverse=True)
+    bm_results.sort(key=lambda x: x["score"], reverse=True)
     a1_results_full = a1_results            # PLAN-SIGNAL-GAP P4: keep full list for big-movers match
     a2_results_full = a2_results
     a3_results_full = a3_results
+    bm_results_full = bm_results
     a1_results = a1_results[:TOP_N]
     a2_results = a2_results[:TOP_N]
     a3_results = a3_results[:TOP_N]
+    bm_results = bm_results[:TOP_N]
 
     # PLAN-SIGNAL-GAP P4: Big Movers — every scanned coin with |change_24h| >= threshold,
     # tagged with whether it qualified for any lane (and at what score) or not.
     # Lets the frontend show WHY a 50%+ gainer didn't open a position, instead of nothing.
-    big_movers = _build_big_movers(tickers, a1_results_full + a2_results_full + a3_results_full)
+    big_movers = _build_big_movers(
+        tickers,
+        a1_results_full + a2_results_full + a3_results_full + bm_results_full,
+    )
 
     elapsed  = round(time.time() - start, 1)
     gen_time = int(time.time())
@@ -231,6 +246,13 @@ async def _run_scan() -> dict:
             "generated_at": gen_time,
             "elapsed_sec":  elapsed,
         },
+        "agent_bigmover": {
+            "results":      bm_results,
+            "total":        len(bm_results),
+            "scanned":      len(tickers),
+            "generated_at": gen_time,
+            "elapsed_sec":  elapsed,
+        },
         "big_movers": big_movers,   # PLAN-SIGNAL-GAP P4
     }
 
@@ -239,6 +261,7 @@ async def _run_scan() -> dict:
         agent1=len(a1_results),
         agent2=len(a2_results),
         agent3=len(a3_results),
+        agent_bigmover=len(bm_results),
         big_movers=len(big_movers),
         scanned=len(tickers),
         elapsed_sec=elapsed,
@@ -290,12 +313,25 @@ def _build_big_movers(tickers: list[dict], all_results: list[dict]) -> list[dict
             else:
                 reason = "Sinyal lain (volume/OI/RSI/breakout) belum cukup kuat untuk lolos threshold"
 
+        # Phase 1 T1: include last price + funding so the watchlist can populate
+        # the force-open modal without an extra Binance browser call.
+        try:
+            price = float(ticker.get("lastPrice", 0) or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        try:
+            funding = float(ticker.get("lastFundingRate", 0) or 0)
+        except (TypeError, ValueError):
+            funding = 0.0
+
         movers.append({
-            "symbol":     symbol,
-            "change_24h": round(change_24h, 2),
-            "status":     status,
-            "reason":     reason,
-            "matches":    matches,
+            "symbol":       symbol,
+            "change_24h":   round(change_24h, 2),
+            "price":        price,
+            "funding_rate": funding,
+            "status":       status,
+            "reason":       reason,
+            "matches":      matches,
         })
 
     movers.sort(key=lambda x: abs(x["change_24h"]), reverse=True)
@@ -331,8 +367,18 @@ async def run_futures_loop() -> None:
             futures_store.set_result("agent1", result["agent1"])
             futures_store.set_result("agent2", result["agent2"])
             futures_store.set_result("agent3", result["agent3"])   # Phase 11
+            futures_store.set_result("agent_bigmover", result["agent_bigmover"])   # Phase 2 BM1
             futures_store.set_big_movers(result["big_movers"])     # PLAN-SIGNAL-GAP P4
             futures_store.set_scanning(False)
+
+            # Phase 1 T4b: persist big movers to DB for ground-truth analytics
+            try:
+                from app.services.big_mover_logger import log_big_movers
+                from agents.futures.weight_updater import get_adaptive_thresholds
+                a3_thr = get_adaptive_thresholds("futures_agent3").get("auto_threshold", 72)
+                await log_big_movers(result["big_movers"], market="futures", threshold=a3_thr)
+            except Exception as exc:
+                logger.warning("big_mover_log_insert_failed", error=str(exc)[:80])
 
             _last_scan   = time.time()
             _cycle_count += 1
@@ -347,12 +393,14 @@ async def run_futures_loop() -> None:
             )
 
             # P2: UNIFIED auto-open — one ranked pool across all lanes, global dedup (BUG-L1)
+            # Phase 2 BM3: include agent_bigmover candidates
             try:
                 from agents.futures.auto_trader import auto_open_positions
                 all_candidates = (
                     result["agent1"]["results"]
                     + result["agent2"]["results"]
                     + result["agent3"]["results"]
+                    + result["agent_bigmover"]["results"]
                 )
                 total_auto = await auto_open_positions(all_candidates)
                 if total_auto:
@@ -365,10 +413,30 @@ async def run_futures_loop() -> None:
             try:
                 from agents.futures.regime import fetch_regime
                 from agents.futures.weight_updater import update_weights
+                from agents.shared.cross_agent_learning import update_cross_agent_weights
                 await fetch_regime()
                 await update_weights()
+                await update_cross_agent_weights()   # SP3: cross-agent blending
             except Exception as exc:
                 logger.warning("post_scan_learning_error", error=str(exc)[:80])
+
+            # Phase 1 T4: backfill forward-pnl on big_mover_log every 10 cycles (~20 min)
+            if _cycle_count % 10 == 0:
+                try:
+                    from app.services.big_mover_logger import backfill_pending
+                    await backfill_pending(max_rows=100)
+                except Exception as exc:
+                    logger.warning("big_mover_backfill_failed", error=str(exc)[:80])
+
+            # P3: weekly backtest — Sunday 00:00-00:02 UTC
+            try:
+                import datetime as _dt
+                _now_utc = _dt.datetime.utcnow()
+                if _now_utc.weekday() == 6 and _now_utc.hour == 0 and _now_utc.minute < 2:
+                    from agents.learning.weekly_backtest import run_weekly_backtest
+                    await run_weekly_backtest()
+            except Exception as exc:
+                logger.warning("weekly_backtest_error", error=str(exc)[:80])
 
         except asyncio.CancelledError:
             futures_store.set_scanning(False)

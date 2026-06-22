@@ -120,7 +120,8 @@ def _get_futures_count() -> int:
         cached = fs.get_all_results()
         a1 = len((cached.get("agent1") or {}).get("results", []))
         a2 = len((cached.get("agent2") or {}).get("results", []))
-        return a1 + a2
+        a3 = len((cached.get("agent3") or {}).get("results", []))
+        return a1 + a2 + a3
     except Exception:
         return -1  # -1 = not scanned yet
 
@@ -132,7 +133,8 @@ def _get_opp_count() -> int:
         result = os_.get_result()
         if result is None:
             return -1  # -1 = not scanned yet
-        return len(result.get("results", []))
+        results = result.get("results", [])
+        return sum(1 for r in results if r.get("alert_type") != "breakout_pump")
     except Exception:
         return -1
 

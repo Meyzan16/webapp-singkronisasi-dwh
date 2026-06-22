@@ -62,6 +62,11 @@ async def _check_binance() -> dict:
                 used = r.headers.get("X-MBX-USED-WEIGHT-1M", "0")
                 result["spot_weight_used"] = int(used)
                 result["spot_weight_pct"]  = round(int(used) / SPOT_WEIGHT_LIMIT * 100, 1)
+                try:
+                    from app.services.rate_limit_tracker import record_weight
+                    record_weight(int(used), api="spot")
+                except Exception:
+                    pass
 
             elif r.status_code == 429:
                 retry = r.headers.get("Retry-After", "60")
@@ -97,6 +102,11 @@ async def _check_binance() -> dict:
                 used = r.headers.get("X-MBX-USED-WEIGHT-1M", "0")
                 result["futures_weight_used"] = int(used)
                 result["futures_weight_pct"]  = round(int(used) / FUTURES_WEIGHT_LIMIT * 100, 1)
+                try:
+                    from app.services.rate_limit_tracker import record_weight
+                    record_weight(int(used), api="fapi")
+                except Exception:
+                    pass
 
             elif r.status_code == 429:
                 retry = r.headers.get("Retry-After", "60")

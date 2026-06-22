@@ -31,13 +31,13 @@ export function SpotBalancePanel({ balance, initial, unrealizedPnl, spotBal, opp
   balance: number;
   initial: number;
   unrealizedPnl: number;
-  spotBal: { balance: number; available: number; locked_margin: number; realized_pnl: number; open_positions: number } | null;
+  spotBal: { balance: number; available: number; locked_margin: number; realized_pnl: number; total_pnl: number; open_positions: number } | null;
   oppOpen: { id: number }[];
   oppClosedAll: { status: string }[];
   equityPoints: { balance: number; win: boolean }[];
   winRate: number;
 }) {
-  const pnl = balance - initial;
+  const pnl = spotBal?.total_pnl ?? (balance - initial);
   const wins  = oppClosedAll.filter(p => p.status === "tp").length;
   const losses = oppClosedAll.filter(p => p.status === "sl").length;
   const denom = oppClosedAll.filter(p => p.status === "tp" || p.status === "sl").length;
@@ -86,10 +86,11 @@ export function SpotBalancePanel({ balance, initial, unrealizedPnl, spotBal, opp
   );
 }
 
-export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futOpen, learning }: {
+export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futBal, futOpen, learning }: {
   balance: number;
   initial: number;
   unrealizedPnl: number;
+  futBal: { balance: number; available: number; locked_margin: number; open_positions: number } | null;
   futOpen: { id: number }[];
   learning: {
     balance: { total_pnl: number };
@@ -100,6 +101,7 @@ export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futOpen, 
 }) {
   const pnl = balance - initial;
   const winRate = learning?.overall.win_rate ?? 0;
+  const walletBalance = futBal?.balance ?? balance;
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4">
@@ -112,7 +114,7 @@ export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futOpen, 
         <span className={`text-xs font-bold ${pnl >= 0 ? "text-green-500" : "text-red-400"}`}>{pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}</span>
       </div>
       <div className="space-y-1.5 text-[11px]">
-        <BalanceRowItem label="Wallet Balance" value={`$${balance.toFixed(2)}`} />
+        <BalanceRowItem label="Wallet Balance" value={`$${walletBalance.toFixed(2)}`} />
         <BalanceRowItem
           label="Unrealized PnL"
           extra={<span className="ml-1 text-[9px] bg-blue-50 text-blue-500 border border-blue-200 px-1 py-px rounded">live</span>}
@@ -121,8 +123,13 @@ export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futOpen, 
         />
         <div className="flex justify-between font-bold border-t border-neutral-100 pt-1.5">
           <span className="text-neutral-700">Margin Balance</span>
-          <span className="text-neutral-900">${(balance + (futOpen.length > 0 ? unrealizedPnl : 0)).toFixed(2)}</span>
+          <span className="text-neutral-900">${(walletBalance + (futOpen.length > 0 ? unrealizedPnl : 0)).toFixed(2)}</span>
         </div>
+        <BalanceRowItem label="Available" value={futBal ? `$${futBal.available.toFixed(2)}` : "—"} />
+        <BalanceRowItem
+          label={`In Order (${futBal?.open_positions ?? futOpen.length})`}
+          value={futBal ? `$${futBal.locked_margin.toFixed(2)}` : "—"}
+        />
         <div className="flex justify-between border-t border-neutral-100 pt-1.5">
           <span className="text-neutral-500">Realized PnL</span>
           <span className={`font-semibold ${(learning?.balance.total_pnl ?? 0) >= 0 ? "text-green-600" : "text-red-500"}`}>

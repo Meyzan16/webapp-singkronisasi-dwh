@@ -50,7 +50,10 @@ async def get_learning_stats() -> dict:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style.in_(["futures_agent1", "futures_agent2", "futures_agent3"]),
+                PaperTrade.style.in_([
+                    "futures_agent1", "futures_agent2", "futures_agent3",
+                    "futures_agent_bigmover",   # Phase 2 BM1
+                ]),
             ).order_by(PaperTrade.entry_at)
         )
         all_trades = list(result.scalars().all())
@@ -182,6 +185,7 @@ async def get_learning_stats() -> dict:
         lev_dist[bucket] = lev_dist.get(bucket, 0) + 1
 
     # Monthly win rate per agent (last 6 months)
+    # EC6: include futures_agent_bigmover as its own bucket — was silently lumped into agent3
     import datetime as dt
     monthly: dict[str, dict] = {}
     for t in closed:
@@ -189,44 +193,41 @@ async def get_learning_stats() -> dict:
             continue
         month_key = dt.datetime.utcfromtimestamp(t.entry_at).strftime("%Y-%m")
         entry = monthly.setdefault(month_key, {
-            "month": month_key,
-            "agent1": {"wins": 0, "total": 0},
-            "agent2": {"wins": 0, "total": 0},
-            "agent3": {"wins": 0, "total": 0},
+            "month":    month_key,
+            "agent1":   {"wins": 0, "total": 0},
+            "agent2":   {"wins": 0, "total": 0},
+            "agent3":   {"wins": 0, "total": 0},
+            "bigmover": {"wins": 0, "total": 0},
         })
         if t.style == "futures_agent1":
             ak = "agent1"
         elif t.style == "futures_agent2":
             ak = "agent2"
-        else:
+        elif t.style == "futures_agent3":
             ak = "agent3"
+        else:
+            ak = "bigmover"   # futures_agent_bigmover
         entry[ak]["total"] += 1
         if _is_real_win(t):
             entry[ak]["wins"] += 1
 
+    def _month_bucket(v: dict, key: str) -> dict:
+        b = v[key]
+        return {
+            "total":    b["total"],
+            "wins":     b["wins"],
+            "win_rate": round(b["wins"] / b["total"] * 100, 1) if b["total"] > 0 else 0.0,
+        }
+
     monthly_stats = []
     for month_key in sorted(monthly.keys())[-6:]:  # last 6 months
         v = monthly[month_key]
-        a1 = v["agent1"]
-        a2 = v["agent2"]
-        a3 = v["agent3"]
         monthly_stats.append({
-            "month": month_key,
-            "agent1": {
-                "total":    a1["total"],
-                "wins":     a1["wins"],
-                "win_rate": round(a1["wins"] / a1["total"] * 100, 1) if a1["total"] > 0 else 0.0,
-            },
-            "agent2": {
-                "total":    a2["total"],
-                "wins":     a2["wins"],
-                "win_rate": round(a2["wins"] / a2["total"] * 100, 1) if a2["total"] > 0 else 0.0,
-            },
-            "agent3": {
-                "total":    a3["total"],
-                "wins":     a3["wins"],
-                "win_rate": round(a3["wins"] / a3["total"] * 100, 1) if a3["total"] > 0 else 0.0,
-            },
+            "month":    month_key,
+            "agent1":   _month_bucket(v, "agent1"),
+            "agent2":   _month_bucket(v, "agent2"),
+            "agent3":   _month_bucket(v, "agent3"),
+            "bigmover": _month_bucket(v, "bigmover"),
         })
 
     # Conservative (flat R:R 1:3) equity — F65: derive from constants, not hardcoded $30/$10.
@@ -254,6 +255,7 @@ async def get_learning_stats() -> dict:
         "agent1":        agent_stats("futures_agent1"),
         "agent2":        agent_stats("futures_agent2"),
         "agent3":        agent_stats("futures_agent3"),
+        "agent_bigmover": agent_stats("futures_agent_bigmover"),  # EC6
         "balance": {
             "starting":  round(wallet_base, 2),                     # Phase 9: real base (incl. deposits)
             "current":   round(balance, 2),

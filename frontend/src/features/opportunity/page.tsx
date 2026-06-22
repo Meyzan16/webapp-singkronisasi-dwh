@@ -21,6 +21,9 @@ const RECONNECT_MS   = 3000;
 const TOP_FEATURED   = 5;
 const INTERVAL_SEC   = 3 * 60;
 
+// Phase 3 G3-regime: 3-state BTC gate
+type RegimeStatus = "OPEN" | "REDUCED" | "CLOSED";
+
 // §11.1: aturan engine diambil dari API — UI tidak boleh hardcode angka aturan
 interface ScannerConfig {
   min_score:          number;
@@ -81,6 +84,9 @@ export default function OpportunityPage() {
   const [newSymbols, setNewSymbols]   = useState<Set<string>>(new Set());
   const [timeAgoStr, setTimeAgoStr]   = useState("");
   const [selectedCoin, setSelectedCoin] = useState<OpportunityResult | null>(null);
+  // Phase 3 G3-regime: BTC regime state for banner
+  const [regimeStatus, setRegimeStatus] = useState<RegimeStatus>("OPEN");
+  const [btcChange24h, setBtcChange24h] = useState<number | null>(null);
 
   // Active positions banner
   const [activePositions, setActivePositions] = useState<ActivePos[]>([]);
@@ -157,6 +163,9 @@ export default function OpportunityPage() {
     setTimeAgoStr("baru saja");
     setLoading(false);
     setScanning(false);
+    // Phase 3 G3-regime: surface BTC regime status for banner
+    setRegimeStatus((data.regime_status as RegimeStatus) ?? "OPEN");
+    setBtcChange24h((data.btc_change_24h as number) ?? null);
 
     if (typeof data.next_scan_in === "number") {
       nextScanInRef.current = data.next_scan_in;
@@ -500,6 +509,31 @@ export default function OpportunityPage() {
 
       {/* ── Market Intel Banner ──────────────────────────────────────────────── */}
       <MarketIntelBanner mode="spot" />
+
+      {regimeStatus !== "OPEN" && (
+        <div
+          className={`rounded-xl border px-4 py-2.5 text-sm flex items-center gap-2 ${
+            regimeStatus === "CLOSED"
+              ? "bg-red-50 border-red-200 text-red-700"
+              : "bg-amber-50 border-amber-200 text-amber-800"
+          }`}
+        >
+          <span className="text-base">
+            {regimeStatus === "CLOSED" ? "🛑" : "⚠️"}
+          </span>
+          <div className="flex-1">
+            <span className="font-bold">
+              Regime: {regimeStatus}
+            </span>
+            <span className="ml-2 text-xs opacity-80">
+              {regimeStatus === "CLOSED"
+                ? "Auto-open dimatikan — BTC turun tajam (≤−5%/24h)."
+                : "Sistem konservatif — quota auto-open dipotong ke 1/cycle."}
+              {btcChange24h !== null && ` BTC 24h ${btcChange24h >= 0 ? "+" : ""}${btcChange24h.toFixed(2)}%`}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* ── Score legend ───────────────────────────────────────────────────── */}
       {!loading && filtered.length > 0 && (

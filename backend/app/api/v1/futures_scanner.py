@@ -21,7 +21,10 @@ router = APIRouter(tags=["futures"])
 logger = structlog.get_logger(__name__)
 
 # P2: all futures lanes share one wallet → dedup & queries are GLOBAL across styles (BUG-L1)
-_ALL_FUTURES_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3"]
+_ALL_FUTURES_STYLES = [
+    "futures_agent1", "futures_agent2", "futures_agent3",
+    "futures_agent_bigmover",   # Phase 2 BM1
+]
 
 
 # ── Schema ─────────────────────────────────────────────────────────────────────
@@ -47,6 +50,8 @@ class OpenFuturesTradeRequest(BaseModel):
     oi_change:    float  = 0.0
     liq_long:     float  = 0.0
     liq_short:    float  = 0.0
+    force_open:  bool    = False           # Phase 1 T1 — manual override
+    session_id:  Optional[str] = None      # B1.2 — for rate limit
 
 
 # ── Layer 1: Scan cache ────────────────────────────────────────────────────────
@@ -127,6 +132,29 @@ async def get_big_movers(
     }
 
 
+@router.get("/futures/big-movers/live")
+async def get_big_movers_live(
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    """
+    Phase 2 BM4 / G21: real-time WebSocket feed snapshot.
+    Returns coins with abs(change_1m) ≥ 1% OR change_24h ≥ 5%.
+    Latency target < 2s vs 2-min scan cycle.
+    Returns [] with `feed_stale=True` if WS connection has been silent > 30s — caller
+    should fall back to /futures/big-movers (REST cache).
+    """
+    from agents.futures.ws_big_mover_feed import get_live_movers, get_state
+    movers = get_live_movers(limit=limit)
+    state = get_state()
+    return {
+        "movers":      movers,
+        "total":       len(movers),
+        "feed_stale":  state.get("is_stale", False),
+        "feed_age_sec": state.get("age_sec"),
+        "feed_state":  state,
+    }
+
+
 # ── Layer 2: Open position ─────────────────────────────────────────────────────
 
 @router.post("/futures/trade")
@@ -141,6 +169,18 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
 
     if not is_db_available():
         raise HTTPException(status_code=503, detail="Database tidak tersedia")
+
+    # Phase 1 B1.2: rate-limit force-open (DB persistent, 5/jam per session)
+    if body.force_open:
+        from app.services.force_open_limiter import can_force_open, record_force_open
+        sess = (body.session_id or "default").strip()[:64] or "default"
+        allowed, used, remaining = await can_force_open(sess)
+        if not allowed:
+            await record_force_open(sess, body.symbol, body.direction, "futures", accepted=False)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit force-open: {used}/5 dipakai dalam 1 jam terakhir. Tunggu cooldown."
+            )
 
     # Phase 10: risk gate — circuit-breaker + RAR gate (first check, before any other validation)
     from agents.futures.risk_gate import is_gate_open, is_state_stale, evaluate_risk_gate
@@ -217,6 +257,7 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
         "liq_long":     body.liq_long,
         "liq_short":    body.liq_short,
         "margin_type":  "cross",
+        "manual":       bool(body.force_open),   # Phase 1 T1 — distinguish manual vs auto
     }
 
     from agents.futures.regime import get_cached_regime
@@ -264,7 +305,14 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
     logger.info("futures_trade_opened",
                 symbol=symbol, direction=body.direction, agent=body.agent,
                 entry=body.entry, sl=body.sl, tp2=body.tp2,
-                leverage=body.leverage, rr=body.rr_ratio)
+                leverage=body.leverage, rr=body.rr_ratio,
+                force_open=body.force_open)
+
+    # Phase 1 B1.2: record successful force-open against rate limit
+    if body.force_open:
+        from app.services.force_open_limiter import record_force_open
+        sess = (body.session_id or "default").strip()[:64] or "default"
+        await record_force_open(sess, symbol, body.direction, "futures", accepted=True)
 
     return {
         "id":      trade.id,
@@ -352,32 +400,40 @@ async def get_futures_positions(
             else:
                 upnl = round((t.entry_price - cp) / t.entry_price * 100 - _FUTURES_FEE_PCT, 2)
 
+        upnl_dollar = (
+            round((upnl / 100) * t.position_size, 2)
+            if upnl is not None and t.position_size and t.position_size > 0
+            else None
+        )
         positions.append({
-            "id":               t.id,
-            "symbol":           t.symbol,
-            "direction":        t.direction,
-            "agent":            t.style,
-            "status":           t.status,
-            "entry":            t.entry_price,
-            "sl":               t.stop_loss,
-            "tp1":              meta.get("tp1"),
-            "tp2":              t.take_profit,
-            "tp3":              meta.get("tp3"),
-            "risk_pct":         meta.get("risk_pct", 0),
-            "tp2_pct":          meta.get("tp2_pct", 0),
-            "rr_ratio":         meta.get("rr_ratio", 0),
-            "leverage":         t.leverage or meta.get("leverage", 1),
-            "margin_type":      t.margin_type or meta.get("margin_type", "cross"),
-            "score":            t.probability,
-            "signals":          meta.get("signals", []),
-            "funding_rate":     meta.get("funding_rate", 0),
-            "oi_change":        meta.get("oi_change", 0),
-            "entry_at":         t.entry_at,
-            "close_price":      t.close_price,
-            "closed_at":        t.closed_at,
-            "pnl_pct":          t.pnl_pct,
-            "current_price":    cp,
-            "unrealized_pnl":   upnl,
+            "id":                    t.id,
+            "symbol":                t.symbol,
+            "direction":             t.direction,
+            "agent":                 t.style,
+            "status":                t.status,
+            "entry":                 t.entry_price,
+            "sl":                    t.stop_loss,
+            "tp1":                   meta.get("tp1"),
+            "tp2":                   t.take_profit,
+            "tp3":                   meta.get("tp3"),
+            "risk_pct":              meta.get("risk_pct", 0),
+            "tp2_pct":               meta.get("tp2_pct", 0),
+            "rr_ratio":              meta.get("rr_ratio", 0),
+            "leverage":              t.leverage or meta.get("leverage", 1),
+            "margin_type":           t.margin_type or meta.get("margin_type", "cross"),
+            "score":                 t.probability,
+            "signals":               meta.get("signals", []),
+            "funding_rate":          meta.get("funding_rate", 0),
+            "oi_change":             meta.get("oi_change", 0),
+            "entry_at":              t.entry_at,
+            "close_price":           t.close_price,
+            "closed_at":             t.closed_at,
+            "pnl_pct":               t.pnl_pct,
+            "pnl_dollar":            t.pnl_dollar,
+            "position_size":         t.position_size,
+            "current_price":         cp,
+            "unrealized_pnl":        upnl,
+            "unrealized_pnl_dollar": upnl_dollar,
         })
 
     return {"positions": positions, "total": len(positions)}
@@ -415,9 +471,28 @@ async def get_futures_status() -> dict:
 # F33/Phase 9: shared notional math; balance now comes from the real wallet
 from app.services.trading_costs import futures_notional as _notional
 
-def _liq_price(entry: float, leverage: int, direction: str) -> float:
-    """Cross margin liquidation ≈ entry ± (95% of margin)."""
-    dist = entry * (0.95 / max(leverage, 1))
+def _liq_price(
+    entry: float,
+    leverage: int,
+    direction: str,
+    position_size: float = 0.0,
+    wallet_equity: float = 0.0,
+    other_open_loss: float = 0.0,
+) -> float:
+    """
+    BC1: Cross-margin liquidation approximation.
+    When wallet_equity is provided, computes effective equity buffer accounting
+    for losses from OTHER open positions. MMR = 1% (conservative for alts).
+    Falls back to isolated approximation when data unavailable.
+    """
+    MMR      = 0.01
+    notional = position_size * max(leverage, 1)
+    if notional > 0 and wallet_equity > 0:
+        effective_equity = max(wallet_equity + other_open_loss, notional * MMR * 1.5)
+        dist_fraction    = max((effective_equity / notional) - MMR, 0.01)
+        dist             = entry * dist_fraction
+    else:
+        dist = entry * (0.95 / max(leverage, 1))
     return (entry - dist) if direction == "LONG" else (entry + dist)
 
 
@@ -476,6 +551,29 @@ async def get_risk_dashboard() -> dict:
         except Exception:
             pass
 
+    # BC1: fetch wallet equity for cross-margin liq computation
+    from app.api.v1.balance import get_or_create_balance as _get_bal
+    try:
+        _fut_wallet   = await _get_bal("futures")
+        _wallet_equity = max(_fut_wallet.balance, 0.0)
+    except Exception:
+        _wallet_equity = 0.0
+
+    # BC1: pass 1 — compute unrealized PnL per trade to determine other-position losses
+    _FUTURES_FEE_PCT  = 0.10
+    _upnl_by_id: dict[int, float] = {}
+    for _t in open_trades:
+        _cur  = live_prices.get(_t.symbol, _t.entry_price)
+        _ent  = _t.entry_price
+        _not  = _t.position_size or _notional(2.0)
+        if _ent and _ent > 0:
+            if _t.direction == "LONG":
+                _upnl_by_id[_t.id] = (_cur - _ent) / _ent * _not
+            else:
+                _upnl_by_id[_t.id] = (_ent - _cur) / _ent * _not
+        else:
+            _upnl_by_id[_t.id] = 0.0
+
     positions = []
     total_margin   = 0.0
     at_risk_count  = 0
@@ -500,7 +598,14 @@ async def get_risk_dashboard() -> dict:
         tp3        = meta.get("tp3")
         direction  = t.direction
 
-        liq         = _liq_price(entry, leverage, direction)
+        # BC1: cross-margin — other positions' losses reduce effective wallet buffer
+        _other_loss = sum(v for k, v in _upnl_by_id.items() if k != t.id and v < 0)
+        liq         = _liq_price(
+            entry, leverage, direction,
+            position_size   = notional,
+            wallet_equity   = _wallet_equity,
+            other_open_loss = _other_loss,
+        )
         current     = live_prices.get(t.symbol, entry)
 
         # Unrealized P&L % — deduct 0.10% round-trip fee (F28)
@@ -556,11 +661,15 @@ async def get_risk_dashboard() -> dict:
             "upnl_dollar":   round(upnl_dollar, 2),
             "risk_pct":      risk_pct,
             "risk_status":   risk_status,
-            "trail_active":  bool(t.trail_active),
-            "score":         t.probability,
-            "auto_opened":   meta.get("auto_opened", False),
-            "entry_at":      t.entry_at,
-            "regime":        t.regime or "unknown",
+            "trail_active":            bool(t.trail_active),
+            "score":                   t.probability,
+            "auto_opened":             meta.get("auto_opened", False),
+            "entry_at":                t.entry_at,
+            "regime":                  t.regime or "unknown",
+            # G6+G15: cumulative cost tracker (from monitor meta)
+            "cumulative_funding_paid": meta.get("cumulative_funding_paid"),
+            "cumulative_fee_paid":     meta.get("cumulative_fee_paid"),
+            "peak_pnl_pct":            meta.get("peak_pnl_pct"),  # G5b
         })
 
     # ── Risk-Adjusted Return (simplified Calmar / Sharpe proxy) ─────────────────
@@ -592,9 +701,9 @@ async def get_risk_dashboard() -> dict:
         if dd > max_dd:
             max_dd = dd
 
-    # Sharpe proxy: mean / std of P&L series
+    # Sharpe proxy: mean / std of P&L series (None = not enough data)
     import statistics
-    sharpe = 0.0
+    sharpe = None
     if len(pnl_series) >= 5:
         try:
             mu  = statistics.mean(pnl_series)
@@ -610,6 +719,13 @@ async def get_risk_dashboard() -> dict:
 
     total_closed_pnl = balance - wallet_base
 
+    # G7 + B6.1: effective margin ratio — locked margin PLUS unrealized losses
+    # (unrealized loss eats effective equity even before liquidation happens)
+    _neg_unrealized  = abs(sum(v for v in _upnl_by_id.values() if v < 0))
+    _effective_margin = total_margin + _neg_unrealized
+    _margin_ratio     = round(_effective_margin / _wallet_equity * 100, 1) \
+                        if _wallet_equity > 0 else None
+
     return {
         "positions": positions,
         "portfolio": {
@@ -623,6 +739,7 @@ async def get_risk_dashboard() -> dict:
             "total_closed_pnl": round(total_closed_pnl, 2),
             "starting_balance": round(wallet_base, 2),
             "current_balance":  round(balance, 2),
+            "margin_ratio":     _margin_ratio,   # G7: effective_margin / wallet %
         },
         "agent_breakdown": {
             "agent1": {
@@ -683,6 +800,22 @@ async def override_risk_gate(body: GateOverrideRequest) -> dict:
 class AutoTradeToggle(BaseModel):
     enabled: bool
     threshold: Optional[int] = None   # F102: optional manual override (None = adaptive)
+
+
+@router.get("/futures/force-open/budget")
+async def get_force_open_budget(session_id: str = Query("default")) -> dict:
+    """Phase 1 B1.2 — remaining force-open budget for this session."""
+    from app.services.force_open_limiter import can_force_open, WINDOW_SEC, MAX_PER_WINDOW
+    sess = (session_id or "default").strip()[:64] or "default"
+    allowed, used, remaining = await can_force_open(sess)
+    return {
+        "session_id": sess,
+        "allowed":    allowed,
+        "used":       used,
+        "remaining":  remaining,
+        "limit":      MAX_PER_WINDOW,
+        "window_sec": WINDOW_SEC,
+    }
 
 
 @router.get("/futures/auto/status")

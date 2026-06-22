@@ -17,6 +17,7 @@ For each open futures paper trade:
 import asyncio
 import json
 import time
+from decimal import Decimal
 from typing import Optional
 
 import httpx
@@ -42,7 +43,30 @@ TAKER_FEE     = 0.0005   # 0.05% per side
 ROUND_TRIP    = TAKER_FEE * 2  # 0.10% total
 
 # Max position age in days — close stalled futures positions
-MAX_AGE_DAYS  = 3   # futures positions should resolve faster than spot
+MAX_AGE_DAYS       = 3   # futures positions should resolve faster than spot
+MAX_AGE_EXTENSIONS = 2   # G11: max 2 × 1-day extensions → 5 days total for winners
+
+# G3: rotation constants
+FUTURES_ROTATION_MIN_DAYS  = 1.0   # start checking after 1 day
+FUTURES_ROTATION_DRIFT_PCT = 3.0   # ≤3% from entry = stagnant
+FUTURES_ROTATION_SCORE_GAP = 10    # candidate must outscore by at least 10
+
+# G4: rugpull detection constants
+RUGPULL_CANDLES       = 5     # 5×1m candles = 5-minute window
+RUGPULL_BASE_PCT      = 5.0   # minimum adverse-move threshold
+RUGPULL_MIN_HOLD_MIN  = 5.0   # skip if held < 5 min (noise at open)
+
+# G5b: absolute profit lock — tier thresholds (peak_pnl → lock if drop below fraction)
+_PROFIT_LOCK_TIERS = [
+    (40.0, 0.75),   # peak ≥ 40%: lock at 75% of peak
+    (25.0, 0.70),   # peak ≥ 25%: lock at 70% of peak
+    (15.0, 0.60),   # peak ≥ 15%: lock at 60% of peak
+]
+
+# G6: funding cost tracker
+FUNDING_WINDOW_SEC     = 8 * 3600   # Binance funds every 8h
+COST_TO_PROFIT_GATE    = 0.30       # close if cumulative cost > 30% of unrealized profit
+COST_ABS_LOSS_GATE_PCT = 0.003      # B5.3: close losing trade if cost > 0.3% of notional
 
 # BUG-L8: wick detection — 1m candles checked per cycle so TP/SL touches BETWEEN the
 # 2-min polls aren't missed (spot monitor already does this; futures did not → a wick that
@@ -58,7 +82,14 @@ _liq_guards   = 0   # positions closed by liquidation guard
 _tp_extended  = 0   # positions with TP extended
 _today: Optional[str] = None  # F61: track date for daily closed_today reset
 
-_FUTURES_STYLES = ("futures_agent1", "futures_agent2", "futures_agent3")
+# EC5: server-time drift check
+NTP_CHECK_INTERVAL_SEC = 1800   # every 30 min
+_last_ntp_check: float = 0.0
+
+_FUTURES_STYLES = (
+    "futures_agent1", "futures_agent2", "futures_agent3",
+    "futures_agent_bigmover",   # Phase 2 BM1 — monitor BM positions same as others
+)
 
 
 def get_state() -> dict:
@@ -73,9 +104,35 @@ def get_state() -> dict:
     }
 
 
-def _calc_liq_price(entry: float, leverage: int, direction: str) -> float:
-    """Cross margin liquidation: ~95% of margin consumed."""
-    dist = entry * (0.95 / max(leverage, 1))
+def _calc_liq_price(
+    entry: float,
+    leverage: int,
+    direction: str,
+    position_size: float = 0.0,
+    wallet_equity: float = 0.0,
+    other_open_loss: float = 0.0,
+) -> float:
+    """
+    BC1: Cross-margin liquidation approximation.
+    When wallet_equity is known, uses effective equity to compute how far price
+    can move before the portfolio loses its maintenance margin on this position.
+    Falls back to the isolated approximation when data is unavailable.
+
+    MMR = 1% for altcoin perpetuals (Binance default).
+    Effective equity = wallet_equity + unrealized losses from OTHER open positions.
+    The position liq-price is approximately:
+      dist = entry × max((effective_equity / notional) − MMR, 0.01)
+    """
+    MMR      = 0.01   # 1% maintenance margin rate (conservative for alts)
+    notional = position_size * max(leverage, 1)
+    if notional > 0 and wallet_equity > 0:
+        # Cross-margin: wallet equity shared across positions; other losses reduce buffer
+        effective_equity = max(wallet_equity + other_open_loss, notional * MMR * 1.5)
+        dist_fraction    = max((effective_equity / notional) - MMR, 0.01)
+        dist             = entry * dist_fraction
+    else:
+        # Fallback: isolated approximation (original formula)
+        dist = entry * (0.95 / max(leverage, 1))
     return (entry - dist) if direction == "LONG" else (entry + dist)
 
 
@@ -95,6 +152,65 @@ def _liq_guard_pct(leverage: int) -> float:
     if leverage <= 20:
         return 4.0
     return 3.0
+
+
+# ── G4 helper ─────────────────────────────────────────────────────────────────
+
+def _rugpull_threshold(atr_pct: float) -> float:
+    """B5.2: adaptive rugpull threshold = max(5%, ATR × 2)."""
+    return max(RUGPULL_BASE_PCT, atr_pct * 2.0)
+
+
+def _flash_adverse_pct(klines_1m: list, direction: str) -> float:
+    """
+    Compute the maximum adverse move in the last RUGPULL_CANDLES 1m candles.
+    LONG: (high of first candle − min low across window) / high of first candle
+    SHORT: (max high across window − low of first candle) / low of first candle
+    Returns 0.0 if data insufficient.
+    """
+    if len(klines_1m) < RUGPULL_CANDLES:
+        return 0.0
+    last5 = klines_1m[-RUGPULL_CANDLES:]
+    try:
+        if direction == "LONG":
+            ref  = float(last5[0][2])   # high of oldest candle in window
+            low  = min(float(k[3]) for k in last5)
+            return (ref - low) / ref * 100 if ref > 0 else 0.0
+        else:  # SHORT
+            ref  = float(last5[0][3])   # low of oldest candle in window
+            high = max(float(k[2]) for k in last5)
+            return (high - ref) / ref * 100 if ref > 0 else 0.0
+    except (IndexError, ValueError):
+        return 0.0
+
+
+# ── G3 helper ─────────────────────────────────────────────────────────────────
+
+def _futures_has_better_candidate(
+    current_score: float,
+    exclude_symbol: str,
+    agent_style: str,
+) -> bool:
+    """
+    G3: True if the futures scan cache has a candidate with materially higher score.
+    Uses the same agent's cached results so we compare like-for-like setups.
+    Cap current_score at 80 to prevent impossibly high required candidate score.
+    """
+    try:
+        from agents.futures import store as futures_store
+        cached = futures_store.get_result(agent_style)
+        if not cached:
+            return False
+        capped = min(current_score, 80)
+        for c in cached.get("results", []):
+            if c.get("symbol") == exclude_symbol:
+                continue
+            c_score = c.get("score", 0)
+            if c_score >= capped + FUTURES_ROTATION_SCORE_GAP:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 # ── Price fetcher ─────────────────────────────────────────────────────────────
@@ -157,6 +273,34 @@ async def _fetch_funding_rates(symbols: list[str]) -> dict[str, float]:
     except Exception:
         pass
     return rates
+
+
+async def _check_server_time_drift() -> None:
+    """EC5: Warn if this server's clock drifts >5s from Binance serverTime.
+
+    Funding windows are calculated with server time; a drift of >5s can cause
+    the G9 funding-window exit to fire at the wrong moment.  Runs at most every
+    30 min so the overhead is negligible.
+    """
+    global _last_ntp_check
+    now = time.time()
+    if now - _last_ntp_check < NTP_CHECK_INTERVAL_SEC:
+        return
+    _last_ntp_check = now
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            r = await c.get(fapi("/fapi/v1/time"))
+            if r.status_code == 200:
+                binance_ms = r.json().get("serverTime", 0)
+                drift = abs(time.time() - binance_ms / 1000)
+                if drift > 5.0:
+                    logger.warning("server_time_drift",
+                                   drift_sec=round(drift, 2),
+                                   msg="funding window timing may be off — check NTP")
+                else:
+                    logger.debug("server_time_ok", drift_sec=round(drift, 3))
+    except Exception:
+        pass  # non-critical — skip silently
 
 
 async def _fetch_futures_klines_1m(client: "httpx.AsyncClient", symbol: str) -> list:
@@ -310,6 +454,13 @@ async def check_futures_positions() -> tuple[int, int]:
     closed  = 0
     updated = 0
 
+    # G10: check if emergency tighten was requested by the risk gate (circuit breaker trip)
+    from agents.futures.risk_gate import consume_emergency_tighten
+    _do_emergency_tighten = consume_emergency_tighten()
+    if _do_emergency_tighten:
+        logger.warning("emergency_tighten_cycle_start",
+                       msg="Circuit breaker tripped — tightening all open SLs")
+
     async with AsyncSessionLocal() as session:
         # Monitor all futures-type positions (including legacy styles)
         result = await session.execute(
@@ -324,7 +475,41 @@ async def check_futures_positions() -> tuple[int, int]:
             return 0, 0   # B3: tuple — caller unpacks (closed, updated)
 
         symbols = list({t.symbol for t in trades})
-        prices  = await _fetch_futures_prices(symbols)
+        # EC2: stale price guard — if fetch takes >30s (network stall / retry loop),
+        # the prices could already be stale by the time we use them.  Skip the cycle
+        # rather than fire a false SL/TP close on stale data.
+        _pf_start = time.time()
+        prices    = await _fetch_futures_prices(symbols)
+        _pf_age   = time.time() - _pf_start
+        if _pf_age > 30.0:
+            logger.warning("monitor_stale_price_skipped",
+                           age_sec=round(_pf_age, 1),
+                           msg="price fetch took >30s — skipping cycle")
+            return 0, 0
+
+        # BC1: fetch wallet equity for cross-margin liq calculation
+        _wallet_equity = FUTURES_STARTING_BALANCE
+        try:
+            _wb = (await session.execute(
+                select(PaperBalance).where(PaperBalance.style == "futures")
+            )).scalar_one_or_none()
+            if _wb:
+                _wallet_equity = max(_wb.balance, 0.0)
+        except Exception:
+            pass
+
+        # BC1: pre-compute unrealized PnL per trade (for cross-margin liq — other positions' losses)
+        _unrealized: dict[int, float] = {}
+        for _t in trades:
+            _p = prices.get(_t.symbol)
+            if _p and _t.entry_price and _t.position_size:
+                if _t.direction == "LONG":
+                    _u = (_p - _t.entry_price) / _t.entry_price * _t.position_size
+                else:
+                    _u = (_t.entry_price - _p) / _t.entry_price * _t.position_size
+                _unrealized[_t.id] = _u
+            else:
+                _unrealized[_t.id] = 0.0
 
         # BUG-L8: fetch 1m klines so TP/SL touches between 2-min polls aren't missed
         klines_1m: dict[str, list] = {}
@@ -352,6 +537,26 @@ async def check_futures_positions() -> tuple[int, int]:
             )
             eff_low  = min(price, wick_low)  if wick_low  is not None else price
             eff_high = max(price, wick_high) if wick_high is not None else price
+
+            # ── G4: Flash dump / pump detection (B5.2: adaptive ATR threshold) ──
+            # Detects sudden 5-minute violent moves that SL may not catch in time.
+            _hold_mins_g4 = (time.time() - (trade.entry_at or time.time())) / 60
+            if _hold_mins_g4 >= RUGPULL_MIN_HOLD_MIN:
+                _k1m_g4      = klines_1m.get(trade.symbol, [])
+                _atr_pct_g4  = float(meta.get("atr_pct", 0.0) or 0.0)
+                _rp_thresh   = _rugpull_threshold(_atr_pct_g4)
+                _adverse_pct = _flash_adverse_pct(_k1m_g4, direction)
+                if _adverse_pct > _rp_thresh:
+                    # Override any existing new_status — rugpull takes priority
+                    new_status   = "sl"
+                    close_price  = round(price, 8)
+                    close_reason = "flash_dump_exit" if direction == "LONG" else "flash_pump_exit"
+                    logger.warning(
+                        "rugpull_detected",
+                        symbol=trade.symbol, direction=direction,
+                        adverse_pct=round(_adverse_pct, 2), threshold=round(_rp_thresh, 2),
+                        atr_pct=_atr_pct_g4,
+                    )
 
             try:
                 meta = json.loads(trade.signals_json or "{}")
@@ -400,10 +605,53 @@ async def check_futures_positions() -> tuple[int, int]:
             close_price:  Optional[float] = None
             close_reason: Optional[str]   = None
 
-            # ── 0. Max age check (3 days — futures should resolve quickly) ────
+            # ── G5b: Absolute profit lock — prevent large give-back from peak ──
+            # Update peak every cycle; close if current drops too far below peak.
+            _pnl_now_pct = (
+                (price - entry) / entry * 100 if direction == "LONG"
+                else (entry - price) / entry * 100
+            ) if entry > 0 else 0.0
+            _peak_pnl = float(meta.get("peak_pnl_pct", 0.0))
+            if _pnl_now_pct > _peak_pnl:
+                _peak_pnl = round(_pnl_now_pct, 3)
+                meta["peak_pnl_pct"] = _peak_pnl
+                trade.signals_json   = json.dumps(meta, ensure_ascii=False)
+                updated += 1
+            for _peak_thresh, _lock_frac in _PROFIT_LOCK_TIERS:
+                if _peak_pnl >= _peak_thresh and _pnl_now_pct <= _peak_pnl * _lock_frac:
+                    new_status   = "tp"
+                    close_price  = round(price, 8)
+                    close_reason = "absolute_profit_lock"
+                    logger.info(
+                        "absolute_profit_lock",
+                        symbol=trade.symbol, direction=direction,
+                        peak_pnl=round(_peak_pnl, 2), current_pnl=round(_pnl_now_pct, 2),
+                        threshold=_peak_thresh, lock_frac=_lock_frac,
+                    )
+                    break
+
+            # ── 0. Max age check (G11: adaptive — extend for profitable trailing) ──
             age_days = (time.time() - (trade.entry_at or 0)) / 86400
-            if age_days > MAX_AGE_DAYS:
-                # Always "expired" — position didn't resolve via TP/SL (F15)
+            _age_ext  = int(meta.get("age_extensions", 0))
+            _max_age  = MAX_AGE_DAYS + min(_age_ext, MAX_AGE_EXTENSIONS)
+            # G11 + B6.3: grant 1-day extension when at boundary, in profit, trailing,
+            # and 1h momentum still aligned (proxied by pnl ≥ 5%).
+            if (not new_status
+                    and trail_active
+                    and _pnl_now_pct >= 5.0
+                    and _age_ext < MAX_AGE_EXTENSIONS
+                    and age_days >= (_max_age - 0.1)):   # within ~2.4 h of expiry
+                _last_ext = float(meta.get("age_last_extended_at", 0.0))
+                if (time.time() - _last_ext) >= 20 * 3600:   # one extension per day
+                    meta["age_extensions"]       = _age_ext + 1
+                    meta["age_last_extended_at"] = time.time()
+                    trade.signals_json           = json.dumps(meta, ensure_ascii=False)
+                    updated    += 1
+                    _age_ext   += 1
+                    _max_age    = MAX_AGE_DAYS + _age_ext
+                    logger.info("age_extended_g11", symbol=trade.symbol,
+                                extensions=_age_ext, pnl=round(_pnl_now_pct, 2))
+            if age_days > _max_age:
                 new_status   = "expired"
                 close_price  = round(price, 8)
                 close_reason = "max_age_expired"
@@ -419,6 +667,28 @@ async def check_futures_positions() -> tuple[int, int]:
                     new_status   = "expired"
                     close_price  = round(price, 8)
                     close_reason = "stagnant_48h"
+
+            # ── 0a1. G8: Stagnant post-TP1 — free capital from stuck trailing pos ──
+            # trail_active means TP1 was hit; if price stalls ≥ 24h at trail SL
+            # level without advancing → close at trail SL to free the capital.
+            if not new_status and trail_active:
+                _tp1_done_g8 = float(meta.get("tp1_done_at", 0.0))
+                _hold_tp1_h  = (time.time() - _tp1_done_g8) / 3600 if _tp1_done_g8 > 0 else 0.0
+                if _hold_tp1_h >= 24.0:
+                    _stuck = (
+                        (direction == "LONG"  and price <= sl * 1.02) or
+                        (direction == "SHORT" and price >= sl * 0.98)
+                    )
+                    if _stuck:
+                        new_status   = "tp"   # TP1 was booked, net profitable
+                        close_price  = round(sl, 8)
+                        close_reason = "stagnant_post_tp1"
+                        logger.info(
+                            "stagnant_post_tp1",
+                            symbol=trade.symbol, direction=direction,
+                            hold_tp1_h=round(_hold_tp1_h, 1),
+                            price=round(price, 6), sl=round(sl, 6),
+                        )
 
             # ── 0b. TP4 extension (F78) — must run before auto-close so tp2 is updated ──
             if (not new_status
@@ -522,7 +792,14 @@ async def check_futures_positions() -> tuple[int, int]:
 
             # ── 2. Liquidation guard (F85: adaptive threshold per leverage) ───
             if not new_status:
-                liq        = _calc_liq_price(entry, leverage, direction)
+                # BC1: cross-margin liq — other positions' losses reduce effective wallet buffer
+                _other_loss = sum(v for k, v in _unrealized.items() if k != trade.id and v < 0)
+                liq        = _calc_liq_price(
+                    entry, leverage, direction,
+                    position_size   = trade.position_size or 0.0,
+                    wallet_equity   = _wallet_equity,
+                    other_open_loss = _other_loss,
+                )
                 d_pct      = _liq_dist_pct(price, liq, direction)
                 guard_pct  = _liq_guard_pct(leverage)  # F85: was fixed 8.0
                 if d_pct < guard_pct:
@@ -540,13 +817,19 @@ async def check_futures_positions() -> tuple[int, int]:
                     )
 
             if new_status and close_price:
+                # BC4: use Decimal for price math to avoid IEEE 754 drift over many trades.
+                _entry_d = Decimal(str(entry))
+                _close_d = Decimal(str(close_price))
                 # Fee-aware P&L: 0.05% entry + 0.05% exit = 0.10% round trip
-                pnl_gross = (close_price - entry) / entry * 100 if direction == "LONG" \
-                            else (entry - close_price) / entry * 100
-                pnl_net   = pnl_gross - (ROUND_TRIP * 100)
+                pnl_gross = (
+                    (_close_d - _entry_d) / _entry_d * 100
+                    if direction == "LONG"
+                    else (_entry_d - _close_d) / _entry_d * 100
+                )
+                pnl_net = pnl_gross - Decimal(str(ROUND_TRIP * 100))
                 try:
                     meta["close_reason"]  = close_reason
-                    meta["pnl_gross_pct"] = round(pnl_gross, 2)
+                    meta["pnl_gross_pct"] = float(round(pnl_gross, 2))
                     meta["fee_pct"]       = round(ROUND_TRIP * 100, 2)
                     trade.signals_json    = json.dumps(meta, ensure_ascii=False)
                 except Exception:
@@ -555,20 +838,21 @@ async def check_futures_positions() -> tuple[int, int]:
                 # Phase 9: dollars off the trade's REAL notional (balance-aware at open);
                 # fall back to the constant-based notional only for legacy rows.
                 _notional_close = trade.position_size or futures_notional(_risk_pct_meta)
+                _notional_d     = Decimal(str(_notional_close))
                 # F76/BUG-L17: partial sold 33% at TP1. New rows ALSO shrank position_size to
                 # the 67% remainder (tp1_size_reduced) → no extra multiplier. Legacy partialed
                 # rows kept full size → still need ×0.67.
                 if meta.get("tp1_partial_done"):
                     _partial_pnl = meta.get("tp1_partial_pnl_dollar", 0.0)
-                    _rem         = 1.0 if meta.get("tp1_size_reduced") else 0.67
-                    _final_pnl   = round((pnl_net / 100) * _notional_close * _rem, 2)
-                    _total_pnl   = round(_partial_pnl + _final_pnl, 2)
+                    _rem         = Decimal("1.0") if meta.get("tp1_size_reduced") else Decimal("0.67")
+                    _final_pnl   = float(round(pnl_net / 100 * _notional_d * _rem, 2))
+                    _total_pnl   = float(round(Decimal(str(_partial_pnl)) + Decimal(str(_final_pnl)), 2))
                 else:
-                    _total_pnl = round((pnl_net / 100) * _notional_close, 2)
+                    _total_pnl = float(round(pnl_net / 100 * _notional_d, 2))
                 trade.status      = new_status
                 trade.close_price = close_price
                 trade.closed_at   = time.time()
-                trade.pnl_pct     = round(pnl_net, 2)
+                trade.pnl_pct     = float(round(pnl_net, 2))
                 trade.pnl_dollar  = _total_pnl
                 closed += 1
                 logger.info(
@@ -603,16 +887,22 @@ async def check_futures_positions() -> tuple[int, int]:
                 _tp1_hit = (direction == "LONG" and eff_high >= tp1) or \
                            (direction == "SHORT" and eff_low <= tp1)
                 if _tp1_hit:
-                    _partial_pnl_pct = ((tp1 - entry) / entry * 100 if direction == "LONG"
-                                        else (entry - tp1) / entry * 100)
-                    _partial_net     = _partial_pnl_pct - (ROUND_TRIP * 100 * 0.5)
+                    # BC4: Decimal for partial TP1 dollar calculation
+                    _tp1_d   = Decimal(str(tp1))
+                    _entry_p = Decimal(str(entry))
+                    _partial_pnl_pct = (
+                        (_tp1_d - _entry_p) / _entry_p * 100 if direction == "LONG"
+                        else (_entry_p - _tp1_d) / _entry_p * 100
+                    )
+                    _partial_net     = _partial_pnl_pct - Decimal(str(ROUND_TRIP * 100 * 0.5))
                     _rp              = meta.get("risk_pct") or 2.0
                     # Phase 9: real notional from the trade; fallback for legacy rows
                     _notional_p      = trade.position_size or futures_notional(_rp)
-                    _partial_dollar  = round((_partial_net / 100) * _notional_p * 0.33, 2)
+                    _partial_dollar  = float(round(_partial_net / 100 * Decimal(str(_notional_p)) * Decimal("0.33"), 2))
                     meta["tp1_partial_done"]       = True
                     meta["tp1_partial_pnl_dollar"] = _partial_dollar
                     meta["tp1_size_reduced"]       = True   # BUG-L17 marker (see close-apply)
+                    meta["tp1_done_at"]            = time.time()  # G3/B5.1: rotation eligibility timestamp
                     trade.pnl_dollar               = (trade.pnl_dollar or 0.0) + _partial_dollar
                     # BUG-L17: shrink stored notional to the 33%-sold remainder so locked margin /
                     # portfolio heat reflect the real reduced exposure (was kept at full size).
@@ -648,6 +938,167 @@ async def check_futures_positions() -> tuple[int, int]:
                         symbol=trade.symbol, direction=direction,
                         entry_fr=_entry_fr, cur_fr=_cur_fr,
                     )
+
+            # ── G6+G15: Cumulative funding + fee cost tracker (B5.3) ──────────
+            # Runs when funding_rates is available (every 10 cycles).
+            # Accumulates simulated funding cost per 8h window + round-trip fee.
+            if not new_status and funding_rates:
+                _cur_fr  = funding_rates.get(trade.symbol, 0.0)
+                _notional_g6 = (trade.position_size or 0.0)
+                if _notional_g6 > 0:
+                    # G15: set cumulative_fee_paid once at first accrual (ROUND_TRIP × notional)
+                    if not meta.get("cumulative_fee_paid"):
+                        meta["cumulative_fee_paid"] = round(ROUND_TRIP * _notional_g6, 4)
+
+                    # G6: accrue funding cost for elapsed 8h windows since last accrual
+                    _now_ts       = int(time.time())
+                    _last_fund_at = int(meta.get("last_funding_at", trade.entry_at or _now_ts))
+                    _windows      = int((_now_ts - _last_fund_at) / FUNDING_WINDOW_SEC)
+                    if _windows > 0:
+                        # Cost = funding_rate_pct × windows × notional (BC4: Decimal for precision)
+                        _fund_cost_d = (Decimal(str(abs(_cur_fr))) / 100
+                                        * Decimal(str(_windows))
+                                        * Decimal(str(_notional_g6)))
+                        meta["cumulative_funding_paid"] = float(round(
+                            Decimal(str(meta.get("cumulative_funding_paid", 0.0))) + _fund_cost_d, 4
+                        ))
+                        # Align last_funding_at to the most recent 8h window boundary
+                        meta["last_funding_at"] = _now_ts - (_now_ts % FUNDING_WINDOW_SEC)
+                        trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                        updated += 1
+
+                    # B5.3 fix: apply cost gate only in meaningful cases
+                    _cum_cost = float(meta.get("cumulative_funding_paid", 0.0)) + \
+                                float(meta.get("cumulative_fee_paid", 0.0))
+                    _pnl_dollar_now = _pnl_now_pct / 100 * _notional_g6  # uses G5b var
+                    if _pnl_dollar_now > 0 and _cum_cost > _pnl_dollar_now * COST_TO_PROFIT_GATE:
+                        # Profitable but costs eating >30% of unrealized → exit now
+                        new_status   = "tp"
+                        close_price  = round(price, 8)
+                        close_reason = "cost_exceeds_profit"
+                        logger.info(
+                            "cost_gate_profit",
+                            symbol=trade.symbol, cum_cost=round(_cum_cost, 4),
+                            unrealized=round(_pnl_dollar_now, 4),
+                        )
+                    elif _pnl_dollar_now <= 0 and _cum_cost > _notional_g6 * COST_ABS_LOSS_GATE_PCT:
+                        # B5.3: losing AND paying significant funding → too expensive to hold
+                        new_status   = "sl"
+                        close_price  = round(price, 8)
+                        close_reason = "cost_exceeds_loss_threshold"
+                        logger.info(
+                            "cost_gate_loss",
+                            symbol=trade.symbol, cum_cost=round(_cum_cost, 4),
+                            unrealized=round(_pnl_dollar_now, 4),
+                        )
+
+                    # ── G9 + B6.2: Funding-window exit ────────────────────────
+                    # 5 min before 00:00/08:00/16:00 UTC: if expected funding cost
+                    # consumes >30% of thin unrealized profit → exit early.
+                    if not new_status:
+                        _now_ts2       = int(time.time())
+                        _next_fund_ts  = (_now_ts2 // FUNDING_WINDOW_SEC + 1) * FUNDING_WINDOW_SEC
+                        _mins_to_fund  = (_next_fund_ts - _now_ts2) / 60
+                        if 0 < _mins_to_fund <= 5:
+                            _exp_fund_cost = abs(_cur_fr) / 100 * _notional_g6
+                            _unr_dollar    = _pnl_dollar_now  # reuse B5.3 var
+                            _fund_too_costly = (
+                                _unr_dollar > 0
+                                and _exp_fund_cost > 0
+                                and (_exp_fund_cost / _unr_dollar) > 0.30
+                            )
+                            if _fund_too_costly:
+                                if direction == "LONG" and _cur_fr > 0.1:
+                                    new_status   = "tp"
+                                    close_price  = round(price, 8)
+                                    close_reason = "funding_window_exit"
+                                    logger.info(
+                                        "funding_window_exit",
+                                        symbol=trade.symbol, direction=direction,
+                                        funding_rate=round(_cur_fr, 4),
+                                        exp_cost=round(_exp_fund_cost, 4),
+                                        unr_profit=round(_unr_dollar, 4),
+                                        mins_to_fund=round(_mins_to_fund, 1),
+                                    )
+                                elif direction == "SHORT" and _cur_fr < -0.1:
+                                    new_status   = "tp"
+                                    close_price  = round(price, 8)
+                                    close_reason = "funding_window_exit"
+                                    logger.info(
+                                        "funding_window_exit",
+                                        symbol=trade.symbol, direction=direction,
+                                        funding_rate=round(_cur_fr, 4),
+                                        exp_cost=round(_exp_fund_cost, 4),
+                                        unr_profit=round(_unr_dollar, 4),
+                                        mins_to_fund=round(_mins_to_fund, 1),
+                                    )
+
+            # ── G3: Futures rotation (B5.1: also rotate trail_active stuck post-TP1) ──
+            if not new_status:
+                _age_g3    = (time.time() - (trade.entry_at or 0)) / 86400
+                _drift_pct = abs(price - entry) / entry * 100 if entry > 0 else 99.0
+                if _age_g3 >= FUTURES_ROTATION_MIN_DAYS:
+                    # B5.1: trail_active stuck since TP1 for 48h+ is also rotate-eligible
+                    _tp1_done_at = float(meta.get("tp1_done_at", 0.0))
+                    _trail_stagnant_post_tp1 = (
+                        trail_active
+                        and _tp1_done_at > 0
+                        and (time.time() - _tp1_done_at) > 48 * 3600
+                        and _drift_pct <= FUTURES_ROTATION_DRIFT_PCT
+                    )
+                    _plain_stagnant = (not trail_active) and _drift_pct <= FUTURES_ROTATION_DRIFT_PCT
+                    if _plain_stagnant or _trail_stagnant_post_tp1:
+                        _cur_score_g3 = trade.probability or 60
+                        if _futures_has_better_candidate(_cur_score_g3, trade.symbol, trade.style):
+                            pnl_rot      = _pnl_now_pct  # reuse G5b var
+                            new_status   = "tp" if pnl_rot > 0 else "sl"
+                            close_price  = round(price, 8)
+                            close_reason = "rotation_stagnant"
+                            logger.info(
+                                "futures_rotation_triggered",
+                                symbol=trade.symbol, direction=direction,
+                                drift_pct=round(_drift_pct, 2),
+                                age_days=round(_age_g3, 1),
+                                trail_stagnant=_trail_stagnant_post_tp1,
+                                pnl_pct=round(pnl_rot, 2),
+                            )
+
+            # ── G10: Emergency tighten / close on circuit breaker (B5.4) ────────
+            if not new_status and _do_emergency_tighten and not meta.get("emergency_sl_tightened"):
+                if direction == "LONG":
+                    if price > entry:
+                        # In profit: tighten SL to entry (protect breakeven)
+                        trade.trail_sl     = round(entry, 8)
+                        trade.trail_active = True
+                        sl = entry
+                        meta["emergency_sl_tightened"] = True
+                        trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                        updated += 1
+                        logger.warning("emergency_tighten_sl", symbol=trade.symbol,
+                                      direction=direction, new_sl=round(entry, 6))
+                    else:
+                        # In loss: close at market immediately
+                        new_status   = "sl"
+                        close_price  = round(price, 8)
+                        close_reason = "emergency_close_circuit_breaker"
+                        logger.warning("emergency_close_position", symbol=trade.symbol,
+                                      direction=direction, entry=entry, price=price)
+                else:  # SHORT
+                    if price < entry:
+                        trade.trail_sl     = round(entry, 8)
+                        trade.trail_active = True
+                        sl = entry
+                        meta["emergency_sl_tightened"] = True
+                        trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                        updated += 1
+                        logger.warning("emergency_tighten_sl", symbol=trade.symbol,
+                                      direction=direction, new_sl=round(entry, 6))
+                    else:
+                        new_status   = "sl"
+                        close_price  = round(price, 8)
+                        close_reason = "emergency_close_circuit_breaker"
+                        logger.warning("emergency_close_position", symbol=trade.symbol,
+                                      direction=direction, entry=entry, price=price)
 
             # ── 4. TP Extension (F81: lock SL at TP1; F84: use current score) ──
             if tp3 and not meta.get("tp_extended"):
@@ -714,6 +1165,7 @@ async def run_futures_monitor() -> None:
             _closed_today = 0
 
         try:
+            await _check_server_time_drift()   # EC5: NTP drift warning (no-op if < 30 min since last)
             closed_n, updated_n = await check_futures_positions()  # B3: unpack tuple
             n = closed_n + updated_n
             _cycle_count += 1

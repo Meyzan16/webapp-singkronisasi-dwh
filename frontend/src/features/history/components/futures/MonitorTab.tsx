@@ -1,8 +1,12 @@
 "use client";
+import { useState } from "react";
 import { EmptyState } from "@/components/ui/feedback";
 import { GateBanner } from "./GateBanner";
 import { OpenPosCard } from "./OpenPosCard";
 import type { FuturesPosition, RiskDashboard, LearningStats, RiskPosition } from "./types";
+import { calcNotional, calcMargin, tradePnlDollar } from "./types";
+
+type AgentFilter = "all" | "agent1" | "agent2" | "agent3";
 
 interface Props {
   positions:    FuturesPosition[];
@@ -34,38 +38,59 @@ function AgentColumn({ label, color, positions, riskMap, riskDollar, atRisk }: {
 }
 
 export function MonitorTab({ positions, riskDash, learning, startingBalance, riskDollar, countdown, onRefresh }: Props) {
+  const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
+
   const pd = riskDash?.portfolio;
   const ab = riskDash?.agent_breakdown;
 
-  const a1Open = positions.filter(p => p.status === "open" && p.agent === "futures_agent1");
-  const a2Open = positions.filter(p => p.status === "open" && p.agent === "futures_agent2");
-  const a3Open = positions.filter(p => p.status === "open" && p.agent === "futures_agent3");
-  const hasOpen = a1Open.length > 0 || a2Open.length > 0 || a3Open.length > 0;
-
   const riskMap: Record<number, RiskPosition> = {};
   (riskDash?.positions ?? []).forEach(rp => { riskMap[rp.id] = rp; });
+
+  const openPos = positions.filter(p => p.status === "open");
+  const a1Open  = openPos.filter(p => p.agent === "futures_agent1");
+  const a2Open  = openPos.filter(p => p.agent === "futures_agent2");
+  const a3Open  = openPos.filter(p => p.agent === "futures_agent3");
+  const hasOpen = openPos.length > 0;
+
+  // Compute financial summary from positions (same logic as OpenPosCard)
+  const getMargin = (p: FuturesPosition) => {
+    const notional = p.position_size ?? calcNotional(p.risk_pct, riskDollar);
+    return riskMap[p.id]?.margin ?? calcMargin(notional, p.leverage);
+  };
+  const totalUnrealized = openPos.reduce((s, p) => s + (tradePnlDollar(p, riskDollar) ?? 0), 0);
+  const totalMargin     = openPos.reduce((s, p) => s + getMargin(p), 0);
+  const momentumMargin  = a3Open.reduce((s, p) => s + getMargin(p), 0);
 
   return (
     <div className="space-y-5">
       <GateBanner gate={riskDash?.gate} />
 
-      {/* Portfolio summary */}
-      {pd && (
+      {/* Portfolio summary — full data from riskDash, fallback from positions when API unavailable */}
+      {pd ? (
         <div className="rounded-2xl bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 text-white p-5">
           <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
             <div>
               <p className="text-xs text-neutral-400 uppercase tracking-wider font-semibold mb-1">🔍 Portfolio Risk Dashboard</p>
-              <div className="flex items-baseline gap-3">
-                <span className={`text-4xl font-black ${pd.current_balance >= startingBalance ? "text-green-400" : "text-red-400"}`}>
-                  ${pd.current_balance.toFixed(2)}
-                </span>
-                <span className={`text-sm font-bold ${pd.total_closed_pnl >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {pd.total_closed_pnl >= 0 ? "+" : ""}${pd.total_closed_pnl.toFixed(2)}
-                </span>
-              </div>
-              <p className="text-xs text-neutral-500 mt-1">
-                Modal ${startingBalance.toLocaleString()} · Risk ${riskDollar.toFixed(0)}/trade · Sharpe ≈ {pd.risk_adjusted_return.toFixed(2)}
-              </p>
+              {(() => {
+                const equity = pd.current_balance + pd.total_unrealized;
+                const equityDelta = equity - startingBalance;
+                return (
+                  <>
+                    <div className="flex items-baseline gap-3">
+                      <span className={`text-4xl font-black ${equity >= startingBalance ? "text-green-400" : "text-red-400"}`}>
+                        ${equity.toFixed(2)}
+                      </span>
+                      <span className={`text-sm font-bold ${equityDelta >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {equityDelta >= 0 ? "+" : ""}${equityDelta.toFixed(2)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-neutral-500 mt-1">
+                      Realized ${pd.current_balance.toFixed(2)} · Unrealized {pd.total_unrealized >= 0 ? "+" : ""}${pd.total_unrealized.toFixed(2)}
+                      {" · "}Sharpe ≈ {pd.risk_adjusted_return != null ? pd.risk_adjusted_return.toFixed(2) : "—"}
+                    </p>
+                  </>
+                );
+              })()}
             </div>
             <div className="grid grid-cols-3 gap-2 text-center">
               {[
@@ -100,49 +125,127 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
             </div>
           )}
 
-          <div className="mt-3 flex gap-4 text-xs flex-wrap">
+          <div className="mt-3 flex gap-4 text-xs flex-wrap items-center">
             <span className="text-neutral-400">Total Margin: <strong className="text-yellow-300">${pd.total_margin.toFixed(0)}</strong></span>
             <span className="text-neutral-400">Notional: <strong className="text-neutral-200">${pd.total_notional.toFixed(0)}</strong></span>
             <span className="text-neutral-400">Unrealized: <strong className={pd.total_unrealized >= 0 ? "text-green-400" : "text-red-400"}>
               {pd.total_unrealized >= 0 ? "+" : ""}${pd.total_unrealized.toFixed(2)}
             </strong></span>
+            {/* G7: margin ratio warning */}
+            {pd.margin_ratio != null && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                pd.margin_ratio > 80
+                  ? "bg-red-900/40 text-red-300 border-red-700/60"
+                  : pd.margin_ratio > 60
+                  ? "bg-yellow-900/40 text-yellow-300 border-yellow-700/60"
+                  : "bg-white/5 text-neutral-400 border-white/10"
+              }`}>
+                {pd.margin_ratio > 80 ? "⚠️ " : pd.margin_ratio > 60 ? "⚡ " : ""}
+                Margin Ratio {pd.margin_ratio.toFixed(1)}%
+              </span>
+            )}
           </div>
+        </div>
+      ) : hasOpen ? (
+        // MN1: fallback banner computed from positions when riskDash API unavailable
+        <div className="rounded-2xl bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 text-white p-5">
+          <p className="text-xs text-neutral-400 uppercase tracking-wider font-semibold mb-3">🔍 Portfolio Risk Dashboard <span className="text-neutral-600 normal-case">(estimasi lokal)</span></p>
+          <div className="flex items-baseline gap-3 mb-3">
+            <span className={`text-4xl font-black ${totalUnrealized >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {totalUnrealized >= 0 ? "+" : ""}${totalUnrealized.toFixed(2)}
+            </span>
+            <span className="text-sm text-neutral-400">unrealized P&L</span>
+          </div>
+          <div className="flex gap-4 text-xs flex-wrap">
+            <span className="text-neutral-400">Open: <strong className="text-blue-400">{openPos.length}</strong></span>
+            <span className="text-neutral-400">Total Margin: <strong className="text-yellow-300">${totalMargin.toFixed(0)}</strong></span>
+            <span className="text-neutral-400">Margin Momentum: <strong className="text-orange-300">${momentumMargin.toFixed(0)}</strong></span>
+          </div>
+        </div>
+      ) : null}
+
+      {/* MN3: Agent filter chips */}
+      {hasOpen && (
+        <div className="flex gap-1.5 flex-wrap">
+          {([
+            { key: "all",    label: "Semua",        cls: "bg-neutral-100 text-neutral-700 border-neutral-300" },
+            { key: "agent1", label: "🎯 Pre-Gainer",   cls: "bg-blue-100 text-blue-700 border-blue-200"     },
+            { key: "agent2", label: "📦 Accumulation", cls: "bg-purple-100 text-purple-700 border-purple-200" },
+            { key: "agent3", label: "🔥 Momentum",     cls: "bg-orange-100 text-orange-700 border-orange-200" },
+          ] as { key: AgentFilter; label: string; cls: string }[]).map(f => (
+            <button key={f.key} onClick={() => setAgentFilter(f.key)}
+              className={`text-[10px] font-bold px-3 py-1 rounded-full border transition-all ${
+                agentFilter === f.key ? `${f.cls} ring-2 ring-offset-1 ring-current` : "bg-white text-neutral-400 border-neutral-200 hover:border-neutral-300"
+              }`}>
+              {f.label}
+            </button>
+          ))}
         </div>
       )}
 
       {/* Open positions by agent */}
       {hasOpen ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <AgentColumn label="🎯 Pre-Gainer"   color="bg-blue-100 text-blue-700 border-blue-200"
-            positions={a1Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent1.at_risk} />
-          <AgentColumn label="📦 Accumulation" color="bg-purple-100 text-purple-700 border-purple-200"
-            positions={a2Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent2.at_risk} />
-          <AgentColumn label="🔥 Momentum"     color="bg-orange-100 text-orange-700 border-orange-200"
-            positions={a3Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent3?.at_risk} />
+          {(agentFilter === "all" || agentFilter === "agent1") && (
+            <AgentColumn label="🎯 Pre-Gainer"   color="bg-blue-100 text-blue-700 border-blue-200"
+              positions={a1Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent1.at_risk} />
+          )}
+          {(agentFilter === "all" || agentFilter === "agent2") && (
+            <AgentColumn label="📦 Accumulation" color="bg-purple-100 text-purple-700 border-purple-200"
+              positions={a2Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent2.at_risk} />
+          )}
+          {(agentFilter === "all" || agentFilter === "agent3") && (
+            <AgentColumn label="🔥 Momentum"     color="bg-orange-100 text-orange-700 border-orange-200"
+              positions={a3Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent3?.at_risk} />
+          )}
         </div>
       ) : (
         <EmptyState icon="📭" title="Tidak ada posisi terbuka saat ini" />
       )}
 
       {/* Monitor stats */}
-      {learning?.monitor && (
-        <div className="bg-white border border-neutral-200 rounded-2xl p-4">
-          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-3">🔬 Monitor Stats</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-            {[
-              { label: "Cycles",        value: learning.monitor.cycle_count,        color: "text-neutral-700" },
-              { label: "Tutup Hari Ini", value: learning.monitor.closed_today,      color: "text-blue-600"    },
-              { label: "Liq Guards",    value: learning.monitor.liq_guards ?? 0,    color: "text-orange-600"  },
-              { label: "TP Extended",   value: learning.monitor.tp_extended ?? 0,   color: "text-green-600"   },
-            ].map(x => (
-              <div key={x.label} className="bg-neutral-50 rounded-xl p-3">
-                <p className={`text-2xl font-black ${x.color}`}>{x.value}</p>
-                <p className="text-[10px] text-neutral-400 mt-0.5">{x.label}</p>
-              </div>
-            ))}
+      <div className="bg-white border border-neutral-200 rounded-2xl p-4">
+        <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-3">📊 Ringkasan Posisi</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+          {/* Unrealized P&L — always computed from positions */}
+          <div className={`rounded-xl p-3 ${hasOpen ? (totalUnrealized >= 0 ? "bg-green-50 border border-green-100" : "bg-red-50 border border-red-100") : "bg-neutral-50"}`}>
+            <p className={`text-xl font-black tabular-nums ${
+              !hasOpen ? "text-neutral-400" : totalUnrealized >= 0 ? "text-green-600" : "text-red-600"
+            }`}>
+              {hasOpen ? `${totalUnrealized >= 0 ? "+" : ""}$${totalUnrealized.toFixed(2)}` : "—"}
+            </p>
+            <p className="text-[10px] text-neutral-600 font-semibold mt-1">Unrealized P&L</p>
+            <p className="text-[9px] text-neutral-400">{openPos.length} posisi open</p>
+          </div>
+
+          {/* Total Margin */}
+          <div className={`rounded-xl p-3 ${hasOpen ? "bg-yellow-50 border border-yellow-100" : "bg-neutral-50"}`}>
+            <p className={`text-xl font-black tabular-nums ${hasOpen ? "text-yellow-600" : "text-neutral-400"}`}>
+              {hasOpen ? `$${totalMargin.toFixed(0)}` : "—"}
+            </p>
+            <p className="text-[10px] text-neutral-600 font-semibold mt-1">Total Margin</p>
+            <p className="text-[9px] text-neutral-400">semua {openPos.length} posisi</p>
+          </div>
+
+          {/* Momentum Margin (Agent 3) */}
+          <div className={`rounded-xl p-3 ${a3Open.length > 0 ? "bg-orange-50 border border-orange-100" : "bg-neutral-50"}`}>
+            <p className={`text-xl font-black tabular-nums ${a3Open.length > 0 ? "text-orange-600" : "text-neutral-400"}`}>
+              {a3Open.length > 0 ? `$${momentumMargin.toFixed(0)}` : "—"}
+            </p>
+            <p className="text-[10px] text-neutral-600 font-semibold mt-1">Margin Momentum</p>
+            <p className="text-[9px] text-neutral-400">{a3Open.length} posisi Momentum</p>
+          </div>
+
+          {/* Closed Today */}
+          <div className="bg-neutral-50 rounded-xl p-3">
+            <p className="text-xl font-black tabular-nums text-blue-600">
+              {learning?.monitor?.closed_today ?? 0}
+            </p>
+            <p className="text-[10px] text-neutral-600 font-semibold mt-1">Tutup Hari Ini</p>
+            <p className="text-[9px] text-neutral-400">posisi closed hari ini</p>
           </div>
         </div>
-      )}
+      </div>
 
       <div className="flex items-center justify-end gap-2">
         <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-50 border border-blue-200">

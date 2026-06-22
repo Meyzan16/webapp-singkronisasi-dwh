@@ -22,7 +22,14 @@ logger = structlog.get_logger(__name__)
 INTERVAL_SEC  = 3 * 60    # scan every 3 minutes — catch entries before big moves
 STARTUP_DELAY = 20
 
-MAX_OPENS_PER_CYCLE = 3   # §7B: naik 2→3 agar tidak melewat momentum bersamaan
+MAX_OPENS_PER_CYCLE         = 3   # §7B: naik 2→3 agar tidak melewat momentum bersamaan
+# Phase 3 G3-regime: REDUCED state cuts cycle quota — system konservatif tapi tetap jalan
+MAX_OPENS_PER_CYCLE_REDUCED = 1
+
+# PLAN-BIG-MOVERS Phase 2 BM3: separate quota for bigmover_chase lane
+MAX_BIGMOVER_OPENS    = 2     # max concurrent bigmover_chase positions
+BIGMOVER_FASTPASS_SEC = 60    # G13: SPOT real-time cadence for big movers
+BIGMOVER_FASTPASS_MIN_PCT = 15.0   # subset: only |change_24h| >= 15% rescanned
 
 # §14.4: circuit breaker — rugi harian (WIB) melebihi batas → auto-open jeda
 DAILY_LOSS_LIMIT_FRACTION = 0.03
@@ -121,6 +128,24 @@ async def _fetch_live_price(symbol: str) -> Optional[float]:
     except Exception:
         pass
     return None
+
+
+async def _bigmover_open_count() -> int:
+    """Phase 2 BM3: count open bigmover_chase positions for quota enforcement."""
+    from app.database import AsyncSessionLocal
+    from app.models.paper_trade import PaperTrade
+    from sqlalchemy import func, select
+
+    async with AsyncSessionLocal() as s:
+        # entry_mode is in signals_json meta. Cheaper: filter by alert_type='bigmover_chase'.
+        r = await s.execute(
+            select(func.count(PaperTrade.id)).where(
+                PaperTrade.style      == "opportunity_spot",
+                PaperTrade.status     == "open",
+                PaperTrade.alert_type == "bigmover_chase",
+            )
+        )
+        return int(r.scalar() or 0)
 
 
 async def _auto_open_position(coin: dict) -> bool:
@@ -257,6 +282,10 @@ async def _auto_open_position(coin: dict) -> bool:
                     score=coin.get("raw_score"), reason=sizing["reason"])
         return False
 
+    # P1: compute entry slippage for meta (informational)
+    from app.services.slippage_sim import calculate_entry_slippage as _cslip, get_session_label as _sess
+    _slip_pct = _cslip(coin.get("quote_vol_24h", 0))
+
     async with AsyncSessionLocal() as session:
         meta = {
             "signals":           coin.get("signals", []),
@@ -284,6 +313,9 @@ async def _auto_open_position(coin: dict) -> bool:
             # maksimal), "fresh_setup" tetap pakai TP1/TP2/TP3 tetap (existing).
             "entry_mode":        coin.get("entry_mode", "fresh_setup"),
             "change_7d":         coin.get("change_7d", 0.0),
+            # P1 / B4.1: slippage info for analytics
+            "entry_slippage_pct": round(_slip_pct, 4),
+            "entry_session":      _sess(),
         }
 
         trade = PaperTrade(
@@ -356,16 +388,34 @@ async def run_opportunity_loop() -> None:
             )
 
             opened = 0
+            # Phase 3 G3-regime: REDUCED → throttle quota to 1 open/cycle
+            regime_status = result.get("regime_status", "OPEN")
+            cycle_quota = (
+                MAX_OPENS_PER_CYCLE_REDUCED
+                if regime_status == "REDUCED"
+                else MAX_OPENS_PER_CYCLE
+            )
+            if regime_status == "REDUCED":
+                logger.info("auto_open_quota_reduced",
+                            quota=cycle_quota, candidates=len(auto_candidates))
+
             if auto_candidates and await _daily_loss_breaker_active():
                 logger.info("auto_open_paused_daily_breaker",
                             skipped=len(auto_candidates))
             else:
+                bm_open_now = await _bigmover_open_count()
                 for coin in auto_candidates:
-                    if opened >= MAX_OPENS_PER_CYCLE:
+                    if opened >= cycle_quota:
                         break
+                    # Phase 2 BM3: separate quota for bigmover_chase
+                    is_bm = coin.get("entry_mode") == "bigmover_chase"
+                    if is_bm and bm_open_now >= MAX_BIGMOVER_OPENS:
+                        continue
                     if await _auto_open_position(coin):
                         opened += 1
                         _auto_opened += 1
+                        if is_bm:
+                            bm_open_now += 1
 
             logger.info(
                 "opportunity_cycle_done",
@@ -387,3 +437,164 @@ async def run_opportunity_loop() -> None:
         elapsed   = time.time() - (_last_scan_ts or time.time())
         sleep_for = max(60, INTERVAL_SEC - elapsed)
         await asyncio.sleep(sleep_for)
+
+
+# ── PLAN-BIG-MOVERS Phase 2 BM3 / G13: SPOT bigmover fastpass (60s cadence) ──
+
+_fastpass_running    = False
+_fastpass_cycle      = 0
+_fastpass_last_ts:   Optional[float] = None
+_fastpass_last_error: Optional[str] = None
+_fastpass_opened     = 0
+
+
+def get_fastpass_state() -> dict:
+    next_in = None
+    if _fastpass_last_ts is not None:
+        next_in = max(0, BIGMOVER_FASTPASS_SEC - (time.time() - _fastpass_last_ts))
+    return {
+        "running":      _fastpass_running,
+        "cycle_count":  _fastpass_cycle,
+        "last_scan_ts": _fastpass_last_ts,
+        "last_error":   _fastpass_last_error,
+        "interval_sec": BIGMOVER_FASTPASS_SEC,
+        "next_in_sec":  round(next_in, 1) if next_in is not None else None,
+        "auto_opened":  _fastpass_opened,
+    }
+
+
+async def _fetch_big_mover_subset() -> list[dict]:
+    """Pull only USDT spot tickers with |change_24h| ≥ 15% AND vol ≥ $1M."""
+    import httpx
+    from app.services.binance_urls import spot as _spot
+
+    async with httpx.AsyncClient(timeout=10) as c:
+        r = await c.get(_spot("/api/v3/ticker/24hr"))
+        if r.status_code != 200:
+            return []
+        all_tickers = r.json() if isinstance(r.json(), list) else []
+
+    out = []
+    for t in all_tickers:
+        sym = t.get("symbol", "")
+        if not sym.endswith("USDT"):
+            continue
+        try:
+            chg = float(t.get("priceChangePercent", 0))
+            vol = float(t.get("quoteVolume", 0))
+        except (TypeError, ValueError):
+            continue
+        if abs(chg) >= BIGMOVER_FASTPASS_MIN_PCT and vol >= opp_scanner.BIGMOVER_MIN_VOLUME:
+            out.append(t)
+    return out
+
+
+async def _run_fastpass_cycle() -> int:
+    """
+    Fetch big-mover subset, score only bigmover_chase, auto-open if eligible.
+    B2.4 dedup: relies on DB unique index (style,symbol,open) — if main scan or
+    previous fastpass already opened, INSERT fails and we skip.
+    Returns number of positions opened this cycle.
+    """
+    import httpx
+
+    subset = await _fetch_big_mover_subset()
+    if not subset:
+        return 0
+
+    bm_open_now = await _bigmover_open_count()
+    if bm_open_now >= MAX_BIGMOVER_OPENS:
+        return 0   # quota already full
+
+    # Sort by abs(change_24h) desc — strongest movers first
+    subset.sort(key=lambda t: abs(float(t.get("priceChangePercent", 0))), reverse=True)
+    subset = subset[:20]   # cap fetch volume
+
+    # Fetch klines for these
+    _sem = asyncio.Semaphore(8)
+    async def _fetch_one(client: httpx.AsyncClient, sym: str, tf: str) -> tuple[str, str, list]:
+        async with _sem:
+            return sym, tf, await opp_scanner._fetch_klines(client, sym, tf)
+
+    klines_map: dict[tuple, list] = {}
+    async with httpx.AsyncClient(timeout=20) as client:
+        tasks = [
+            asyncio.create_task(_fetch_one(client, t["symbol"], tf))
+            for t in subset for tf in opp_scanner.TIMEFRAMES
+        ]
+        for task in tasks:
+            sym, tf, kl = await task
+            klines_map[(sym, tf)] = kl
+
+    opened_now = 0
+    for ticker in subset:
+        if bm_open_now + opened_now >= MAX_BIGMOVER_OPENS:
+            break
+        symbol     = ticker["symbol"]
+        change_24h = float(ticker.get("priceChangePercent", 0))
+        if change_24h < opp_scanner.BIGMOVER_MIN_CHANGE_24H:
+            continue   # SHORT extreme losers not supported (spot LONG-only)
+
+        tf_data: dict = {}
+        for tf in opp_scanner.TIMEFRAMES:
+            d = opp_scanner._analyze_tf(tf, klines_map.get((symbol, tf), []))
+            if d:
+                tf_data[tf] = d
+        if not tf_data:
+            continue
+
+        d1h = tf_data.get("1h")
+        change_1h = 0.0
+        if d1h and len(d1h.closes) >= 2 and d1h.closes[-2] > 0:
+            change_1h = (d1h.closes[-1] - d1h.closes[-2]) / d1h.closes[-2] * 100
+
+        d4h = tf_data.get("4h")
+        change_7d = 0.0
+        if d4h and len(d4h.closes) >= 42 and d4h.closes[-42] > 0:
+            change_7d = (d4h.closes[-1] - d4h.closes[-42]) / d4h.closes[-42] * 100
+
+        res = opp_scanner._score_bigmover_chase(
+            symbol, tf_data, change_24h, change_1h, change_7d
+        )
+        if res is None:
+            continue
+        levels = opp_scanner._calc_trade_levels_bigmover(
+            klines_map.get((symbol, "15m"), []), res["current_price"]
+        )
+        if levels is None:
+            continue
+        res.update(levels)
+
+        if not res.get("auto_open"):
+            continue
+        if await _auto_open_position(res):
+            opened_now += 1
+
+    return opened_now
+
+
+async def run_bigmover_fastpass() -> None:
+    """G13 — SPOT real-time second-pass loop (60s cadence) for big movers."""
+    global _fastpass_running, _fastpass_cycle, _fastpass_last_ts, _fastpass_last_error, _fastpass_opened
+    _fastpass_running = True
+    logger.info("bigmover_fastpass_started", interval_sec=BIGMOVER_FASTPASS_SEC)
+    await asyncio.sleep(STARTUP_DELAY + 30)   # let main scan settle first
+
+    while True:
+        try:
+            opened = await _run_fastpass_cycle()
+            _fastpass_cycle += 1
+            _fastpass_last_ts = time.time()
+            _fastpass_last_error = None
+            if opened:
+                _fastpass_opened += opened
+                logger.info("bigmover_fastpass_opened", cycle=_fastpass_cycle, opened=opened)
+        except asyncio.CancelledError:
+            _fastpass_running = False
+            logger.info("bigmover_fastpass_stopped")
+            raise
+        except Exception as exc:
+            _fastpass_last_error = str(exc)[:120]
+            logger.warning("bigmover_fastpass_error", error=_fastpass_last_error)
+
+        await asyncio.sleep(BIGMOVER_FASTPASS_SEC)
