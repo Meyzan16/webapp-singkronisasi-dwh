@@ -267,12 +267,10 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 continue
 
             # Phase 2 BM1: dedicated bigmover slot cap
+            # bm_open_count starts as DB pre-existing count and is incremented after
+            # each BM open in this cycle — no need to re-scan existing_syms here.
             if agent == "futures_agent_bigmover":
-                if bm_open_count + sum(
-                    1 for s in ranked[:ranked.index(sig)]
-                    if s.get("agent") == "futures_agent_bigmover"
-                    and s.get("symbol") in existing_syms
-                ) >= MAX_BIGMOVER_POSITIONS:
+                if bm_open_count >= MAX_BIGMOVER_POSITIONS:
                     logger.debug("bigmover_lane_full")
                     continue
 

@@ -115,10 +115,16 @@ async def _migrate_columns(connection) -> None:
         ")",
         "CREATE TABLE IF NOT EXISTS predictive_log ("
         "  id SERIAL PRIMARY KEY,"
-        "  symbol VARCHAR(20), agent VARCHAR(30), direction VARCHAR(10),"
-        "  setup_type VARCHAR(20), score FLOAT, entry FLOAT, sl FLOAT, tp FLOAT,"
-        "  predicted_at FLOAT, resolved_at FLOAT, outcome VARCHAR(10),"
-        "  actual_pnl_pct FLOAT, notes TEXT"
+        "  symbol VARCHAR(20) NOT NULL, agent VARCHAR(50) NOT NULL,"
+        "  direction VARCHAR(10) NOT NULL, regime VARCHAR(30),"
+        "  score FLOAT NOT NULL, signals_json TEXT,"
+        "  price_at_scan FLOAT NOT NULL, oi_change FLOAT,"
+        "  funding_rate FLOAT, change_24h FLOAT,"
+        "  scanned_at FLOAT NOT NULL,"
+        "  price_4h FLOAT, price_24h FLOAT,"
+        "  hit_4h BOOLEAN, hit_24h BOOLEAN,"
+        "  move_4h_pct FLOAT, move_24h_pct FLOAT,"
+        "  resolved_at FLOAT"
         ")",
     ]
     for sql in migrations:
