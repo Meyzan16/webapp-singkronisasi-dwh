@@ -57,3 +57,10 @@ class PaperTrade(Base):
     close_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     pnl_pct:     Mapped[float | None] = mapped_column(Float, nullable=True)   # % gain/loss at close
     pnl_dollar:  Mapped[float | None] = mapped_column(Float, nullable=True)   # $ gain/loss at close
+
+    # PLAN_v2 P0.5 — per-trade monitor heartbeat & denormalized setup_type
+    setup_type:        Mapped[str | None]   = mapped_column(String(20),  nullable=True, index=True)
+    last_tick_at:      Mapped[float | None] = mapped_column(Float,       nullable=True)
+    last_tick_price:   Mapped[float | None] = mapped_column(Float,       nullable=True)
+    last_tick_pnl_pct: Mapped[float | None] = mapped_column(Float,       nullable=True)
+    last_tick_event:   Mapped[str | None]   = mapped_column(String(40),  nullable=True)

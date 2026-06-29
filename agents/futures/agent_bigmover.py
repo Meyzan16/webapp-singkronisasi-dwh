@@ -31,8 +31,9 @@ from .data import FuturesData
 from .agent1 import (
     _rsi, _swing_lows, _swing_highs, _round_price,
     _atr,
-    MIN_SL_PCT, MAX_SL_MARGIN_PCT,
+    MIN_SL_PCT,
 )
+from .utils import cap_leverage_by_lane   # PLAN_v2 P1.2/P1.3
 from app.services.slippage_sim import calculate_entry_slippage
 
 logger = structlog.get_logger(__name__)
@@ -392,6 +393,20 @@ def scan_symbol(
 
     # ── Score ─────────────────────────────────────────────────────────────────
     score, signals, diag = _score_bigmover(tf_map, price, change_24h, direction)
+
+    # P3.6: apply adaptive signal weights (BigMover was previously excluded from learning)
+    try:
+        from agents.futures import weight_updater
+        from agents.shared.cross_agent_learning import get_cross_weight, blend_weights
+        wc = weight_updater.get_weight_cache(AGENT_NAME)
+        for sig in signals:
+            key   = weight_updater.normalize_signal_key(sig)
+            own_w = wc.get(key, 1.0)
+            w     = blend_weights(own_w, get_cross_weight(key))
+            score += (w - 1.0) * 7.0
+    except Exception:
+        pass   # never block scan due to weight error
+
     if score < MIN_SCORE:
         return []
 
@@ -408,6 +423,9 @@ def scan_symbol(
         return []
 
     atr_pct = levels.pop("atr_pct")
+    # PLAN_v2 P1.2/P1.3 — even with FIXED_LEVERAGE=3 (currently safe), pipe through the cap
+    # so any future bump cannot accidentally violate the bigmover lane safety budget (20%).
+    leverage = cap_leverage_by_lane(FIXED_LEVERAGE, levels.get("risk_pct", 0.0), lane="bigmover")
 
     return [{
         "symbol":       symbol,
@@ -415,7 +433,7 @@ def scan_symbol(
         "price":        round(price, 8),
         "score":        round(min(score, 100), 1),
         "signals":      signals,
-        "leverage":     FIXED_LEVERAGE,
+        "leverage":     leverage,
         "change_24h":   round(change_24h, 2),
         "change_1h":    diag.get("change_1h", 0),
         "change_30m":   diag.get("change_30m", 0),

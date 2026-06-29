@@ -6,13 +6,25 @@ import { type Overview, fmtChangeColor, MOOD_CFG } from "./components/types";
 import { FundingBadge, CoinRow, NewListingCard, HeatTile } from "./components/CoinWidgets";
 import { SentimenTab } from "./components/SentimenTab";
 
-type TabKey = "overview" | "gainers" | "losers" | "new" | "volume" | "sentiment" | "heatmap";
+type TabKey = "overview" | "gainers" | "losers" | "new" | "volume" | "sentiment" | "heatmap" | "radar";
+
+interface RadarMover {
+  symbol:     string;
+  change_24h: number;
+  price:      number;
+  funding_rate: number;
+  status:     string;
+  reason:     string;
+  tier:       string;
+  matches:    { agent: string; direction: string; score: number }[];
+}
 
 export default function FuturesMarketPage() {
-  const [data,      setData]      = useState<Overview | null>(null);
-  const [loading,   setLoading]   = useState(true);
-  const [tab,       setTab]       = useState<TabKey>("overview");
-  const [countdown, setCountdown] = useState(60);
+  const [data,        setData]        = useState<Overview | null>(null);
+  const [radarMovers, setRadarMovers] = useState<RadarMover[] | null>(null);
+  const [loading,     setLoading]     = useState(true);
+  const [tab,         setTab]         = useState<TabKey>("overview");
+  const [countdown,   setCountdown]   = useState(60);
   const countRef = useRef(60);
 
   const fetchData = useCallback(async (forceRefresh = false) => {
@@ -31,7 +43,24 @@ export default function FuturesMarketPage() {
     finally { setLoading(false); }
   }, []);
 
+  const fetchRadar = useCallback(async () => {
+    try {
+      const r = await fetch("/api/v1/futures/big-movers?limit=200");
+      if (r.ok) {
+        const d = await r.json() as { movers: RadarMover[] };
+        const preMove = (d.movers ?? []).filter(m =>
+          m.tier === "coiling" || m.tier === "rising_star"
+        );
+        setRadarMovers(preMove);
+      }
+    } catch { /* silent */ }
+  }, []);
+
   useEffect(() => { void fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (tab === "radar" && !radarMovers) void fetchRadar();
+  }, [tab, radarMovers, fetchRadar]);
 
   useEffect(() => {
     const poll = setInterval(() => { void fetchData(); }, 60_000);
@@ -55,6 +84,7 @@ export default function FuturesMarketPage() {
     { key: "volume",     label: "💰 Volume",    count: data?.top_volume.length  },
     { key: "sentiment",  label: "📡 Sentimen"  },
     { key: "heatmap",    label: "🗺 Heatmap"   },
+    { key: "radar",      label: "🔭 Pre-Move Radar", count: radarMovers?.length },
   ];
 
   return (
@@ -385,6 +415,106 @@ export default function FuturesMarketPage() {
 
       {/* Sentiment Tab */}
       {tab === "sentiment" && data && <SentimenTab data={data} />}
+
+      {/* Pre-Move Radar Tab */}
+      {tab === "radar" && (
+        <div className="space-y-4">
+          <div className="bg-gradient-to-br from-indigo-900 via-indigo-800 to-purple-900 text-white rounded-2xl p-5">
+            <p className="text-xs text-indigo-300 uppercase tracking-wider font-semibold mb-1">🔭 PLAN_v3 P6 — Pre-Move Radar</p>
+            <h2 className="text-xl font-black mb-1">Pre-Move Radar</h2>
+            <p className="text-sm text-indigo-200">
+              Koin yang <strong>belum bergerak besar</strong> tapi menunjukkan sinyal pre-breakout:
+              BB Squeeze (coiling) atau kenaikan awal 6-10% dengan volume 2× (rising star).
+              Ini target prioritas untuk Agent 1 (Pre-Gainer) dan Agent 2 (Accumulation).
+            </p>
+          </div>
+
+          {!radarMovers ? (
+            <div className="text-center py-12 text-neutral-400">
+              <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              Memuat radar data...
+            </div>
+          ) : radarMovers.length === 0 ? (
+            <div className="text-center py-12 text-neutral-400">
+              <p className="text-3xl mb-2">🔭</p>
+              <p>Tidak ada koin pre-move terdeteksi saat ini.</p>
+              <p className="text-xs mt-1">Data diperbarui setiap scan cycle (~2 menit).</p>
+            </div>
+          ) : (
+            <>
+              {/* Coiling section */}
+              {radarMovers.filter(m => m.tier === "coiling").length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <p className="text-sm font-bold text-blue-700">🔵 Coiling — BB Squeeze Terdeteksi</p>
+                    <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                      {radarMovers.filter(m => m.tier === "coiling").length} koin
+                    </span>
+                  </div>
+                  <div className="grid gap-2">
+                    {radarMovers.filter(m => m.tier === "coiling").map(m => (
+                      <div key={m.symbol} className="bg-white border border-blue-100 rounded-xl p-3 flex items-center gap-3 flex-wrap hover:border-blue-300 transition-colors">
+                        <div className="flex-1 min-w-[120px]">
+                          <p className="text-sm font-bold text-neutral-800">{m.symbol.replace("USDT", "")}<span className="text-neutral-400 font-normal text-xs">/USDT</span></p>
+                          <p className="text-[10px] text-neutral-400">${m.price > 0 ? m.price.toPrecision(4) : "—"}</p>
+                        </div>
+                        <span className={`text-sm font-bold tabular-nums ${m.change_24h >= 0 ? "text-green-600" : "text-red-500"}`}>
+                          {m.change_24h >= 0 ? "+" : ""}{m.change_24h.toFixed(1)}%
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${m.funding_rate > 0 ? "bg-orange-50 text-orange-600" : "bg-green-50 text-green-600"}`}>
+                          FR {m.funding_rate >= 0 ? "+" : ""}{(m.funding_rate * 100).toFixed(3)}%
+                        </span>
+                        {m.matches.length > 0 && (
+                          <span className="text-[10px] bg-teal-50 text-teal-600 px-2 py-0.5 rounded-full font-semibold">
+                            ✓ {m.matches[0].agent.replace("futures_", "")} {m.matches[0].direction} {m.matches[0].score}pts
+                          </span>
+                        )}
+                        <span className="text-[9px] text-blue-500 font-semibold">🔵 coiling</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Rising star section */}
+              {radarMovers.filter(m => m.tier === "rising_star").length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <p className="text-sm font-bold text-yellow-700">⭐ Rising Star — 6-10% + Volume 2×</p>
+                    <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-bold">
+                      {radarMovers.filter(m => m.tier === "rising_star").length} koin
+                    </span>
+                  </div>
+                  <div className="grid gap-2">
+                    {radarMovers.filter(m => m.tier === "rising_star").map(m => (
+                      <div key={m.symbol} className="bg-white border border-yellow-100 rounded-xl p-3 flex items-center gap-3 flex-wrap hover:border-yellow-300 transition-colors">
+                        <div className="flex-1 min-w-[120px]">
+                          <p className="text-sm font-bold text-neutral-800">{m.symbol.replace("USDT", "")}<span className="text-neutral-400 font-normal text-xs">/USDT</span></p>
+                          <p className="text-[10px] text-neutral-400">${m.price > 0 ? m.price.toPrecision(4) : "—"}</p>
+                        </div>
+                        <span className="text-sm font-bold tabular-nums text-green-600">
+                          +{m.change_24h.toFixed(1)}%
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${m.funding_rate > 0 ? "bg-orange-50 text-orange-600" : "bg-green-50 text-green-600"}`}>
+                          FR {m.funding_rate >= 0 ? "+" : ""}{(m.funding_rate * 100).toFixed(3)}%
+                        </span>
+                        {m.matches.length > 0 ? (
+                          <span className="text-[10px] bg-teal-50 text-teal-600 px-2 py-0.5 rounded-full font-semibold">
+                            ✓ {m.matches[0].agent.replace("futures_", "")} {m.matches[0].direction} {m.matches[0].score}pts
+                          </span>
+                        ) : (
+                          <span className="text-[9px] text-neutral-400">{m.reason.slice(0, 40)}</span>
+                        )}
+                        <span className="text-[9px] text-yellow-600 font-semibold">⭐ rising_star</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Heatmap Tab */}
       {tab === "heatmap" && data && (

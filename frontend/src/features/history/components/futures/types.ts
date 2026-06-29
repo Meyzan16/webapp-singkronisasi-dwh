@@ -29,11 +29,18 @@ export interface FuturesPosition {
   unrealized_pnl_dollar: number | null;
 }
 
+export interface MonitorEvent {
+  ts:   number;
+  kind: string;
+  [k:   string]: unknown;
+}
+
 export interface RiskPosition {
   id:           number;
   symbol:       string;
   direction:    "LONG" | "SHORT";
   agent:        string;
+  setup_type?:  string | null;    // PLAN_v2 P2.5
   entry:        number;
   current:      number;
   sl:           number;
@@ -48,6 +55,7 @@ export interface RiskPosition {
   sl_dist_pct:  number;
   upnl_pct:     number;
   upnl_dollar:  number;
+  roi_pct:      number;              // PLAN_v2 P2.1 — upnl / margin × 100
   risk_status:  "SAFE" | "WARNING" | "DANGER";
   trail_active:             boolean;
   score:                    number;
@@ -55,6 +63,12 @@ export interface RiskPosition {
   cumulative_funding_paid?: number | null;   // G6: simulated funding cost accrued
   cumulative_fee_paid?:     number | null;   // G15: round-trip fee cost
   peak_pnl_pct?:            number | null;   // G5b: highest unrealized % reached
+  // PLAN_v2 P1.4 — per-trade monitor heartbeat
+  last_tick_at?:      number | null;
+  last_tick_price?:   number | null;
+  last_tick_pnl_pct?: number | null;
+  last_tick_event?:   string | null;
+  events?:            MonitorEvent[];
 }
 
 export interface GateState {
@@ -91,6 +105,11 @@ export interface RiskDashboard {
     total_unrealized: number; at_risk_count: number; max_drawdown_pct: number;
     risk_adjusted_return: number | null; total_closed_pnl: number; current_balance: number;
     margin_ratio?: number | null;   // G7: effective_margin / wallet_balance (%)
+    aggregate_roi_pct?: number;     // PLAN_v2 P2.3 — Σ unrealized / Σ margin × 100
+    worst_roi?: {
+      id: number; symbol: string; agent: string; setup_type?: string | null;
+      roi_pct: number; upnl_dollar: number; margin: number; leverage: number;
+    } | null;
   };
   agent_breakdown: {
     agent1: { open: number; margin: number; at_risk: number };

@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     position_size_percent: float = Field(default=2.0, validation_alias="POSITION_SIZE_PERCENT")
     max_open_positions: int = Field(default=3, validation_alias="MAX_OPEN_POSITIONS")
 
+    # PLAN_v2 P0.2 — destructive DB reset endpoint gated by this flag
+    allow_db_reset: bool = Field(default=False, validation_alias="ALLOW_DB_RESET")
+
 
 @lru_cache
 def get_settings() -> Settings:

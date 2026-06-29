@@ -26,6 +26,14 @@ AUTO_OPEN_THRESHOLD = 72   # fallback when no adaptive threshold yet
 MAX_AUTO_POSITIONS  = 6    # P2: GLOBAL cap across all lanes (one shared wallet)
 FUTURES_COOLDOWN_HOURS = 3 # F55: no re-entry within 3h of an SL on the same symbol (global)
 
+# P4.3: Lane quota — 40/30/20/10 split prevents momentum from monopolizing all 6 slots.
+# Map: setup_type → max concurrent open positions in that lane (not counting bigmover).
+LANE_QUOTAS: dict[str, int] = {
+    "momentum":     2,   # 40% of 6 = 2.4 → 2 (floor to avoid over-expose)
+    "pre_gainer":   2,   # 30% of 6 = 1.8 → 2
+    "accumulation": 1,   # 20% of 6 = 1.2 → 1
+}
+
 # P2: all futures lane styles share ONE wallet → dedup & limits are GLOBAL (BUG-L1).
 # Phase 2 BM3: include futures_agent_bigmover — shares wallet but has separate slot quota.
 _FUTURES_STYLES = (
@@ -83,8 +91,26 @@ def _effective_threshold(agent: str) -> int:
     Phase 2 BM1: bigmover lane uses FIXED threshold (60) to avoid the A2 death-spiral.
     """
     if agent == "futures_agent_bigmover":
+        # P4.6: BigMover threshold adaptive based on 14d win rate
+        # 60 (WR≥45%), 65 (35–45%), 70 (<35%) — prevents fixed threshold death spiral
+        from agents.futures.weight_updater import get_state as _wstate
         from agents.futures.agent_bigmover import MIN_SCORE
-        return int(MIN_SCORE)
+        try:
+            wst      = _wstate()
+            bm_wr    = wst.get("coin_win_rates", {})
+            # Rough BM win rate: use global futures win rate as proxy when BM-specific absent
+            from agents.futures.weight_updater import _coin_win_rates as _cwr
+            total    = sum(d.get("total", 0) for d in _cwr.values())
+            wins     = sum(d.get("wins", 0)  for d in _cwr.values())
+            wr_14d   = wins / total if total >= 10 else 0.45  # fallback neutral
+            if wr_14d >= 0.45:
+                return 60
+            elif wr_14d >= 0.35:
+                return 65
+            else:
+                return 70
+        except Exception:
+            return int(MIN_SCORE)
     if _manual_threshold is not None:
         return _manual_threshold
     from agents.futures.weight_updater import get_adaptive_thresholds
@@ -169,6 +195,17 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         )
         bm_open_count: int = bm_count_q.scalar() or 0
 
+        # P4.3: per-setup_type lane quota — count open positions per setup_type
+        lane_q = await session.execute(
+            select(PaperTrade.setup_type, func.count(PaperTrade.id)).where(
+                PaperTrade.style.in_(_FUTURES_STYLES),
+                PaperTrade.status == "open",
+            ).group_by(PaperTrade.setup_type)
+        )
+        lane_open_counts: dict[str, int] = {row[0]: row[1] for row in lane_q.fetchall() if row[0]}
+        # Track newly opened per lane during this cycle
+        lane_opened_this_cycle: dict[str, int] = {}
+
         # GLOBAL open symbols + SL cooldown across all lanes (BUG-L1).
         # BC2: in HEDGE_MODE, dedup on (symbol, direction) tuples so LONG+SHORT coexist.
         if HEDGE_MODE:
@@ -237,6 +274,26 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                     and s.get("symbol") in existing_syms
                 ) >= MAX_BIGMOVER_POSITIONS:
                     logger.debug("bigmover_lane_full")
+                    continue
+
+            # P4.3: per-lane quota — prevent momentum from taking all 6 slots
+            setup = sig.get("setup_type", "")
+            if setup and setup in LANE_QUOTAS:
+                lane_db_count    = lane_open_counts.get(setup, 0)
+                lane_cycle_count = lane_opened_this_cycle.get(setup, 0)
+                if lane_db_count + lane_cycle_count >= LANE_QUOTAS[setup]:
+                    logger.debug("lane_quota_full", setup=setup,
+                                 db=lane_db_count, cycle=lane_cycle_count,
+                                 quota=LANE_QUOTAS[setup])
+                    continue
+
+            # P6.4: per-lane WR auto-pause
+            if setup:
+                from agents.futures.risk_gate import is_lane_paused
+                _lane_paused, _lane_pause_reason = is_lane_paused(setup)
+                if _lane_paused:
+                    logger.info("auto_trade_lane_paused", setup=setup,
+                                reason=_lane_pause_reason)
                     continue
 
             # B3.1: revalidate funding LIVE (scan cache up to 2 min old) for ALL lanes.
@@ -342,6 +399,9 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             opened += 1
             if agent == "futures_agent_bigmover":
                 bm_open_count += 1
+            # P4.3: track lane count for quota enforcement within this cycle
+            if setup and setup in LANE_QUOTAS:
+                lane_opened_this_cycle[setup] = lane_opened_this_cycle.get(setup, 0) + 1
 
             logger.info(
                 "auto_trade_opened",

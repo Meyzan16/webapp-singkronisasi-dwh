@@ -1,6 +1,6 @@
 "use client";
 
-import { SettingsIcon, LogOut, Zap, Grid2X2, BookOpen, History, TrendingUp, BarChart2, Activity, Globe, Store } from "lucide-react";
+import { SettingsIcon, LogOut, Zap, Grid2X2, BookOpen, History, TrendingUp, BarChart2, Activity, Globe, Store, Brain } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useContext } from "react";
 import Link from "next/link";
@@ -13,6 +13,7 @@ const routes = [
   { label: "Futures Market",   href: "/futures-market", icon: Globe,        group: "FUTURES" },
   { label: "Spot Market",      href: "/spot-market",  icon: Store,       group: "SPOT"    },
   { label: "Spot Opportunity", href: "/opportunity",  icon: TrendingUp,  group: "SPOT"    },
+  { label: "Signal Performance", href: "/signals",    icon: Brain,       group: "ALL"     },
   { label: "History",          href: "/history",      icon: BarChart2,   group: "ALL"     },
   { label: "System Health",    href: "/system-health", icon: Activity,    group: ""        },
   { label: "Architecture",     href: "/architecture", icon: BookOpen,    group: ""        },

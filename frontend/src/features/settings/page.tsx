@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { RiskConfig, TAParametersForm, APIKeyForm } from "./components";
+import { RiskConfig, TAParametersForm, APIKeyForm, DBResetCard } from "./components";
 import { AgentSettings } from "@/types/settings";
 
 const DEFAULT_SETTINGS: AgentSettings = {
@@ -96,6 +96,8 @@ export default function SettingsPage() {
           </pre>
         </CardContent>
       </Card>
+
+      <DBResetCard />
     </div>
   );
 }

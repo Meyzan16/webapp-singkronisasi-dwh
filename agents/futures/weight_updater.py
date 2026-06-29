@@ -25,16 +25,55 @@ from collections import defaultdict
 from typing import Optional
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import delete as sql_delete, select
 
 from app.database import AsyncSessionLocal, is_db_available
 from app.models.paper_trade import PaperTrade
 from app.models.signal_weight import AgentSignalWeight
+from app.models.signal_weight_history import SignalWeightHistory
 
 logger = structlog.get_logger(__name__)
 
 _last_run:   Optional[float] = None
 _last_error: Optional[str]   = None
+
+# P7.1: rejection log queue — agents append here, scheduler flushes to DB
+_rejection_queue: list[dict] = []
+_REJECTION_QUEUE_MAX = 500   # cap to avoid unbounded growth if scheduler stalls
+
+
+def log_rejection(
+    symbol:       str,
+    agent:        str,
+    direction:    str,
+    score:        float,
+    threshold:    float,
+    regime:       str = "all",
+    weak_signals: list | None = None,
+    reason:       str = "score_below_threshold",
+) -> None:
+    """P7.1: Queue a signal rejection for later DB flush. Synchronous — safe to call from scoring."""
+    if len(_rejection_queue) >= _REJECTION_QUEUE_MAX:
+        return
+    import json as _json
+    _rejection_queue.append({
+        "symbol":        symbol,
+        "agent":         agent,
+        "direction":     direction,
+        "score":         round(score, 2),
+        "threshold":     round(threshold, 2),
+        "regime":        regime,
+        "reject_reason": reason,
+        "weak_signals":  _json.dumps(weak_signals or [], ensure_ascii=False),
+        "rejected_at":   time.time(),
+    })
+
+
+def flush_rejection_queue() -> list[dict]:
+    """P7.1: Return and clear the rejection queue. Called by scheduler after each scan."""
+    global _rejection_queue
+    rows, _rejection_queue = _rejection_queue, []
+    return rows
 
 MIN_RUN_INTERVAL  = 5 * 60
 RECENCY_DAYS      = 30
@@ -50,23 +89,42 @@ FUTURES_AGENTS = [
 
 # ── In-memory caches (read synchronously by agents during scoring) ─────────────
 
-_weight_cache:        dict[str, dict[str, float]] = {}
-_adaptive_thresholds: dict[str, dict]             = {}
-_coin_blacklist:      dict[str, float]            = {}
-_coin_win_rates:      dict[str, dict]             = {}
+_weight_cache:        dict[str, dict[str, float]]             = {}
+_regime_weight_cache: dict[str, dict[str, dict[str, float]]] = {}  # {agent:{regime:{sig:w}}}
+_adaptive_thresholds: dict[str, dict]                         = {}
+_coin_blacklist:      dict[str, float]                        = {}   # symbol-level (direction-blind fallback)
+_coin_blacklist_dir:  dict[tuple, float]                      = {}   # P4.8: {(symbol, direction): until_ts}
+_coin_win_rates:      dict[str, dict]                         = {}   # symbol-level (direction-blind fallback)
+_coin_win_rates_dir:  dict[tuple, dict]                       = {}   # P4.8: {(symbol, direction): {wins, total}}
 
 
 # ── Public cache accessors ─────────────────────────────────────────────────────
 
-def get_weight_cache(agent: str) -> dict[str, float]:
-    return _weight_cache.get(agent, {})
+def get_weight_cache(agent: str, regime: str = "all") -> dict[str, float]:
+    """Return signal weight cache for agent, optionally filtered to a regime.
+
+    Falls back to "all" for signals that have insufficient per-regime data.
+    P3.5 (PLAN_v2): regime-conditional scoring — unused regime data was a known gap.
+    """
+    if regime == "all":
+        return _weight_cache.get(agent, {})
+    regime_map    = _regime_weight_cache.get(agent, {})
+    regime_weights = regime_map.get(regime, {})
+    all_weights   = _weight_cache.get(agent, {})
+    if not regime_weights:
+        return all_weights
+    # Regime-specific overrides "all" for keys that have per-regime data
+    return {**all_weights, **regime_weights}
 
 
 def get_adaptive_thresholds(agent: str) -> dict:
     return _adaptive_thresholds.get(agent, {"min_score": 52, "auto_threshold": 72})
 
 
-def is_blacklisted(symbol: str) -> bool:
+def is_blacklisted(symbol: str, direction: str = "") -> bool:
+    """P4.8: directional blacklist — check (symbol, direction) first, fallback to symbol-only."""
+    if direction and time.time() < _coin_blacklist_dir.get((symbol, direction), 0):
+        return True
     return time.time() < _coin_blacklist.get(symbol, 0)
 
 
@@ -74,7 +132,19 @@ def normalize_signal_key(raw: str) -> str:
     return _normalize_signal(raw)
 
 
-def get_coin_bonus(symbol: str) -> float:
+def get_coin_bonus(symbol: str, direction: str = "") -> float:
+    """P4.8: directional bonus/penalty — directional data takes priority over symbol-level."""
+    # Prefer directional data if available
+    if direction:
+        dir_data = _coin_win_rates_dir.get((symbol, direction), {})
+        if dir_data.get("total", 0) >= 3:
+            wr = dir_data.get("wins", 0) / dir_data["total"]
+            if wr >= 0.70:
+                return 5.0
+            if wr < 0.30:
+                return -5.0
+            return 0.0
+    # Fall back to direction-blind data
     data  = _coin_win_rates.get(symbol, {})
     total = data.get("total", 0)
     if total < 3:
@@ -116,6 +186,7 @@ def _target_weight(win_rate_adj: float) -> float:
 
 
 def _update_coin_blacklist(trades: list) -> None:
+    global _coin_blacklist_dir
     by_symbol: dict = defaultdict(list)
     for t in sorted(trades, key=lambda x: x.closed_at or x.entry_at or 0):
         by_symbol[t.symbol].append(t)
@@ -127,6 +198,19 @@ def _update_coin_blacklist(trades: list) -> None:
             _coin_blacklist[symbol] = until
             logger.info("coin_blacklisted", symbol=symbol, hours=24)
 
+        # P4.8: directional blacklist — track (symbol, direction) separately
+        by_direction: dict = defaultdict(list)
+        for t in sym_trades:
+            if t.direction:
+                by_direction[t.direction].append(t)
+        for direction, dir_trades in by_direction.items():
+            dir_last3 = [t for t in dir_trades if t.status in ("sl", "tp")][-3:]
+            if len(dir_last3) >= 3 and all(t.status == "sl" for t in dir_last3):
+                until_dir = time.time() + 24 * 3600
+                _coin_blacklist_dir[(symbol, direction)] = until_dir
+                logger.info("coin_blacklisted_directional", symbol=symbol,
+                            direction=direction, hours=24)
+
     # G23: prune stale blacklist entries (expired >30d ago) — prevents unbounded growth
     _cutoff = time.time() - 30 * 86400
     stale_bl = [s for s, until in _coin_blacklist.items() if until < _cutoff]
@@ -135,17 +219,30 @@ def _update_coin_blacklist(trades: list) -> None:
     if stale_bl:
         logger.debug("blacklist_pruned", count=len(stale_bl))
 
+    stale_dir = [k for k, until in _coin_blacklist_dir.items() if until < _cutoff]
+    for k in stale_dir:
+        del _coin_blacklist_dir[k]
+
 
 def _compute_coin_win_rates(trades: list) -> None:
-    global _coin_win_rates
+    global _coin_win_rates, _coin_win_rates_dir
     by_symbol: dict = defaultdict(lambda: {"wins": 0, "total": 0})
+    by_symbol_dir: dict = defaultdict(lambda: {"wins": 0, "total": 0})
     for t in trades:
         if t.status not in ("tp", "sl"):
             continue
         by_symbol[t.symbol]["total"] += 1
-        if t.status == "tp" and (t.pnl_pct or 0.0) > 0:
+        is_win = t.status == "tp" and (t.pnl_pct or 0.0) > 0
+        if is_win:
             by_symbol[t.symbol]["wins"] += 1
+        # P4.8: directional tracking
+        if t.direction:
+            key = (t.symbol, t.direction)
+            by_symbol_dir[key]["total"] += 1
+            if is_win:
+                by_symbol_dir[key]["wins"] += 1
     _coin_win_rates = dict(by_symbol)
+    _coin_win_rates_dir = dict(by_symbol_dir)
 
     # G23: prune _coin_win_rates for symbols absent from the current training window —
     # avoids unbounded growth as new symbols rotate in/out of the universe.
@@ -155,6 +252,11 @@ def _compute_coin_win_rates(trades: list) -> None:
         del _coin_win_rates[s]
     if stale_wr:
         logger.debug("coin_win_rates_pruned", count=len(stale_wr))
+
+    active_keys = {(t.symbol, t.direction) for t in trades if t.direction}
+    stale_dir_wr = [k for k in list(_coin_win_rates_dir) if k not in active_keys]
+    for k in stale_dir_wr:
+        del _coin_win_rates_dir[k]
 
 
 def _compute_adaptive_thresholds(trades: list) -> None:
@@ -276,23 +378,24 @@ async def update_weights() -> int:
                 for key in [(agent, sig_key, "all"), (agent, sig_key, regime)]:
                     _add(key, is_win, decay, pnl_pct)
 
-        # ── Update in-memory weight cache (aggregate "all" only) ──────────────
-        new_cache: dict[str, dict[str, float]] = {}
+        # ── Update in-memory weight cache ("all" + per-regime) ───────────────
+        new_cache:        dict[str, dict[str, float]]             = {}
+        new_regime_cache: dict[str, dict[str, dict[str, float]]] = {}
         for (agent_name, signal_key, regime_key), v in stats.items():
-            if regime_key != "all":
-                continue
             if v["raw_n"] < MIN_SAMPLE_RAW:
                 continue
-            n_eff    = v["total"]
-            wr_adj   = (v["wins"] + 1.0) / (n_eff + 2.0)   # Laplace
-            target   = _target_weight(wr_adj)
-            conf     = min(1.0, n_eff / 10.0)
-            desired  = 1.0 + (target - 1.0) * conf
-            weight   = round(max(0.70, min(1.50, desired)), 3)
-            if agent_name not in new_cache:
-                new_cache[agent_name] = {}
-            new_cache[agent_name][signal_key] = weight
+            n_eff   = v["total"]
+            wr_adj  = (v["wins"] + 1.0) / (n_eff + 2.0)
+            target  = _target_weight(wr_adj)
+            conf    = min(1.0, n_eff / 10.0)
+            desired = 1.0 + (target - 1.0) * conf
+            weight  = round(max(0.70, min(1.50, desired)), 3)
+            if regime_key == "all":
+                new_cache.setdefault(agent_name, {})[signal_key] = weight
+            # P3.5: per-regime cache (override "all" for regime-specific scoring)
+            new_regime_cache.setdefault(agent_name, {}).setdefault(regime_key, {})[signal_key] = weight
         _weight_cache.update(new_cache)
+        _regime_weight_cache.update(new_regime_cache)
 
         # ── Upsert to DB with step cap ────────────────────────────────────────
         upserted = 0
@@ -306,6 +409,9 @@ async def update_weights() -> int:
             )
             for row in ex_result.scalars().all():
                 existing_map[(row.agent, row.signal_key, row.regime)] = row
+
+            # P3.1: collect history snapshots to insert in same commit
+            history_rows: list[SignalWeightHistory] = []
 
             for (agent, signal_key, regime), v in stats.items():
                 if v["raw_n"] < MIN_SAMPLE_RAW and regime == "all":
@@ -322,12 +428,13 @@ async def update_weights() -> int:
                 row = existing_map.get(key)
 
                 if row is None:
-                    initial = 1.0 + max(-STEP_CAP, min(STEP_CAP, desired - 1.0))
+                    initial      = round(1.0 + max(-STEP_CAP, min(STEP_CAP, desired - 1.0)), 3)
+                    final_weight = initial
                     session.add(AgentSignalWeight(
                         agent            = agent,
                         signal_key       = signal_key,
                         regime           = regime,
-                        weight           = round(initial, 3),
+                        weight           = initial,
                         win_count        = int(round(v["wins"])),
                         total_count      = v["raw_n"],
                         win_rate         = round(win_rate, 4),
@@ -336,7 +443,7 @@ async def update_weights() -> int:
                         updated_at       = now,
                     ))
                 else:
-                    step         = max(-STEP_CAP, min(STEP_CAP, desired - row.weight))
+                    step                 = max(-STEP_CAP, min(STEP_CAP, desired - row.weight))
                     row.weight           = round(row.weight + step, 3)
                     row.win_count        = int(round(v["wins"]))
                     row.total_count      = v["raw_n"]
@@ -344,7 +451,23 @@ async def update_weights() -> int:
                     row.avg_pnl_pct      = round(avg_pnl, 3)
                     row.sample_count_raw = v["raw_n"]
                     row.updated_at       = now
+                    final_weight         = row.weight
                 upserted += 1
+
+                # P3.1: snapshot "all" regime weights for trajectory visualization
+                if regime == "all" and v["raw_n"] >= MIN_SAMPLE_RAW:
+                    history_rows.append(SignalWeightHistory(
+                        agent            = agent,
+                        signal_key       = signal_key,
+                        regime           = "all",
+                        weight           = final_weight,
+                        win_count        = int(round(v["wins"])),
+                        total_count      = v["raw_n"],
+                        win_rate         = round(win_rate, 4),
+                        avg_pnl_pct      = round(avg_pnl, 3),
+                        sample_count_raw = v["raw_n"],
+                        snapshot_at      = now,
+                    ))
 
             # Zombie pruning: keys absent from current data
             for key, row in existing_map.items():
@@ -362,6 +485,14 @@ async def update_weights() -> int:
                     )
                     upserted += 1
 
+            # Insert history snapshots + prune old (>90d)
+            for hr in history_rows:
+                session.add(hr)
+            await session.execute(
+                sql_delete(SignalWeightHistory).where(
+                    SignalWeightHistory.snapshot_at < now - 90 * 86400
+                )
+            )
             await session.commit()
 
         _last_run   = now
@@ -377,15 +508,30 @@ async def update_weights() -> int:
 
 
 def get_state() -> dict:
+    regime_keys = {
+        agent: list(regimes.keys())
+        for agent, regimes in _regime_weight_cache.items()
+    }
+    now = time.time()
     return {
-        "last_run":   _last_run,
-        "last_error": _last_error,
-        "cached_agents": list(_weight_cache.keys()),
-        "blacklisted_coins": [s for s, t in _coin_blacklist.items()
-                               if time.time() < t],
+        "last_run":       _last_run,
+        "last_error":     _last_error,
+        "cached_agents":  list(_weight_cache.keys()),
+        "cached_keys":    sum(len(v) for v in _weight_cache.values()),
+        "regime_keys":    regime_keys,
+        "blacklisted_coins": [s for s, t in _coin_blacklist.items() if now < t],
+        "blacklisted_directional": [
+            {"symbol": s, "direction": d}
+            for (s, d), t in _coin_blacklist_dir.items() if now < t
+        ],
         "coin_win_rates": {
             s: {"wins": d["wins"], "total": d["total"],
                 "wr": round(d["wins"] / d["total"], 3) if d["total"] else 0}
             for s, d in _coin_win_rates.items()
+        },
+        "coin_win_rates_directional": {
+            f"{s}_{dr}": {"wins": d["wins"], "total": d["total"],
+                          "wr": round(d["wins"] / d["total"], 3) if d["total"] else 0}
+            for (s, dr), d in _coin_win_rates_dir.items()
         },
     }

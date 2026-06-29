@@ -1,11 +1,23 @@
 "use client";
+import { useState } from "react";
 import { fmtPrice } from "@/lib/format";
 import { DirBadge, RiskStatusBadge, PnlText } from "@/components/ui/trading-badges";
 import { type FuturesPosition, type RiskPosition, calcNotional, calcMargin, calcLiqPrice, tradePnlDollar } from "./types";
 
+// PLAN_v2 P2.2 — ROI on margin (bukan notional) dengan threshold color.
+function roiColorClass(roi: number | null | undefined): string {
+  if (roi == null) return "text-neutral-400";
+  if (roi >= 0)     return "text-green-600 font-bold";
+  if (roi >= -50)   return "text-yellow-600 font-bold";
+  if (roi >= -100)  return "text-red-500 font-bold";
+  return "text-red-700 font-black animate-pulse";
+}
+
 export function OpenPosCard({ p, risk, riskDollar }: {
   p: FuturesPosition; risk?: RiskPosition; riskDollar: number;
 }) {
+  const [showEvents, setShowEvents] = useState(false);
+
   const notional    = risk?.notional  ?? calcNotional(p.risk_pct, riskDollar);
   const margin      = risk?.margin    ?? calcMargin(notional, p.leverage);
   const liq         = risk?.liq_price ?? calcLiqPrice(p.entry, p.leverage, p.direction);
@@ -13,6 +25,13 @@ export function OpenPosCard({ p, risk, riskDollar }: {
   const upnlPct     = p.unrealized_pnl;
   const rStatus     = risk?.risk_status ?? "SAFE";
   const liqDistPct  = risk?.liq_dist_pct ?? (p.current_price != null ? Math.abs((p.current_price - liq) / liq * 100) : null);
+
+  // PLAN_v2 P2.1 — ROI on margin: prefer server-computed, else derive from upnl$ + margin.
+  const roi = risk?.roi_pct ?? (upnl$ != null && margin > 0 ? (upnl$ / margin) * 100 : null);
+  const events = risk?.events ?? [];
+  const lastTickAge = risk?.last_tick_at != null
+    ? Math.max(0, Math.round((Date.now() / 1000 - risk.last_tick_at)))
+    : null;
 
   return (
     <div className={`rounded-xl border p-3 transition-all ${
@@ -82,6 +101,45 @@ export function OpenPosCard({ p, risk, riskDollar }: {
           )}
         </span>
       </div>
+
+      {/* PLAN_v2 P2.1+P2.2 — ROI on margin (the number user actually cares about) */}
+      <div className="mt-1.5 pt-1.5 border-t border-neutral-100 flex items-center justify-between text-[11px]">
+        <span className="text-neutral-500">
+          ROI{" "}
+          <span className={roiColorClass(roi)}>
+            {roi != null ? `${roi >= 0 ? "+" : ""}${roi.toFixed(1)}%` : "—"}
+            {roi != null && roi < -100 && " ⚠"}
+          </span>
+        </span>
+        {/* PLAN_v2 P1.4 — last monitor tick proof */}
+        <button
+          type="button"
+          onClick={() => setShowEvents(s => !s)}
+          className="text-[10px] text-neutral-400 hover:text-neutral-600"
+          title={risk?.last_tick_event ?? "tick"}
+        >
+          {lastTickAge != null
+            ? `🩺 ${lastTickAge < 60 ? `${lastTickAge}s` : `${Math.round(lastTickAge/60)}m`} ago`
+            : "🩺 —"}
+          {events.length > 0 && (
+            <span className="ml-1 text-blue-500">· {events.length} evt</span>
+          )}
+        </button>
+      </div>
+
+      {/* PLAN_v2 P2.4 — event timeline drawer */}
+      {showEvents && events.length > 0 && (
+        <div className="mt-1.5 pt-1.5 border-t border-neutral-100 space-y-0.5">
+          {events.slice().reverse().map((ev, i) => (
+            <div key={i} className="flex items-center justify-between text-[9px] font-mono">
+              <span className="text-blue-600">{ev.kind}</span>
+              <span className="text-neutral-400">
+                {new Date(Number(ev.ts) * 1000).toLocaleTimeString("id-ID")}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* G6+G15: cumulative cost display */}
       {((risk?.cumulative_funding_paid ?? 0) > 0 || (risk?.cumulative_fee_paid ?? 0) > 0) && (

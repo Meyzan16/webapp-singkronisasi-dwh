@@ -640,11 +640,18 @@ async def get_risk_dashboard() -> dict:
         total_margin     += margin
         total_unrealized += upnl_dollar
 
+        # PLAN_v2 P2.1 — ROI on margin (bukan notional). SNDK case study tampil −10% di
+        # tabel pakai % notional padahal sebenarnya margin loss 126%. roi_pct = margin loss
+        # nyata = upnl_$ / margin × 100, lebih informative untuk user.
+        roi_pct = (upnl_dollar / margin * 100) if margin > 0 else 0.0
+
         positions.append({
             "id":            t.id,
             "symbol":        t.symbol,
             "direction":     direction,
             "agent":         t.style,
+            # PLAN_v2 P2.5 — denormalised setup_type (accumulation / pre_gainer / momentum / bigmover)
+            "setup_type":    t.setup_type or meta.get("setup_type"),
             "entry":         entry,
             "current":       round(current, 8),
             "sl":            round(sl, 8),
@@ -659,6 +666,7 @@ async def get_risk_dashboard() -> dict:
             "sl_dist_pct":   round(sl_dist_pct, 2),
             "upnl_pct":      round(upnl_pct, 2),
             "upnl_dollar":   round(upnl_dollar, 2),
+            "roi_pct":       round(roi_pct, 2),     # PLAN_v2 P2.1
             "risk_pct":      risk_pct,
             "risk_status":   risk_status,
             "trail_active":            bool(t.trail_active),
@@ -670,6 +678,12 @@ async def get_risk_dashboard() -> dict:
             "cumulative_funding_paid": meta.get("cumulative_funding_paid"),
             "cumulative_fee_paid":     meta.get("cumulative_fee_paid"),
             "peak_pnl_pct":            meta.get("peak_pnl_pct"),  # G5b
+            # PLAN_v2 P1.4 — per-trade heartbeat & event timeline
+            "last_tick_at":    t.last_tick_at,
+            "last_tick_price": t.last_tick_price,
+            "last_tick_pnl_pct": t.last_tick_pnl_pct,
+            "last_tick_event": t.last_tick_event,
+            "events":          (meta.get("events") or [])[-10:],  # last 10 events for drawer
         })
 
     # ── Risk-Adjusted Return (simplified Calmar / Sharpe proxy) ─────────────────
@@ -726,6 +740,25 @@ async def get_risk_dashboard() -> dict:
     _margin_ratio     = round(_effective_margin / _wallet_equity * 100, 1) \
                         if _wallet_equity > 0 else None
 
+    # PLAN_v2 P2.3 — aggregate ROI di margin (bukan notional). "Worst ROI Open" tile.
+    _agg_roi_pct = (
+        round(total_unrealized / total_margin * 100, 2)
+        if total_margin > 0 else 0.0
+    )
+    _worst_roi = None
+    if positions:
+        _worst = min(positions, key=lambda p: p.get("roi_pct", 0.0))
+        _worst_roi = {
+            "id":         _worst["id"],
+            "symbol":     _worst["symbol"],
+            "agent":      _worst["agent"],
+            "setup_type": _worst.get("setup_type"),
+            "roi_pct":    _worst["roi_pct"],
+            "upnl_dollar": _worst["upnl_dollar"],
+            "margin":     _worst["margin"],
+            "leverage":   _worst["leverage"],
+        }
+
     return {
         "positions": positions,
         "portfolio": {
@@ -733,6 +766,8 @@ async def get_risk_dashboard() -> dict:
             "total_margin":     round(total_margin, 2),
             "total_notional":   round(sum(p["notional"] for p in positions), 2),
             "total_unrealized": round(total_unrealized, 2),
+            "aggregate_roi_pct": _agg_roi_pct,   # PLAN_v2 P2.3
+            "worst_roi":         _worst_roi,     # PLAN_v2 P2.3
             "at_risk_count":    at_risk_count,
             "max_drawdown_pct": round(max_dd, 2),
             "risk_adjusted_return": sharpe,

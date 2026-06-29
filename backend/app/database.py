@@ -97,6 +97,16 @@ async def _migrate_columns(connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_big_mover_log_backfill ON big_mover_log (last_backfill_at)",
         # Phase 1 B1.2: force-open rate limit
         "CREATE INDEX IF NOT EXISTS ix_force_open_log_ts ON force_open_log (ts)",
+        # PLAN_v2 P0.5 — per-trade heartbeat + denormalized setup_type
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS setup_type VARCHAR(20)",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS last_tick_at FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS last_tick_price FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS last_tick_pnl_pct FLOAT",
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS last_tick_event VARCHAR(40)",
+        "CREATE INDEX IF NOT EXISTS ix_paper_trades_setup_type ON paper_trades (setup_type)",
+        # PLAN_v2 P7.1 — rejection_log indexes (table created via Base.metadata.create_all)
+        "CREATE INDEX IF NOT EXISTS ix_rl_symbol_ts ON rejection_log (symbol, rejected_at) "
+        "WHERE EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='rejection_log')",
     ]
     for sql in migrations:
         try:

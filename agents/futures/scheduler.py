@@ -28,8 +28,9 @@ INTERVAL_SEC  = 2 * 60    # scan every 2 minutes — pre-gainer signals can form
 STARTUP_DELAY = 30        # start after main scanner
 TOP_N         = 30        # top results per agent
 TIMEFRAMES    = ["15m", "1h", "4h"]
-# Expand universe: pre-gainer hunt needs wider coverage beyond just top-100 by volume
-UNIVERSE_CAP  = 150
+# P4.2 / PLAN_v3 D1.1: expanded universe — early-stage movers have low volume but
+# high change_pct. Top-change feed injects them even if they're not in top-150 by volume.
+UNIVERSE_CAP  = 250
 
 _running     = False
 _cycle_count = 0
@@ -52,6 +53,42 @@ def get_state() -> dict:
 
 
 # ── Scan runner ────────────────────────────────────────────────────────────────
+
+async def _fetch_top_change_tickers(existing: list[dict], n: int = 30) -> list[dict]:
+    """
+    P4.1 / PLAN_v3 D1.1: Inject top-N gainers + top-N losers (by 24h change%) into universe.
+
+    Pulls /fapi/v1/ticker/24hr (weight=40, all-symbols endpoint) and extracts extreme movers.
+    Catches early-stage movers (3-8% change) that are not in top-250 by volume — these are
+    the coins most likely to become ESPORTS-type big movers within 24h.
+    """
+    existing_syms = {t["symbol"] for t in existing}
+    try:
+        async with httpx.AsyncClient(timeout=12) as c:
+            r = await c.get(fapi("/fapi/v1/ticker/24hr"))
+            if r.status_code != 200:
+                return []
+            all_tickers = r.json()
+
+        usdt_tickers = [
+            t for t in all_tickers
+            if t.get("symbol", "").endswith("USDT")
+            and t.get("symbol") not in existing_syms
+        ]
+        usdt_tickers.sort(key=lambda x: float(x.get("priceChangePercent", 0) or 0))
+
+        # Bottom (losers) + top (gainers) — pick coins in the 3-30% move range
+        # to focus on early-stage movers, not parabolic/capitulation moves.
+        def _in_range(t: dict) -> bool:
+            pct = abs(float(t.get("priceChangePercent", 0) or 0))
+            return 3.0 <= pct <= 30.0
+
+        losers  = [t for t in usdt_tickers[:n * 2] if _in_range(t)][:n]
+        gainers = [t for t in reversed(usdt_tickers[-n * 2:]) if _in_range(t)][:n]
+        return gainers + losers
+    except Exception:
+        return []
+
 
 async def _fetch_extreme_funding_tickers(existing: list[dict]) -> list[dict]:
     """
@@ -125,6 +162,19 @@ async def _run_scan() -> dict:
             logger.info("added_extreme_funding_coins", count=len(extreme_tickers))
     except Exception:
         pass  # non-critical — agent2 still scans top-100
+
+    # Step 1b2: P4.1 / PLAN_v3 D1.1 — inject top gainers+losers (early-stage movers).
+    # Uses the all-symbols /ticker/24hr endpoint (weight=40). These coins are NOT in
+    # top-250 volume yet but are just starting to move — prime pre-gainer territory.
+    try:
+        change_tickers = await _fetch_top_change_tickers(tickers)
+        if change_tickers:
+            existing_syms = {t["symbol"] for t in tickers}
+            added_change = [t for t in change_tickers if t["symbol"] not in existing_syms]
+            tickers.extend(added_change)
+            logger.info("added_top_change_coins", count=len(added_change))
+    except Exception:
+        pass  # non-critical
 
     # Step 1c (P3, Lane C / BUG-L18): add recent new-listings — they're rarely in the
     # top-volume universe, so the agents never saw them. Wires discovery → trading.
@@ -269,9 +319,27 @@ async def _run_scan() -> dict:
     return result
 
 
-# ── Big Movers helper (PLAN-SIGNAL-GAP P4) ─────────────────────────────────────
+# ── Market Pulse helper (PLAN-SIGNAL-GAP P4 + PLAN_v3 D1.4) ─────────────────────
 
 BIG_MOVER_THRESHOLD = 10.0   # |change_24h| % — matches the screenshot's "Big Movers" panel
+
+
+def _classify_tier(change_pct: float, vol_ratio: float, bb_squeeze: bool) -> str:
+    """PLAN_v3 D1.4: classify coin into market pulse tier.
+
+    Tier "big_mover"   — already ≥10% 24h (reactive)
+    Tier "rising_star" — 6-10% 24h AND volume 2×+ (early-stage gainer)
+    Tier "coiling"     — |change_24h| ≤ 3% AND BB squeeze detected (pre-breakout)
+    Tier "other"       — everything else (no special tier)
+    """
+    abs_chg = abs(change_pct)
+    if abs_chg >= BIG_MOVER_THRESHOLD:
+        return "big_mover"
+    if 6 <= abs_chg < BIG_MOVER_THRESHOLD and vol_ratio >= 2.0:
+        return "rising_star"
+    if abs_chg <= 3.0 and bb_squeeze:
+        return "coiling"
+    return "other"
 
 
 def _build_big_movers(tickers: list[dict], all_results: list[dict]) -> list[dict]:
@@ -324,6 +392,15 @@ def _build_big_movers(tickers: list[dict], all_results: list[dict]) -> list[dict
         except (TypeError, ValueError):
             funding = 0.0
 
+        # PLAN_v3 D1.4: compute tier for market pulse classification
+        try:
+            vol_24h   = float(ticker.get("quoteVolume", 0) or 0)
+            vol_avg   = float(ticker.get("volume", 0) or 0)
+            vol_ratio = vol_24h / (vol_avg * 20) if vol_avg > 0 else 1.0  # rough 24h vs avg
+        except Exception:
+            vol_ratio = 1.0
+        tier = _classify_tier(change_24h, vol_ratio, bb_squeeze=False)  # bb_squeeze deferred (no kline here)
+
         movers.append({
             "symbol":       symbol,
             "change_24h":   round(change_24h, 2),
@@ -332,10 +409,123 @@ def _build_big_movers(tickers: list[dict], all_results: list[dict]) -> list[dict
             "status":       status,
             "reason":       reason,
             "matches":      matches,
+            "tier":         tier,   # PLAN_v3 D1.4: "big_mover" | "rising_star" | "coiling" | "other"
         })
 
     movers.sort(key=lambda x: abs(x["change_24h"]), reverse=True)
     return movers[:60]
+
+
+# ── Predictive log helpers (PLAN_v3 P4 D4.1) ─────────────────────────────────
+
+async def _log_predictive_snapshot(scan_result: dict) -> None:
+    """Log top scoring candidates from each agent to predictive_log for accuracy tracking."""
+    import json as _json
+    from app.database import AsyncSessionLocal, is_db_available
+    from app.models.predictive_log import PredictiveLog
+
+    if not is_db_available():
+        return
+
+    now = time.time()
+    rows_to_add = []
+
+    for agent_key in ["agent1", "agent2", "agent3", "agent_bigmover"]:
+        agent_data = scan_result.get(agent_key, {})
+        # Log top 10 per agent (don't flood the DB)
+        for r in agent_data.get("results", [])[:10]:
+            rows_to_add.append(PredictiveLog(
+                symbol       = r["symbol"],
+                agent        = r.get("agent", f"futures_{agent_key}"),
+                direction    = r.get("direction", "LONG"),
+                regime       = r.get("regime"),
+                score        = r.get("score", 0.0),
+                signals_json = _json.dumps(r.get("signals", [])[:5]),
+                price_at_scan= r.get("price", 0.0),
+                oi_change    = r.get("oi_change"),
+                funding_rate = r.get("funding_rate"),
+                change_24h   = r.get("change_24h"),
+                scanned_at   = now,
+            ))
+
+    if not rows_to_add:
+        return
+
+    async with AsyncSessionLocal() as session:
+        session.add_all(rows_to_add)
+        await session.commit()
+
+    # Prune predictive_log entries older than 30 days every 1000 cycles
+    global _cycle_count
+    if _cycle_count % 1000 == 0:
+        from sqlalchemy import delete as _del
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                _del(PredictiveLog).where(PredictiveLog.scanned_at < now - 30 * 86400)
+            )
+            await session.commit()
+
+
+async def _resolve_predictive_logs() -> None:
+    """Resolve predictions older than 4h by fetching current prices from Binance."""
+    import httpx as _httpx
+    import json as _json
+    from sqlalchemy import select as _sel, update as _upd
+    from app.database import AsyncSessionLocal
+    from app.models.predictive_log import PredictiveLog
+    from app.services.binance_urls import fapi
+
+    now = time.time()
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            _sel(PredictiveLog).where(
+                PredictiveLog.resolved_at.is_(None),
+                PredictiveLog.scanned_at <= now - 4 * 3600,
+            ).limit(200)
+        )
+        pending = result.scalars().all()
+
+    if not pending:
+        return
+
+    symbols = list({r.symbol for r in pending})
+    price_map: dict[str, float] = {}
+    try:
+        async with _httpx.AsyncClient(timeout=10) as client:
+            syms_param = _json.dumps(symbols, separators=(",", ":"))
+            resp = await client.get(fapi("/fapi/v1/ticker/price"), params={"symbols": syms_param})
+            if resp.status_code == 200:
+                for item in resp.json():
+                    price_map[item["symbol"]] = float(item["price"])
+    except Exception:
+        return
+
+    async with AsyncSessionLocal() as session:
+        for row in pending:
+            cp = price_map.get(row.symbol)
+            if not cp or row.price_at_scan <= 0:
+                continue
+            age_h    = (now - row.scanned_at) / 3600
+            move_pct = (cp - row.price_at_scan) / row.price_at_scan * 100
+            directed = move_pct if row.direction == "LONG" else -move_pct
+            hit_4h   = directed >= 1.5 if age_h >= 4 else None
+            hit_24h  = directed >= 3.0 if age_h >= 24 else None
+            # Only mark fully resolved once 24h window has passed.
+            # If resolved_at is set at 4h, the row drops out of the unresolved query
+            # and the 24h outcome is never written — data loss.
+            await session.execute(
+                _upd(PredictiveLog).where(PredictiveLog.id == row.id).values(
+                    price_4h     = cp if age_h >= 4 else None,
+                    price_24h    = cp if age_h >= 24 else None,
+                    hit_4h       = hit_4h,
+                    hit_24h      = hit_24h,
+                    move_4h_pct  = round(directed, 3) if age_h >= 4 else None,
+                    move_24h_pct = round(directed, 3) if age_h >= 24 else None,
+                    resolved_at  = now if hit_24h is not None else None,
+                )
+            )
+        await session.commit()
 
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
@@ -392,6 +582,24 @@ async def run_futures_loop() -> None:
                 agent3=result["agent3"]["total"],
             )
 
+            # D4.1 (PLAN_v3): log top candidates to predictive_log for accuracy measurement
+            try:
+                await _log_predictive_snapshot(result)
+            except Exception as exc:
+                logger.warning("predictive_log_failed", error=str(exc)[:80])
+
+            # D4.1: resolve stale predictions every 12 cycles (~24 min)
+            if _cycle_count % 12 == 0:
+                try:
+                    from app.database import AsyncSessionLocal, is_db_available
+                    if is_db_available():
+                        import httpx as _httpx
+                        from sqlalchemy import select as _select, update as _update
+                        from app.models.predictive_log import PredictiveLog
+                        await _resolve_predictive_logs()
+                except Exception as exc:
+                    logger.warning("predictive_resolve_failed", error=str(exc)[:80])
+
             # P2: UNIFIED auto-open — one ranked pool across all lanes, global dedup (BUG-L1)
             # Phase 2 BM3: include agent_bigmover candidates
             try:
@@ -412,13 +620,39 @@ async def run_futures_loop() -> None:
             # Update regime cache + signal weights after each cycle
             try:
                 from agents.futures.regime import fetch_regime
-                from agents.futures.weight_updater import update_weights
+                from agents.futures.weight_updater import update_weights, flush_rejection_queue
                 from agents.shared.cross_agent_learning import update_cross_agent_weights
                 await fetch_regime()
                 await update_weights()
                 await update_cross_agent_weights()   # SP3: cross-agent blending
             except Exception as exc:
                 logger.warning("post_scan_learning_error", error=str(exc)[:80])
+
+            # P7.1: flush rejection log queue to DB
+            try:
+                from agents.futures.weight_updater import flush_rejection_queue
+                _rejections = flush_rejection_queue()
+                if _rejections:
+                    from app.database import AsyncSessionLocal, is_db_available
+                    from app.models.rejection_log import RejectionLog
+                    if is_db_available():
+                        async with AsyncSessionLocal() as _rsess:
+                            for _r in _rejections:
+                                _rsess.add(RejectionLog(**_r))
+                            await _rsess.commit()
+                        # Prune rejection_log > 7 days to keep table small
+                        if _cycle_count % 100 == 0:
+                            from sqlalchemy import delete as _sql_del
+                            import time as _t
+                            async with AsyncSessionLocal() as _rsess2:
+                                await _rsess2.execute(
+                                    _sql_del(RejectionLog).where(
+                                        RejectionLog.rejected_at < _t.time() - 7 * 86400
+                                    )
+                                )
+                                await _rsess2.commit()
+            except Exception as exc:
+                logger.warning("rejection_log_flush_failed", error=str(exc)[:80])
 
             # Phase 1 T4: backfill forward-pnl on big_mover_log every 10 cycles (~20 min)
             if _cycle_count % 10 == 0:
@@ -437,6 +671,18 @@ async def run_futures_loop() -> None:
                     await run_weekly_backtest()
             except Exception as exc:
                 logger.warning("weekly_backtest_error", error=str(exc)[:80])
+
+            # P7 D7.2: monthly threshold calibration — 1st of each month 00:00-00:10 UTC
+            try:
+                import datetime as _dt2
+                _now2 = _dt2.datetime.utcnow()
+                if _now2.day == 1 and _now2.hour == 0 and _now2.minute < 10:
+                    from agents.learning.monthly_calibration import run_monthly_calibration
+                    _cal = await run_monthly_calibration()
+                    if _cal.get("changes"):
+                        logger.info("monthly_calibration_done", changes=_cal["changes"])
+            except Exception as exc:
+                logger.warning("monthly_calibration_error", error=str(exc)[:80])
 
         except asyncio.CancelledError:
             futures_store.set_scanning(False)

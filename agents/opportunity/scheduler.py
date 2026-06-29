@@ -424,6 +424,16 @@ async def run_opportunity_loop() -> None:
                 auto_opened=opened,
             )
 
+            # SP2/SP3: refresh SPOT signal weights + cross-agent blend after each scan.
+            # MIN_RUN_INTERVAL inside each updater guarantees no excessive DB work.
+            try:
+                from agents.opportunity.weight_updater import update_spot_weights
+                from agents.shared.cross_agent_learning import update_cross_agent_weights
+                await update_spot_weights()
+                await update_cross_agent_weights()
+            except Exception as exc:
+                logger.warning("post_scan_learning_error", error=str(exc)[:80])
+
         except asyncio.CancelledError:
             opp_store.set_scanning(False)
             logger.info("opportunity_agent_stopped")

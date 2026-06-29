@@ -144,7 +144,34 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
                 Margin Ratio {pd.margin_ratio.toFixed(1)}%
               </span>
             )}
+            {/* PLAN_v2 P2.3 — aggregate ROI on margin */}
+            {pd.aggregate_roi_pct != null && pd.open_count > 0 && (
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                pd.aggregate_roi_pct < -50
+                  ? "bg-red-900/40 text-red-300 border-red-700/60"
+                  : pd.aggregate_roi_pct < 0
+                  ? "bg-yellow-900/40 text-yellow-300 border-yellow-700/60"
+                  : "bg-green-900/40 text-green-300 border-green-700/60"
+              }`}>
+                Aggregate ROI {pd.aggregate_roi_pct >= 0 ? "+" : ""}{pd.aggregate_roi_pct.toFixed(1)}%
+              </span>
+            )}
           </div>
+          {/* PLAN_v2 P2.3 — Worst ROI Open */}
+          {pd.worst_roi && pd.worst_roi.roi_pct < 0 && (
+            <div className="mt-3 rounded-xl bg-red-900/30 border border-red-700/40 px-3 py-2 text-xs">
+              <span className="text-neutral-400 mr-2">Worst ROI Open:</span>
+              <span className="font-bold text-red-300">{pd.worst_roi.symbol.replace("USDT", "")}</span>
+              <span className="text-neutral-500 ml-1">({pd.worst_roi.setup_type ?? pd.worst_roi.agent.replace("futures_", "")})</span>
+              <span className={`ml-2 font-bold ${pd.worst_roi.roi_pct < -100 ? "text-red-400 animate-pulse" : "text-red-300"}`}>
+                {pd.worst_roi.roi_pct >= 0 ? "+" : ""}{pd.worst_roi.roi_pct.toFixed(1)}%
+                {pd.worst_roi.roi_pct < -100 && " ⚠"}
+              </span>
+              <span className="text-neutral-500 ml-2">
+                ${pd.worst_roi.upnl_dollar.toFixed(2)} on ${pd.worst_roi.margin.toFixed(0)} margin · {pd.worst_roi.leverage}x
+              </span>
+            </div>
+          )}
         </div>
       ) : hasOpen ? (
         // MN1: fallback banner computed from positions when riskDash API unavailable

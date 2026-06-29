@@ -37,12 +37,13 @@ from .data import FuturesData
 from .agent1 import (
     _rsi, _swing_lows, _swing_highs, _round_price,
     _ema, _atr,
-    MIN_RR, MIN_SL_PCT, MAX_SL_MARGIN_PCT,
+    MIN_RR, MIN_SL_PCT,
 )
+from .utils import cap_leverage_by_lane   # PLAN_v2 P1.2/P1.3
 
 logger = structlog.get_logger(__name__)
 
-MIN_SCORE  = 55
+MIN_SCORE  = 65   # P4.4: raised from 55 — reduces momentum false entries
 AGENT_NAME = "futures_agent3"
 
 # Momentum leverage: capped lower than pre-gainer (already-moved = higher vol risk)
@@ -52,8 +53,8 @@ _MAX_LEV = 10
 def calc_leverage_momentum(atr_pct: float, score: float, risk_pct: float = 0.0) -> int:
     """Dynamic leverage — more conservative than pre-gainer agents (max 10x).
 
-    BUG-L6/L7: reconciled with SL distance so a full SL never loses more than
-    MAX_SL_MARGIN_PCT of margin (was ATR-only → tight SL + high leverage wipe).
+    PLAN_v2 P1.2/P1.3: lane-aware SL-margin cap (momentum 25%) + liquidation safety
+    delegated to utils.cap_leverage_by_lane.
     """
     if atr_pct > 5.0:   base = 2
     elif atr_pct > 3.0: base = 3
@@ -64,10 +65,7 @@ def calc_leverage_momentum(atr_pct: float, score: float, risk_pct: float = 0.0) 
     if score >= 80:    base = min(base + 2, _MAX_LEV)
     elif score >= 70:  base = min(base + 1, _MAX_LEV)
 
-    # BUG-L6/L7: cap leverage by SL distance (margin loss ≈ risk_pct × leverage)
-    if risk_pct and risk_pct > 0:
-        base = min(base, max(1, int(MAX_SL_MARGIN_PCT / risk_pct)))
-
+    base = cap_leverage_by_lane(base, risk_pct, lane="momentum")
     return max(1, min(base, _MAX_LEV))
 
 
@@ -161,6 +159,14 @@ def _score_momentum_long(
     change_1h = 0.0
     if d1h and len(d1h.closes) >= 5 and d1h.closes[-4] > 0:
         change_1h = (d1h.closes[-1] - d1h.closes[-4]) / d1h.closes[-4] * 100
+
+    # D2.5 (PLAN_v3): per-TF volume ratios used for breakout volume gate
+    _tf_vol_ratios: dict[str, float] = {}
+    for _tf, _d in [("1h", d1h), ("4h", d4h), ("15m", d15)]:
+        if _d and len(_d.volumes) >= 21:
+            _avg_v = sum(_d.volumes[-21:-1]) / 20
+            _tf_vol_ratios[_tf] = _d.volumes[-1] / _avg_v if _avg_v > 0 else 1.0
+    _early_breakout_confirmed = False  # D2.4: set True if 3-7% + breakout + vol + OI
 
     # ── 1. 24h move in sweet spot (0-20 pts) ─────────────────────────────────
     # PLAN-SIGNAL-GAP P1: ceiling extended to 50% — coins like ZRO +30%, EVAA +114%
@@ -269,31 +275,51 @@ def _score_momentum_long(
             score -= 6  # coin actually stalling/reversing
 
     # ── 6. Breakout above 30-candle high (0-13 pts) ──────────────────────────
+    # D2.5 (PLAN_v3): only award breakout pts when volume confirms (vol_ratio >= 1.5).
+    # False breakouts on low volume are common — filter them to improve signal quality.
     for tf_key, d in [("4h", d4h), ("1h", d1h)]:
         if not d or len(d.highs) < 32:
             continue
         is_bo, bo_pct = _is_breakout(d.highs, d.lows, d.closes, "LONG")
         if is_bo:
-            if bo_pct >= 2.0:
-                score += 13
-                signals.append(f"🔓 Breakout {tf_key} +{bo_pct:.1f}% di atas {30}-candle high — udara bersih di atas")
-            elif bo_pct >= 0.5:
-                score += 8
-                signals.append(f"Breakout baru {tf_key} — baru menembus resistance {30}-candle")
+            _bo_vol = _tf_vol_ratios.get(tf_key, 1.0)
+            if _bo_vol >= 1.5:
+                if bo_pct >= 2.0:
+                    score += 13
+                    signals.append(f"🔓 Breakout {tf_key} +{bo_pct:.1f}% vol {_bo_vol:.1f}× — breakout dikonfirmasi volume")
+                elif bo_pct >= 0.5:
+                    score += 8
+                    signals.append(f"Breakout baru {tf_key} vol {_bo_vol:.1f}× — menembus resistance dengan volume")
+            # D2.4 (PLAN_v3): Early breakout branch — 3-7% change + fresh breakout + vol + OI.
+            # These coins are pre-momentum: penalizing them with -15 misses the entry.
+            if 3.0 <= change_24h <= 7.0 and bo_pct >= 0.3 and _bo_vol >= 1.5 and oi_chg >= 1.0:
+                _early_breakout_confirmed = True
+                score += 10   # early breakout with confirmation = strong pre-momentum signal
+                signals.append(f"⚡ Early breakout {tf_key} +{change_24h:.1f}% vol {_bo_vol:.1f}× OI +{oi_chg:.1f}% — pre-momentum detected")
             break
 
     # ── Penalties ─────────────────────────────────────────────────────────────
     # PLAN-SIGNAL-GAP P1: non-stacking (was 3 separate `if`s — a coin >35% got BOTH
     # the -15 "overextended" AND -25 "parabolic" penalty = -40 total before any other
     # signal, making it mathematically impossible to reach MIN_SCORE).
-    if change_24h < 5.0:
+    # D2.4 (PLAN_v3): skip -15 for early breakout confirmed (3-7% with vol+OI+breakout).
+    if change_24h < 5.0 and not _early_breakout_confirmed:
         score -= 15   # not enough momentum — pre-gainers better handles this
+    elif change_24h < 5.0 and _early_breakout_confirmed:
+        pass          # early breakout path — skip penalty, already given +10 bonus
     elif change_24h > 50.0:
         score -= 20   # parabolic >50% → exit risk tinggi
     elif change_24h > 35.0:
         score -= 8    # extended, tapi tidak as harsh
     elif change_24h > 25.0:
         score -= 5    # sedikit extended
+
+    # P4.7: late momentum penalty — coin yang sudah naik >20% kemungkinan sudah peaked.
+    # Separate dari bracket above (additive), but capped to prevent double-stacking.
+    if change_24h > 20.0:
+        score -= 10   # late entry = risk reward makin tipis, chasing lebih berbahaya
+        signals.append(f"⚠ Late momentum +{change_24h:.1f}% — sudah jauh dari base, entry risiko tinggi (−10)")
+
 
     if rsi_val > 80:
         score -= 15   # overbought
@@ -470,6 +496,11 @@ def _score_momentum_short(
     elif drop > 25.0:
         score -= 5    # oversold-ish — bounce risk elevated but not disqualifying
 
+    # P4.7: late momentum penalty — SHORT coin yang sudah dump >20% kemungkinan sudah bottomed.
+    if drop > 20.0:
+        score -= 10
+        signals.append(f"⚠ Late dump {change_24h:.1f}% — sudah jauh dari top, short risiko bounce tinggi (−10)")
+
     if rsi_val < 22:
         score -= 15   # extreme oversold = reversal imminent
     elif rsi_val < 28:
@@ -620,11 +651,13 @@ def scan_symbol(
 
     from agents.futures import weight_updater
     from agents.futures.regime import detect_coin_regime
-    weight_cache  = weight_updater.get_weight_cache(AGENT_NAME)
+    from agents.shared.cross_agent_learning import get_cross_weight, blend_weights
     thresholds    = weight_updater.get_adaptive_thresholds(AGENT_NAME)
     effective_min = thresholds["min_score"]
     # BUG-L13: per-coin regime from the coin's own 1h OHLCV (was BTC-only for all alts)
     regime        = detect_coin_regime(tf_map.get("1h") or ref)
+    # P3.5: regime-conditional weight cache (falls back to "all" for missing keys)
+    weight_cache  = weight_updater.get_weight_cache(AGENT_NAME, regime=regime)
 
     long_score,  long_sigs  = _score_momentum_long(tf_map, price, change_24h, regime)
     short_score, short_sigs = _score_momentum_short(tf_map, price, change_24h, regime)
@@ -634,11 +667,13 @@ def scan_symbol(
         ("LONG",  long_score,  long_sigs),
         ("SHORT", short_score, short_sigs),
     ]:
-        # Signal weight adjustments from historical win rates
+        # SP3: signal weight = own-agent × 0.7 + cross-agent × 0.3 (blended evidence).
+        # P3.7: multiplier ×7 (was ×5) — wider impact so adaptive learning has real bite.
         for sig in signals:
-            key = weight_updater.normalize_signal_key(sig)
-            w   = weight_cache.get(key, 1.0)
-            score += (w - 1.0) * 5.0
+            key   = weight_updater.normalize_signal_key(sig)
+            own_w = weight_cache.get(key, 1.0)
+            w     = blend_weights(own_w, get_cross_weight(key))
+            score += (w - 1.0) * 7.0
 
         # Regime modifier: momentum loves trending regimes
         if regime == "volatile":
@@ -653,6 +688,18 @@ def scan_symbol(
             score -= 8      # counter-trend momentum: risky
 
         if score < effective_min:
+            # P7.1: log rejection
+            try:
+                _weak3 = sorted(
+                    ((weight_updater.normalize_signal_key(s),
+                      weight_cache.get(weight_updater.normalize_signal_key(s), 1.0))
+                     for s in signals),
+                    key=lambda x: x[1]
+                )[:3]
+                weight_updater.log_rejection(symbol, AGENT_NAME, direction, score, effective_min,
+                                             regime=regime, weak_signals=[f"{k}:{w}" for k, w in _weak3])
+            except Exception:
+                pass
             continue
         levels = _calc_levels(direction, tf_map, price)
         if not levels:
