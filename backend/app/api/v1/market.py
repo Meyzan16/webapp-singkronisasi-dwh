@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.services.binance_auth import get_binance_credentials, _get_time_offset
 
 router = APIRouter(tags=["market"])
 logger = structlog.get_logger(__name__)
@@ -29,9 +30,9 @@ def _sign(secret: str, query_string: str) -> str:
     return hmac.new(secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
 
 
-def _signed_url(path: str, secret: str, extra: dict | None = None) -> tuple[str, str]:
-    """Return (base_query, signed_query) for a Binance signed endpoint."""
-    params: dict = {"timestamp": int(time.time() * 1000), "recvWindow": 10000}
+def _signed_url(path: str, secret: str, extra: dict | None = None, ts: int | None = None) -> str:
+    """Return signed query string for a Binance private endpoint."""
+    params: dict = {"timestamp": ts if ts is not None else int(time.time() * 1000), "recvWindow": 10000}
     if extra:
         params.update(extra)
     qs = urlencode(params)
@@ -105,6 +106,7 @@ async def _fetch_avg_buy_price(
     total_held: float,
     api_key: str,
     api_secret: str,
+    ts: int | None = None,
 ) -> float | None:
     """
     Calculate avg buy price using FIFO (First In, First Out).
@@ -125,7 +127,7 @@ async def _fetch_avg_buy_price(
 
     try:
         # Limit 1000 (Binance max) to cover more trade history (S12)
-        qs = _signed_url("/api/v3/myTrades", api_secret, {"symbol": symbol, "limit": 1000})
+        qs = _signed_url("/api/v3/myTrades", api_secret, {"symbol": symbol, "limit": 1000}, ts=ts)
         resp = await client.get(spot(f"/api/v3/myTrades?{qs}"), headers=_auth_headers(api_key))
         if resp.status_code != 200:
             return None
@@ -250,20 +252,22 @@ async def debug_spot_connection() -> dict:
 @router.get("/market/spot-positions", response_model=SpotPositionsResponse)
 async def get_spot_positions() -> SpotPositionsResponse:
     """Fetch all non-zero spot holdings with current price, avg buy price, and P&L."""
-    s = get_settings()
-    if not s.binance_api_key:
+    # Read credentials from DB first, fall back to .env
+    api_key, api_secret = await get_binance_credentials()
+    if not api_key:
         raise HTTPException(
             status_code=400,
-            detail="BINANCE_API_KEY tidak ditemukan. Tambahkan ke backend/.env lalu restart backend."
+            detail="BINANCE_API_KEY tidak ditemukan. Tambahkan di Settings → Binance API lalu simpan ke database."
         )
 
-    qs = _signed_url("/api/v3/account", s.binance_api_secret)
+    offset = await _get_time_offset()
+    ts = int(time.time() * 1000) + offset
+    qs = _signed_url("/api/v3/account", api_secret, ts=ts)
 
     async with httpx.AsyncClient(timeout=20) as client:
         try:
-            account = await _get(client, spot(f"/api/v3/account?{qs}"), _auth_headers(s.binance_api_key))
+            account = await _get(client, spot(f"/api/v3/account?{qs}"), _auth_headers(api_key))
         except HTTPException as e:
-            # Re-raise with more helpful message
             detail = str(e.detail)
             if "401" in detail or "-2014" in detail or "-2015" in detail:
                 raise HTTPException(status_code=401,
@@ -293,7 +297,7 @@ async def get_spot_positions() -> SpotPositionsResponse:
 
         # Fetch avg buy price concurrently for all assets
         avg_prices = await asyncio.gather(*[
-            _fetch_avg_buy_price(client, a[0], a[3], s.binance_api_key, s.binance_api_secret)
+            _fetch_avg_buy_price(client, a[0], a[3], api_key, api_secret, ts)
             for a in raw_assets
         ])
 
@@ -333,17 +337,19 @@ async def get_spot_positions() -> SpotPositionsResponse:
 @router.get("/market/futures-positions", response_model=FuturesPositionsResponse)
 async def get_futures_positions() -> FuturesPositionsResponse:
     """Fetch all active (non-zero) futures positions."""
-    s = get_settings()
-    if not s.binance_api_key:
-        raise HTTPException(status_code=400, detail="API key not configured")
+    api_key, api_secret = await get_binance_credentials()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key tidak ditemukan. Tambahkan di Settings → Binance API.")
 
-    qs = _signed_url("/fapi/v2/positionRisk", s.binance_api_secret)
+    offset = await _get_time_offset()
+    ts = int(time.time() * 1000) + offset
+    qs = _signed_url("/fapi/v2/positionRisk", api_secret, ts=ts)
 
     async with httpx.AsyncClient(timeout=15) as client:
         raw: list = await _get(
             client,
             fapi(f"/fapi/v2/positionRisk?{qs}"),
-            _auth_headers(s.binance_api_key),
+            _auth_headers(api_key),
         )
 
     positions: list[FuturesPosition] = []
