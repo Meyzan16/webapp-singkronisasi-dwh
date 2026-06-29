@@ -5,6 +5,9 @@ All private Binance endpoints (account, orders, wallet) require:
   - timestamp + signature query params (HMAC-SHA256 of the full query string)
 
 Credentials priority: PostgreSQL AppSettings → .env / config.py fallback.
+
+Clock sync: Binance rejects requests where timestamp differs from their server
+by more than 1000ms. We fetch /api/v3/time once per hour and cache the offset.
 """
 
 import hashlib
@@ -15,6 +18,28 @@ import urllib.parse
 import httpx
 
 from app.services.binance_urls import spot
+
+# ── Binance server-time offset cache ──────────────────────────────────────────
+_time_offset_ms: int   = 0      # local_ts + offset = binance_ts
+_offset_fetched_at: float = 0.0
+_OFFSET_TTL = 3600  # re-sync every hour
+
+
+async def _get_time_offset() -> int:
+    """Return cached ms offset between local clock and Binance server time."""
+    global _time_offset_ms, _offset_fetched_at
+    if time.time() - _offset_fetched_at > _OFFSET_TTL:
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(spot("/api/v3/time"))
+                if r.status_code == 200:
+                    binance_ts = r.json()["serverTime"]
+                    local_ts   = int(time.time() * 1000)
+                    _time_offset_ms     = binance_ts - local_ts
+                    _offset_fetched_at  = time.time()
+        except Exception:
+            pass  # keep existing offset; don't break on network hiccup
+    return _time_offset_ms
 
 
 async def get_binance_credentials() -> tuple[str, str]:
@@ -54,7 +79,8 @@ async def binance_signed_get(
     Returns (response_json, status_code).
     """
     params = dict(params)
-    params["timestamp"] = int(time.time() * 1000)
+    offset = await _get_time_offset()
+    params["timestamp"] = int(time.time() * 1000) + offset
     query_string = urllib.parse.urlencode(params)
     signature = hmac.new(
         api_secret.encode("utf-8"),
