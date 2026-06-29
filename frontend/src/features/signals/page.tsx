@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -48,7 +48,78 @@ interface CrossResponse {
   meta:    { total: number };
 }
 
-type SubTab = "overview" | "spot" | "futures" | "cross";
+interface RegimeRow {
+  signal_key:    string;
+  regimes:       Record<string, number | null>;
+  max_deviation: number;
+}
+
+interface RegimeResponse {
+  signals: RegimeRow[];
+  regimes: string[];
+}
+
+interface CatalogAgent {
+  agent:   string;
+  label:   string;
+  max_pts: number;
+  file:    string;
+  fn:      string;
+}
+
+interface CatalogEntry {
+  label:                string;
+  category:             string;
+  description:          string;
+  agents:               CatalogAgent[];
+  score_impact_formula: string;
+}
+
+interface CatalogResponse {
+  catalog:    Record<string, CatalogEntry>;
+  categories: string[];
+  total:      number;
+}
+
+interface RejectionRow {
+  id: number; symbol: string; agent: string; direction: string;
+  score: number; threshold: number; regime: string;
+  weak_signals: string[] | null;  // API returns array, not string
+  rejected_at: number;
+}
+
+interface PredictiveHitRow {
+  agent: string; direction: string; total: number;
+  hit_rate_4h: number; hit_rate_24h: number;
+  avg_move_4h: number; avg_move_24h: number;
+}
+
+interface LaneHealth {
+  lane: string; agent: string; label: string;
+  paused: boolean; pause_until?: number;
+  wr: number; trades: number;
+}
+
+interface AgentHealthData {
+  scan: {
+    running: boolean; cycle_count: number; last_scan_ts?: number;
+    next_scan_in_min?: number; last_error?: string; interval_minutes: number;
+  };
+  gate: {
+    active: boolean; gate_type: string; reason: string;
+    drawdown_pct?: number; dd_threshold?: number;
+    rar?: number; n_trades: number; stale: boolean;
+  };
+  lanes: LaneHealth[];
+  learning: {
+    cached_keys: number; cached_agents: string[];
+    blacklisted_count: number; blacklisted_coins: string[];
+    bl_directional: { symbol: string; direction: string }[];
+    last_run?: number; last_error?: string;
+  };
+}
+
+type SubTab = "overview" | "spot" | "futures" | "cross" | "regime" | "formulas" | "rejections" | "predictive";
 type SortBy = "win_rate" | "avg_pnl_pct" | "total_count" | "weight";
 
 const AGENT_TABS = [
@@ -58,7 +129,7 @@ const AGENT_TABS = [
   { key: "futures_agent3",   label: "Momentum",      color: "text-orange-700", bg: "bg-orange-100 border-orange-200" },
 ];
 
-// ── WeightBar ─────────────────────────────────────────────────────────────────
+// ── Small components ──────────────────────────────────────────────────────────
 
 function WeightBar({ weight }: { weight: number }) {
   const pct = Math.round(((weight - 0.7) / (1.5 - 0.7)) * 100);
@@ -74,8 +145,6 @@ function WeightBar({ weight }: { weight: number }) {
   );
 }
 
-// ── WinRateBadge ──────────────────────────────────────────────────────────────
-
 function WinRateBadge({ rate, total }: { rate: number; total: number }) {
   const cls = total < 5 ? "text-neutral-400" : rate >= 65 ? "text-green-600" : rate >= 50 ? "text-yellow-600" : "text-red-500";
   return (
@@ -85,8 +154,6 @@ function WinRateBadge({ rate, total }: { rate: number; total: number }) {
     </div>
   );
 }
-
-// ── ReliabilityBadge ──────────────────────────────────────────────────────────
 
 function ReliabilityBadge({ r }: { r: "high" | "medium" | "low" }) {
   const map = {
@@ -101,9 +168,155 @@ function ReliabilityBadge({ r }: { r: "high" | "medium" | "low" }) {
   );
 }
 
+// ── HitRateBar ────────────────────────────────────────────────────────────────
+
+function HitRateBar({ value, label, threshold = 50 }: { value: number; label: string; threshold?: number }) {
+  const pct = Math.min(100, Math.max(0, value));
+  const good = pct >= threshold;
+  const color = pct >= 60 ? "bg-green-500" : pct >= 45 ? "bg-yellow-400" : "bg-red-400";
+  const textColor = pct >= 60 ? "text-green-700" : pct >= 45 ? "text-yellow-600" : "text-red-600";
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] text-neutral-500 w-12 shrink-0">{label}</span>
+      <div className="flex-1 relative h-2 bg-neutral-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+        {/* Threshold marker at 50% */}
+        <div className="absolute top-0 bottom-0 w-px bg-neutral-400 opacity-60" style={{ left: `${threshold}%` }} />
+      </div>
+      <span className={`text-xs font-black tabular-nums w-10 text-right ${textColor}`}>{pct.toFixed(0)}%</span>
+      <span className="text-[10px]">{good ? "✓" : "✗"}</span>
+    </div>
+  );
+}
+
+// ── AgentHealthCards ──────────────────────────────────────────────────────────
+
+const LANE_ICONS: Record<string, string> = {
+  pre_gainer:   "🎯",
+  accumulation: "🪣",
+  momentum:     "⚡",
+  bigmover:     "🚀",
+};
+
+const LANE_COLORS: Record<string, string> = {
+  pre_gainer:   "border-blue-200 bg-blue-50",
+  accumulation: "border-purple-200 bg-purple-50",
+  momentum:     "border-orange-200 bg-orange-50",
+  bigmover:     "border-red-200 bg-red-50",
+};
+
+function AgentHealthCards({ health }: { health: AgentHealthData | null }) {
+  if (!health) return null;
+  const gateOpen = !health.gate.active;
+
+  return (
+    <div className="space-y-3">
+      {/* System status banner */}
+      <div className={`flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border ${gateOpen ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+        <span className={`text-sm font-bold ${gateOpen ? "text-green-700" : "text-red-700"}`}>
+          {gateOpen ? "🟢 Gate: Terbuka" : `🔴 Gate: ${health.gate.gate_type.replace("_", " ").toUpperCase()}`}
+        </span>
+        <span className="text-xs text-neutral-500">·</span>
+        <span className="text-xs text-neutral-600 font-mono">
+          Scan #{health.scan.cycle_count ?? "—"}
+        </span>
+        <span className="text-xs text-neutral-500">·</span>
+        <span className="text-xs text-neutral-600">
+          {health.scan.next_scan_in_min != null
+            ? `Berikutnya ${health.scan.next_scan_in_min.toFixed(1)} mnt`
+            : health.scan.last_scan_ts
+              ? `Terakhir ${new Date(health.scan.last_scan_ts * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}`
+              : "Belum scan"}
+        </span>
+        <span className="text-xs text-neutral-500">·</span>
+        <span className="text-xs font-bold text-indigo-600">
+          🧠 {health.learning.cached_keys} sinyal dipelajari
+        </span>
+        {health.learning.blacklisted_count > 0 && (
+          <>
+            <span className="text-xs text-neutral-500">·</span>
+            <span className="text-xs font-semibold text-orange-600">
+              ⛔ {health.learning.blacklisted_count} koin blacklist
+            </span>
+          </>
+        )}
+        {health.gate.drawdown_pct != null && (
+          <>
+            <span className="text-xs text-neutral-500">·</span>
+            <span className="text-xs text-neutral-500 tabular-nums">
+              DD {health.gate.drawdown_pct.toFixed(1)}% / {health.gate.dd_threshold}%
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* Gate warning when active */}
+      {health.gate.active && (
+        <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-xs text-red-700">
+          <span className="font-bold">⛔ Risk Gate Aktif: </span>{health.gate.reason}
+        </div>
+      )}
+
+      {/* Per-lane cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {health.lanes.map(lane => {
+          const wr = lane.wr * 100;
+          const wrColor = lane.trades < 10 ? "text-neutral-400" : wr >= 55 ? "text-green-600" : wr >= 40 ? "text-yellow-600" : "text-red-500";
+          return (
+            <div key={lane.lane} className={`rounded-xl border p-3 ${lane.paused ? "border-orange-300 bg-orange-50" : LANE_COLORS[lane.lane] ?? "bg-neutral-50 border-neutral-200"}`}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-base">{LANE_ICONS[lane.lane] ?? "📊"}</span>
+                {lane.paused ? (
+                  <span className="text-[9px] bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-full font-bold">PAUSED</span>
+                ) : (
+                  <span className="text-[9px] bg-green-100 text-green-700 border border-green-200 px-1.5 py-0.5 rounded-full font-bold">ACTIVE</span>
+                )}
+              </div>
+              <p className="text-xs font-bold text-neutral-800 mb-1">{lane.label}</p>
+              <div className="flex items-baseline gap-1">
+                <span className={`text-xl font-black tabular-nums ${wrColor}`}>
+                  {lane.trades >= 5 ? `${wr.toFixed(0)}%` : "—"}
+                </span>
+                <span className="text-[9px] text-neutral-400">WR</span>
+              </div>
+              <p className="text-[9px] text-neutral-400 mt-0.5">{lane.trades} trades rolling</p>
+              {lane.paused && lane.pause_until && (
+                <p className="text-[9px] text-orange-600 mt-1">
+                  Resume {new Date(lane.pause_until * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Blacklisted coins (when present) */}
+      {health.learning.blacklisted_coins.length > 0 && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3">
+          <p className="text-[10px] font-bold text-orange-700 uppercase tracking-wider mb-2">
+            ⛔ Koin Blacklist (3× SL berturut — 24h cooldown)
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {health.learning.blacklisted_coins.map(c => (
+              <span key={c} className="bg-orange-100 text-orange-800 border border-orange-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                {c.replace("USDT", "")}
+              </span>
+            ))}
+            {health.learning.bl_directional.map(b => (
+              <span key={`${b.symbol}-${b.direction}`} className="bg-orange-50 text-orange-600 border border-orange-200 text-[10px] px-2 py-0.5 rounded-full">
+                {b.symbol.replace("USDT", "")} {b.direction}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── UpdaterStatus ─────────────────────────────────────────────────────────────
 
-function UpdaterStatus({ state, onForce }: { state: UpdaterState | null; onForce: () => void }) {
+function LearningLoopStatus({ state, onForce }: { state: UpdaterState | null; onForce: () => void }) {
   const fmt = (ts?: number) => ts ? new Date(ts * 1000).toLocaleTimeString("id-ID") : "—";
   const items = [
     { label: "SPOT",        last: state?.spot?.last_run,    error: state?.spot?.last_error,    extra: state?.spot?.last_count != null ? `${state.spot.last_count} keys` : "" },
@@ -129,6 +342,9 @@ function UpdaterStatus({ state, onForce }: { state: UpdaterState | null; onForce
           </div>
         ))}
       </div>
+      <p className="text-[10px] text-neutral-400 mt-3">
+        Bobot naik/turun otomatis setiap siklus scan. Cross-agent blending aktif jika sinyal muncul di ≥2 agen.
+      </p>
     </div>
   );
 }
@@ -154,13 +370,14 @@ function SortTh({ col, label, sortBy, setSortBy, sortDir, setSortDir }: {
 
 // ── SignalTable ───────────────────────────────────────────────────────────────
 
-function SignalTable({ signals, agentKey, sortBy, setSortBy, sortDir, setSortDir }: {
+function SignalTable({ signals, agentKey, sortBy, setSortBy, sortDir, setSortDir, catalog }: {
   signals: SignalRow[];
   agentKey: string;
   sortBy: SortBy;
   setSortBy: (s: SortBy) => void;
   sortDir: "desc" | "asc";
   setSortDir: (d: "desc" | "asc") => void;
+  catalog?: CatalogResponse | null;
 }) {
   if (signals.length === 0) return (
     <div className="text-center py-10 text-neutral-400 text-sm">Belum ada data sinyal dengan filter ini</div>
@@ -181,12 +398,19 @@ function SignalTable({ signals, agentKey, sortBy, setSortBy, sortDir, setSortDir
             ? Object.values(s.agents)[0]
             : s.agents[agentKey];
           if (!agentData) return null;
+          // Prefer catalog human label over raw normalized key
+          const catEntry = catalog?.catalog?.[s.signal_key];
+          const displayLabel = catEntry?.label ?? s.signal_key.replace(/_/g, " ");
+          const catColor = catEntry ? "text-neutral-800" : "text-neutral-500";
           return (
             <div key={s.signal_key} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 px-4 py-2.5 items-center hover:bg-neutral-50">
               <div>
-                <p className="text-xs font-semibold text-neutral-800 font-mono truncate max-w-xs">
-                  {s.signal_key.replace(/_/g, " ")}
+                <p className={`text-xs font-semibold font-mono truncate max-w-xs ${catColor}`}>
+                  {displayLabel}
                 </p>
+                {catEntry && (
+                  <p className="text-[9px] text-neutral-400 font-normal mt-0.5">{s.signal_key}</p>
+                )}
                 {s.cross_weight && (
                   <span className="text-[9px] text-purple-600 font-semibold">
                     cross ×{s.cross_weight.toFixed(2)}
@@ -265,6 +489,422 @@ function CrossAgentTable({ signals }: { signals: CrossSignalRow[] }) {
   );
 }
 
+// ── RegimeHeatmap ─────────────────────────────────────────────────────────────
+
+const REGIME_COLORS: Record<string, string> = {
+  trending_up:   "bg-green-500",
+  trending_down: "bg-red-500",
+  ranging:       "bg-yellow-400",
+  volatile:      "bg-orange-500",
+  all:           "bg-blue-500",
+};
+
+function RegimeCell({ weight }: { weight: number | null }) {
+  if (weight === null) return <td className="px-2 py-2 text-center text-[9px] text-neutral-300">—</td>;
+  const dev = weight - 1.0;
+  const bg  = dev > 0.15 ? "bg-green-100 text-green-700" : dev < -0.15 ? "bg-red-100 text-red-700" : dev > 0.05 ? "bg-teal-50 text-teal-600" : dev < -0.05 ? "bg-orange-50 text-orange-600" : "bg-neutral-50 text-neutral-500";
+  return (
+    <td className={`px-2 py-2 text-center text-[10px] font-bold tabular-nums rounded ${bg}`}>
+      ×{weight.toFixed(2)}
+    </td>
+  );
+}
+
+function RegimeHeatmap({ regimeData }: { regimeData: RegimeResponse | null }) {
+  if (!regimeData) return <div className="text-center py-10 text-neutral-400 text-sm">Memuat data regime...</div>;
+  if (regimeData.signals.length === 0) return (
+    <div className="text-center py-10 text-neutral-400 text-sm">
+      Belum ada data regime-specific. Weight akan terbentuk setelah ≥3 trade per regime ter-close.
+    </div>
+  );
+  const REGIMES = ["all", "trending_up", "trending_down", "ranging", "volatile"];
+  const REGIME_LABELS: Record<string, string> = {
+    all: "All", trending_up: "Trending ↑", trending_down: "Trending ↓", ranging: "Ranging", volatile: "Volatile",
+  };
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs border-collapse">
+        <thead>
+          <tr className="bg-neutral-50 border-b border-neutral-200">
+            <th className="text-left px-3 py-2 font-bold text-neutral-500 uppercase text-[9px] tracking-wider min-w-[200px]">Signal</th>
+            {REGIMES.map(r => (
+              <th key={r} className="px-2 py-2 text-center text-[9px] font-bold text-neutral-500 uppercase tracking-wider">
+                <span className={`inline-block w-2 h-2 rounded-full mr-1 ${REGIME_COLORS[r] ?? "bg-neutral-400"}`} />
+                {REGIME_LABELS[r]}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-neutral-100">
+          {regimeData.signals.map(s => (
+            <tr key={s.signal_key} className="hover:bg-neutral-50">
+              <td className="px-3 py-2">
+                <span className="font-mono text-[11px] text-neutral-700">{s.signal_key.replace(/_/g, " ")}</span>
+              </td>
+              {REGIMES.map(r => <RegimeCell key={r} weight={s.regimes[r] ?? null} />)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="text-[10px] text-neutral-400 mt-3 px-1">
+        Hijau = weight &gt; 1.0 (profitable di regime ini). Merah = weight &lt; 1.0 (underperform).
+        Aktif sejak PLAN_v2 P3.5.
+      </p>
+    </div>
+  );
+}
+
+// ── FormulasTab ───────────────────────────────────────────────────────────────
+
+const CATEGORY_COLORS: Record<string, string> = {
+  volatility:    "bg-blue-50 border-blue-200 text-blue-700",
+  volume:        "bg-teal-50 border-teal-200 text-teal-700",
+  funding:       "bg-purple-50 border-purple-200 text-purple-700",
+  open_interest: "bg-orange-50 border-orange-200 text-orange-700",
+  momentum:      "bg-yellow-50 border-yellow-200 text-yellow-700",
+  structure:     "bg-neutral-50 border-neutral-200 text-neutral-600",
+  composite:     "bg-green-50 border-green-200 text-green-700",
+  magnitude:     "bg-red-50 border-red-200 text-red-700",
+  breakout:      "bg-cyan-50 border-cyan-200 text-cyan-700",
+  wyckoff:       "bg-indigo-50 border-indigo-200 text-indigo-700",
+};
+
+function FormulasTab({ catalog }: { catalog: CatalogResponse | null }) {
+  const [catFilter, setCatFilter] = useState<string>("all");
+  if (!catalog) return <div className="text-center py-10 text-neutral-400 text-sm">Memuat katalog...</div>;
+  const entries = Object.entries(catalog.catalog);
+  const filtered = catFilter === "all" ? entries : entries.filter(([, e]) => e.category === catFilter);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-1.5">
+        <button onClick={() => setCatFilter("all")}
+          className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-all ${catFilter === "all" ? "bg-neutral-800 text-white border-neutral-800" : "bg-white text-neutral-500 border-neutral-200"}`}>
+          All ({entries.length})
+        </button>
+        {catalog.categories.map(c => (
+          <button key={c} onClick={() => setCatFilter(c)}
+            className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-all capitalize ${catFilter === c ? "bg-neutral-800 text-white border-neutral-800" : `${CATEGORY_COLORS[c] ?? "bg-white text-neutral-500 border-neutral-200"}`}`}>
+            {c.replace(/_/g, " ")}
+          </button>
+        ))}
+      </div>
+      <div className="grid gap-3">
+        {filtered.map(([key, entry]) => (
+          <div key={key} className="bg-white border border-neutral-200 rounded-xl p-4">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="font-bold text-sm text-neutral-800">{entry.label}</span>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border capitalize ${CATEGORY_COLORS[entry.category] ?? "bg-neutral-50 border-neutral-200 text-neutral-500"}`}>
+                    {entry.category.replace(/_/g, " ")}
+                  </span>
+                </div>
+                <code className="text-[9px] text-neutral-400 font-mono">{key}</code>
+              </div>
+              <span className="text-[9px] text-neutral-400 bg-neutral-50 px-2 py-1 rounded-lg font-mono whitespace-nowrap">
+                {entry.score_impact_formula}
+              </span>
+            </div>
+            <p className="text-xs text-neutral-600 mb-3">{entry.description}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {entry.agents.map(a => (
+                <div key={a.agent} className="bg-neutral-50 rounded-lg px-2 py-1 text-[10px]">
+                  <span className="font-bold text-neutral-700">{a.label}</span>
+                  <span className="text-neutral-400"> · max {a.max_pts} pts · </span>
+                  <code className="text-teal-600 text-[9px]">{a.fn}()</code>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── PredictivePanel ───────────────────────────────────────────────────────────
+
+function PredictivePanel({ data }: { data: PredictiveHitRow[] | null }) {
+  if (!data) return (
+    <div className="flex items-center justify-center py-16 text-neutral-400 gap-2">
+      <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+      Memuat...
+    </div>
+  );
+  if (data.length === 0) return (
+    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-6 text-center space-y-2">
+      <p className="text-2xl">🔮</p>
+      <p className="text-sm font-bold text-indigo-800">Belum ada prediction yang resolve</p>
+      <p className="text-xs text-indigo-600">
+        Sistem mencatat setiap kandidat yang di-scan. Setelah 4h dan 24h,
+        harga dicek apakah bergerak ke arah yang diprediksi.
+        Predictions resolve otomatis setiap ~24 menit.
+      </p>
+      <p className="text-[10px] text-indigo-400 mt-2">
+        Hit threshold: 4h ≥1.5% · 24h ≥3.0%
+      </p>
+    </div>
+  );
+
+  // Compute overall quality
+  const totalRows = data.length;
+  const avgHit4h  = data.reduce((s, r) => s + r.hit_rate_4h, 0) / totalRows;
+  const bestRow   = [...data].sort((a, b) => b.hit_rate_4h - a.hit_rate_4h)[0];
+  const totalPred = data.reduce((s, r) => s + r.total, 0);
+  const overallQuality = avgHit4h >= 55 ? "SANGAT BAIK" : avgHit4h >= 45 ? "BAIK" : avgHit4h >= 35 ? "CUKUP" : "PERLU PERBAIKAN";
+  const qualityColor = avgHit4h >= 55 ? "text-green-700 bg-green-50 border-green-200" : avgHit4h >= 45 ? "text-teal-700 bg-teal-50 border-teal-200" : avgHit4h >= 35 ? "text-yellow-700 bg-yellow-50 border-yellow-200" : "text-red-700 bg-red-50 border-red-200";
+
+  // Group by agent label
+  const AGENT_SHORT: Record<string, string> = {
+    "futures_agent1": "Pre-Gainer",
+    "futures_agent2": "Accumulation",
+    "futures_agent3": "Momentum",
+    "futures_agent_bigmover": "BigMover",
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Quality summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className={`rounded-xl border px-4 py-3 ${qualityColor}`}>
+          <p className="text-[10px] font-bold uppercase tracking-wider mb-1">Kualitas 4h</p>
+          <p className="text-xl font-black tabular-nums">{avgHit4h.toFixed(0)}%</p>
+          <p className="text-[10px] font-semibold mt-0.5">{overallQuality}</p>
+        </div>
+        <div className="bg-white border border-neutral-200 rounded-xl px-4 py-3">
+          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1">Total Resolved</p>
+          <p className="text-xl font-black text-neutral-800 tabular-nums">{totalPred}</p>
+          <p className="text-[10px] text-neutral-400 mt-0.5">predictions</p>
+        </div>
+        <div className="bg-white border border-neutral-200 rounded-xl px-4 py-3">
+          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1">Best Agent</p>
+          <p className="text-sm font-black text-neutral-800">{AGENT_SHORT[bestRow.agent] ?? bestRow.agent.replace("futures_", "")}</p>
+          <p className="text-[10px] text-green-600 font-semibold mt-0.5">{bestRow.direction} · {bestRow.hit_rate_4h.toFixed(0)}% hit 4h</p>
+        </div>
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+          <p className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider mb-1">Threshold Hit</p>
+          <p className="text-xs text-indigo-700 font-semibold">4h: ≥1.5% move</p>
+          <p className="text-xs text-indigo-700 font-semibold">24h: ≥3.0% move</p>
+        </div>
+      </div>
+
+      {/* Per-agent hit rate bars */}
+      <div className="bg-white border border-neutral-200 rounded-xl p-4 space-y-4">
+        <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Hit Rate per Agen & Arah</p>
+        {data.map(row => {
+          const agentLabel = AGENT_SHORT[row.agent] ?? row.agent.replace("futures_", "");
+          const dirColor = row.direction === "LONG" ? "text-green-600 bg-green-50 border-green-200" : "text-red-600 bg-red-50 border-red-200";
+          return (
+            <div key={`${row.agent}-${row.direction}`} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-neutral-700 w-28">{agentLabel}</span>
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${dirColor}`}>
+                  {row.direction}
+                </span>
+                <span className="text-[10px] text-neutral-400">{row.total} predictions</span>
+              </div>
+              <div className="pl-4 space-y-1.5">
+                <HitRateBar value={row.hit_rate_4h}  label="4h hit"  threshold={50} />
+                <HitRateBar value={row.hit_rate_24h} label="24h hit" threshold={45} />
+                <div className="flex gap-4 text-[10px] text-neutral-400 mt-1">
+                  <span>avg 4h move: <span className={`font-semibold ${row.avg_move_4h > 0 ? "text-green-600" : "text-red-500"}`}>{row.avg_move_4h > 0 ? "+" : ""}{row.avg_move_4h.toFixed(1)}%</span></span>
+                  <span>avg 24h move: <span className={`font-semibold ${row.avg_move_24h > 0 ? "text-green-600" : "text-red-500"}`}>{row.avg_move_24h > 0 ? "+" : ""}{row.avg_move_24h.toFixed(1)}%</span></span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="text-[10px] text-neutral-400 px-1">
+        Garis vertikal di bar = threshold baseline (50% untuk 4h, 45% untuk 24h).
+        Data ini akan digunakan untuk fine-tune weight agen secara proaktif (PLAN_v4 P2.3).
+      </p>
+    </div>
+  );
+}
+
+// ── AdaptiveLearningTutorial ──────────────────────────────────────────────────
+
+function AdaptiveLearningTutorial({
+  onClose,
+  health,
+  predictive,
+}: {
+  onClose: () => void;
+  health:     AgentHealthData | null;
+  predictive: PredictiveHitRow[] | null;
+}) {
+  const [dontShow, setDontShow] = useState(false);
+
+  const handleClose = () => {
+    if (dontShow) localStorage.setItem("signals_tutorial_dismissed", "1");
+    onClose();
+  };
+
+  const learnedKeys = health?.learning.cached_keys ?? 0;
+  const blacklisted = health?.learning.blacklisted_count ?? 0;
+  const totalPred   = predictive?.reduce((s, r) => s + r.total, 0) ?? 0;
+  const avgHit4h    = predictive && predictive.length > 0
+    ? predictive.reduce((s, r) => s + r.hit_rate_4h, 0) / predictive.length
+    : null;
+
+  const steps = [
+    {
+      icon: "🔍",
+      title: "Scan Universe",
+      desc: "Setiap 15 menit, 100 coin Binance Futures di-scan. 7 sinyal TA dihitung per coin (BB Squeeze, Volume, OI, Funding, dsb).",
+      color: "border-blue-200 bg-blue-50",
+      text: "text-blue-700",
+    },
+    {
+      icon: "📊",
+      title: "Score & Filter",
+      desc: "Tiap sinyal punya weight (×0.7–×1.5). Score = Σ(poin × weight). Hanya coin di atas threshold (52 pts) yang masuk paper trade.",
+      color: "border-teal-200 bg-teal-50",
+      text: "text-teal-700",
+    },
+    {
+      icon: "📝",
+      title: "Paper Trade",
+      desc: "Kandidat dicatat dengan harga entry, SL, TP, dan leverage. Monitor mengecek SL/TP setiap menit — simulasi live trading.",
+      color: "border-purple-200 bg-purple-50",
+      text: "text-purple-700",
+    },
+    {
+      icon: "🧠",
+      title: "Weight Update",
+      desc: "Setelah trade close, weight naik jika TP hit, turun jika SL hit. Sinyal yang sering benar mendapat skor lebih besar di scan berikutnya.",
+      color: "border-orange-200 bg-orange-50",
+      text: "text-orange-700",
+    },
+    {
+      icon: "🔮",
+      title: "Predictive Log",
+      desc: "Setiap kandidat (TP/SL atau tidak) dicatat. Setelah 4h & 24h, harga dicek. Mengukur akurasi TA murni — bukan hanya trade yang masuk.",
+      color: "border-indigo-200 bg-indigo-50",
+      text: "text-indigo-700",
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 text-white rounded-t-2xl p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] text-neutral-400 uppercase tracking-wider font-semibold mb-1">Tutorial</p>
+              <h2 className="text-xl font-black">Bagaimana Adaptive Learning Bekerja?</h2>
+              <p className="text-sm text-neutral-400 mt-1">
+                Sistem ini seperti LLM yang terus belajar dari hasil trading —
+                sinyal yang profitable dapat bobot lebih, sinyal yang sering loss dikurangi.
+              </p>
+            </div>
+            <button onClick={handleClose} className="text-neutral-400 hover:text-white transition-colors shrink-0 text-xl leading-none mt-1">×</button>
+          </div>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Loop diagram */}
+          <div className="flex flex-wrap items-center justify-center gap-1.5 py-2">
+            {steps.map((step, i) => (
+              <div key={step.title} className="flex items-center gap-1.5">
+                <div className={`flex flex-col items-center rounded-xl border px-3 py-2.5 ${step.color} min-w-[90px]`}>
+                  <span className="text-xl mb-1">{step.icon}</span>
+                  <span className={`text-[10px] font-black uppercase tracking-wide ${step.text}`}>{step.title}</span>
+                </div>
+                {i < steps.length - 1 && <span className="text-neutral-300 font-bold">→</span>}
+              </div>
+            ))}
+          </div>
+
+          {/* Step descriptions */}
+          <div className="grid grid-cols-1 gap-2">
+            {steps.map(step => (
+              <div key={step.title} className={`flex gap-3 rounded-xl border p-3 ${step.color}`}>
+                <span className="text-base shrink-0 mt-0.5">{step.icon}</span>
+                <div>
+                  <p className={`text-xs font-bold mb-0.5 ${step.text}`}>{step.title}</p>
+                  <p className="text-[11px] text-neutral-600 leading-relaxed">{step.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Current stats */}
+          {(learnedKeys > 0 || totalPred > 0) && (
+            <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+              <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-3">Status Sistem Saat Ini</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="text-center">
+                  <p className="text-2xl font-black text-indigo-600 tabular-nums">{learnedKeys}</p>
+                  <p className="text-[9px] text-neutral-400 uppercase font-semibold mt-0.5">Sinyal Dipelajari</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-black text-orange-500 tabular-nums">{blacklisted}</p>
+                  <p className="text-[9px] text-neutral-400 uppercase font-semibold mt-0.5">Koin Blacklist</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-black text-blue-600 tabular-nums">{totalPred}</p>
+                  <p className="text-[9px] text-neutral-400 uppercase font-semibold mt-0.5">Predictions Logged</p>
+                </div>
+                <div className="text-center">
+                  <p className={`text-2xl font-black tabular-nums ${avgHit4h == null ? "text-neutral-400" : avgHit4h >= 50 ? "text-green-600" : "text-yellow-600"}`}>
+                    {avgHit4h != null ? `${avgHit4h.toFixed(0)}%` : "—"}
+                  </p>
+                  <p className="text-[9px] text-neutral-400 uppercase font-semibold mt-0.5">Avg 4h Hit Rate</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tabs guide */}
+          <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
+            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-3">Panduan Tab</p>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { tab: "📊 Overview",    desc: "Status live: gate, lane WR, learning loop" },
+                { tab: "🎯 SPOT",        desc: "Sinyal yang dipelajari agen SPOT scanner"   },
+                { tab: "⚡ Futures",     desc: "Sinyal futures (Pre-Gainer, Accum, Momentum)" },
+                { tab: "🔗 Cross-Agent", desc: "Sinyal yang muncul di ≥2 agen — lebih reliable" },
+                { tab: "🌡 Regime",      desc: "Weight per market regime (trending/ranging)" },
+                { tab: "🔬 Formulas",    desc: "Detail rumus & kategori setiap sinyal"       },
+                { tab: "🚫 Rejections",  desc: "Kandidat yang tidak lolos threshold kemarin"  },
+                { tab: "🔮 Predictive",  desc: "Akurasi prediksi 4h & 24h per agen"          },
+              ].map(item => (
+                <div key={item.tab} className="flex gap-2">
+                  <span className="text-[10px] font-bold text-neutral-700 shrink-0 w-24">{item.tab}</span>
+                  <span className="text-[10px] text-neutral-500">{item.desc}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="flex items-center justify-between pt-1">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="rounded"
+                checked={dontShow}
+                onChange={e => setDontShow(e.target.checked)}
+              />
+              <span className="text-[11px] text-neutral-500">Jangan tampilkan lagi</span>
+            </label>
+            <button
+              onClick={handleClose}
+              className="bg-neutral-900 text-white text-xs font-bold px-5 py-2 rounded-xl hover:bg-neutral-700 transition-colors">
+              Mengerti
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SignalsPage() {
@@ -273,26 +913,77 @@ export default function SignalsPage() {
   const [sortBy,      setSortBy]      = useState<SortBy>("win_rate");
   const [sortDir,     setSortDir]     = useState<"desc" | "asc">("desc");
   const [minTrades,   setMinTrades]   = useState(3);
-  const [perfData,    setPerfData]    = useState<PerformanceResponse | null>(null);
-  const [crossData,   setCrossData]   = useState<CrossResponse | null>(null);
-  const [updaterState,setUpdaterState]= useState<UpdaterState | null>(null);
-  const [loading,     setLoading]     = useState(true);
-  const [forceMsg,    setForceMsg]    = useState<string | null>(null);
+
+  const [perfData,       setPerfData]       = useState<PerformanceResponse | null>(null);
+  const [crossData,      setCrossData]      = useState<CrossResponse | null>(null);
+  const [regimeData,     setRegimeData]     = useState<RegimeResponse | null>(null);
+  const [catalogData,    setCatalogData]    = useState<CatalogResponse | null>(null);
+  const [updaterState,   setUpdaterState]   = useState<UpdaterState | null>(null);
+  const [rejectionsData, setRejectionsData] = useState<RejectionRow[] | null>(null);
+  const [predictiveData, setPredictiveData] = useState<PredictiveHitRow[] | null>(null);
+  const [agentHealth,    setAgentHealth]    = useState<AgentHealthData | null>(null);
+  const [loading,        setLoading]        = useState(true);
+  const [forceMsg,       setForceMsg]       = useState<string | null>(null);
+  const [showTutorial,   setShowTutorial]   = useState(false);
+
+  // Auto-show tutorial on first visit
+  useEffect(() => {
+    if (typeof window !== "undefined" && !localStorage.getItem("signals_tutorial_dismissed")) {
+      setShowTutorial(true);
+    }
+  }, []);
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [perfRes, crossRes, stateRes] = await Promise.all([
+      const [perfRes, crossRes, stateRes, catalogRes, healthRes] = await Promise.all([
         fetch(`/api/v1/signals/performance?agent=all&regime=all&min_trades=${minTrades}&sort_by=${sortBy}&sort_dir=${sortDir}&limit=50`),
         fetch(`/api/v1/signals/cross_agent?min_trades=5`),
         fetch("/api/v1/signals/updater/state"),
+        fetch("/api/v1/signals/catalog"),
+        fetch("/api/v1/signals/agent_health"),
       ]);
-      if (perfRes.ok)  setPerfData(await perfRes.json() as PerformanceResponse);
-      if (crossRes.ok) setCrossData(await crossRes.json() as CrossResponse);
-      if (stateRes.ok) setUpdaterState(await stateRes.json() as UpdaterState);
+      if (perfRes.ok)    setPerfData(await perfRes.json() as PerformanceResponse);
+      if (crossRes.ok)   setCrossData(await crossRes.json() as CrossResponse);
+      if (stateRes.ok)   setUpdaterState(await stateRes.json() as UpdaterState);
+      if (catalogRes.ok) setCatalogData(await catalogRes.json() as CatalogResponse);
+      if (healthRes.ok)  setAgentHealth(await healthRes.json() as AgentHealthData);
     } catch { /* stale */ }
     finally { if (!silent) setLoading(false); }
   }, [minTrades, sortBy, sortDir]);
+
+  const fetchRegime = useCallback(async () => {
+    try {
+      const r = await fetch("/api/v1/signals/regime_heatmap?limit=30");
+      if (r.ok) setRegimeData(await r.json() as RegimeResponse);
+    } catch { /* stale */ }
+  }, []);
+
+  const fetchRejections = useCallback(async () => {
+    try {
+      const r = await fetch("/api/v1/signals/rejections?hours=24&limit=100");
+      if (r.ok) {
+        const d = await r.json() as { rejections: RejectionRow[] };
+        setRejectionsData(d.rejections ?? []);
+      }
+    } catch { /* stale */ }
+  }, []);
+
+  const fetchPredictive = useCallback(async () => {
+    try {
+      const r = await fetch("/api/v1/predictive/hit_rate?hours=168");
+      if (r.ok) {
+        const d = await r.json() as { by_agent: PredictiveHitRow[] };
+        setPredictiveData(d.by_agent ?? []);
+      }
+    } catch { /* stale */ }
+  }, []);
+
+  useEffect(() => {
+    if (subTab === "regime"     && !regimeData)     void fetchRegime();
+    if (subTab === "rejections" && !rejectionsData) void fetchRejections();
+    if (subTab === "predictive" && !predictiveData) void fetchPredictive();
+  }, [subTab, regimeData, rejectionsData, predictiveData, fetchRegime, fetchRejections, fetchPredictive]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
@@ -309,26 +1000,28 @@ export default function SignalsPage() {
     setTimeout(() => setForceMsg(null), 5000);
   };
 
-  const allSignals = perfData?.signals ?? [];
-  const spotSignals = allSignals.filter(s => s.agents["opportunity_spot"]);
-  const futSignals  = allSignals.filter(s =>
+  const allSignals   = perfData?.signals ?? [];
+  const spotSignals  = useMemo(() => allSignals.filter(s => s.agents["opportunity_spot"]), [allSignals]);
+  const futSignals   = useMemo(() => allSignals.filter(s =>
     s.agents["futures_agent1"] || s.agents["futures_agent2"] || s.agents["futures_agent3"]
-  );
+  ), [allSignals]);
   const crossSignals = crossData?.signals ?? [];
 
-  const topSpot    = [...allSignals].filter(s => s.agents["opportunity_spot"]).slice(0, 3);
-  const topFutures = [...allSignals].filter(s =>
-    s.agents["futures_agent1"] || s.agents["futures_agent2"] || s.agents["futures_agent3"]
-  ).slice(0, 3);
-  const topCross   = crossSignals.filter(s => s.reliability === "high").slice(0, 3);
+  const topSpot    = useMemo(() => spotSignals.slice(0, 3), [spotSignals]);
+  const topFutures = useMemo(() => futSignals.slice(0, 3), [futSignals]);
+  const topCross   = useMemo(() => crossSignals.filter(s => s.reliability === "high").slice(0, 3), [crossSignals]);
 
   const subTabBar = (
-    <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl w-fit">
+    <div className="flex flex-wrap gap-1 bg-neutral-100 p-1 rounded-xl w-fit">
       {([
-        { key: "overview", label: "📊 Overview"    },
-        { key: "spot",     label: "🎯 SPOT"        },
-        { key: "futures",  label: "⚡ Futures"     },
-        { key: "cross",    label: "🔗 Cross-Agent" },
+        { key: "overview",    label: "📊 Overview"    },
+        { key: "spot",        label: "🎯 SPOT"        },
+        { key: "futures",     label: "⚡ Futures"     },
+        { key: "cross",       label: "🔗 Cross-Agent" },
+        { key: "regime",      label: "🌡 Regime"      },
+        { key: "formulas",    label: "🔬 Formulas"    },
+        { key: "rejections",  label: "🚫 Rejections"  },
+        { key: "predictive",  label: "🔮 Predictive"  },
       ] as { key: SubTab; label: string }[]).map(t => (
         <button key={t.key} onClick={() => setSubTab(t.key)}
           className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${subTab === t.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}>
@@ -340,17 +1033,35 @@ export default function SignalsPage() {
 
   return (
     <div className="space-y-5 max-w-6xl">
+      {showTutorial && (
+        <AdaptiveLearningTutorial
+          onClose={() => setShowTutorial(false)}
+          health={agentHealth}
+          predictive={predictiveData}
+        />
+      )}
+
       {/* Header */}
       <div className="rounded-2xl bg-gradient-to-br from-neutral-900 via-neutral-800 to-neutral-900 text-white p-5">
-        <p className="text-xs text-neutral-400 uppercase tracking-wider font-semibold mb-1">🧠 Adaptive Learning</p>
-        <h1 className="text-2xl font-black mb-1">Signal Performance</h1>
-        <p className="text-sm text-neutral-400">
-          Setiap sinyal dilacak dari entry → close. Weight naik bila sinyal profitable,
-          turun bila sering loss. Agents saling belajar via cross-agent blending.
-        </p>
-        {forceMsg && (
-          <p className="mt-2 text-xs text-teal-300 font-semibold">{forceMsg}</p>
-        )}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs text-neutral-400 uppercase tracking-wider font-semibold mb-1">🧠 Adaptive Learning Engine</p>
+            <h1 className="text-2xl font-black mb-1">Signal Performance</h1>
+            <p className="text-sm text-neutral-400">
+              Setiap sinyal dilacak dari entry → close. Weight naik bila profitable, turun bila sering loss.
+              Agents saling belajar via cross-agent blending. Predictive log mengukur akurasi di luar paper trade.
+            </p>
+            {forceMsg && (
+              <p className="mt-2 text-xs text-teal-300 font-semibold">{forceMsg}</p>
+            )}
+          </div>
+          <button
+            onClick={() => setShowTutorial(true)}
+            className="shrink-0 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm font-black transition-colors flex items-center justify-center"
+            title="Cara kerja adaptive learning">
+            ?
+          </button>
+        </div>
       </div>
 
       {subTabBar}
@@ -365,6 +1076,9 @@ export default function SignalsPage() {
           {/* ── OVERVIEW ─────────────────────────────────────────────────── */}
           {subTab === "overview" && (
             <div className="space-y-5">
+              {/* Agent health cards */}
+              <AgentHealthCards health={agentHealth} />
+
               {/* Summary strip */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
@@ -397,7 +1111,7 @@ export default function SignalsPage() {
                           <div key={s.signal_key} className="flex items-center justify-between py-1.5 border-b border-neutral-50 last:border-0">
                             <div className="flex-1 min-w-0">
                               <p className="text-[11px] font-semibold text-neutral-700 truncate font-mono">
-                                {s.signal_key.replace(/_/g, " ")}
+                                {catalogData?.catalog?.[s.signal_key]?.label ?? s.signal_key.replace(/_/g, " ")}
                               </p>
                               <p className="text-[9px] text-neutral-400">{s.agent_count} agen · {s.cross_total} trades</p>
                             </div>
@@ -414,7 +1128,7 @@ export default function SignalsPage() {
                             <div key={s.signal_key} className="flex items-center justify-between py-1.5 border-b border-neutral-50 last:border-0">
                               <div className="flex-1 min-w-0">
                                 <p className="text-[11px] font-semibold text-neutral-700 truncate font-mono">
-                                  {s.signal_key.replace(/_/g, " ")}
+                                  {catalogData?.catalog?.[s.signal_key]?.label ?? s.signal_key.replace(/_/g, " ")}
                                 </p>
                                 <WeightBar weight={d.weight} />
                               </div>
@@ -428,8 +1142,8 @@ export default function SignalsPage() {
                 ))}
               </div>
 
-              {/* Updater status */}
-              <UpdaterStatus state={updaterState} onForce={handleForce} />
+              {/* Learning loop status */}
+              <LearningLoopStatus state={updaterState} onForce={handleForce} />
             </div>
           )}
 
@@ -448,7 +1162,8 @@ export default function SignalsPage() {
                 </div>
               </div>
               <SignalTable signals={spotSignals} agentKey="opportunity_spot"
-                sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir} />
+                sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir}
+                catalog={catalogData} />
             </div>
           )}
 
@@ -477,6 +1192,7 @@ export default function SignalsPage() {
                 signals={futSignals.filter(s => s.agents[agentFilter])}
                 agentKey={agentFilter}
                 sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir}
+                catalog={catalogData}
               />
             </div>
           )}
@@ -494,6 +1210,107 @@ export default function SignalsPage() {
                 </p>
               </div>
               <CrossAgentTable signals={crossSignals} />
+            </div>
+          )}
+
+          {/* ── REGIME HEATMAP ────────────────────────────────────────────── */}
+          {subTab === "regime" && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                <p className="font-bold text-blue-800 mb-1">🌡 Regime-Conditional Weights</p>
+                <p className="text-xs text-blue-600">
+                  Setiap sinyal ditrack terpisah per market regime (trending_up, trending_down, ranging, volatile).
+                  Agent membaca weight per-regime saat scoring — sinyal bagus di <em>trending_up</em>
+                  tapi buruk di <em>volatile</em> akan di-downweight otomatis saat market volatile.
+                  Data muncul setelah ≥3 trade per regime ter-close.
+                </p>
+              </div>
+              <RegimeHeatmap regimeData={regimeData} />
+            </div>
+          )}
+
+          {/* ── FORMULAS ──────────────────────────────────────────────────── */}
+          {subTab === "formulas" && (
+            <div className="space-y-4">
+              <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4">
+                <p className="font-bold text-teal-800 mb-1">🔬 Signal Formula Catalog</p>
+                <p className="text-xs text-teal-600">
+                  Setiap sinyal dipetakan ke agent, file, dan fungsi yang menggunakannya.
+                  Impact simulator: weight ×1.5 pada sinyal dengan max_pts=35 → +2.45 pts (formula: (w−1.0)×7).
+                </p>
+              </div>
+              <FormulasTab catalog={catalogData} />
+            </div>
+          )}
+
+          {/* ── REJECTIONS ────────────────────────────────────────────────── */}
+          {subTab === "rejections" && (
+            <div className="space-y-4">
+              <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+                <p className="font-bold text-red-800 mb-1">🚫 Rejection Log (24h)</p>
+                <p className="text-xs text-red-600">
+                  Koin yang discan tapi tidak lolos threshold. Kolom "Gap" = selisih score vs threshold —
+                  makin kecil gapnya, makin dekat koin itu dengan entry.
+                  Weak signals = sinyal dengan weight terendah yang menghambat skor.
+                </p>
+              </div>
+              {!rejectionsData ? (
+                <div className="text-center py-10 text-neutral-400 text-sm">Memuat...</div>
+              ) : rejectionsData.length === 0 ? (
+                <div className="text-center py-10 text-neutral-400 text-sm">Tidak ada rejection dalam 24h terakhir</div>
+              ) : (
+                <div className="overflow-hidden rounded-xl border border-neutral-200">
+                  <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 px-4 py-2 bg-neutral-50 border-b border-neutral-200 text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
+                    <span>Symbol / Agent</span>
+                    <span className="text-right">Score</span>
+                    <span className="text-right">Gap</span>
+                    <span>Regime</span>
+                    <span>Waktu</span>
+                  </div>
+                  <div className="divide-y divide-neutral-100 max-h-[500px] overflow-y-auto">
+                    {rejectionsData.map(r => {
+                      const gap = r.threshold - r.score;
+                      const gapColor = gap < 5 ? "text-yellow-600" : gap < 10 ? "text-orange-500" : "text-red-500";
+                      // weak_signals is string[] from API
+                      const weakList = Array.isArray(r.weak_signals)
+                        ? r.weak_signals.slice(0, 2).join(", ")
+                        : (r.weak_signals ?? "");
+                      return (
+                        <div key={r.id} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-3 px-4 py-2.5 items-start hover:bg-neutral-50">
+                          <div>
+                            <p className="text-xs font-bold text-neutral-800">
+                              {r.symbol}
+                              <span className={`ml-1.5 text-[9px] font-semibold ${r.direction === "LONG" ? "text-green-600" : "text-red-500"}`}>
+                                {r.direction}
+                              </span>
+                            </p>
+                            <p className="text-[9px] text-neutral-400">{r.agent.replace("futures_", "")} · {weakList}</p>
+                          </div>
+                          <p className="text-xs font-mono tabular-nums text-neutral-600 text-right">{r.score.toFixed(1)}</p>
+                          <p className={`text-xs font-bold tabular-nums text-right ${gapColor}`}>-{gap.toFixed(1)}</p>
+                          <span className="text-[9px] bg-neutral-100 text-neutral-500 px-1.5 py-0.5 rounded-full self-start">{r.regime}</span>
+                          <p className="text-[9px] text-neutral-400 tabular-nums">{new Date(r.rejected_at * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── PREDICTIVE ────────────────────────────────────────────────── */}
+          {subTab === "predictive" && (
+            <div className="space-y-4">
+              <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
+                <p className="font-bold text-indigo-800 mb-1">🔮 Predictive Accuracy (7 hari)</p>
+                <p className="text-xs text-indigo-600">
+                  Setiap kandidat entry dicatat saat scan. 4h dan 24h kemudian sistem mengecek apakah harga bergerak
+                  ke arah yang diprediksi (hit 4h = ≥1.5%, hit 24h = ≥3.0%). Data ini mengukur apakah agen
+                  semakin pintar dalam memprediksi pergerakan harga, terlepas dari apakah trade dibuka atau tidak.
+                </p>
+              </div>
+              <PredictivePanel data={predictiveData} />
             </div>
           )}
         </>

@@ -35,17 +35,18 @@ class FuturesData:
     funding_rate:     float = 0.0   # latest funding rate (e.g. 0.001 = 0.1%)
     funding_rate_avg: float = 0.0   # 8h avg funding rate
     oi_usdt:          float = 0.0   # current open interest in USDT
-    oi_change_pct:    float = 0.0   # OI change % last 1h
+    oi_change_pct:    float = 0.0   # OI change % last 1h (delta_1)
+    oi_change_pct_prev: float = 0.0 # OI change % previous 1h (delta_2, for acceleration detection)
     liq_long_usdt:    float = 0.0   # long liquidations last 1h (USDT)
     liq_short_usdt:   float = 0.0   # short liquidations last 1h (USDT)
 
 
 # ── Fetch helpers ──────────────────────────────────────────────────────────────
 
-async def _fetch_klines(client: httpx.AsyncClient, symbol: str, tf: str) -> list:
+async def _fetch_klines(client: httpx.AsyncClient, symbol: str, tf: str, limit: int = CANDLE_LIMIT) -> list:
     try:
         r = await client.get(
-            fapi(f"/fapi/v1/klines?symbol={symbol}&interval={tf}&limit={CANDLE_LIMIT}")
+            fapi(f"/fapi/v1/klines?symbol={symbol}&interval={tf}&limit={limit}")
         )
         if r.status_code == 200:
             d = r.json()
@@ -70,27 +71,40 @@ async def _fetch_funding(client: httpx.AsyncClient, symbol: str) -> tuple[float,
     return 0.0, 0.0
 
 
-async def _fetch_oi(client: httpx.AsyncClient, symbol: str) -> tuple[float, float]:
-    """(current_oi_usdt, oi_change_pct_1h)."""
+async def _fetch_oi(client: httpx.AsyncClient, symbol: str) -> tuple[float, float, float]:
+    """(current_oi_usdt, oi_change_pct_1h, oi_change_pct_prev_1h).
+
+    Fetches 3 snapshots to enable delta-of-delta acceleration detection:
+      delta_1 = most recent 1h OI change (hist[-1] vs hist[-2])
+      delta_2 = previous 1h OI change   (hist[-2] vs hist[-3])
+    Acceleration: delta_1 > delta_2 > 0 = consecutive growth = institutional conviction.
+    """
     try:
         r1 = await client.get(fapi(f"/fapi/v1/openInterest?symbol={symbol}"))
         if r1.status_code != 200:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
         current_oi = float(r1.json().get("openInterest", 0))
 
         r2 = await client.get(
-            fapi(f"/futures/data/openInterestHist?symbol={symbol}&period=1h&limit=2")
+            fapi(f"/futures/data/openInterestHist?symbol={symbol}&period=1h&limit=3")
         )
         if r2.status_code == 200:
             hist = r2.json()
-            if isinstance(hist, list) and len(hist) >= 2:
+            if isinstance(hist, list) and len(hist) >= 3:
+                oi0 = float(hist[0]["sumOpenInterest"])
+                oi1 = float(hist[1]["sumOpenInterest"])
+                oi2 = float(hist[2]["sumOpenInterest"])
+                delta_1 = (oi2 - oi1) / oi1 * 100 if oi1 > 0 else 0.0
+                delta_2 = (oi1 - oi0) / oi0 * 100 if oi0 > 0 else 0.0
+                return current_oi, delta_1, delta_2
+            elif isinstance(hist, list) and len(hist) >= 2:
                 prev = float(hist[0]["sumOpenInterest"])
                 curr = float(hist[-1]["sumOpenInterest"])
                 change = (curr - prev) / prev * 100 if prev > 0 else 0.0
-                return current_oi, change
-        return current_oi, 0.0
+                return current_oi, change, 0.0
+        return current_oi, 0.0, 0.0
     except Exception:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
 
 
 async def _fetch_liquidations(client: httpx.AsyncClient, symbol: str) -> tuple[float, float]:
@@ -143,15 +157,19 @@ async def fetch_symbol_data(
 
     try:
         # All futures-specific data fetched once (same regardless of TF)
-        kline_tasks   = {tf: asyncio.create_task(_fetch_klines(client, symbol, tf)) for tf in timeframes}
+        # 1h TF uses 200 candles for volume z-score baseline (P1.1)
+        kline_tasks   = {
+            tf: asyncio.create_task(_fetch_klines(client, symbol, tf, limit=200 if tf == "1h" else CANDLE_LIMIT))
+            for tf in timeframes
+        }
         funding_task  = asyncio.create_task(_fetch_funding(client, symbol))
         oi_task       = asyncio.create_task(_fetch_oi(client, symbol))
         liq_task      = asyncio.create_task(_fetch_liquidations(client, symbol))
 
         klines_map   = {tf: await task for tf, task in kline_tasks.items()}
-        funding, f_avg = await funding_task
-        oi_usdt, oi_chg = await oi_task
-        liq_l, liq_s    = await liq_task
+        funding, f_avg               = await funding_task
+        oi_usdt, oi_chg, oi_chg_prev = await oi_task
+        liq_l, liq_s                 = await liq_task
 
     finally:
         if own_client:
@@ -169,12 +187,13 @@ async def fetch_symbol_data(
             lows     = [float(k[3]) for k in klines],
             closes   = [float(k[4]) for k in klines],
             volumes  = [float(k[5]) for k in klines],
-            funding_rate     = funding,
-            funding_rate_avg = f_avg,
-            oi_usdt          = oi_usdt,
-            oi_change_pct    = oi_chg,
-            liq_long_usdt    = liq_l,
-            liq_short_usdt   = liq_s,
+            funding_rate       = funding,
+            funding_rate_avg   = f_avg,
+            oi_usdt            = oi_usdt,
+            oi_change_pct      = oi_chg,
+            oi_change_pct_prev = oi_chg_prev,
+            liq_long_usdt      = liq_l,
+            liq_short_usdt     = liq_s,
         )
         result[tf] = d
     return result

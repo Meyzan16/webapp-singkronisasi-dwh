@@ -43,7 +43,8 @@ from .data import FuturesData
 from .agent1 import (
     _ema, _rsi, _atr, _swing_lows, _swing_highs,
     _round_price, calc_leverage,
-    _bb_squeeze, _volume_accumulation, _candle_coil,
+    _bb_squeeze, _bb_squeeze_persistence, _volume_accumulation, _candle_coil,
+    _volume_zscore,
 )
 
 logger = structlog.get_logger(__name__)
@@ -189,9 +190,23 @@ def _score_accumulation(
         # Wrong direction for LONG pre-gainer
         score -= 10
 
-    # ── T0 on-chain: OI Confirmation (0-8 pts) ───────────────────────────────
+    # D3.6 (PLAN_v3): Wyckoff multi-TF confidence — require BOTH 4h and 1h to agree.
+    # Single-TF Wyckoff can be noisy; dual confirmation = much stronger signal.
+    if d4h and d1h and len(d4h.closes) >= 30 and len(d1h.closes) >= 30:
+        phase4h, _ = _wyckoff_phase(d4h.closes, d4h.volumes)
+        phase1h, _ = _wyckoff_phase(d1h.closes, d1h.volumes)
+        if phase4h == "accumulation" and phase1h == "accumulation":
+            score += 8
+            signals.append("🔵 Wyckoff Accumulation 4H+1H konfirmasi — dual-TF pre-markup conviction")
+        elif phase4h == "accumulation" and phase1h in ("markup", "neutral"):
+            score += 3   # 4h accumulation starting to mark up on 1h
+        elif phase4h == phase1h == "markup" and phase == "accumulation":
+            pass   # already gave markup pts above, avoid double-counting
+
+    # ── T0 on-chain: OI Confirmation (0-8 pts) + Acceleration (0-6 pts) ────────
     # OI rising during accumulation = institutions entering quietly
-    oi_chg = ref.oi_change_pct
+    oi_chg      = ref.oi_change_pct
+    oi_chg_prev = ref.oi_change_pct_prev
 
     if phase == "accumulation" and oi_chg > 2.0:
         score += 8
@@ -205,6 +220,11 @@ def _score_accumulation(
         signals.append(f"📊 OI +{oi_chg:.1f}% tanpa pergerakan harga — akumulasi tersembunyi")
     elif oi_chg < -2.0:
         score -= 4   # OI falling = exit / liquidation risk
+
+    # P1.2: OI acceleration during accumulation = institutional conviction building
+    if oi_chg > oi_chg_prev > 0:
+        score += 6
+        signals.append(f"📈 OI acceleration {oi_chg_prev:.1f}% → {oi_chg:.1f}% — momentum institusional membangun")
 
     # ── T1: Trend Setup (0-15 pts) ────────────────────────────────────────────
     # Recovering / flat trend = pre-move ideal, uptrend = markup already started
@@ -255,6 +275,7 @@ def _score_accumulation(
     # ── T2: S/R Breakout Zone (0-14 pts) ─────────────────────────────────────
     # Price near resistance = breakout catalyst within reach
     sr_found = False
+    _res_near_price = None
     for tf_key in ["4h", "1h", "15m"]:
         d = tf_map.get(tf_key)
         if not d or not d.lows or not d.highs:
@@ -269,6 +290,7 @@ def _score_accumulation(
             score    += 14
             signals.append(f"🎯 {dist:.1f}% ke resistance {tf_key} — breakout trigger zone")
             sr_found = True
+            _res_near_price = near_res[0]
             break
 
         # Also check: price bouncing off support (entry near support = safe LONG)
@@ -278,6 +300,19 @@ def _score_accumulation(
             signals.append(f"📍 Bouncing dari support {tf_key} — entry aman dengan SL jelas")
             sr_found = True
             break
+
+    # D3.4 (PLAN_v3): resistance test count bonus — level tested multiple times = proven.
+    # Count 1h candles whose high touched within 1% of the resistance level.
+    if _res_near_price and d1h and len(d1h.highs) >= 20:
+        _test_count = sum(
+            1 for h in d1h.highs[-50:]
+            if abs(h - _res_near_price) / _res_near_price < 0.01
+        )
+        if _test_count >= 5:
+            score += 4
+            signals.append(f"🏋 Resistance diuji {_test_count}× (1h) — level solid, breakout makin dekat")
+        elif _test_count >= 3:
+            score += 2
 
     # ── T2 on-chain: Volume at S/R zone (0-4 pts) ────────────────────────────
     if sr_found and ref.volumes:
@@ -291,9 +326,16 @@ def _score_accumulation(
     # BB Squeeze primary, vol accumulation, candle coil
     primary = d1h or d4h or d15
     if primary and primary.closes:
-        # BB Squeeze (primary compression signal)
-        is_sq4h, bw4h, label4h = _bb_squeeze(d4h.closes) if d4h else (False, 100.0, "none")
-        is_sq1h, bw1h, label1h = _bb_squeeze(primary.closes)
+        # D3.1 (PLAN_v3): compute ATR to feed adaptive BB thresholds
+        _atr_val = _atr(primary.highs, primary.lows, primary.closes, 14) if (
+            primary.highs and primary.lows and len(primary.closes) >= 14) else 0.0
+        _atr_pct = _atr_val / primary.closes[-1] * 100 if primary.closes[-1] > 0 else 0.0
+
+        # BB Squeeze (primary compression signal) — D3.1: ATR-adaptive thresholds
+        is_sq4h, bw4h, label4h = (
+            _bb_squeeze(d4h.closes, atr_pct=_atr_pct) if d4h else (False, 100.0, "none")
+        )
+        is_sq1h, bw1h, label1h = _bb_squeeze(primary.closes, atr_pct=_atr_pct)
 
         if label4h == "strong" and label1h in ("strong", "moderate"):
             score += 18
@@ -307,6 +349,15 @@ def _score_accumulation(
         elif label1h == "moderate":
             score += 6
 
+        # D3.5 (PLAN_v3): squeeze persistence bonus — longer compression = bigger breakout energy
+        if label1h in ("strong", "moderate"):
+            _persist = _bb_squeeze_persistence(primary.closes, atr_pct=_atr_pct)
+            if _persist >= 8:
+                score += 5
+                signals.append(f"🔵 Squeeze {_persist} candle beruntun (1H) — energi terkompresi lama")
+            elif _persist >= 5:
+                score += 3
+
         # Volume accumulation (smart money buying quietly)
         is_accum, vol_r, accum_label = _volume_accumulation(primary.closes, primary.volumes)
         if accum_label == "strong":
@@ -314,6 +365,16 @@ def _score_accumulation(
             signals.append(f"📦 Volume akumulasi {vol_r:.1f}× — smart money entry senyap")
         elif accum_label == "moderate":
             score += 4
+
+        # P1.1: Volume Z-Score — current vol vs 200-candle 1h baseline
+        if d1h and len(d1h.volumes) >= 10:
+            vol_z = _volume_zscore(d1h.volumes)
+            if vol_z >= 2.5:
+                score += 10
+                signals.append(f"🚀 Volume spike +{vol_z:.1f}σ vs baseline 200 candle — surge institusional")
+            elif vol_z >= 1.5:
+                score += 5
+                signals.append(f"Volume +{vol_z:.1f}σ di atas baseline 1h — akumulasi di atas normal")
 
         # Candle coil (energy compressing in bodies)
         if primary.opens and _candle_coil(primary.opens, primary.closes):
@@ -411,8 +472,12 @@ def _score_distribution(
     # Compression at TOP = dump loading (mirror of accumulation at bottom)
     primary = d1h or d4h or d15
     if primary and primary.closes:
-        is_sq1h, bw1h, label1h = _bb_squeeze(primary.closes)
-        is_sq4h, bw4h, label4h = _bb_squeeze(d4h.closes) if d4h else (False, 100.0, "none")
+        # D3.1: ATR-adaptive thresholds (same as _score_accumulation T3)
+        _atr_v_dist = _atr(primary.highs, primary.lows, primary.closes, 14) if (
+            primary.highs and primary.lows and len(primary.closes) >= 14) else 0.0
+        _atr_pct_dist = _atr_v_dist / primary.closes[-1] * 100 if primary.closes[-1] > 0 else 0.0
+        is_sq1h, bw1h, label1h = _bb_squeeze(primary.closes, atr_pct=_atr_pct_dist)
+        is_sq4h, bw4h, label4h = _bb_squeeze(d4h.closes, atr_pct=_atr_pct_dist) if d4h else (False, 100.0, "none")
 
         if label4h in ("strong", "moderate") and label1h in ("strong", "moderate"):
             score += 15
@@ -552,7 +617,7 @@ def scan_symbol(
     # F68/F69/F72: load in-memory caches (synchronous — no await needed)
     from agents.futures import weight_updater
     from agents.futures.regime import detect_coin_regime
-    weight_cache  = weight_updater.get_weight_cache(AGENT_NAME)
+    from agents.shared.cross_agent_learning import get_cross_weight, blend_weights
     thresholds    = weight_updater.get_adaptive_thresholds(AGENT_NAME)
     effective_min = thresholds["min_score"]
     # BUG-L13: per-coin regime from the coin's own 1h OHLCV (was BTC-only for all alts)
@@ -560,6 +625,8 @@ def scan_symbol(
         regime = detect_coin_regime(tf_map.get("1h") or ref)
     except Exception:
         regime = "neutral"
+    # P3.5: regime-conditional weight cache (falls back to "all" for missing keys)
+    weight_cache  = weight_updater.get_weight_cache(AGENT_NAME, regime=regime)
 
     try:
         long_score,  long_sigs  = _score_accumulation(tf_map, price, change_24h)
@@ -572,11 +639,13 @@ def scan_symbol(
         ("LONG",  long_score,  long_sigs),
         ("SHORT", short_score, short_sigs),
     ]:
-        # F68: apply signal weight adjustments from historical win rates (±5 pts per signal)
+        # F68 + SP3: apply signal weight (own-agent blended with cross-agent evidence).
+        # P3.7: multiplier ×7 (was ×5) — wider impact so adaptive learning has real bite.
         for sig in signals:
-            key = weight_updater.normalize_signal_key(sig)
-            w   = weight_cache.get(key, 1.0)
-            score += (w - 1.0) * 5.0
+            key   = weight_updater.normalize_signal_key(sig)
+            own_w = weight_cache.get(key, 1.0)
+            w     = blend_weights(own_w, get_cross_weight(key))
+            score += (w - 1.0) * 7.0
 
         # F72: regime modifier — reward alignment, penalize counter-trend
         if regime == "volatile":
@@ -592,17 +661,30 @@ def scan_symbol(
 
         # F92: per-coin win rate bonus/penalty (±5 pts, needs ≥3 historical trades)
         try:
-            score += weight_updater.get_coin_bonus(symbol)
+            score += weight_updater.get_coin_bonus(symbol, direction)  # P4.8: directional
         except Exception:
             pass
 
         if score < effective_min:   # F69: adaptive threshold
+            # P7.1: log rejection
+            try:
+                _weak2 = sorted(
+                    ((weight_updater.normalize_signal_key(s),
+                      weight_cache.get(weight_updater.normalize_signal_key(s), 1.0))
+                     for s in signals),
+                    key=lambda x: x[1]
+                )[:3]
+                weight_updater.log_rejection(symbol, AGENT_NAME, direction, score, effective_min,
+                                             regime=regime, weak_signals=[f"{k}:{w}" for k, w in _weak2])
+            except Exception:
+                pass
             continue
         levels = _calc_levels(direction, tf_map, price)
         if not levels:
             continue
         atr_pct  = levels.pop("atr_pct")
-        leverage = calc_leverage(atr_pct, score, levels["risk_pct"])
+        # PLAN_v2 P1.3 — accumulation hold-time lebih lama → cap margin loss lebih ketat (15%).
+        leverage = calc_leverage(atr_pct, score, levels["risk_pct"], lane="accumulation")
         results.append({
             "symbol":       symbol,
             "direction":    direction,
@@ -616,8 +698,14 @@ def scan_symbol(
             "liq_long":     round(ref.liq_long_usdt / 1e6, 3),
             "liq_short":    round(ref.liq_short_usdt / 1e6, 3),
             "agent":        AGENT_NAME,
-            "setup_type":   "pre_move",   # P2: lane tag (accumulation = pre-move)
-            "regime":       regime,       # BUG-L13: per-coin regime (for trade.regime/learning)
+            "setup_type":   "accumulation",  # PLAN_v2 — disambiguated from pre_gainer
+            "regime":       regime,          # BUG-L13: per-coin regime (for trade.regime/learning)
             **levels,
         })
+
+    # D2.3 (PLAN_v3): when both LONG and SHORT qualify for accumulation/distribution,
+    # contradictory setups on the same coin reduce confidence — keep only the higher-scored.
+    if len(results) == 2:
+        results = [max(results, key=lambda x: x["score"])]
+
     return results

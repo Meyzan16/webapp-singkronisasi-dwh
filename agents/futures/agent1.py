@@ -30,7 +30,10 @@ from typing import Optional
 import structlog
 
 from .data import FuturesData
-from .utils import _ema, _atr   # F112: shared TA helpers (agent2 re-imports _ema/_atr from here)
+from .utils import (
+    _ema, _atr,                # F112: shared TA helpers (agent2 re-imports from here)
+    cap_leverage_by_lane,      # PLAN_v2 P1.2/P1.3 — single source for sizing caps
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -40,10 +43,9 @@ AGENT_NAME = "futures_agent1"
 # BUG-L3/L5: minimum SL distance (%) — stops tighter than this get hit by market noise
 # (was an implicit 0.3% floor → 0.34% SL @ 12x = instant noise stop-out, win rate 0%).
 MIN_SL_PCT = 1.5
-# BUG-L6/L7: reconcile leverage with SL distance — cap leverage so a full SL hit loses
-# at most this % of margin (margin loss ≈ risk_pct × leverage). Prevents the old
-# inverse coupling where low-ATR coins got MAX leverage paired with the TIGHTEST SL.
-MAX_SL_MARGIN_PCT = 25.0
+# PLAN_v2 P1.3: per-lane cap now lives in utils.MAX_SL_MARGIN_PCT_BY_LANE.
+# The single 25% legacy constant was applied uniformly to momentum + pre-move +
+# accumulation — accumulation holds for days, so its cap is now 15% (utils).
 
 
 # ── Math helpers ──────────────────────────────────────────────────────────────
@@ -89,12 +91,11 @@ def _round_price(price: float, ref: float) -> float:
 
 # ── Signal detectors ──────────────────────────────────────────────────────────
 
-def _bb_squeeze(closes: list[float], period: int = 20) -> tuple[bool, float, str]:
+def _bb_squeeze(closes: list[float], period: int = 20, atr_pct: float = 0.0) -> tuple[bool, float, str]:
     """
     Detect Bollinger Band Squeeze (volatility compression).
-    Returns (is_squeeze, bb_width_pct, label).
-    Strong squeeze: width < 4% → breakout very close.
-    Moderate squeeze: width 4-7% → compression building.
+    D3.1 (PLAN_v3): adaptive threshold = 0.6× ATR for strong, 1.0× ATR for moderate.
+    Falls back to fixed 4%/7% when atr_pct is not provided.
     """
     if len(closes) < period:
         return False, 100.0, "none"
@@ -102,11 +103,31 @@ def _bb_squeeze(closes: list[float], period: int = 20) -> tuple[bool, float, str
     mean = sum(tail) / period
     std  = math.sqrt(sum((v - mean) ** 2 for v in tail) / period)
     bw   = (std * 4) / mean * 100 if mean > 0 else 100.0
-    if bw < 4.0:
+    strong_thresh   = max(2.0, atr_pct * 0.6) if atr_pct > 0 else 4.0
+    moderate_thresh = max(4.0, atr_pct * 1.0) if atr_pct > 0 else 7.0
+    if bw < strong_thresh:
         return True, round(bw, 2), "strong"
-    if bw < 7.0:
+    if bw < moderate_thresh:
         return True, round(bw, 2), "moderate"
     return False, round(bw, 2), "none"
+
+
+def _bb_squeeze_persistence(closes: list[float], period: int = 20, atr_pct: float = 0.0) -> int:
+    """
+    D3.5 (PLAN_v3): count trailing consecutive candles where BB is in squeeze.
+    Returns streak count (0 if current candle is not a squeeze).
+    """
+    if len(closes) < period + 1:
+        return 0
+    streak = 0
+    for offset in range(len(closes) - period + 1):
+        slice_end = len(closes) - offset
+        _, _, label = _bb_squeeze(closes[slice_end - period: slice_end], period, atr_pct)
+        if label in ("strong", "moderate"):
+            streak += 1
+        else:
+            break
+    return streak
 
 
 def _volume_accumulation(closes: list[float], volumes: list[float]) -> tuple[bool, float, str]:
@@ -130,6 +151,25 @@ def _volume_accumulation(closes: list[float], volumes: list[float]) -> tuple[boo
     if vol_ratio >= 1.8 and price_move < 0.04:
         return True, round(vol_ratio, 2), "moderate"
     return False, round(vol_ratio, 2), "none"
+
+
+def _volume_zscore(volumes: list[float]) -> float:
+    """
+    P1.1: Z-score of current candle volume vs historical baseline.
+    Uses up to 200 prior candles as baseline; requires 1h TF fetched with limit=200.
+    Returns standard deviations above mean (negative = below avg).
+    """
+    if len(volumes) < 10:
+        return 0.0
+    baseline_len = min(200, len(volumes) - 1)
+    baseline = volumes[-baseline_len - 1:-1]
+    if not baseline:
+        return 0.0
+    cur  = volumes[-1]
+    mean = sum(baseline) / len(baseline)
+    variance = sum((v - mean) ** 2 for v in baseline) / len(baseline)
+    std = variance ** 0.5
+    return (cur - mean) / std if std > 0 else 0.0
 
 
 def _candle_coil(opens: list[float], closes: list[float], n: int = 8) -> bool:
@@ -162,13 +202,18 @@ def _rsi_sweet_spot(closes: list[float]) -> tuple[float, str]:
 
 # ── Leverage ──────────────────────────────────────────────────────────────────
 
-def calc_leverage(atr_pct: float, score: float, risk_pct: float = 0.0) -> int:
+def calc_leverage(
+    atr_pct:  float,
+    score:    float,
+    risk_pct: float = 0.0,
+    lane:     str   = "pre_gainer",
+) -> int:
     """Dynamic leverage from volatility (ATR%) + confidence (score), reconciled with SL.
 
-    BUG-L6/L7: leverage is now capped by the SL distance so a full SL hit never loses
-    more than MAX_SL_MARGIN_PCT of margin. Previously leverage was derived from ATR alone
-    and never reconciled with the (often tiny) SL — low-ATR coins got 12-15x paired with a
-    0.3-0.7% SL, guaranteeing a noise stop-out.
+    PLAN_v2 P1.2/P1.3 (replaces BUG-L6/L7):
+      - lane-aware SL-margin cap (accumulation 15% / pre_move 18% / momentum 25%)
+      - liquidation-safety cap so a wick to SL never lands at the liq line
+      - both caps applied via utils.cap_leverage_by_lane (shared with agent3)
     """
     if atr_pct > 5.0:   base = 2
     elif atr_pct > 3.0: base = 3
@@ -180,11 +225,7 @@ def calc_leverage(atr_pct: float, score: float, risk_pct: float = 0.0) -> int:
     elif score >= 70:  base = min(base + 2, 12)
     elif score >= 60:  base = min(base + 1, 10)
 
-    # BUG-L6/L7: cap leverage by SL distance (margin loss ≈ risk_pct × leverage)
-    if risk_pct and risk_pct > 0:
-        base = min(base, max(1, int(MAX_SL_MARGIN_PCT / risk_pct)))
-
-    return max(1, base)
+    return cap_leverage_by_lane(base, risk_pct, lane)
 
 
 # ── Main scorer ───────────────────────────────────────────────────────────────
@@ -213,10 +254,17 @@ def _score_pregainer(
     squeeze_pts = 0
     squeeze_signals: list[str] = []
 
+    # D3.1 (PLAN_v3): compute ATR for adaptive BB thresholds
+    _atr_ref = d1h or d4h or d15
+    _atr_pct_sq = 0.0
+    if _atr_ref and len(_atr_ref.closes) >= 14 and _atr_ref.highs and _atr_ref.lows:
+        _atr_v = _atr(_atr_ref.highs, _atr_ref.lows, _atr_ref.closes, 14)
+        _atr_pct_sq = _atr_v / _atr_ref.closes[-1] * 100 if _atr_ref.closes[-1] > 0 else 0.0
+
     for tf_key, d in [("4h", d4h), ("1h", d1h), ("15m", d15)]:
         if not d or len(d.closes) < 20:
             continue
-        is_sq, bw, label = _bb_squeeze(d.closes)
+        is_sq, bw, label = _bb_squeeze(d.closes, atr_pct=_atr_pct_sq)
         if label == "strong":
             pts = 14 if tf_key == "4h" else (12 if tf_key == "1h" else 8)
             squeeze_pts += pts
@@ -260,6 +308,16 @@ def _score_pregainer(
 
     score += best_accum
 
+    # P1.1: Volume Z-Score bonus — current vol vs 200-candle 1h baseline
+    if d1h and len(d1h.volumes) >= 10:
+        vol_z = _volume_zscore(d1h.volumes)
+        if vol_z >= 2.5:
+            score += 10
+            signals.append(f"🚀 Volume spike +{vol_z:.1f}σ vs baseline 200 candle — surge institusional")
+        elif vol_z >= 1.5:
+            score += 5
+            signals.append(f"Volume +{vol_z:.1f}σ di atas baseline 1h — akumulasi di atas normal")
+
     # ── 3. Funding Rate neutral/negative (0-15 pts) ───────────────────────────
     # Fuel = market not yet crowded LONG → room to run when breakout hits
     fr = ref.funding_rate   # raw (e.g. 0.0001 = 0.01%)
@@ -277,9 +335,10 @@ def _score_pregainer(
     elif fr > 0.03 / 100:
         score -= 4
 
-    # ── 4. OI Building (0-12 pts) ─────────────────────────────────────────────
+    # ── 4. OI Building (0-12 pts) + Acceleration (0-6 pts) ───────────────────
     # Open Interest rising = new money entering = conviction accumulating
-    oi_chg = ref.oi_change_pct
+    oi_chg      = ref.oi_change_pct
+    oi_chg_prev = ref.oi_change_pct_prev
     if oi_chg >= 3.0:
         score += 12
         signals.append(f"📊 OI +{oi_chg:.1f}% — posisi baru masuk, konviksi meningkat")
@@ -290,6 +349,11 @@ def _score_pregainer(
         score += 4
     elif oi_chg < -2.0:
         score -= 5   # OI falling = liquidation / exit risk
+
+    # P1.2: OI acceleration (delta-of-delta) — consecutive growth = institutional momentum
+    if oi_chg > oi_chg_prev > 0:
+        score += 6
+        signals.append(f"📈 OI acceleration {oi_chg_prev:.1f}% → {oi_chg:.1f}% — momentum institusional membangun")
 
     # ── 5. Near Resistance < 3% (0-10 pts) ───────────────────────────────────
     # Catalyst within reach → breakout needs only small push
@@ -331,11 +395,24 @@ def _score_pregainer(
 
     # ── Penalties ─────────────────────────────────────────────────────────────
 
-    # Already pumped = missed the move → heavy penalty
+    # D2.2 (PLAN_v3): gradual 24h penalty conditioned on 1h pullback
+    # If coin is up big 24h BUT pulled back 1h, it may be coiling for continuation
+    _d1h = tf_map.get("1h")
+    _change_1h = 0.0
+    if _d1h and len(_d1h.closes) >= 2:
+        _change_1h = (_d1h.closes[-1] - _d1h.closes[-2]) / _d1h.closes[-2] * 100 if _d1h.closes[-2] > 0 else 0.0
+
     if change_24h > 15:
-        score -= 25
+        if _change_1h < -2.0:   # pulled back 1h after big 24h move = potential continuation
+            score -= 5
+            signals.append(f"⚠ Up {change_24h:.1f}% but 1h pullback {_change_1h:.1f}% — possible re-entry zone")
+        else:
+            score -= 25          # still chasing = high late-entry risk
     elif change_24h > 8:
-        score -= 12
+        if _change_1h < -1.0:   # mild pullback
+            score -= 6
+        else:
+            score -= 12
 
     # Dumping coin = wrong direction for LONG
     if change_24h < -15:
@@ -359,16 +436,27 @@ def _score_pregainer(
     elif ref.liq_long_usdt > 500_000:
         score += 1
 
-    # F56: ATH penalty — near 7-day high is late entry, not pre-gainer setup
+    # D2.1 (PLAN_v3): differentiate ATH cases — breaking ATH with volume = fresh leg up,
+    # not late entry. Near ATH but coiling = still cautious.
     if d4h and len(d4h.highs) >= 42:
         ath_7d = max(d4h.highs[-42:])
         if ath_7d > 0:
             pct_from_ath = (price - ath_7d) / ath_7d
-            if pct_from_ath >= -0.02:   # within 2% of 7-day high
-                score -= 20
-                signals.append(f"⚠️ Near 7d ATH ({pct_from_ath:+.1%}) — late entry risk")
-            elif pct_from_ath >= -0.05:  # within 5%
+            # Volume confirmation for breakout
+            _vol_ratio_1h = 1.0
+            if _d1h and len(_d1h.volumes) >= 5:
+                _vol_avg_1h = sum(_d1h.volumes[-5:]) / 5
+                _vol_ratio_1h = _d1h.volumes[-1] / _vol_avg_1h if _vol_avg_1h > 0 else 1.0
+            if pct_from_ath >= 0.005 and _vol_ratio_1h >= 1.5:
+                # Breaking ATH with volume = continuation thesis (fresh leg up)
+                score += 8
+                signals.append(f"🚀 Break 7d ATH +{pct_from_ath:.1%} vol {_vol_ratio_1h:.1f}× — fresh leg up")
+            elif -0.02 <= pct_from_ath < 0.005:
+                # Near ATH but not breaking → cautious (milder than before)
                 score -= 10
+                signals.append(f"⚠️ Near 7d ATH ({pct_from_ath:+.1%}) — late entry risk")
+            elif pct_from_ath >= -0.05:
+                score -= 5
                 signals.append(f"Dekat 7d ATH ({pct_from_ath:+.1%}) — cautious")
 
     return score, signals[:5]
@@ -408,10 +496,17 @@ def _score_predump(
     squeeze_pts = 0
     squeeze_signals: list[str] = []
 
+    # D3.1 (PLAN_v3): compute ATR for adaptive BB thresholds
+    _atr_ref_d = d1h or d4h or d15
+    _atr_pct_sq_d = 0.0
+    if _atr_ref_d and len(_atr_ref_d.closes) >= 14 and _atr_ref_d.highs and _atr_ref_d.lows:
+        _atr_v_d = _atr(_atr_ref_d.highs, _atr_ref_d.lows, _atr_ref_d.closes, 14)
+        _atr_pct_sq_d = _atr_v_d / _atr_ref_d.closes[-1] * 100 if _atr_ref_d.closes[-1] > 0 else 0.0
+
     for tf_key, d in [("4h", d4h), ("1h", d1h), ("15m", d15)]:
         if not d or len(d.closes) < 20:
             continue
-        is_sq, bw, label = _bb_squeeze(d.closes)
+        is_sq, bw, label = _bb_squeeze(d.closes, atr_pct=_atr_pct_sq_d)
         if label == "strong":
             pts = 14 if tf_key == "4h" else (12 if tf_key == "1h" else 8)
             squeeze_pts += pts
@@ -469,9 +564,10 @@ def _score_predump(
         # Negative funding = shorts paying = headwind for SHORT
         score -= 8
 
-    # ── 4. OI rising at resistance (0-12 pts) ────────────────────────────────
+    # ── 4. OI rising at resistance (0-12 pts) + Acceleration (0-5 pts) ────────
     # New longs entering at resistance = long trap (will be forced to close on drop)
-    oi_chg = ref.oi_change_pct
+    oi_chg      = ref.oi_change_pct
+    oi_chg_prev = ref.oi_change_pct_prev
     if oi_chg >= 3.0 and change_24h > 2:
         score += 12
         signals.append(f"📊 OI +{oi_chg:.1f}% saat harga naik — long trap forming, forced unwind imminent")
@@ -482,6 +578,11 @@ def _score_predump(
         score += 3
     elif oi_chg < -2.0:
         score -= 4  # OI falling = longs already exiting
+
+    # P1.2: OI acceleration at resistance = long trap deepening each hour
+    if oi_chg > oi_chg_prev > 0 and change_24h > 1:
+        score += 5
+        signals.append(f"📈 OI acceleration {oi_chg_prev:.1f}% → {oi_chg:.1f}% di resistance — long trap deepening")
 
     # ── 5. Near resistance < 2% (0-10 pts) ───────────────────────────────────
     # Price hugging resistance = rejection zone, short entry ideal
@@ -675,11 +776,13 @@ def scan_symbol(
     # F68/F69/F72: load in-memory caches (synchronous — no await needed)
     from agents.futures import weight_updater
     from agents.futures.regime import detect_coin_regime
-    weight_cache  = weight_updater.get_weight_cache(AGENT_NAME)
+    from agents.shared.cross_agent_learning import get_cross_weight, blend_weights
     thresholds    = weight_updater.get_adaptive_thresholds(AGENT_NAME)
     effective_min = thresholds["min_score"]
     # BUG-L13: per-coin regime from the coin's own 1h OHLCV (was BTC-only for all alts)
     regime        = detect_coin_regime(tf_map.get("1h") or ref)
+    # P3.5: regime-conditional weight cache (falls back to "all" for missing keys)
+    weight_cache  = weight_updater.get_weight_cache(AGENT_NAME, regime=regime)
 
     long_score,  long_sigs  = _score_pregainer(tf_map, price, change_24h)
     short_score, short_sigs = _score_predump(tf_map, price, change_24h)
@@ -689,11 +792,13 @@ def scan_symbol(
         ("LONG",  long_score,  long_sigs),
         ("SHORT", short_score, short_sigs),
     ]:
-        # F68: apply signal weight adjustments from historical win rates (±5 pts per signal)
+        # F68 + SP3: apply signal weight (own-agent blended with cross-agent evidence).
+        # P3.7: multiplier ×7 (was ×5) — wider impact so adaptive learning has real bite.
         for sig in signals:
-            key = weight_updater.normalize_signal_key(sig)
-            w   = weight_cache.get(key, 1.0)
-            score += (w - 1.0) * 5.0
+            key   = weight_updater.normalize_signal_key(sig)
+            own_w = weight_cache.get(key, 1.0)
+            w     = blend_weights(own_w, get_cross_weight(key))
+            score += (w - 1.0) * 7.0
 
         # F72: regime modifier — reward alignment, penalize counter-trend
         if regime == "volatile":
@@ -708,15 +813,24 @@ def scan_symbol(
             score -= 5
 
         # F92: per-coin win rate bonus/penalty (±5 pts, needs ≥3 historical trades)
-        score += weight_updater.get_coin_bonus(symbol)
+        score += weight_updater.get_coin_bonus(symbol, direction)  # P4.8: directional
 
         if score < effective_min:   # F69: adaptive threshold
+            # P7.1: log rejection so UI can explain "why not opened"
+            _weak = sorted(
+                ((weight_updater.normalize_signal_key(s),
+                  weight_cache.get(weight_updater.normalize_signal_key(s), 1.0))
+                 for s in signals),
+                key=lambda x: x[1]
+            )[:3]
+            weight_updater.log_rejection(symbol, AGENT_NAME, direction, score, effective_min,
+                                         regime=regime, weak_signals=[f"{k}:{w}" for k, w in _weak])
             continue
         levels = _calc_levels(direction, tf_map, price)
         if not levels:
             continue
         atr_pct  = levels.pop("atr_pct")
-        leverage = calc_leverage(atr_pct, score, levels["risk_pct"])
+        leverage = calc_leverage(atr_pct, score, levels["risk_pct"], lane="pre_gainer")
         results.append({
             "symbol":       symbol,
             "direction":    direction,
@@ -730,8 +844,8 @@ def scan_symbol(
             "liq_long":     round(ref.liq_long_usdt / 1e6, 3),
             "liq_short":    round(ref.liq_short_usdt / 1e6, 3),
             "agent":        AGENT_NAME,
-            "setup_type":   "pre_move",   # P2: lane tag for unified scanner
-            "regime":       regime,       # BUG-L13: per-coin regime (for trade.regime/learning)
+            "setup_type":   "pre_gainer",   # PLAN_v2 — lane disambiguated from accumulation
+            "regime":       regime,         # BUG-L13: per-coin regime (for trade.regime/learning)
             **levels,
         })
     return results
