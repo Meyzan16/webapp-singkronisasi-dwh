@@ -1249,7 +1249,7 @@ export default function SignalsPage() {
               <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
                 <p className="font-bold text-red-800 mb-1">🚫 Rejection Log (24h)</p>
                 <p className="text-xs text-red-600">
-                  Koin yang discan tapi tidak lolos threshold. Kolom "Gap" = selisih score vs threshold —
+                  Koin yang discan tapi tidak lolos threshold. Kolom &quot;Gap&quot; = selisih score vs threshold —
                   makin kecil gapnya, makin dekat koin itu dengan entry.
                   Weak signals = sinyal dengan weight terendah yang menghambat skor.
                 </p>

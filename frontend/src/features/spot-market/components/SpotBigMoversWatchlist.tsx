@@ -52,9 +52,9 @@ export function SpotBigMoversWatchlist({ movers }: { movers: SpotMover[] }) {
   }, [sid]);
 
   useEffect(() => {
-    void refreshBudget();
+    const init = setTimeout(() => void refreshBudget(), 0);
     const t = setInterval(() => void refreshBudget(), 30_000);
-    return () => clearInterval(t);
+    return () => { clearTimeout(init); clearInterval(t); };
   }, [refreshBudget]);
 
   // Filter LONG-only candidates (spot is LONG-only), volume gated

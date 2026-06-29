@@ -29,8 +29,9 @@ export function OpenPosCard({ p, risk, riskDollar }: {
   // PLAN_v2 P2.1 — ROI on margin: prefer server-computed, else derive from upnl$ + margin.
   const roi = risk?.roi_pct ?? (upnl$ != null && margin > 0 ? (upnl$ / margin) * 100 : null);
   const events = risk?.events ?? [];
+  const [nowSec] = useState(() => Date.now() / 1000);
   const lastTickAge = risk?.last_tick_at != null
-    ? Math.max(0, Math.round((Date.now() / 1000 - risk.last_tick_at)))
+    ? Math.max(0, Math.round((nowSec - risk.last_tick_at)))
     : null;
 
   return (

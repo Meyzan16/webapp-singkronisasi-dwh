@@ -287,7 +287,7 @@ function ForceOpenModal({
       const body = {
         symbol: mover.symbol,
         direction,
-        agent: "futures_agent3", // force-opens log under momentum lane
+        agent: "futures_agent_bigmover",
         entry: livePrice,
         sl,
         tp1,

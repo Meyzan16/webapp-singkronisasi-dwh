@@ -6,7 +6,7 @@ import { OpenPosCard } from "./OpenPosCard";
 import type { FuturesPosition, RiskDashboard, LearningStats, RiskPosition } from "./types";
 import { calcNotional, calcMargin, tradePnlDollar } from "./types";
 
-type AgentFilter = "all" | "agent1" | "agent2" | "agent3";
+type AgentFilter = "all" | "agent1" | "agent2" | "agent3" | "agent_bigmover";
 
 interface Props {
   positions:    FuturesPosition[];
@@ -50,6 +50,7 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
   const a1Open  = openPos.filter(p => p.agent === "futures_agent1");
   const a2Open  = openPos.filter(p => p.agent === "futures_agent2");
   const a3Open  = openPos.filter(p => p.agent === "futures_agent3");
+  const bmOpen  = openPos.filter(p => p.agent === "futures_agent_bigmover");
   const hasOpen = openPos.length > 0;
 
   // Compute financial summary from positions (same logic as OpenPosCard)
@@ -60,6 +61,7 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
   const totalUnrealized = openPos.reduce((s, p) => s + (tradePnlDollar(p, riskDollar) ?? 0), 0);
   const totalMargin     = openPos.reduce((s, p) => s + getMargin(p), 0);
   const momentumMargin  = a3Open.reduce((s, p) => s + getMargin(p), 0);
+  const bmMargin        = bmOpen.reduce((s, p) => s + getMargin(p), 0);
 
   return (
     <div className="space-y-5">
@@ -107,11 +109,12 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
           </div>
 
           {ab && (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {([
-                { key: "agent1", label: "🎯 Pre-Gainer",   cls: "text-blue-300",   data: ab.agent1 },
-                { key: "agent2", label: "📦 Accumulation", cls: "text-purple-300", data: ab.agent2 },
-                { key: "agent3", label: "🔥 Momentum",     cls: "text-orange-300", data: ab.agent3 },
+                { key: "agent1",         label: "🎯 Pre-Gainer",   cls: "text-blue-300",   data: ab.agent1 },
+                { key: "agent2",         label: "📦 Accumulation", cls: "text-purple-300", data: ab.agent2 },
+                { key: "agent3",         label: "🔥 Momentum",     cls: "text-orange-300", data: ab.agent3 },
+                { key: "agent_bigmover", label: "💥 Big Mover",    cls: "text-amber-300",  data: ab.agent_bigmover },
               ] as const).filter(a => a.data).map(a => (
                 <div key={a.key} className={`bg-white/5 rounded-xl p-3 border ${(a.data!.at_risk ?? 0) > 0 ? "border-red-700/40" : "border-white/5"}`}>
                   <p className={`text-[10px] font-bold mb-2 ${a.cls}`}>{a.label}</p>
@@ -186,7 +189,7 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
           <div className="flex gap-4 text-xs flex-wrap">
             <span className="text-neutral-400">Open: <strong className="text-blue-400">{openPos.length}</strong></span>
             <span className="text-neutral-400">Total Margin: <strong className="text-yellow-300">${totalMargin.toFixed(0)}</strong></span>
-            <span className="text-neutral-400">Margin Momentum: <strong className="text-orange-300">${momentumMargin.toFixed(0)}</strong></span>
+            <span className="text-neutral-400">Margin Momo+BM: <strong className="text-orange-300">${(momentumMargin + bmMargin).toFixed(0)}</strong></span>
           </div>
         </div>
       ) : null}
@@ -195,10 +198,11 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
       {hasOpen && (
         <div className="flex gap-1.5 flex-wrap">
           {([
-            { key: "all",    label: "Semua",        cls: "bg-neutral-100 text-neutral-700 border-neutral-300" },
-            { key: "agent1", label: "🎯 Pre-Gainer",   cls: "bg-blue-100 text-blue-700 border-blue-200"     },
-            { key: "agent2", label: "📦 Accumulation", cls: "bg-purple-100 text-purple-700 border-purple-200" },
-            { key: "agent3", label: "🔥 Momentum",     cls: "bg-orange-100 text-orange-700 border-orange-200" },
+            { key: "all",            label: "Semua",           cls: "bg-neutral-100 text-neutral-700 border-neutral-300"  },
+            { key: "agent1",         label: "🎯 Pre-Gainer",   cls: "bg-blue-100 text-blue-700 border-blue-200"           },
+            { key: "agent2",         label: "📦 Accumulation", cls: "bg-purple-100 text-purple-700 border-purple-200"     },
+            { key: "agent3",         label: "🔥 Momentum",     cls: "bg-orange-100 text-orange-700 border-orange-200"     },
+            { key: "agent_bigmover", label: "💥 Big Mover",    cls: "bg-amber-100 text-amber-700 border-amber-200"        },
           ] as { key: AgentFilter; label: string; cls: string }[]).map(f => (
             <button key={f.key} onClick={() => setAgentFilter(f.key)}
               className={`text-[10px] font-bold px-3 py-1 rounded-full border transition-all ${
@@ -212,7 +216,7 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
 
       {/* Open positions by agent */}
       {hasOpen ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           {(agentFilter === "all" || agentFilter === "agent1") && (
             <AgentColumn label="🎯 Pre-Gainer"   color="bg-blue-100 text-blue-700 border-blue-200"
               positions={a1Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent1.at_risk} />
@@ -224,6 +228,10 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
           {(agentFilter === "all" || agentFilter === "agent3") && (
             <AgentColumn label="🔥 Momentum"     color="bg-orange-100 text-orange-700 border-orange-200"
               positions={a3Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent3?.at_risk} />
+          )}
+          {(agentFilter === "all" || agentFilter === "agent_bigmover") && (
+            <AgentColumn label="💥 Big Mover"    color="bg-amber-100 text-amber-700 border-amber-200"
+              positions={bmOpen} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent_bigmover?.at_risk} />
           )}
         </div>
       ) : (
@@ -254,13 +262,13 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
             <p className="text-[9px] text-neutral-400">semua {openPos.length} posisi</p>
           </div>
 
-          {/* Momentum Margin (Agent 3) */}
-          <div className={`rounded-xl p-3 ${a3Open.length > 0 ? "bg-orange-50 border border-orange-100" : "bg-neutral-50"}`}>
-            <p className={`text-xl font-black tabular-nums ${a3Open.length > 0 ? "text-orange-600" : "text-neutral-400"}`}>
-              {a3Open.length > 0 ? `$${momentumMargin.toFixed(0)}` : "—"}
+          {/* Momentum + BigMover Margin */}
+          <div className={`rounded-xl p-3 ${(a3Open.length + bmOpen.length) > 0 ? "bg-orange-50 border border-orange-100" : "bg-neutral-50"}`}>
+            <p className={`text-xl font-black tabular-nums ${(a3Open.length + bmOpen.length) > 0 ? "text-orange-600" : "text-neutral-400"}`}>
+              {(a3Open.length + bmOpen.length) > 0 ? `$${(momentumMargin + bmMargin).toFixed(0)}` : "—"}
             </p>
-            <p className="text-[10px] text-neutral-600 font-semibold mt-1">Margin Momentum</p>
-            <p className="text-[9px] text-neutral-400">{a3Open.length} posisi Momentum</p>
+            <p className="text-[10px] text-neutral-600 font-semibold mt-1">Margin Momo+BM</p>
+            <p className="text-[9px] text-neutral-400">{a3Open.length} Momentum · {bmOpen.length} BigMover</p>
           </div>
 
           {/* Closed Today */}
