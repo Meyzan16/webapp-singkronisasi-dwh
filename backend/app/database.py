@@ -107,6 +107,19 @@ async def _migrate_columns(connection) -> None:
         # PLAN_v2 P7.1 — rejection_log indexes (table created via Base.metadata.create_all)
         "CREATE INDEX IF NOT EXISTS ix_rl_symbol_ts ON rejection_log (symbol, rejected_at) "
         "WHERE EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='rejection_log')",
+        # Safety-net: create tables that may be missing if backend started before these models were added.
+        "CREATE TABLE IF NOT EXISTS app_settings ("
+        "  key VARCHAR(100) PRIMARY KEY,"
+        "  value TEXT,"
+        "  updated_at FLOAT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())"
+        ")",
+        "CREATE TABLE IF NOT EXISTS predictive_log ("
+        "  id SERIAL PRIMARY KEY,"
+        "  symbol VARCHAR(20), agent VARCHAR(30), direction VARCHAR(10),"
+        "  setup_type VARCHAR(20), score FLOAT, entry FLOAT, sl FLOAT, tp FLOAT,"
+        "  predicted_at FLOAT, resolved_at FLOAT, outcome VARCHAR(10),"
+        "  actual_pnl_pct FLOAT, notes TEXT"
+        ")",
     ]
     for sql in migrations:
         try:
