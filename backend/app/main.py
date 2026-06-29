@@ -36,9 +36,10 @@ from app.api.v1.signals import router as signals_router
 from app.api.v1.futures_eligibility import router as futures_eligibility_router
 from app.api.v1.big_mover_log import router as big_mover_log_router
 from app.api.v1.backtest import router as backtest_router
-from app.api.v1.admin        import router as admin_router
-from app.api.v1.diagnostics  import router as diagnostics_router
-from app.api.v1.predictive   import router as predictive_router
+from app.api.v1.admin             import router as admin_router
+from app.api.v1.diagnostics       import router as diagnostics_router
+from app.api.v1.predictive        import router as predictive_router
+from app.api.v1.exchange_settings import router as exchange_router
 from app.models.paper_trade import PaperTrade as _PaperTrade          # noqa: F401
 from app.models.paper_balance import PaperBalance as _PaperBalance    # noqa: F401
 from app.models.balance_transaction import BalanceTransaction as _BalTxn  # noqa: F401
@@ -47,7 +48,8 @@ from app.models.big_mover_log import BigMoverLog as _BML               # noqa: F
 from app.models.force_open_log import ForceOpenLog as _FOL             # noqa: F401
 from app.models.backtest_result import WeeklyBacktestResult as _WBR   # noqa: F401
 from app.models.rejection_log import RejectionLog as _RL
-from app.models.predictive_log import PredictiveLog as _PL   # noqa: F401              # noqa: F401
+from app.models.predictive_log import PredictiveLog as _PL   # noqa: F401
+from app.models.app_settings import AppSettings as _AS       # noqa: F401
 from app.config import get_settings
 from app.database import create_db_schema, dispose_engine, set_db_available
 from agents.opportunity.scheduler import run_opportunity_loop, run_bigmover_fastpass
@@ -136,6 +138,7 @@ app.include_router(backtest_router,         prefix=settings.api_v1_prefix)
 app.include_router(admin_router,            prefix=settings.api_v1_prefix)
 app.include_router(diagnostics_router,      prefix=settings.api_v1_prefix)
 app.include_router(predictive_router,       prefix=settings.api_v1_prefix)
+app.include_router(exchange_router,         prefix=settings.api_v1_prefix)
 
 
 @app.websocket("/ws/opportunity")

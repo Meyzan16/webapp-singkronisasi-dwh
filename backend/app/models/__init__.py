@@ -5,9 +5,11 @@ from app.models.signal_weight_history import SignalWeightHistory
 from app.models.health_event import HealthEvent
 from app.models.rejection_log import RejectionLog
 from app.models.predictive_log import PredictiveLog
+from app.models.app_settings import AppSettings
 
 __all__ = [
     "PaperTrade", "PaperBalance",
     "AgentSignalWeight", "SignalWeightHistory",
     "HealthEvent", "RejectionLog", "PredictiveLog",
+    "AppSettings",
 ]

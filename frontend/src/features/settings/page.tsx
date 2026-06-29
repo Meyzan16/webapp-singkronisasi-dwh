@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS: AgentSettings = {
   api: {
     binanceApiKey: "",
     binanceApiSecret: "",
-    testnetMode: true,
+    testnetMode: false,
   },
 };
 
@@ -34,7 +34,10 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
 
   const handleSaveSettings = () => {
-    localStorage.setItem("agentSettings", JSON.stringify(settings));
+    // Only save risk + TA to localStorage — API keys go to DB via APIKeyForm
+    const { api: _api, ...rest } = settings;
+    void _api;
+    localStorage.setItem("agentSettings", JSON.stringify(rest));
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -50,6 +53,9 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
+      {/* API keys stored in PostgreSQL — self-contained component */}
+      <APIKeyForm />
+
       <RiskConfig
         settings={settings.risk}
         onUpdate={(risk) => setSettings({ ...settings, risk })}
@@ -60,17 +66,12 @@ export default function SettingsPage() {
         onUpdate={(ta) => setSettings({ ...settings, ta })}
       />
 
-      <APIKeyForm
-        settings={settings.api}
-        onUpdate={(api) => setSettings({ ...settings, api })}
-      />
-
       <div className="flex gap-3">
         <button
           onClick={handleSaveSettings}
           className="flex-1 p-3 bg-primarygreen text-white rounded-lg font-semibold hover:bg-teal-600 transition-colors"
         >
-          Save All Settings
+          Save Risk &amp; TA Settings
         </button>
         <button
           onClick={() => setSettings(DEFAULT_SETTINGS)}
@@ -87,15 +88,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       )}
-
-      <Card className="bg-neutral-50">
-        <CardContent className="pt-6">
-          <h3 className="font-semibold mb-2">Current Configuration Preview</h3>
-          <pre className="text-xs overflow-auto bg-neutral-100 p-3 rounded max-h-64">
-            {JSON.stringify(settings, null, 2)}
-          </pre>
-        </CardContent>
-      </Card>
 
       <DBResetCard />
     </div>
