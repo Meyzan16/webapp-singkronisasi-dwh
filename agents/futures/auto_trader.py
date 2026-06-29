@@ -315,9 +315,9 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             sig = dict(sig)
             sig["entry"] = _rtt(sig.get("entry", sig.get("price", 0)), _tick)
             sig["sl"]    = _rtt(sig.get("sl", 0), _tick)
-            if sig.get("tp1"): sig["tp1"] = _rtt(sig["tp1"], _tick)
-            if sig.get("tp2"): sig["tp2"] = _rtt(sig["tp2"], _tick)
-            if sig.get("tp3"): sig["tp3"] = _rtt(sig["tp3"], _tick)
+            sig["tp1"]   = _rtt(sig.get("tp1", 0), _tick)
+            sig["tp2"]   = _rtt(sig.get("tp2", 0), _tick)
+            sig["tp3"]   = _rtt(sig.get("tp3", 0), _tick)
 
             # Phase 9: size from the REAL shared futures wallet (balance-aware + portfolio heat).
             from app.api.v1.balance import compute_futures_sizing

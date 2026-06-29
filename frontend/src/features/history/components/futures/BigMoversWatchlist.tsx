@@ -43,6 +43,7 @@ const AGENT_LABEL: Record<string, string> = {
   futures_agent1: "Pre-Gainer",
   futures_agent2: "Accumulation",
   futures_agent3: "Momentum",
+  futures_agent_bigmover: "Big Mover",
 };
 
 function sessionId(): string {

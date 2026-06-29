@@ -134,7 +134,7 @@ export function FuturesTab() {
 
   const stats = useMemo(() => {
     const open   = positions.filter(p => p.status === "open");
-    const closed = positions.filter(p => p.status === "tp" || p.status === "sl");
+    const closed = positions.filter(p => p.status === "tp" || p.status === "sl" || p.status === "expired");
     const wins   = closed.filter(isRealWin);
     const losses = closed.filter(p => !isRealWin(p));
     const totalPnl$ = closed.reduce((acc, p) => acc + (tradePnlDollar(p, riskDollar) ?? 0), 0);
