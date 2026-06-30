@@ -24,12 +24,12 @@ export function GateBanner({ gate }: { gate: GateState | undefined }) {
           {!isOverride && (
             <div className="flex gap-4 mt-2 text-xs flex-wrap">
               <span className={cfg.textCls}>
-                DD dari peak: <strong className={isCB ? "text-red-700" : ""}>{gate.drawdown_pct.toFixed(1)}%</strong>
+                DD dari peak: <strong className={isCB ? "text-red-700" : ""}>{gate.drawdown_pct?.toFixed(1) ?? "—"}%</strong>
                 <span className="opacity-60 ml-1">(batas {gate.dd_threshold}%)</span>
               </span>
               {gate.n_trades >= 5 && (
                 <span className={cfg.textCls}>
-                  Sharpe: <strong className={isRAR ? "text-orange-700" : ""}>{gate.rar.toFixed(3)}</strong>
+                  Sharpe: <strong className={isRAR ? "text-orange-700" : ""}>{gate.rar?.toFixed(3) ?? "—"}</strong>
                   <span className="opacity-60 ml-1">(batas {gate.rar_threshold})</span>
                 </span>
               )}

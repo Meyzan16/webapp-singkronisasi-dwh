@@ -314,9 +314,9 @@ def _score_momentum_long(
     elif change_24h > 25.0:
         score -= 5    # sedikit extended
 
-    # P4.7: late momentum penalty — coin yang sudah naik >20% kemungkinan sudah peaked.
-    # Separate dari bracket above (additive), but capped to prevent double-stacking.
-    if change_24h > 20.0:
+    # P4.7: late momentum penalty for the 20-25% gap not covered by bracket above.
+    # Coins >25% already penalised by bracket; stacking P4.7 on top would double-penalise.
+    if 20.0 < change_24h < 25.0:
         score -= 10   # late entry = risk reward makin tipis, chasing lebih berbahaya
         signals.append(f"⚠ Late momentum +{change_24h:.1f}% — sudah jauh dari base, entry risiko tinggi (−10)")
 

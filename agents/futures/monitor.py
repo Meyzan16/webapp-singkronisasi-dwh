@@ -1442,7 +1442,7 @@ async def _run_fast_loop() -> None:
                                      else (_ep_d - _cp_d) / _ep_d * 100)
                         pnl_net = pnl_gross - _D(str(ROUND_TRIP * 100))
                         _notional = t.position_size or futures_notional(meta.get("risk_pct") or 2.0)
-                        t.status      = "sl"
+                        t.status      = "tp" if float(pnl_net) > 0 else "sl"
                         t.close_price = round(cp, 8)
                         t.closed_at   = time.time()
                         t.pnl_pct     = float(round(pnl_net, 2))

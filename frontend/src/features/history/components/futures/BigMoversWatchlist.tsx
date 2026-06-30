@@ -258,7 +258,7 @@ function ForceOpenModal({
 
   const noPerp = elig?.futures_perpetual === false;
   const extremeFunding =
-    elig?.funding_rate != null && Math.abs(elig.funding_rate) > 0.12;
+    elig?.funding_rate != null && Math.abs(elig.funding_rate * 100) > 0.12;
 
   const submit = async () => {
     setSubmitting(true);
@@ -344,7 +344,7 @@ function ForceOpenModal({
           )}
           {extremeFunding && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
-              Funding rate {elig?.funding_rate?.toFixed(3)}% — extreme. Posisi {direction} akan
+              Funding rate {((elig?.funding_rate ?? 0) * 100).toFixed(3)}% — extreme. Posisi {direction} akan
               bayar funding mahal per 8 jam.
             </div>
           )}

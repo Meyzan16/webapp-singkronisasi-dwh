@@ -19,7 +19,7 @@ function buildEquity(closed: FuturesPosition[], startingBalance: number, riskDol
   sorted.forEach((p, i) => {
     const pnl$ = tradePnlDollar(p, riskDollar);
     if (pnl$ != null) balance = Math.max(0, balance + pnl$);
-    points.push({ balance, n: i + 1, symbol: p.symbol.replace("USDT", ""), win: (p.pnl_pct ?? 0) >= 0 });
+    points.push({ balance, n: i + 1, symbol: p.symbol.replace("USDT", ""), win: (pnl$ ?? 0) >= 0 });
   });
   return points;
 }
@@ -45,8 +45,9 @@ export function FuturesTab() {
         fetch("/api/v1/futures/monitor/risk"),
         fetch("/api/v1/futures/auto/status"),
       ]);
-      if (!posRes.ok) return;
-      setPositions(((await posRes.json()) as { positions: FuturesPosition[] }).positions ?? []);
+      if (posRes.ok) {
+        setPositions(((await posRes.json()) as { positions: FuturesPosition[] }).positions ?? []);
+      }
       if (learnRes.ok) {
         const ld = await learnRes.json() as LearningStats;
         if (!("error" in ld)) setLearning(ld);
@@ -87,9 +88,11 @@ export function FuturesTab() {
 
     function connect() {
       if (!mounted) return;
-      const proto = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host  = typeof window !== "undefined" ? window.location.hostname : "localhost";
-      ws = new WebSocket(`${proto}//${host}:8000/ws/big-movers`);
+      const wsBase = process.env.NEXT_PUBLIC_WS_URL;
+      const proto  = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host   = typeof window !== "undefined" ? window.location.host : "localhost:8000";
+      const wsUrl  = wsBase ? `${wsBase}/ws/big-movers` : `${proto}//${host}/ws/big-movers`;
+      ws = new WebSocket(wsUrl);
 
       ws.onmessage = (ev) => {
         try {
@@ -134,7 +137,7 @@ export function FuturesTab() {
 
   const stats = useMemo(() => {
     const open   = positions.filter(p => p.status === "open");
-    const closed = positions.filter(p => p.status === "tp" || p.status === "sl" || p.status === "expired");
+    const closed = positions.filter(p => p.status === "tp" || p.status === "sl");
     const wins   = closed.filter(isRealWin);
     const losses = closed.filter(p => !isRealWin(p));
     const totalPnl$ = closed.reduce((acc, p) => acc + (tradePnlDollar(p, riskDollar) ?? 0), 0);

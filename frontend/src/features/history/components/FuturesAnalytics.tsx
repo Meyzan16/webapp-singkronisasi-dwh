@@ -67,18 +67,20 @@ function EquityDualChart({
   const minB = Math.min(...allBalances) * 0.98;
   const maxB = Math.max(...allBalances) * 1.02;
   const range = Math.max(maxB - minB, 1);
-  const n = leveraged.length;
+  const nL = leveraged.length;
+  const nC = conservative.length;
 
-  const toY = (b: number) => 100 - ((b - minB) / range) * 100;
-  const toX = (i: number) => (i / Math.max(n - 1, 1)) * 100;
+  const toY    = (b: number) => 100 - ((b - minB) / range) * 100;
+  const toXLev = (i: number) => (i / Math.max(nL - 1, 1)) * 100;
+  const toXCon = (i: number) => (i / Math.max(nC - 1, 1)) * 100;
 
   // Build SVG path strings
   const levPath = leveraged
-    .map((p, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(p.balance).toFixed(1)}`)
+    .map((p, i) => `${i === 0 ? "M" : "L"}${toXLev(i).toFixed(1)},${toY(p.balance).toFixed(1)}`)
     .join(" ");
 
   const conPath = conservative
-    .map((p, i) => `${i === 0 ? "M" : "L"}${toX(i).toFixed(1)},${toY(p.balance).toFixed(1)}`)
+    .map((p, i) => `${i === 0 ? "M" : "L"}${toXCon(i).toFixed(1)},${toY(p.balance).toFixed(1)}`)
     .join(" ");
 
   const lastLev  = leveraged[leveraged.length - 1].balance;

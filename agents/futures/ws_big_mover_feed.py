@@ -128,8 +128,8 @@ def _process_tickers(tickers: list[dict]) -> None:
 
         # Filter: keep coins above either threshold
         if abs(change_24h) < MIN_ABS_CHANGE_24H and abs(change_1m) < MIN_ABS_CHANGE_1M:
-            # Drop from cache if previously tracked but no longer interesting
             _movers_live.pop(sym, None)
+            _prev_prices.pop(sym, None)  # prune stale price ref when symbol leaves tracking
             continue
 
         prev_state = _movers_live.get(sym, {})

@@ -414,8 +414,8 @@ async def update_weights() -> int:
             history_rows: list[SignalWeightHistory] = []
 
             for (agent, signal_key, regime), v in stats.items():
-                if v["raw_n"] < MIN_SAMPLE_RAW and regime == "all":
-                    continue  # not enough data for "all" rows
+                if v["raw_n"] < MIN_SAMPLE_RAW:
+                    continue  # not enough data — apply to all regimes, not just "all"
                 n_eff      = v["total"]
                 wr_adj     = (v["wins"] + 1.0) / (n_eff + 2.0)
                 target     = _target_weight(wr_adj)

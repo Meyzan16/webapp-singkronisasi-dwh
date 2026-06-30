@@ -83,6 +83,8 @@ async def get_futures_scan(
             fs.set_scanning(False)
             logger.error("futures_scan_error", error=str(exc))
             raise HTTPException(status_code=503, detail="Scan gagal: " + str(exc)[:80])
+        finally:
+            fs.set_scanning(False)
 
     return _filter_results(cached, agent, direction, min_score, limit)
 
@@ -108,9 +110,10 @@ async def force_futures_scan(
         fs.set_big_movers(result["big_movers"])   # PLAN-SIGNAL-GAP P4
         return _filter_results(fs.get_all_results(), agent, direction, min_score, limit)
     except Exception as exc:
-        fs.set_scanning(False)
         logger.error("futures_force_scan_error", error=str(exc))
         raise HTTPException(status_code=503, detail=str(exc)[:100])
+    finally:
+        fs.set_scanning(False)
 
 
 @router.get("/futures/big-movers")

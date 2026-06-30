@@ -434,7 +434,7 @@ async def reset_balance(style: str, body: ResetRequest) -> dict:
     async with AsyncSessionLocal() as guard_session:
         open_count = (await guard_session.execute(
             select(PaperTrade).where(
-                PaperTrade.style  == style_key,
+                PaperTrade.style.in_(_wallet_trade_styles(style_key)),
                 PaperTrade.status == "open",
             ).limit(1)
         )).scalar_one_or_none()

@@ -265,7 +265,7 @@ def update_lane_wr(lane: str, wins: int, total: int) -> None:
                 logger.warning("lane_auto_paused", lane=lane, wr=round(wr, 3),
                                total=total, pause_hours=LANE_PAUSE_HOURS)
         elif time.time() >= _lane_paused_until.get(lane, 0.0):
-            pass  # already expired naturally — no action needed
+            _lane_paused_until.pop(lane, None)  # clear expired entry to keep dict clean
 
 
 def is_state_stale() -> bool:
