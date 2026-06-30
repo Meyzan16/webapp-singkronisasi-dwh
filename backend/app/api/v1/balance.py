@@ -130,7 +130,7 @@ async def compute_spot_sizing(score: float, risk_pct: float) -> dict:
         closed_pnls = (await dd_session.execute(
             select(PaperTrade.pnl_dollar).where(
                 PaperTrade.style == "opportunity_spot",
-                PaperTrade.status.in_(["tp", "sl", "manual"]),
+                PaperTrade.status.in_(["tp", "sl", "manual", "expired"]),
                 PaperTrade.pnl_dollar.isnot(None),
                 PaperTrade.closed_at >= time.time() - 90 * 86400,
             ).order_by(PaperTrade.closed_at.asc())

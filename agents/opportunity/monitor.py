@@ -323,7 +323,8 @@ def _risk_signal(
     if rsi > 80 and pnl_net >= profit_floor:
         hist = _price_history.get(symbol, [])
         if len(hist) >= 3:
-            recent_range = (max(hist[-3:]) - min(hist[-3:])) / hist[-3] if hist[-3] > 0 else 1
+            base = min(hist[-3:])
+            recent_range = (max(hist[-3:]) - min(hist[-3:])) / base if base > 0 else 1
             if recent_range < 0.005:
                 return "profit_protection"
 
@@ -603,7 +604,7 @@ async def _process_trade(
             meta["tp3_hit"]             = True
             meta["tp3_hit_at"]          = time.time()
             meta["entry_mode"]          = "momentum_chase"
-            meta["tp1_hit"]             = meta.get("tp1_hit", True)  # enable trailing SL
+            meta["tp1_hit"]             = meta.get("tp1_hit", False)  # don't assume TP1 was hit
             meta["current_sl"]          = round(tp3 * 0.98, 8)       # initial trail = 2% below TP3
             trade.stop_loss             = round(tp3 * 0.98, 8)
             trade.signals_json          = json.dumps(meta, ensure_ascii=False)

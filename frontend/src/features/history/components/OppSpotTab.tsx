@@ -186,8 +186,9 @@ export function OppSpotTab() {
     const manual = positions.filter(p => p.status === "manual");
     const wins   = tp.filter(p => (p.pnl_pct ?? 0) > 0);
 
-    const winRate = (tp.length + sl.length) > 0
-      ? (wins.length / (tp.length + sl.length)) * 100
+    const expired = positions.filter(p => p.status === "expired");
+    const winRate = (tp.length + sl.length + expired.length) > 0
+      ? (wins.length / (tp.length + sl.length + expired.length)) * 100
       : 0;
     const allClosed  = [...tp, ...sl, ...manual];
     const avgPnl     = allClosed.length > 0

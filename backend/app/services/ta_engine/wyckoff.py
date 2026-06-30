@@ -51,7 +51,7 @@ def detect_swing_structure(highs: List[float], lows: List[float], period: int = 
         higher_highs.append(highs[i] > prev_high)
 
         # Check if current low is higher than previous low
-        prev_low = max(lows[i - period : i])
+        prev_low = min(lows[i - period : i])
         higher_lows.append(lows[i] > prev_low)
 
     return higher_highs, higher_lows

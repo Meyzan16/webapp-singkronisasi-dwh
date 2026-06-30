@@ -227,7 +227,7 @@ async def _auto_open_position(coin: dict) -> bool:
     # §12.7: TP juga 45 menit — jangan langsung beli lagi di puncak pump yang sama.
     # B7: breakout_pump cooldown lebih pendek: 30 menit TP/SL
     COOLDOWN_SL_HOURS = 0.5  if is_breakout else 2.0
-    COOLDOWN_TP_HOURS = 0.5  if is_breakout else 0.33   # 30 menit untuk breakout
+    COOLDOWN_TP_HOURS = 0.5  if is_breakout else 0.75   # 45 menit untuk akumulasi (§12.7)
     async with AsyncSessionLocal() as ck:
         last_close_q = await ck.execute(
             select(PaperTrade).where(
@@ -605,6 +605,7 @@ async def run_bigmover_fastpass() -> None:
             raise
         except Exception as exc:
             _fastpass_last_error = str(exc)[:120]
+            _fastpass_running = False
             logger.warning("bigmover_fastpass_error", error=_fastpass_last_error)
 
         await asyncio.sleep(BIGMOVER_FASTPASS_SEC)

@@ -50,7 +50,7 @@ export function OpenPositionCard({
             )}
           </div>
           <p className="text-[10px] text-neutral-500 truncate mt-0.5">
-            {p.signals[0] ?? ""}
+            {p.signals?.[0] ?? ""}
           </p>
         </div>
 

@@ -236,7 +236,7 @@ async def get_stats(days: int = Query(90)) -> dict:
         )
         all_trades = list(result.scalars().all())
 
-    closed = [t for t in all_trades if t.status in ("tp", "sl")]
+    closed = [t for t in all_trades if t.status in ("tp", "sl", "manual", "expired")]
     # BUG FIX: real wins require positive net pnl (status "tp" with negative pnl is a loss)
     wins   = [t for t in closed if _is_real_win(t)]
 
@@ -289,7 +289,7 @@ async def get_equity(style: str = Query("futures")) -> dict:
     async with AsyncSessionLocal() as s:
         result = await s.execute(
             select(PaperTrade)
-            .where(PaperTrade.status.in_(["tp", "sl"]), *style_filter)
+            .where(PaperTrade.status.in_(["tp", "sl", "manual", "expired"]), *style_filter)
             .order_by(PaperTrade.closed_at)
         )
         trades = list(result.scalars().all())
@@ -333,7 +333,7 @@ async def get_daily_pnl(days: int = Query(30)) -> dict:
     async with AsyncSessionLocal() as s:
         result = await s.execute(
             select(PaperTrade)
-            .where(PaperTrade.closed_at >= cutoff, PaperTrade.status.in_(["tp", "sl"]))
+            .where(PaperTrade.closed_at >= cutoff, PaperTrade.status.in_(["tp", "sl", "manual", "expired"]))
             .order_by(PaperTrade.closed_at)
         )
         trades = list(result.scalars().all())
@@ -345,7 +345,7 @@ async def get_daily_pnl(days: int = Query(30)) -> dict:
         d["trades"] += 1
         if t.pnl_pct is not None:   # F42: include break-even (0.0) trades
             d["pnl"] = round(d["pnl"] + t.pnl_pct, 2)
-        if t.status == "tp":
+        if _is_real_win(t):
             d["wins"] += 1
         else:
             d["losses"] += 1

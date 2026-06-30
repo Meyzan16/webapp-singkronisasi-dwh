@@ -42,7 +42,7 @@ export default function SpotMarketPage() {
   }, [fetchData]);
 
   const ms     = data?.market_stats;
-  const upPct  = ms ? Math.round((ms.up_count / ms.total_pairs) * 100) : 50;
+  const upPct  = (ms && ms.total_pairs > 0) ? Math.round((ms.up_count / ms.total_pairs) * 100) : 50;
 
   const TABS: { key: TabKey; label: string; count?: number }[] = [
     { key: "overview", label: "📊 Overview" },

@@ -127,7 +127,7 @@ async def update_spot_weights() -> int:
             if meta.get("close_reason") in EXCLUDED_REASONS:
                 continue
 
-            is_win = (t.status == "tp") and (t.pnl_pct or 0) > 0
+            is_win = (t.status == "tp") and (t.pnl_pct is not None and t.pnl_pct > 0)
             decay  = _decay_factor(t.closed_at, now)
 
             if t.alert_type:
