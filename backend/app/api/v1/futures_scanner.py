@@ -795,6 +795,11 @@ async def get_risk_dashboard() -> dict:
                 "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent3"), 2),
                 "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent3" and p["risk_status"] == "DANGER"),
             },
+            "agent_bigmover": {
+                "open": sum(1 for p in positions if p["agent"] == "futures_agent_bigmover"),
+                "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent_bigmover"), 2),
+                "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent_bigmover" and p["risk_status"] == "DANGER"),
+            },
         },
         "generated_at": time.time(),
         "gate": _gate,   # Phase 10: full gate state — frontend reads from risk dashboard
