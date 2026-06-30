@@ -28,8 +28,8 @@ MAX_OPENS_PER_CYCLE_REDUCED = 1
 
 # PLAN-BIG-MOVERS Phase 2 BM3: separate quota for bigmover_chase lane
 MAX_BIGMOVER_OPENS    = 2     # max concurrent bigmover_chase positions
-BIGMOVER_FASTPASS_SEC = 60    # G13: SPOT real-time cadence for big movers
-BIGMOVER_FASTPASS_MIN_PCT = 15.0   # subset: only |change_24h| >= 15% rescanned
+BIGMOVER_FASTPASS_SEC = 30    # Wave Rider: check every 30s (was 60) — catch early
+BIGMOVER_FASTPASS_MIN_PCT = 8.0    # Wave Rider: rescan from 8% change_24h (was 15%)
 
 # §14.4: circuit breaker — rugi harian (WIB) melebihi batas → auto-open jeda
 DAILY_LOSS_LIMIT_FRACTION = 0.03
@@ -185,7 +185,10 @@ async def _auto_open_position(coin: dict) -> bool:
         logger.info("auto_open_no_live_price", symbol=symbol)
         return False
     drift_pct = abs(live - entry) / entry * 100
-    if drift_pct > 1.0:
+    # BigMover/breakout coins move fast — tolerate up to 3% drift; others 1%
+    is_bigmover = coin.get("entry_mode") == "bigmover_chase" or coin.get("alert_type") == "breakout_pump"
+    drift_limit = 3.0 if is_bigmover else 1.0
+    if drift_pct > drift_limit:
         logger.info("auto_open_price_drift_skip", symbol=symbol,
                     scan_price=entry, live=live, drift_pct=round(drift_pct, 2))
         return False
@@ -569,7 +572,7 @@ async def _run_fastpass_cycle() -> int:
         if res is None:
             continue
         levels = opp_scanner._calc_trade_levels_bigmover(
-            klines_map.get((symbol, "15m"), []), res["current_price"]
+            klines_map.get((symbol, "15m"), []), res["current_price"], change_24h
         )
         if levels is None:
             continue

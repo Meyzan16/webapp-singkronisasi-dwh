@@ -132,20 +132,25 @@ BREAKOUT_RISK_MIN_PCT     = 2.0    # min SL distance
 BREAKOUT_RISK_MAX_PCT     = 12.0   # max SL distance (lebih lebar dari akumulasi 5%)
 
 # ── Big Mover Chase lane (PLAN-BIG-MOVERS Phase 2 BM2) ───────────────────────
-# Lane LONG-only untuk coin yang sudah pump ≥ 20% 24h atau ≥ 30% 7d. Simplified
-# scoring tanpa BB Squeeze (irrelevant di breakout). B2.3: hapus full direction
-# gate, ganti dengan lighter check (change_1h>0 + 5m majority green).
-BIGMOVER_MIN_CHANGE_24H   = 20.0   # ≥20% qualifies
+# Wave Rider: catch the wave earlier (10% not 20%) and ride it longer (wider TPs).
+# Tujuan: jika coin naik 2200%, agent masuk di tengah dan bisa capture 500-1400%.
+BIGMOVER_MIN_CHANGE_24H   = 10.0   # ≥10% qualifies (was 20) — catch earlier in rally
 BIGMOVER_MIN_CHANGE_7D    = 30.0   # ≥30% weekly qualifies
-BIGMOVER_MAX_CHANGE_24H   = 150.0  # >150% parabolic — skip
-BIGMOVER_MIN_VOLUME       = 1_000_000   # $1M min (plan spec)
+BIGMOVER_MAX_CHANGE_24H   = 200.0  # >200% parabolic — skip (was 150)
+BIGMOVER_MIN_VOLUME       = 1_000_000   # $1M min
 BIGMOVER_AUTO_SCORE       = 65     # auto-open threshold
 BIGMOVER_MIN_SCORE        = 55     # min display score
-BIGMOVER_RISK_PCT_DEFAULT = 0.7    # 0.7% per-trade risk (separuh accumulation 1%)
+BIGMOVER_RISK_PCT_DEFAULT = 0.7    # 0.7% per-trade risk
 BIGMOVER_SL_PCT_MAX       = 5.0    # SL floor 5%
-BIGMOVER_TP1_PCT          = 3.0
-BIGMOVER_TP2_PCT          = 6.0
-BIGMOVER_TP3_PCT          = 10.0
+# Standard TP (change_24h 10–49%) — wider than before to ride the wave longer
+BIGMOVER_TP1_PCT          = 5.0    # was 3.0
+BIGMOVER_TP2_PCT          = 12.0   # was 6.0
+BIGMOVER_TP3_PCT          = 25.0   # was 10.0
+# Explosive TP (change_24h ≥ 50%) — coin sudah parabolic, beri ruang lebih besar
+BIGMOVER_EXPLOSIVE_THRESHOLD = 50.0
+BIGMOVER_EXPLOSIVE_TP1_PCT   = 8.0
+BIGMOVER_EXPLOSIVE_TP2_PCT   = 20.0
+BIGMOVER_EXPLOSIVE_TP3_PCT   = 45.0
 BIGMOVER_GAP_5M_LIMIT     = 5.0    # skip kalau gap antar candle 5m > 5%
 BIGMOVER_ENTRY_TRAP_30M   = 15.0   # G18 entry-trap: change_30m > 15% same dir = puncak
 
@@ -393,10 +398,11 @@ def _calc_trade_levels(tf_data: dict[str, TFData], entry: float) -> Optional[dic
 def _calc_trade_levels_bigmover(
     klines_15m: list,
     entry: float,
+    change_24h: float = 0.0,
 ) -> Optional[dict]:
     """
     SL = max(1.5% below swing-low 15m, -5%) — wider than accumulation.
-    TP: fixed +3%/+6%/+10% (R:R ≥ 1.2 to TP1, ≥ 1.5 to TP2 even at max SL).
+    Wave Rider TPs: standard +5%/+12%/+25%; explosive (>=50%) +8%/+20%/+45%.
     """
     if entry <= 0 or len(klines_15m) < 20:
         return None
@@ -421,9 +427,19 @@ def _calc_trade_levels_bigmover(
     if risk_pct < 1.0 or risk_pct > BIGMOVER_SL_PCT_MAX + 0.5:
         return None
 
-    tp1 = entry * (1 + BIGMOVER_TP1_PCT / 100)
-    tp2 = entry * (1 + BIGMOVER_TP2_PCT / 100)
-    tp3 = entry * (1 + BIGMOVER_TP3_PCT / 100)
+    # Wave Rider: pakai explosive TPs ketika coin sudah +50% 24h — beri ruang lebih
+    if change_24h >= BIGMOVER_EXPLOSIVE_THRESHOLD:
+        tp1_pct = BIGMOVER_EXPLOSIVE_TP1_PCT
+        tp2_pct = BIGMOVER_EXPLOSIVE_TP2_PCT
+        tp3_pct = BIGMOVER_EXPLOSIVE_TP3_PCT
+    else:
+        tp1_pct = BIGMOVER_TP1_PCT
+        tp2_pct = BIGMOVER_TP2_PCT
+        tp3_pct = BIGMOVER_TP3_PCT
+
+    tp1 = entry * (1 + tp1_pct / 100)
+    tp2 = entry * (1 + tp2_pct / 100)
+    tp3 = entry * (1 + tp3_pct / 100)
 
     rr = (tp2 - entry) / risk
     if rr < 1.2:
@@ -440,9 +456,9 @@ def _calc_trade_levels_bigmover(
         "tp2":         rp(tp2, entry),
         "tp3":         rp(tp3, entry),
         "risk_pct":    round(risk_pct, 2),
-        "tp1_pct":     BIGMOVER_TP1_PCT,
-        "tp2_pct":     BIGMOVER_TP2_PCT,
-        "tp3_pct":     BIGMOVER_TP3_PCT,
+        "tp1_pct":     tp1_pct,
+        "tp2_pct":     tp2_pct,
+        "tp3_pct":     tp3_pct,
         "tp1_net_pct": net_pct(tp1),
         "tp2_net_pct": net_pct(tp2),
         "tp3_net_pct": net_pct(tp3),
@@ -738,8 +754,15 @@ def _score_bigmover_chase(
     elif 72 < rsi_val <= 80:
         score += 7
         signals.append(f"RSI {rsi_val:.0f} extended — hati-hati exhaustion")
-    elif rsi_val > 80:
-        return None   # overbought hard skip
+    elif rsi_val > 85:
+        return None   # overbought hard skip (was 80)
+    elif 80 < rsi_val <= 85:
+        # Wave Rider: allow RSI 80-85 only if strong 1h momentum + weekly trend
+        if change_1h >= 2.0 and change_7d >= 30.0:
+            score += 3   # small bonus: wave still has buyers
+            signals.append(f"RSI {rsi_val:.0f} elevated — wave riding, 1h={change_1h:.1f}%")
+        else:
+            return None  # not enough confirmation — skip
 
     # ── 3. EMA alignment (0-15 pts) ───────────────────────────────────────────
     aligned = sum(1 for d in tf_data.values() if d.ema9 > d.ema21)
@@ -761,7 +784,10 @@ def _score_bigmover_chase(
         score += 9
 
     # ── 5. Momentum context (0-20 pts) ────────────────────────────────────────
-    if 20 <= change_24h < 35:
+    if 10 <= change_24h < 20:
+        score += 7
+        signals.append(f"Δ24h +{change_24h:.1f}% — wave awal, masuk di tengah")
+    elif 20 <= change_24h < 35:
         score += 12
         signals.append(f"Δ24h +{change_24h:.1f}% — wave matang, room masih ada")
     elif 35 <= change_24h < 70:
@@ -1563,7 +1589,7 @@ async def run_opportunity_scan() -> dict:
             continue
 
         bm_levels = _calc_trade_levels_bigmover(
-            klines_map.get((bsym, "15m"), []), bm_res["current_price"],
+            klines_map.get((bsym, "15m"), []), bm_res["current_price"], bm_change_24h,
         )
         if bm_levels is None:
             continue
