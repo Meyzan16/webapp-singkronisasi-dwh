@@ -99,7 +99,7 @@ function EquityDualChart({
         <path d={levPath} fill="none" stroke="#14b8a6" strokeWidth="1.2" />
         {/* Dots for each trade */}
         {leveraged.map((p, i) => (
-          <circle key={i} cx={toX(i)} cy={toY(p.balance)} r="0.8"
+          <circle key={i} cx={toXLev(i)} cy={toY(p.balance)} r="0.8"
             fill={p.win ? "#22c55e" : "#ef4444"} />
         ))}
       </svg>
