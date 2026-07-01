@@ -1,62 +1,26 @@
 # PLAN_v4 — Deferred Items + Data-Driven Evolution
 
 Tanggal: 2026-06-29  
-**Review terakhir: 2026-07-01** — Phase 1 ✅ + Phase 5 ✅ selesai. Phase 2–4 masih pending, prerequisite belum terpenuhi (sistem baru jalan ~2 hari, butuh ≥ 7 hari).
+**Review terakhir: 2026-07-01** — Phase 1 & Phase 5 sudah SELESAI + verified, dihapus dari dokumen ini. Yang tersisa hanya Phase 2–4 yang masih **menunggu prerequisite data** (`predictive_log` ≥ 7 hari; sistem live sejak ~2026-06-29).
 
-Kelanjutan PLAN_v2 + PLAN_v3. Semua item di sini adalah deferred items yang **menunggu kondisi terpenuhi**:
-- **Phase 1**: bisa dikerjakan sekarang (fix data infrastructure, tidak butuh runtime data)
-- **Phase 2–4**: butuh `predictive_log` terisi ≥ 7 hari sebelum bisa dieksekusi
-- **Phase 5**: kosmetik, dikerjakan kapan saja
+Kelanjutan PLAN_v2 + PLAN_v3. Item di sini adalah deferred yang belum bisa dieksekusi sampai runtime data cukup.
 
 ## Status Prerequisite (per 2026-07-01)
 
-| Kondisi | Status | Catatan |
+| Kondisi | Status | Cek cara |
 |---|---|---|
-| predictive_log ≥ 7 hari data | ❌ ~2 hari | Sistem live sejak ~2026-06-29. Cek ulang 2026-07-08. |
-| predictive_log ≥ 20 resolved entries per agent | ❌ Belum cukup | Perlu 7+ hari dulu untuk akumulasi |
-| hit_rate_4h stabil (< 5% delta antara 2 run) | ❌ Belum | Prerequisite di atas belum terpenuhi |
+| predictive_log ≥ 7 hari data | ❌ ~2 hari — cek ulang **2026-07-08** | `GET /predictive/recent?limit=10` → `scanned_at` tertua |
+| predictive_log ≥ 20 resolved entries per agent | ❌ belum cukup | `GET /predictive/hit_rate` → `resolved_count` |
+| hit_rate_4h stabil (< 5% delta antar 2 run) | ❌ belum | Run `/predictive/hit_rate` dua hari berturut lalu bandingkan |
 
-**Catatan tambahan:**
-- `agents/learning/monthly_calibration.py` SUDAH ADA — mengadjust threshold bulanan berdasarkan hit rate. Ini beda dari P2.2 (yang per-regime, per-direction, dan berbasis predictive_log). Tidak menggantikan P2.2.
-- `agents/learning/weekly_backtest.py` SUDAH ADA — backtest threshold berdasarkan `big_mover_log`. Beda dari P2.1 yang berdasarkan `predictive_log` signal-level. Tidak menggantikan P2.1.
-- `_early_breakout_confirmed` flag di agent3.py (line ~296) SUDAH ADA sebagai internal branch D2.4. Ini bagian dari P3.3 tuning, tapi data-driven calibration (P3.3 proper) masih pending data.
-
----
-
-## Status prerequisite
-
-| Kondisi | Cek cara |
-|---|---|
-| predictive_log ≥ 7 hari data | `GET /predictive/recent?limit=10` → cek `scanned_at` tertua |
-| predictive_log ≥ 20 resolved entries per agent | `GET /predictive/hit_rate` → cek `resolved_count` |
-| hit_rate_4h stabil (berubah < 5% antara 2 run berturut) | Run `/predictive/hit_rate` dua hari berturut lalu bandingkan |
+**Catatan (sudah ada, JANGAN dianggap menggantikan item di bawah):**
+- `agents/learning/monthly_calibration.py` — adjust threshold bulanan by hit rate. Beda dari P2.2 (per-regime/direction, berbasis predictive_log).
+- `agents/learning/weekly_backtest.py` — backtest threshold by `big_mover_log`. Beda dari P2.1 (signal-level, berbasis predictive_log).
+- `_early_breakout_confirmed` flag di agent3.py (~line 296) — internal branch D2.4. Bagian dari P3.3, tapi data-driven calibration (P3.3 proper) masih pending.
 
 ---
 
-## PHASE 1 — Data Infrastructure ✅ SELESAI (2026-06-29) — VERIFIED 2026-07-01
-
-**Tujuan**: Unblock D3.2 dan D3.3 yang ter-defer karena constraint data.
-
-### P1.1 — Extend CANDLE_LIMIT untuk volume baseline (D3.2) ✅
-
-- [x] `_fetch_klines` menerima `limit` param; 1h TF di-fetch dengan `limit=200`
-- [x] `_volume_zscore()` ditambahkan di `agent1.py` — z-score vs baseline 200 candle
-- [x] `_score_pregainer` (agent1): `vol_z ≥ 2.5` → +10 pts, `vol_z ≥ 1.5` → +5 pts
-- [x] `_score_accumulation` (agent2) T3: bonus z-score identik setelah `_volume_accumulation`
-
-### P1.2 — OI acceleration delta-of-delta (D3.3) ✅
-
-- [x] `_fetch_oi` fetch 3 snapshots, return `(oi_usdt, delta_1, delta_2)`
-- [x] `FuturesData.oi_change_pct_prev` field baru untuk delta sebelumnya
-- [x] `_score_pregainer` (agent1): `oi_chg > oi_chg_prev > 0` → +6 pts
-- [x] `_score_predump` (agent1): acceleration di resistance → +5 pts
-- [x] T0 OI section (agent2): acceleration check → +6 pts
-
-**Gate review P1**: ✅ Python syntax clean, TypeScript clean, no errors.
-
----
-
-## PHASE 2 — Feedback Loop Expansion ⏳ PENDING — Prerequisite belum terpenuhi (butuh 2026-07-08+)
+## PHASE 2 — Feedback Loop Expansion ⏳ PENDING (butuh 2026-07-08+)
 
 **Prerequisite**: `predictive_log` terisi ≥ 7 hari, ≥ 20 resolved entries per agent.
 
@@ -101,7 +65,7 @@ Kelanjutan PLAN_v2 + PLAN_v3. Semua item di sini adalah deferred items yang **me
 
 ---
 
-## PHASE 3 — Early Breakout Agent Decision ⏳ PENDING — Prerequisite belum terpenuhi (butuh 2026-07-15+)
+## PHASE 3 — Early Breakout Agent Decision ⏳ PENDING (butuh 2026-07-15+)
 
 **Prerequisite**: D5.1 spike analysis — predictive_log harus punya 14+ hari data untuk `change_24h` 3–7% range di agent3.
 
@@ -137,7 +101,7 @@ Jika hit rate ≤ 40% → tidak perlu agent baru, tapi branch existing di agent3
 
 ---
 
-## PHASE 4 — UI Enhancement ⏳ PENDING — Prerequisite belum terpenuhi (butuh 2026-07-08+)
+## PHASE 4 — UI Enhancement ⏳ PENDING (butuh 2026-07-08+)
 
 **Prerequisite**: predictive_log ≥ 7 hari, hit_rate endpoint mengembalikan data bermakna.
 
@@ -165,53 +129,18 @@ Jika hit rate ≤ 40% → tidak perlu agent baru, tapi branch existing di agent3
 
 ---
 
-## PHASE 5 — Polish ✅ SELESAI (2026-06-29) — VERIFIED 2026-07-01
-
-### P5.1 — Tutorial popup adaptive learning (P7.4) ✅
-
-- [x] `AdaptiveLearningTutorial` modal di `/signals` page
-- [x] `?` button di header — buka tutorial kapan saja
-- [x] Auto-show saat first visit (localStorage check)
-- [x] Loop diagram: Scan Universe → Score & Filter → Paper Trade → Weight Update → Predictive Log
-- [x] Live stats: sinyal dipelajari, blacklist count, prediction count, avg 4h hit rate
-- [x] Panduan tab untuk semua 8 sub-tab
-- [x] "Jangan tampilkan lagi" checkbox + localStorage `signals_tutorial_dismissed`
-
-**Gate review P5**: ✅ Modal muncul, dismiss berjalan, `?` button bisa reopen.
-
----
-
-## Timeline & Dependencies
+## Timeline & Dependencies (sisa)
 
 ```
-Sekarang ──────────────────────────────────────────────────→ Waktu
-   │
-   ├── P1 (sekarang)
-   │    P1.1 Volume z-score + P1.2 OI acceleration
-   │
-   │    [tunggu 7 hari runtime data]
-   │
-   ├── P2 (hari ke-7+)
-   │    P2.1 Weekly job + P2.2 Regime re-tune + P2.3 Predictive→weights
-   │
-   │    [tunggu 14 hari, cek D5.1 spike]
-   │
-   ├── P3 (hari ke-14+)
-   │    P3.1 Spike analysis → P3.2 atau P3.3 (conditional)
-   │
-   ├── P4 (paralel dengan P2+, butuh data saja)
-   │    P4.1 Probability badge + P4.2 Detected-at badge
-   │
-   └── P5 (kapan saja, tidak urgent)
-        P5.1 Tutorial popup
+2026-07-08+  P2 (hari ke-7)  — P2.1 Weekly job + P2.2 Regime re-tune + P2.3 Predictive→weights
+             P4 (paralel)     — P4.1 Probability badge + P4.2 Detected-at badge
+2026-07-15+  P3 (hari ke-14)  — P3.1 Spike analysis → P3.2 ATAU P3.3 (conditional)
 ```
 
-## Keputusan Terkunci
+## Keputusan Terkunci (relevan untuk phase tersisa)
 
 | Pertanyaan | Keputusan |
 |---|---|
 | Agent baru `agent_early_breakout.py`? | **Conditional** — hanya buat jika D5.1 spike menunjukkan hit rate > 40% dalam ≥ 30 samples. Default: tuning branch saja. |
 | Predictive → weight blend ratio? | **0.85 × trade + 0.15 × predictive** (konservatif). Eskalasi ke 0.7/0.3 hanya jika predictive terbukti uncorrelated dengan trade signal (additive value). |
-| Candle limit extend? | **200 candles untuk 1h TF** (tidak lebih — rate limit concern). 4h TF tetap 100. |
-| Volume z-score baseline window? | **200 candles 1h = ~8 hari** (tidak ideal 30d tapi practical). Note di scoring bahwa z-score relatif terhadap 8d window, bukan 30d. |
 | Weekly signal review apply direction? | **Lower weight only** saat pertama berjalan (conservative). Setelah 4 minggu data: enable raise juga. |
