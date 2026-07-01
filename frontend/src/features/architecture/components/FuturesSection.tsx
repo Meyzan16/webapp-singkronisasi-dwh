@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge, SectionTitle } from "./primitives";
+import { Badge, LiveBadge, SectionTitle, SourceBadge } from "./primitives";
 import {
   FUTURES_AGENTS,
   FUTURES_MONITOR_LAYERS,
@@ -9,28 +9,51 @@ import {
   RISK_GATE,
   SYSTEM_OVERVIEW,
 } from "../data";
+import { useAgentConfig } from "../hooks/useAgentConfig";
+import { useAgentConfigDbKeys } from "../hooks/useAgentConfigDbKeys";
+
+// data.ts lane key ("agent1") → live API agent key ("pre_gainer")
+const LIVE_AGENT_KEY: Record<string, string> = {
+  agent1: "pre_gainer",
+  agent2: "accumulation",
+  agent3: "momentum",
+  bigmover: "bigmover",
+};
 
 // ─── SYSTEM STATS ─────────────────────────────────────────────────────────────
 function FuturesStatsBar() {
+  const { data, loading } = useAgentConfig();
+  const dbKeys = useAgentConfigDbKeys();
+  const live = data?.futures;
   const o = SYSTEM_OVERVIEW.futures;
-  const stats = [
-    { label: "Scan Interval",   val: o.scanInterval },
-    { label: "Monitor",         val: o.monitorInterval },
-    { label: "Max Open/Cycle",  val: String(o.maxOpensCycle) },
+
+  const stats: { label: string; val: string; dbKey?: string }[] = [
+    { label: "Scan Interval",   val: live?.scan_interval_sec != null ? `${Math.round(live.scan_interval_sec / 60)} menit` : o.scanInterval },
+    { label: "Monitor",         val: live?.monitor_interval_sec != null ? `${Math.round(live.monitor_interval_sec / 60)} menit` : o.monitorInterval },
+    { label: "Fast Monitor",    val: o.fastMonitorInterval.replace(" (high-risk)", "") },
+    { label: "Max Positions",   val: live ? `${live.auto_trader?.max_positions_global} global` : `${o.maxPositions} global`, dbKey: "futures.max_auto_positions" },
     { label: "Min Score",       val: String(o.minScore) },
     { label: "Auto-Open",       val: o.autoOpenScore },
-    { label: "R:R Min",         val: `≥ ${o.rrMin}` },
-    { label: "Max Age",         val: o.maxAge },
-    { label: "Circuit Breaker", val: `−${o.circuitBreakerPct}%` },
+    { label: "Max Age",         val: live ? `${live.monitor?.max_age_days}–${(live.monitor?.max_age_days ?? 0) + (live.monitor?.max_age_extensions ?? 0)} hari` : o.maxAge },
+    { label: "Circuit Breaker", val: live ? `−${live.risk_gate?.dd_hard_stop_pct}%` : `−${o.circuitBreakerPct}%` },
   ];
   return (
-    <div className="grid grid-cols-4 md:grid-cols-8 gap-2 mb-6">
-      {stats.map(s => (
-        <div key={s.label} className="bg-neutral-50 border rounded-xl px-3 py-2 text-center">
-          <p className="text-[10px] text-neutral-500 font-medium">{s.label}</p>
-          <p className="text-xs font-bold text-blue-700 mt-0.5">{s.val}</p>
-        </div>
-      ))}
+    <div className="mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">System Overview</p>
+        <LiveBadge live={!!live} loading={loading} />
+      </div>
+      <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+        {stats.map(s => (
+          <div key={s.label} className="bg-neutral-50 border rounded-xl px-3 py-2 text-center">
+            <p className="text-[10px] text-neutral-500 font-medium flex items-center justify-center">
+              {s.label}
+              {s.dbKey && <SourceBadge dbKey={s.dbKey} dbKeys={dbKeys} />}
+            </p>
+            <p className="text-xs font-bold text-blue-700 mt-0.5">{s.val}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -39,6 +62,13 @@ function FuturesStatsBar() {
 function AgentsSection() {
   const [active, setActive] = useState(FUTURES_AGENTS[0].key);
   const agent = FUTURES_AGENTS.find(a => a.key === active)!;
+  const { data } = useAgentConfig();
+  const dbKeys = useAgentConfigDbKeys();
+  const liveAgent = data?.futures?.agents?.[LIVE_AGENT_KEY[active] ?? active];
+  const minScore = (liveAgent?.min_score as number | undefined) ?? agent.minScore;
+  // Only bigmover's min_score is DB-wired (fixed threshold) — agent1/2/3 use
+  // adaptive thresholds from weight_updater, which aren't a static agent_config row.
+  const minScoreDbKey = active === "bigmover" ? "futures.bigmover_min_score" : undefined;
 
   return (
     <div className="mb-6">
@@ -66,7 +96,8 @@ function AgentsSection() {
             <div className="flex gap-1.5 mt-2">
               <Badge label={`Max ${agent.leverageMax}×`} color={agent.badgeColor} />
               <Badge label={agent.direction} color="bg-neutral-100 text-neutral-700" />
-              <Badge label={`Min ${agent.minScore} pts`} color={agent.badgeColor} />
+              <Badge label={`Min ${minScore} pts`} color={agent.badgeColor} />
+              {minScoreDbKey && <SourceBadge dbKey={minScoreDbKey} dbKeys={dbKeys} />}
             </div>
           </div>
           <div className="text-xs text-neutral-600 bg-white/60 rounded-xl p-3 space-y-1 shrink-0">

@@ -154,6 +154,31 @@ BIGMOVER_EXPLOSIVE_TP3_PCT   = 45.0
 BIGMOVER_GAP_5M_LIMIT     = 5.0    # skip kalau gap antar candle 5m > 5%
 BIGMOVER_ENTRY_TRAP_30M   = 15.0   # G18 entry-trap: change_30m > 15% same dir = puncak
 
+# ── Early Radar lane (PLAN_v5 Group A) ───────────────────────────────────────
+# Tangkap explosive micro-cap SEBELUM masuk radar lain. Universe $100K–$1M volume
+# yang tidak disentuh Accumulation ($5M), BigMover/Weekly ($1M), Breakout ($500K).
+# Sinyal inti: volume surge vs rata-rata 7 hari + harga dekat 30d high. Ini pola
+# yang paling sering mendahului explosive move (e.g. SYN-type). Micro-cap = risiko
+# lebih tinggi → bar score tinggi (70), risk/trade ½ normal, max 2 posisi aktif.
+EARLY_RADAR_VOL_MIN        = 100_000     # $100K floor (di bawah ini iliquid)
+EARLY_RADAR_VOL_MAX        = 1_000_000   # $1M ceiling (di atas → lane lain handle)
+EARLY_RADAR_SURGE_MIN      = 2.0         # vol_24h / avg_7d_daily_vol ≥ 2× (wajib)
+EARLY_RADAR_SURGE_STRONG   = 3.0         # ≥ 3× = strong (full pts)
+EARLY_RADAR_NEAR_HIGH_PCT  = 10.0        # ≤ 10% di bawah 30d high
+EARLY_RADAR_NEAR_HIGH_STR  = 5.0         # ≤ 5% di bawah 30d high (full pts)
+EARLY_RADAR_POOL           = 50          # max 50 kandidat gainer dari range vol
+EARLY_RADAR_MIN_SCORE      = 70          # bar tinggi (micro-cap = risiko lebih)
+EARLY_RADAR_AUTO_SCORE     = 85          # auto-open threshold
+EARLY_RADAR_RISK_PCT       = 0.5         # 0.5% risk/trade (½ dari lane normal)
+EARLY_RADAR_MAX_OPEN       = 2           # max 2 posisi aktif sekaligus
+EARLY_RADAR_CHANGE_MAX     = 30.0        # change_24h > 30% → sudah lari (penalty)
+EARLY_RADAR_SL_MIN_PCT     = 3.0         # SL floor (micro-cap volatile, butuh ruang)
+EARLY_RADAR_SL_MAX_PCT     = 10.0        # SL ceiling (di atas ini skip)
+EARLY_RADAR_TP1_PCT        = 10.0        # target pertama
+EARLY_RADAR_TP2_PCT        = 25.0        # primary target (nilai harapan)
+EARLY_RADAR_TP3_PCT        = 60.0        # explosive scenario
+EARLY_RADAR_RR_MIN         = 4.0         # micro-cap butuh asymmetry besar
+
 
 # ── Math helpers ───────────────────────────────────────────────────────────────
 
@@ -845,6 +870,169 @@ def _score_bigmover_chase(
     }
 
 
+# ── Early Radar scoring + levels (PLAN_v5 Group A) ──────────────────────────────
+
+def _calc_trade_levels_early_radar(low_30d: float, entry: float) -> Optional[dict]:
+    """
+    SL = 30d low − 1% buffer, di-clamp ke [3%, 10%].
+    TP tetap (bukan risk-multiple) karena micro-cap: +10/+25/+60%.
+    R:R ke TP2 ≥ 4.0 wajib — micro-cap perlu asymmetry besar utk kompensasi slippage.
+    """
+    if entry <= 0 or low_30d <= 0:
+        return None
+
+    sl       = low_30d * 0.99   # 1% di bawah 30d low
+    risk_pct = (entry - sl) / entry * 100
+
+    # Clamp: kalau SL terlalu dekat, lebarkan ke floor; kalau terlalu jauh, skip.
+    if risk_pct < EARLY_RADAR_SL_MIN_PCT:
+        sl       = entry * (1 - EARLY_RADAR_SL_MIN_PCT / 100)
+        risk_pct = EARLY_RADAR_SL_MIN_PCT
+    if risk_pct > EARLY_RADAR_SL_MAX_PCT:
+        return None
+    if sl >= entry:
+        return None
+
+    risk = entry - sl
+    tp1  = entry * (1 + EARLY_RADAR_TP1_PCT / 100)
+    tp2  = entry * (1 + EARLY_RADAR_TP2_PCT / 100)
+    tp3  = entry * (1 + EARLY_RADAR_TP3_PCT / 100)
+
+    rr = (tp2 - entry) / risk
+    if rr < EARLY_RADAR_RR_MIN:
+        return None
+
+    rp = _round_price
+
+    def net_pct(tp: float) -> float:
+        return round((tp - entry) / entry * 100 - EXECUTION_COST_PCT, 2)
+
+    return {
+        "entry":       rp(entry, entry),
+        "sl":          rp(sl, entry),
+        "tp1":         rp(tp1, entry),
+        "tp2":         rp(tp2, entry),
+        "tp3":         rp(tp3, entry),
+        "risk_pct":    round(risk_pct, 2),
+        "tp1_pct":     EARLY_RADAR_TP1_PCT,
+        "tp2_pct":     EARLY_RADAR_TP2_PCT,
+        "tp3_pct":     EARLY_RADAR_TP3_PCT,
+        "tp1_net_pct": net_pct(tp1),
+        "tp2_net_pct": net_pct(tp2),
+        "tp3_net_pct": net_pct(tp3),
+        "rr_ratio":    round(rr, 1),
+    }
+
+
+def _score_early_radar(symbol: str, klines_1d: list, ticker: dict) -> Optional[dict]:
+    """
+    Scoring lane Early Radar dari klines HARIAN saja (murah, 1 TF).
+    Sinyal: volume surge (vs avg 7d) + harga dekat 30d high + momentum sehat + RSI + BB.
+    Return None kalau tidak ada volume surge (sinyal inti) atau score < MIN.
+    """
+    if len(klines_1d) < 31:
+        return None
+
+    try:
+        # §10.1: buang candle harian yang sedang berjalan untuk baseline.
+        completed = klines_1d[:-1]
+        highs = [float(k[2]) for k in completed]
+        lows  = [float(k[3]) for k in completed]
+        closes = [float(k[4]) for k in completed]
+        qvols = [float(k[7]) for k in completed]   # k[7] = quote asset volume harian
+        current_price = float(ticker.get("lastPrice", 0)) or closes[-1]
+        change_24h    = float(ticker.get("priceChangePercent", 0))
+        vol_24h       = float(ticker.get("quoteVolume", 0))
+    except (IndexError, ValueError, TypeError):
+        return None
+
+    if current_price <= 0 or len(closes) < 30:
+        return None
+
+    score   = 0.0
+    signals: list[str] = []
+
+    # ── 1. Volume surge (0-40 pts) — sinyal INTI, wajib ≥ 2× ────────────────────
+    avg_7d_vol = sum(qvols[-7:]) / 7 if len(qvols) >= 7 else 0.0
+    surge = vol_24h / avg_7d_vol if avg_7d_vol > 0 else 0.0
+    if surge >= EARLY_RADAR_SURGE_STRONG:
+        score += 40
+        signals.append(f"Volume surge {surge:.1f}× vs rata-rata 7d — akumulasi mulai")
+    elif surge >= EARLY_RADAR_SURGE_MIN:
+        score += 25
+        signals.append(f"Volume surge {surge:.1f}× vs rata-rata 7d")
+    else:
+        return None   # tanpa surge = bukan early radar signal
+
+    # ── 2. Near 30d high (0-30 pts) ─────────────────────────────────────────────
+    high_30d = max(highs[-30:])
+    low_30d  = min(lows[-30:])
+    dist_to_high = (high_30d - current_price) / current_price * 100 if current_price > 0 else 999
+    if dist_to_high <= EARLY_RADAR_NEAR_HIGH_STR:
+        score += 30
+        signals.append(f"Harga {dist_to_high:.1f}% di bawah 30d high — siap breakout")
+    elif dist_to_high <= EARLY_RADAR_NEAR_HIGH_PCT:
+        score += 15
+        signals.append(f"Harga {dist_to_high:.1f}% di bawah 30d high")
+
+    # ── 3. Momentum sehat (0-15 pts) — bukan parabolic ──────────────────────────
+    if 2.0 <= change_24h <= 15.0:
+        score += 15
+        signals.append(f"Δ24h +{change_24h:.1f}% — momentum sehat, belum lari")
+
+    # ── 4. RSI harian tidak overbought (0-10 pts) ───────────────────────────────
+    rsi_1d = _rsi(closes, 14)
+    if 40 <= rsi_1d <= 65:
+        score += 10
+        signals.append(f"RSI harian {rsi_1d:.0f} — ruang naik masih ada")
+
+    # ── 5. BB squeeze harian (0-5 pts) — energi terkompresi ─────────────────────
+    bb_w = _bb_width(closes)
+    if bb_w < 0.10:
+        score += 5
+        signals.append("BB harian menyempit — energi terkompresi")
+
+    # ── Penalty: sudah lari terlalu jauh ────────────────────────────────────────
+    if change_24h > EARLY_RADAR_CHANGE_MAX:
+        score -= 20
+        signals.append(f"⚠ Δ24h +{change_24h:.0f}% — mungkin sudah terlambat")
+
+    if score < EARLY_RADAR_MIN_SCORE:
+        return None
+
+    clean_signals = [s for s in signals if not s.startswith("⚠")]
+    raw_score = round(score, 1)
+    auto_open = raw_score >= EARLY_RADAR_AUTO_SCORE
+
+    return {
+        "symbol":              symbol,
+        "current_price":       round(current_price, 8),
+        "opportunity_score":   round(min(score, 99), 1),
+        "raw_score":           raw_score,
+        "direction_confirmed": True,   # near-high + surge = inherently bullish
+        "auto_open":           auto_open,
+        "entry_mode":          "early_radar",
+        "signals":             clean_signals[:5],
+        "alert_type":          "early_radar",
+        "change_24h":          round(change_24h, 2),
+        "change_1h":           0.0,
+        "change_7d":           0.0,
+        "vol_ratio":           round(surge, 2),
+        "vol_surge_ratio":     round(surge, 2),
+        "near_high_pct":       round(dist_to_high, 2),
+        "avg_taker":           0.5,
+        "ema_bullish":         False,
+        "squeeze_tfs":         [],
+        "tfs_confirmed":       ["1d"],
+        "bb_width_15m":        None,
+        "rsi_1h":              round(rsi_1d, 1),
+        "weight_applied":      1.0,
+        "banned_by_learning":  False,
+        "account_risk_pct":    EARLY_RADAR_RISK_PCT,   # ½ normal — micro-cap sizing
+        "_low_30d":            low_30d,
+    }
+
+
 # ── Opportunity scoring ────────────────────────────────────────────────────────
 
 def _score_symbol(
@@ -1111,6 +1299,61 @@ async def _fetch_klines(client: httpx.AsyncClient, symbol: str, tf: str) -> list
     return []
 
 
+async def scan_early_radar(tickers_all: list[dict], done_syms: set[str]) -> list[dict]:
+    """
+    Early Radar pass (PLAN_v5 Group A) — micro-cap $100K–$1M volume.
+    Fetch HANYA klines harian (1d) — murah, 1 TF, tidak seperti lane lain (3 TF).
+    Universe ini tidak disentuh lane lain. done_syms di-mutate untuk dedup global.
+    """
+    pool = [
+        t for t in tickers_all
+        if (
+            EARLY_RADAR_VOL_MIN <= float(t.get("quoteVolume", 0) or 0) < EARLY_RADAR_VOL_MAX
+            and float(t.get("priceChangePercent", 0) or 0) > 0
+            and t["symbol"] not in done_syms
+        )
+    ]
+    pool.sort(key=lambda t: float(t.get("priceChangePercent", 0) or 0), reverse=True)
+    pool = pool[:EARLY_RADAR_POOL]
+    if not pool:
+        return []
+
+    _er_sem = asyncio.Semaphore(10)
+
+    async def _fetch_1d(client: httpx.AsyncClient, sym: str) -> tuple[str, list]:
+        async with _er_sem:
+            return sym, await _fetch_klines(client, sym, "1d")
+
+    klines_1d_map: dict[str, list] = {}
+    async with httpx.AsyncClient(timeout=25) as client:
+        tasks = [asyncio.create_task(_fetch_1d(client, t["symbol"])) for t in pool]
+        for task in tasks:
+            sym, kl = await task
+            klines_1d_map[sym] = kl
+
+    results: list[dict] = []
+    for t in pool:
+        sym = t["symbol"]
+        if sym in done_syms:
+            continue
+        res = _score_early_radar(sym, klines_1d_map.get(sym, []), t)
+        if res is None:
+            continue
+        levels = _calc_trade_levels_early_radar(res.pop("_low_30d", 0.0), res["current_price"])
+        if levels is None:
+            continue
+        res.update(levels)
+        res["quote_vol_24h"] = float(t.get("quoteVolume", 0) or 0)
+        res["ev_per_risk"]   = _ev_per_risk(res)
+        results.append(res)
+        done_syms.add(sym)
+
+    results.sort(key=lambda x: x.get("raw_score", 0), reverse=True)
+    results = results[:5]
+    logger.info("early_radar_scan_done", found=len(results), pool=len(pool))
+    return results
+
+
 # ── Main scan ──────────────────────────────────────────────────────────────────
 
 async def _load_alert_weights() -> tuple[dict[str, float], set[str]]:
@@ -1193,6 +1436,34 @@ async def run_opportunity_scan() -> dict:
     """
     start = time.time()
     logger.info("opportunity_scan_start")
+
+    # PLAN_v5 Group C: pull DB overrides for critical gates once per cycle.
+    # `global` here means every function in this module — including ones called
+    # later in this same cycle — sees the live value (Python resolves bare
+    # globals at call time, not def time). Falls back to the hardcoded default
+    # below if the DB has no override or is unavailable.
+    global MIN_QUOTE_VOLUME, BREAKOUT_MIN_VOLUME, BIGMOVER_MIN_VOLUME, WEEKLY_SCAN_MIN_VOLUME, \
+        EARLY_RADAR_VOL_MIN, MIN_SCORE, AUTO_OPEN_SCORE, BREAKOUT_MIN_SCORE, BREAKOUT_AUTO_SCORE, \
+        BIGMOVER_MIN_SCORE, BIGMOVER_AUTO_SCORE, EARLY_RADAR_MIN_SCORE, EARLY_RADAR_AUTO_SCORE, \
+        EARLY_RADAR_MAX_OPEN
+    try:
+        from agents.shared.config_reader import cfg
+        MIN_QUOTE_VOLUME       = await cfg.get("spot", "min_quote_volume", MIN_QUOTE_VOLUME)
+        BREAKOUT_MIN_VOLUME    = await cfg.get("spot", "breakout_min_volume", BREAKOUT_MIN_VOLUME)
+        BIGMOVER_MIN_VOLUME    = await cfg.get("spot", "bigmover_min_volume", BIGMOVER_MIN_VOLUME)
+        WEEKLY_SCAN_MIN_VOLUME = await cfg.get("spot", "weekly_min_volume", WEEKLY_SCAN_MIN_VOLUME)
+        EARLY_RADAR_VOL_MIN    = await cfg.get("spot", "early_radar_min_volume", EARLY_RADAR_VOL_MIN)
+        MIN_SCORE              = await cfg.get("spot", "min_score", MIN_SCORE)
+        AUTO_OPEN_SCORE        = await cfg.get("spot", "auto_open_score", AUTO_OPEN_SCORE)
+        BREAKOUT_MIN_SCORE     = await cfg.get("spot", "breakout_min_score", BREAKOUT_MIN_SCORE)
+        BREAKOUT_AUTO_SCORE    = await cfg.get("spot", "breakout_auto_score", BREAKOUT_AUTO_SCORE)
+        BIGMOVER_MIN_SCORE     = await cfg.get("spot", "bigmover_min_score", BIGMOVER_MIN_SCORE)
+        BIGMOVER_AUTO_SCORE    = await cfg.get("spot", "bigmover_auto_score", BIGMOVER_AUTO_SCORE)
+        EARLY_RADAR_MIN_SCORE  = await cfg.get("spot", "early_radar_min_score", EARLY_RADAR_MIN_SCORE)
+        EARLY_RADAR_AUTO_SCORE = await cfg.get("spot", "early_radar_auto_score", EARLY_RADAR_AUTO_SCORE)
+        EARLY_RADAR_MAX_OPEN   = await cfg.get("spot", "early_radar_max_open", EARLY_RADAR_MAX_OPEN)
+    except Exception as exc:
+        logger.warning("agent_config_pull_failed", scope="spot_scanner", error=str(exc)[:120])
 
     # Load adaptive weights (non-blocking — uses default 1.0 if DB unavailable)
     alert_weights, banned_types = await _load_alert_weights()
@@ -1609,6 +1880,15 @@ async def run_opportunity_scan() -> dict:
     logger.info("bigmover_chase_scan_done", found=len(bigmover_results),
                 pool=len(_bm_pool), extras=len(bm_extra_movers))
 
+    # ── PLAN_v5 Group A: Early Radar pass ─────────────────────────────────────
+    # Micro-cap $100K–$1M — universe yang tidak disentuh lane lain. Dedup via
+    # _breakout_done (shared set). Fetch klines 1d SAJA (murah).
+    try:
+        early_radar_results = await scan_early_radar(tickers_all, _breakout_done)
+    except Exception as e:
+        logger.warning("early_radar_scan_failed", error=str(e))
+        early_radar_results = []
+
     # §12.5 + Phase 3 G3-regime: 3-state — CLOSED kills auto-open, REDUCED keeps
     # auto_open flag (scheduler enforces lower quota), OPEN normal.
     regime, regime_status = _btc_regime(btc_tf_data, btc_change_24h)
@@ -1618,6 +1898,8 @@ async def run_opportunity_scan() -> dict:
         for r_ in breakout_results:
             r_["auto_open"] = False
         for r_ in bigmover_results:
+            r_["auto_open"] = False
+        for r_ in early_radar_results:
             r_["auto_open"] = False
         logger.info("scan_regime_gate_closed", regime=regime, btc_24h=btc_change_24h)
     elif regime_status == "REDUCED":
@@ -1631,13 +1913,14 @@ async def run_opportunity_scan() -> dict:
     breakout_results.sort(key=lambda x: x.get("raw_score", 0), reverse=True)
     breakout_results = breakout_results[:10]
 
-    all_results = results + breakout_results + bigmover_results
+    all_results = results + breakout_results + bigmover_results + early_radar_results
 
     elapsed = round(time.time() - start, 1)
     logger.info("opportunity_scan_done",
                 found=len(all_results), scanned=len(candidates),
                 breakout_found=len(breakout_results),
                 bigmover_found=len(bigmover_results),
+                early_radar_found=len(early_radar_results),
                 regime=regime, elapsed_sec=elapsed)
 
     return {
@@ -1647,6 +1930,7 @@ async def run_opportunity_scan() -> dict:
         "found_accumulation": len(results),
         "found_breakout":     len(breakout_results),
         "found_bigmover":     len(bigmover_results),
+        "found_early_radar":  len(early_radar_results),
         "btc_regime":         regime,
         "regime_status":      regime_status,    # Phase 3 G3-regime: OPEN | REDUCED | CLOSED
         "btc_change_24h":     round(btc_change_24h, 2),

@@ -88,13 +88,22 @@ async def get_or_create_balance(style_key: str) -> PaperBalance:
         return bal
 
 
-async def compute_spot_sizing(score: float, risk_pct: float) -> dict:
+async def compute_spot_sizing(
+    score: float,
+    risk_pct: float,
+    risk_fraction_override: float | None = None,
+) -> dict:
     """
     Balance-aware position sizing for opportunity_spot.
 
     Fixed-fractional risk: risk_dollar = balance × risk_fraction, where
     risk_fraction scales 1% → 2% with conviction (score 95 → 100).
     Notional = risk_dollar / (risk_pct / 100).
+
+    risk_fraction_override (PLAN_v5 Group A): kalau di-set, pakai nilai ini
+    sebagai risk_fraction (mengabaikan conviction scaling) — dipakai Early Radar
+    yang risk-nya ½ normal (0.5%) karena micro-cap lebih berisiko. Drawdown
+    halving tetap berlaku di atasnya.
 
     No partial entries: if available balance cannot fund the FULL notional,
     can_open is False — entering a big opportunity with a small margin biases
@@ -121,7 +130,10 @@ async def compute_spot_sizing(score: float, risk_pct: float) -> dict:
     # Conviction scaling from RAW pre-weight score (§7.4, §10.2)
     span       = CONVICTION_CEIL - CONVICTION_FLOOR
     conviction = max(0.0, min(1.0, (score - CONVICTION_FLOOR) / span)) if span > 0 else 0.0
-    risk_fraction = RISK_BASE_FRACTION + (RISK_MAX_FRACTION - RISK_BASE_FRACTION) * conviction
+    if risk_fraction_override is not None:
+        risk_fraction = risk_fraction_override
+    else:
+        risk_fraction = RISK_BASE_FRACTION + (RISK_MAX_FRACTION - RISK_BASE_FRACTION) * conviction
 
     # §15.5: proteksi drawdown dari puncak ekuitas — pendarahan pelan yang tidak
     # tertangkap circuit breaker harian. Drawdown > 10% dari peak → risk dipotong

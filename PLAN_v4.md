@@ -1,10 +1,25 @@
 # PLAN_v4 — Deferred Items + Data-Driven Evolution
 
-Tanggal: 2026-06-29
+Tanggal: 2026-06-29  
+**Review terakhir: 2026-07-01** — Phase 1 ✅ + Phase 5 ✅ selesai. Phase 2–4 masih pending, prerequisite belum terpenuhi (sistem baru jalan ~2 hari, butuh ≥ 7 hari).
+
 Kelanjutan PLAN_v2 + PLAN_v3. Semua item di sini adalah deferred items yang **menunggu kondisi terpenuhi**:
 - **Phase 1**: bisa dikerjakan sekarang (fix data infrastructure, tidak butuh runtime data)
 - **Phase 2–4**: butuh `predictive_log` terisi ≥ 7 hari sebelum bisa dieksekusi
 - **Phase 5**: kosmetik, dikerjakan kapan saja
+
+## Status Prerequisite (per 2026-07-01)
+
+| Kondisi | Status | Catatan |
+|---|---|---|
+| predictive_log ≥ 7 hari data | ❌ ~2 hari | Sistem live sejak ~2026-06-29. Cek ulang 2026-07-08. |
+| predictive_log ≥ 20 resolved entries per agent | ❌ Belum cukup | Perlu 7+ hari dulu untuk akumulasi |
+| hit_rate_4h stabil (< 5% delta antara 2 run) | ❌ Belum | Prerequisite di atas belum terpenuhi |
+
+**Catatan tambahan:**
+- `agents/learning/monthly_calibration.py` SUDAH ADA — mengadjust threshold bulanan berdasarkan hit rate. Ini beda dari P2.2 (yang per-regime, per-direction, dan berbasis predictive_log). Tidak menggantikan P2.2.
+- `agents/learning/weekly_backtest.py` SUDAH ADA — backtest threshold berdasarkan `big_mover_log`. Beda dari P2.1 yang berdasarkan `predictive_log` signal-level. Tidak menggantikan P2.1.
+- `_early_breakout_confirmed` flag di agent3.py (line ~296) SUDAH ADA sebagai internal branch D2.4. Ini bagian dari P3.3 tuning, tapi data-driven calibration (P3.3 proper) masih pending data.
 
 ---
 
@@ -18,7 +33,7 @@ Kelanjutan PLAN_v2 + PLAN_v3. Semua item di sini adalah deferred items yang **me
 
 ---
 
-## PHASE 1 — Data Infrastructure ✅ SELESAI (2026-06-29)
+## PHASE 1 — Data Infrastructure ✅ SELESAI (2026-06-29) — VERIFIED 2026-07-01
 
 **Tujuan**: Unblock D3.2 dan D3.3 yang ter-defer karena constraint data.
 
@@ -41,7 +56,7 @@ Kelanjutan PLAN_v2 + PLAN_v3. Semua item di sini adalah deferred items yang **me
 
 ---
 
-## PHASE 2 — Feedback Loop Expansion (Butuh ≥ 7 Hari Data)
+## PHASE 2 — Feedback Loop Expansion ⏳ PENDING — Prerequisite belum terpenuhi (butuh 2026-07-08+)
 
 **Prerequisite**: `predictive_log` terisi ≥ 7 hari, ≥ 20 resolved entries per agent.
 
@@ -86,7 +101,7 @@ Kelanjutan PLAN_v2 + PLAN_v3. Semua item di sini adalah deferred items yang **me
 
 ---
 
-## PHASE 3 — Early Breakout Agent Decision (Butuh ≥ 14 Hari Data)
+## PHASE 3 — Early Breakout Agent Decision ⏳ PENDING — Prerequisite belum terpenuhi (butuh 2026-07-15+)
 
 **Prerequisite**: D5.1 spike analysis — predictive_log harus punya 14+ hari data untuk `change_24h` 3–7% range di agent3.
 
@@ -122,7 +137,7 @@ Jika hit rate ≤ 40% → tidak perlu agent baru, tapi branch existing di agent3
 
 ---
 
-## PHASE 4 — UI Enhancement (Butuh Data Predictive)
+## PHASE 4 — UI Enhancement ⏳ PENDING — Prerequisite belum terpenuhi (butuh 2026-07-08+)
 
 **Prerequisite**: predictive_log ≥ 7 hari, hit_rate endpoint mengembalikan data bermakna.
 
@@ -150,7 +165,7 @@ Jika hit rate ≤ 40% → tidak perlu agent baru, tapi branch existing di agent3
 
 ---
 
-## PHASE 5 — Polish ✅ SELESAI (2026-06-29)
+## PHASE 5 — Polish ✅ SELESAI (2026-06-29) — VERIFIED 2026-07-01
 
 ### P5.1 — Tutorial popup adaptive learning (P7.4) ✅
 

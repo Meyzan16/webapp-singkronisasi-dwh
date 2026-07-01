@@ -132,6 +132,24 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     if not _auto_enabled or not is_db_available():
         return 0
 
+    # PLAN_v5 Group C: pull DB overrides once per cycle — see scanner.py
+    # run_opportunity_scan for the `global` rationale (resolved at call time).
+    global MAX_AUTO_POSITIONS, MAX_BIGMOVER_POSITIONS, FUTURES_COOLDOWN_HOURS, \
+        MAX_WALLET_MARGIN_PCT, LANE_QUOTAS
+    try:
+        from agents.shared.config_reader import cfg
+        MAX_AUTO_POSITIONS     = int(await cfg.get("futures", "max_auto_positions", MAX_AUTO_POSITIONS))
+        MAX_BIGMOVER_POSITIONS = int(await cfg.get("futures", "max_bigmover_positions", MAX_BIGMOVER_POSITIONS))
+        FUTURES_COOLDOWN_HOURS = await cfg.get("futures", "cooldown_hours", FUTURES_COOLDOWN_HOURS)
+        MAX_WALLET_MARGIN_PCT  = await cfg.get("futures", "max_wallet_margin_pct", MAX_WALLET_MARGIN_PCT)
+        # LANE_QUOTAS is a dict shared by reference with importers — mutate in
+        # place so `from auto_trader import LANE_QUOTAS` bindings elsewhere stay in sync.
+        LANE_QUOTAS["momentum"]     = int(await cfg.get("futures", "lane_quota_momentum", LANE_QUOTAS["momentum"]))
+        LANE_QUOTAS["pre_gainer"]   = int(await cfg.get("futures", "lane_quota_pre_gainer", LANE_QUOTAS["pre_gainer"]))
+        LANE_QUOTAS["accumulation"] = int(await cfg.get("futures", "lane_quota_accumulation", LANE_QUOTAS["accumulation"]))
+    except Exception as exc:
+        logger.warning("agent_config_pull_failed", scope="auto_trader", error=str(exc)[:120])
+
     regime = get_cached_regime()
 
     # Phase 10: risk gate — circuit-breaker (DD > 20%) + RAR gate (Sharpe < −0.5)

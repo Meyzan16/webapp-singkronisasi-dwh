@@ -1,7 +1,9 @@
 "use client";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge, SectionTitle } from "./primitives";
+import { Badge, LiveBadge, SectionTitle, SourceBadge } from "./primitives";
 import { ADAPTIVE_LEARNING, TECH_STACK } from "../data";
+import { useAgentConfig } from "../hooks/useAgentConfig";
+import { useAgentConfigDbKeys } from "../hooks/useAgentConfigDbKeys";
 
 // ─── LEARNING OVERVIEW ───────────────────────────────────────────────────────
 function LearnFlow() {
@@ -37,6 +39,10 @@ function LearnFlow() {
 
 // ─── WEIGHT FORMULA ──────────────────────────────────────────────────────────
 function WeightFormula() {
+  const { data, loading } = useAgentConfig();
+  const dbKeys = useAgentConfigDbKeys();
+  const live = data?.learning;
+
   const wrColor: Record<string, string> = {
     "↑ boost 50%":   "bg-green-50 border-green-200 text-green-800",
     "↑ boost 20%":   "bg-teal-50 border-teal-200 text-teal-800",
@@ -46,7 +52,10 @@ function WeightFormula() {
 
   return (
     <div className="mb-6">
-      <SectionTitle icon="⚖️" title="Weight Update Formula" sub="Laplace smoothing cegah over-fit, confidence scaling dari sample size" />
+      <div className="flex items-center justify-between mb-4">
+        <SectionTitle icon="⚖️" title="Weight Update Formula" sub="Laplace smoothing cegah over-fit, confidence scaling dari sample size" />
+        <LiveBadge live={!!live} loading={loading} />
+      </div>
       <div className="grid md:grid-cols-2 gap-4">
         <div className="space-y-3">
           {/* WR → target table */}
@@ -69,25 +78,29 @@ function WeightFormula() {
           <div className="bg-neutral-50 border rounded-xl p-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Time Decay</p>
             <div className="space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-neutral-600">Spot half-life</span>
-                <Badge label={ADAPTIVE_LEARNING.spotDecay.halfLife} color="bg-teal-50 text-teal-700" />
+              <div className="flex justify-between items-center">
+                <span className="text-neutral-600 flex items-center">Spot half-life<SourceBadge dbKey="learning.decay_half_life_days" dbKeys={dbKeys} /></span>
+                <Badge label={live ? `${live.decay_half_life_days} hari` : ADAPTIVE_LEARNING.spotDecay.halfLife} color="bg-teal-50 text-teal-700" />
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-600">Futures half-life</span>
                 <Badge label={ADAPTIVE_LEARNING.futuresDecay.halfLife} color="bg-blue-50 text-blue-700" />
               </div>
-              <div className="flex justify-between">
-                <span className="text-neutral-600">Window</span>
-                <Badge label={ADAPTIVE_LEARNING.spotDecay.window} color="bg-neutral-100 text-neutral-700" />
+              <div className="flex justify-between items-center">
+                <span className="text-neutral-600 flex items-center">Window<SourceBadge dbKey="learning.training_window_days" dbKeys={dbKeys} /></span>
+                <Badge label={live ? `${live.training_window_days} hari` : ADAPTIVE_LEARNING.spotDecay.window} color="bg-neutral-100 text-neutral-700" />
               </div>
               <div className="flex justify-between">
                 <span className="text-neutral-600">Min Sample</span>
                 <Badge label={`${ADAPTIVE_LEARNING.minSample} trades`} color="bg-neutral-100 text-neutral-700" />
               </div>
-              <div className="flex justify-between">
-                <span className="text-neutral-600">Step Cap</span>
-                <Badge label={ADAPTIVE_LEARNING.stepCap} color="bg-orange-50 text-orange-700" />
+              <div className="flex justify-between items-center">
+                <span className="text-neutral-600 flex items-center">Step Cap<SourceBadge dbKey="learning.step_cap" dbKeys={dbKeys} /></span>
+                <Badge label={live?.step_cap != null ? `${(live.step_cap * 100).toFixed(0)}%/run` : ADAPTIVE_LEARNING.stepCap} color="bg-orange-50 text-orange-700" />
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-neutral-600 flex items-center">Cross-Agent Blend<SourceBadge dbKey="learning.cross_blend" dbKeys={dbKeys} /></span>
+                <Badge label={live ? `${live.cross_agent?.blend_pct}%` : "30%"} color="bg-purple-50 text-purple-700" />
               </div>
             </div>
           </div>

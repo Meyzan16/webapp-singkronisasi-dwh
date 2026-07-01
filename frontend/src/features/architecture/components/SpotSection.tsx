@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge, SectionTitle } from "./primitives";
+import { Badge, LiveBadge, SectionTitle, SourceBadge } from "./primitives";
 import {
   SPOT_LANES,
   SPOT_SIGNALS,
@@ -9,40 +9,84 @@ import {
   SPOT_MONITOR_LAYERS,
   SYSTEM_OVERVIEW,
 } from "../data";
+import { useAgentConfig } from "../hooks/useAgentConfig";
+import { useAgentConfigDbKeys } from "../hooks/useAgentConfigDbKeys";
 
 // ─── UNIVERSE OVERVIEW ────────────────────────────────────────────────────────
 function UniverseBar() {
+  const { data, loading } = useAgentConfig();
+  const dbKeys = useAgentConfigDbKeys();
+  const live = data?.spot;
   const o = SYSTEM_OVERVIEW.spot;
-  const stats = [
-    { label: "Scan Interval",     val: o.scanInterval },
-    { label: "Monitor",           val: o.monitorInterval },
-    { label: "Fastpass BigMover", val: o.fastpassInterval.replace(" (BigMover)", "") },
-    { label: "Min Volume",        val: o.minVolume },
-    { label: "Min Score",         val: String(o.minScore) },
-    { label: "Auto-Open",         val: String(o.autoOpenScore) },
+
+  const vols = live?.min_volume;
+  const volRange = vols
+    ? `$${Math.min(...Object.values(vols)) >= 1000 ? `${(Math.min(...Object.values(vols)) / 1000).toFixed(0)}K` : Math.min(...Object.values(vols))} – $${(Math.max(...Object.values(vols)) / 1_000_000).toFixed(0)}M`
+    : o.minVolume;
+
+  const stats: { label: string; val: string; dbKey?: string }[] = [
+    { label: "Scan Interval",     val: live?.scan_interval_sec != null ? `${Math.round(live.scan_interval_sec / 60)} menit` : o.scanInterval },
+    { label: "Monitor",           val: live?.monitor_interval_sec != null ? `${live.monitor_interval_sec} detik` : o.monitorInterval },
+    { label: "Fastpass BigMover", val: live?.fastpass?.bigmover_interval_sec != null ? `${live.fastpass.bigmover_interval_sec} detik` : o.fastpassInterval.replace(" (BigMover)", "") },
+    { label: "Vol Range",         val: volRange, dbKey: "spot.min_quote_volume" },
+    { label: "Min Score",         val: live ? String(live.score_thresholds?.accumulation?.min ?? o.minScore) : String(o.minScore), dbKey: "spot.min_score" },
+    { label: "Auto-Open",         val: live ? String(live.score_thresholds?.accumulation?.auto ?? o.autoOpenScore) : String(o.autoOpenScore), dbKey: "spot.auto_open_score" },
     { label: "R:R Min",           val: `≥ ${o.rrMin}` },
-    { label: "Max Open/Cycle",    val: String(o.maxOpensCycle) },
+    { label: "Max Open/Cycle",    val: live ? String(live.quota?.max_opens_per_cycle ?? o.maxOpensCycle) : String(o.maxOpensCycle), dbKey: "spot.max_opens_per_cycle" },
   ];
   return (
-    <div className="grid grid-cols-4 md:grid-cols-8 gap-2 mb-6">
-      {stats.map(s => (
-        <div key={s.label} className="bg-neutral-50 border rounded-xl px-3 py-2 text-center">
-          <p className="text-[10px] text-neutral-500 font-medium">{s.label}</p>
-          <p className="text-xs font-bold text-teal-700 mt-0.5">{s.val}</p>
-        </div>
-      ))}
+    <div className="mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">System Overview</p>
+        <LiveBadge live={!!live} loading={loading} />
+      </div>
+      <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+        {stats.map(s => (
+          <div key={s.label} className="bg-neutral-50 border rounded-xl px-3 py-2 text-center">
+            <p className="text-[10px] text-neutral-500 font-medium flex items-center justify-center">
+              {s.label}
+              {s.dbKey && <SourceBadge dbKey={s.dbKey} dbKeys={dbKeys} />}
+            </p>
+            <p className="text-xs font-bold text-teal-700 mt-0.5">{s.val}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
+
+// PLAN_v5 Group C7 — DB key per lane (matches agent_config_defaults.py seed keys).
+// "weekly" volume is DB-wired but its score reuses accumulation's threshold at
+// runtime (scanner.py has no separate weekly score gate), so its score badge
+// points at the accumulation keys.
+const LANE_DB_KEYS: Record<string, { vol: string; min: string; auto: string }> = {
+  accumulation: { vol: "spot.min_quote_volume",      min: "spot.min_score",             auto: "spot.auto_open_score" },
+  breakout:     { vol: "spot.breakout_min_volume",   min: "spot.breakout_min_score",    auto: "spot.breakout_auto_score" },
+  bigmover:     { vol: "spot.bigmover_min_volume",   min: "spot.bigmover_min_score",    auto: "spot.bigmover_auto_score" },
+  weekly:       { vol: "spot.weekly_min_volume",     min: "spot.min_score",             auto: "spot.auto_open_score" },
+  early_radar:  { vol: "spot.early_radar_min_volume", min: "spot.early_radar_min_score", auto: "spot.early_radar_auto_score" },
+};
 
 // ─── 4 LANES ─────────────────────────────────────────────────────────────────
 function LanesSection() {
   const [active, setActive] = useState(SPOT_LANES[0].key);
   const lane = SPOT_LANES.find(l => l.key === active)!;
+  const { data } = useAgentConfig();
+  const dbKeys = useAgentConfigDbKeys();
+  const live = data?.spot;
+  const laneDbKeys = LANE_DB_KEYS[lane.key];
+
+  const liveMinVol   = live?.min_volume?.[lane.key];
+  const liveScore    = live?.score_thresholds?.[lane.key];
+  const minScore     = liveScore?.min ?? lane.minScore;
+  const autoScore    = liveScore?.auto ?? lane.autoScore;
+  const minVolumeStr = liveMinVol
+    ? liveMinVol >= 1_000_000 ? `$${(liveMinVol / 1_000_000).toFixed(1).replace(".0", "")}M` : `$${(liveMinVol / 1000).toFixed(0)}K`
+    : lane.minVolume;
 
   return (
     <div className="mb-6">
-      <SectionTitle icon="🛣" title="4 Scanning Lanes" sub="Setiap lane punya universe, trigger, dan SL/TP berbeda" />
+      <SectionTitle icon="🛣" title="5 Scanning Lanes" sub="Setiap lane punya universe, trigger, dan SL/TP berbeda" />
       <div className="flex gap-2 mb-4 flex-wrap">
         {SPOT_LANES.map(l => (
           <button key={l.key} onClick={() => setActive(l.key)}
@@ -63,14 +107,24 @@ function LanesSection() {
             <p className="text-xs mt-1 opacity-80 max-w-xl">{lane.desc}</p>
           </div>
           <div className="text-right shrink-0 space-y-1">
-            <Badge label={`Min Score: ${lane.minScore}`} color={lane.badgeColor} />
+            <span className="inline-flex items-center">
+              <Badge label={`Min Score: ${minScore}`} color={lane.badgeColor} />
+              {laneDbKeys && <SourceBadge dbKey={laneDbKeys.min} dbKeys={dbKeys} />}
+            </span>
             <div />
-            <Badge label={`Auto-Open: ${lane.autoScore}`} color={lane.badgeColor} />
+            <span className="inline-flex items-center">
+              <Badge label={`Auto-Open: ${autoScore}`} color={lane.badgeColor} />
+              {laneDbKeys && <SourceBadge dbKey={laneDbKeys.auto} dbKeys={dbKeys} />}
+            </span>
           </div>
         </div>
 
         <div className="grid md:grid-cols-2 gap-3">
           <div className="space-y-2">
+            <div className="flex items-center gap-1">
+              <InfoRow label="Min Volume" val={minVolumeStr} />
+              {laneDbKeys && <SourceBadge dbKey={laneDbKeys.vol} dbKeys={dbKeys} />}
+            </div>
             <InfoRow label="Trigger" val={lane.trigger} />
             <InfoRow label="SL Method" val={lane.slMethod} />
             <InfoRow label="SL Range" val={lane.slRange} />

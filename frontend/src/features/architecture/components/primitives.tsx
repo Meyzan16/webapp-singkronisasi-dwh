@@ -24,6 +24,41 @@ export function SectionTitle({ icon, title, sub }: { icon: string; title: string
   );
 }
 
+export function LiveBadge({ live, loading }: { live: boolean; loading?: boolean }) {
+  if (loading) {
+    return (
+      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-400 inline-flex items-center gap-1">
+        <span className="w-1.5 h-1.5 rounded-full bg-neutral-300 animate-pulse" /> memuat…
+      </span>
+    );
+  }
+  return live ? (
+    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700 inline-flex items-center gap-1">
+      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /> Live dari agent
+    </span>
+  ) : (
+    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-500 inline-flex items-center gap-1">
+      <span className="w-1.5 h-1.5 rounded-full bg-neutral-400" /> Static (fallback)
+    </span>
+  );
+}
+
+/** PLAN_v5 Group C7 — badge showing whether a field is DB-editable or still hardcoded. */
+export function SourceBadge({ dbKey, dbKeys }: { dbKey: string; dbKeys: Set<string> }) {
+  const inDb = dbKeys.has(dbKey);
+  return inDb ? (
+    <a href="/settings" title={`Editable via Settings > Agent Config (${dbKey})`}
+       className="text-[8px] font-bold px-1 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 ml-1">
+      🔵 DB
+    </a>
+  ) : (
+    <span title="Hardcoded constant — belum bisa diubah dari UI"
+          className="text-[8px] font-bold px-1 py-0.5 rounded bg-neutral-100 text-neutral-400 ml-1">
+      ⚪ static
+    </span>
+  );
+}
+
 export function Tabs({ tabs, active, onChange }: { tabs: string[]; active: string; onChange: (t: string) => void }) {
   return (
     <div className="flex bg-neutral-100 rounded-lg p-0.5 gap-0.5 mb-4 flex-wrap">

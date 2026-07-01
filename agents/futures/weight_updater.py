@@ -312,7 +312,7 @@ async def update_weights() -> int:
     SP2: upgraded with recency decay, Laplace smoothing, step cap, zombie pruning.
     Returns number of rows upserted.
     """
-    global _last_run, _last_error
+    global _last_run, _last_error, STEP_CAP
 
     if not is_db_available():
         return 0
@@ -320,6 +320,15 @@ async def update_weights() -> int:
     now = time.time()
     if _last_run and (now - _last_run) < MIN_RUN_INTERVAL:
         return 0
+
+    # PLAN_v5 Group C: step_cap shared with SPOT (same "learning.step_cap" key —
+    # both currently 0.10). decay_half_life_days is NOT wired here — futures uses
+    # 14d vs SPOT's 7d, wiring both to one key would let one overwrite the other.
+    try:
+        from agents.shared.config_reader import cfg
+        STEP_CAP = await cfg.get("learning", "step_cap", STEP_CAP)
+    except Exception as exc:
+        logger.warning("agent_config_pull_failed", scope="futures_weight_updater", error=str(exc)[:120])
 
     try:
         async with AsyncSessionLocal() as session:

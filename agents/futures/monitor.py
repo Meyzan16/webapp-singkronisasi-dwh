@@ -1502,6 +1502,24 @@ async def run_futures_monitor() -> None:
             _closed_today = 0
 
         try:
+            # PLAN_v5 Group C: pull DB overrides once per cycle. Lane caps live in
+            # utils.py as a shared dict — mutate values IN PLACE (not rebind the
+            # name) so `from utils import MAX_SL_MARGIN_PCT_BY_LANE` here and
+            # anywhere else that imported it keep pointing at the same object.
+            try:
+                from agents.shared.config_reader import cfg
+                MAX_SL_MARGIN_PCT_BY_LANE["accumulation"] = await cfg.get(
+                    "futures", "lane_cap_accumulation", MAX_SL_MARGIN_PCT_BY_LANE["accumulation"])
+                MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"] = await cfg.get(
+                    "futures", "lane_cap_pre_gainer", MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"])
+                MAX_SL_MARGIN_PCT_BY_LANE["pre_move"] = MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"]  # legacy alias
+                MAX_SL_MARGIN_PCT_BY_LANE["momentum"] = await cfg.get(
+                    "futures", "lane_cap_momentum", MAX_SL_MARGIN_PCT_BY_LANE["momentum"])
+                MAX_SL_MARGIN_PCT_BY_LANE["bigmover"] = await cfg.get(
+                    "futures", "lane_cap_bigmover", MAX_SL_MARGIN_PCT_BY_LANE["bigmover"])
+            except Exception as exc:
+                logger.warning("agent_config_pull_failed", scope="futures_monitor", error=str(exc)[:120])
+
             await _check_server_time_drift()   # EC5: NTP drift warning (no-op if < 30 min since last)
             closed_n, updated_n = await check_futures_positions()  # B3: unpack tuple
             n = closed_n + updated_n

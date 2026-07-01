@@ -87,7 +87,7 @@ async def update_cross_agent_weights() -> int:
     aggregate by signal_key, compute cross-agent weight, upsert with step cap.
     Returns number of rows touched.
     """
-    global _last_run, _last_error, _cross_cache
+    global _last_run, _last_error, _cross_cache, CROSS_BLEND
 
     if not is_db_available():
         return 0
@@ -95,6 +95,15 @@ async def update_cross_agent_weights() -> int:
     now = time.time()
     if _last_run and (now - _last_run) < MIN_RUN_INTERVAL:
         return 0
+
+    # PLAN_v5 Group C: blend_weights() (called from agent1/2/3 at scoring time)
+    # reads CROSS_BLEND as a bare global in THIS module, so refreshing it here
+    # takes effect starting the next scan cycle — this update runs post-scan.
+    try:
+        from agents.shared.config_reader import cfg
+        CROSS_BLEND = await cfg.get("learning", "cross_blend", CROSS_BLEND)
+    except Exception as exc:
+        logger.warning("agent_config_pull_failed", scope="cross_agent_learning", error=str(exc)[:120])
 
     try:
 

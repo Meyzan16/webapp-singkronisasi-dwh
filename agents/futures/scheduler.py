@@ -550,6 +550,16 @@ async def run_futures_loop() -> None:
 
     while True:
         try:
+            # PLAN_v5 Group C: pull DB override for BigMover's fixed score gate.
+            # a_bm.scan_symbol() is synchronous and reads the bare global
+            # MIN_SCORE — reassigning the module attribute here (before _run_scan
+            # calls into it) means every call this cycle sees the live value.
+            try:
+                from agents.shared.config_reader import cfg
+                a_bm.MIN_SCORE = int(await cfg.get("futures", "bigmover_min_score", a_bm.MIN_SCORE))
+            except Exception as exc:
+                logger.warning("agent_config_pull_failed", scope="futures_scheduler", error=str(exc)[:120])
+
             futures_store.set_scanning(True)
             result = await _run_scan()
 

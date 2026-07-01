@@ -1,6 +1,6 @@
 "use client";
 import { Card, CardContent } from "@/components/ui/card";
-import { APIKeyForm, AgentOverviewCard, DBResetCard } from "./components";
+import { APIKeyForm, AgentOverviewCard, AgentConfigEditor, DBResetCard } from "./components";
 
 export default function SettingsPage() {
   return (
@@ -16,6 +16,7 @@ export default function SettingsPage() {
 
       <APIKeyForm />
       <AgentOverviewCard />
+      <AgentConfigEditor />
       <DBResetCard />
     </div>
   );

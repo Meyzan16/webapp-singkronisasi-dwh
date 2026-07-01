@@ -6,7 +6,7 @@ import { FuturesSection } from "./components/FuturesSection";
 import { LearningSection } from "./components/LearningSection";
 
 const TOP_TABS = [
-  { key: "spot",    label: "🎯 SPOT",      sub: "4 Lanes · 12 Signals · 5 Exit Layers" },
+  { key: "spot",    label: "🎯 SPOT",      sub: "5 Lanes · 12 Signals · 5 Exit Layers" },
   { key: "futures", label: "⚡ FUTURES",   sub: "4 Agents · Leverage · Monitor · Risk Gate" },
   { key: "learning",label: "🧠 Learning",  sub: "Adaptive Weights · Auto-Threshold · Blacklist · Tech" },
 ] as const;
@@ -54,10 +54,10 @@ export default function ArchitecturePage() {
             {[
               { icon: "🎯", label: "Spot Scanner",    sub: "3 min cycle",    color: "bg-teal-500/20 border-teal-400/30"    },
               { icon: "📍", label: "Spot Monitor",    sub: "60s · L0–L4",   color: "bg-amber-500/20 border-amber-400/30"  },
-              { icon: "⚡", label: "Pre-Gainer",      sub: "Futures · 5min", color: "bg-blue-500/20 border-blue-400/30"    },
+              { icon: "⚡", label: "Pre-Gainer",      sub: "Futures · 2min", color: "bg-blue-500/20 border-blue-400/30"    },
               { icon: "📦", label: "Accumulation",    sub: "Futures · T0-T4",color: "bg-purple-500/20 border-purple-400/30"},
-              { icon: "🔥", label: "Momentum",        sub: "Futures · 5min", color: "bg-orange-500/20 border-orange-400/30"},
-              { icon: "💥", label: "Big Mover",       sub: "Futures · 5min", color: "bg-yellow-500/20 border-yellow-400/30"},
+              { icon: "🔥", label: "Momentum",        sub: "Futures · 2min", color: "bg-orange-500/20 border-orange-400/30"},
+              { icon: "💥", label: "Big Mover",       sub: "Futures · 2min", color: "bg-yellow-500/20 border-yellow-400/30"},
               { icon: "🧠", label: "Weight Updater",  sub: "Learning · 6h",  color: "bg-green-500/20 border-green-400/30"  },
             ].map(a => (
               <div key={a.label} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border ${a.color}`}>

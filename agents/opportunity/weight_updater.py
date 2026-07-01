@@ -83,12 +83,21 @@ def _decay_factor(closed_at: Optional[float], now: float) -> float:
 
 async def update_spot_weights() -> int:
     """Recompute signal weights from recent closed trades. Returns rows touched."""
-    global _last_run, _last_error, _last_count
+    global _last_run, _last_error, _last_count, TRAINING_WINDOW_D, DECAY_HALF_LIFE_D, STEP_CAP
 
     if not is_db_available():
         return 0
     if _last_run and (time.time() - _last_run) < MIN_RUN_INTERVAL:
         return 0
+
+    # PLAN_v5 Group C: pull DB overrides once per run.
+    try:
+        from agents.shared.config_reader import cfg
+        TRAINING_WINDOW_D = await cfg.get("learning", "training_window_days", TRAINING_WINDOW_D)
+        DECAY_HALF_LIFE_D = await cfg.get("learning", "decay_half_life_days", DECAY_HALF_LIFE_D)
+        STEP_CAP          = await cfg.get("learning", "step_cap", STEP_CAP)
+    except Exception as exc:
+        logger.warning("agent_config_pull_failed", scope="spot_weight_updater", error=str(exc)[:120])
 
     now    = time.time()
     cutoff = now - TRAINING_WINDOW_D * 86400

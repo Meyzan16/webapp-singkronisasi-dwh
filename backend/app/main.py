@@ -39,6 +39,7 @@ from app.api.v1.backtest import router as backtest_router
 from app.api.v1.admin             import router as admin_router
 from app.api.v1.diagnostics       import router as diagnostics_router
 from app.api.v1.predictive        import router as predictive_router
+from app.api.v1.agent_config      import router as agent_config_router
 from app.api.v1.exchange_settings import router as exchange_router
 from app.models.paper_trade import PaperTrade as _PaperTrade          # noqa: F401
 from app.models.paper_balance import PaperBalance as _PaperBalance    # noqa: F401
@@ -50,6 +51,7 @@ from app.models.backtest_result import WeeklyBacktestResult as _WBR   # noqa: F4
 from app.models.rejection_log import RejectionLog as _RL
 from app.models.predictive_log import PredictiveLog as _PL   # noqa: F401
 from app.models.app_settings import AppSettings as _AS       # noqa: F401
+from app.models.agent_config import AgentConfig as _AC       # noqa: F401
 from app.config import get_settings
 from app.database import create_db_schema, dispose_engine, set_db_available
 from agents.opportunity.scheduler import run_opportunity_loop, run_bigmover_fastpass
@@ -80,6 +82,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await create_db_schema()
         set_db_available(True)
         logger.info("database_ready", msg="PostgreSQL connected")
+
+        # PLAN_v5 Group C: seed agent_config defaults (idempotent — never
+        # overwrites an operator's saved override).
+        try:
+            from app.services.agent_config_defaults import seed_agent_config_defaults
+            n = await seed_agent_config_defaults()
+            if n:
+                logger.info("agent_config_seeded", inserted=n)
+        except Exception as exc:
+            logger.warning("agent_config_seed_failed", error=str(exc)[:120])
     except Exception as exc:
         set_db_available(False)
         logger.warning("database_unavailable", error=str(exc)[:120])
@@ -138,6 +150,7 @@ app.include_router(backtest_router,         prefix=settings.api_v1_prefix)
 app.include_router(admin_router,            prefix=settings.api_v1_prefix)
 app.include_router(diagnostics_router,      prefix=settings.api_v1_prefix)
 app.include_router(predictive_router,       prefix=settings.api_v1_prefix)
+app.include_router(agent_config_router,     prefix=settings.api_v1_prefix)
 app.include_router(exchange_router,         prefix=settings.api_v1_prefix)
 
 

@@ -147,6 +147,19 @@ async def evaluate_risk_gate() -> None:
     if not is_db_available():
         return  # keep existing state; don't block on DB unavailability
 
+    # PLAN_v5 Group C: pull DB overrides once per evaluation. NOTE: DD_HARD_STOP_PCT/
+    # DD_RECOVER_PCT are deliberately NOT wired here — _scaled_dd_threshold() below
+    # computes them fresh from wallet size on every call and would immediately
+    # clobber any DB override, so exposing them as editable would be misleading.
+    global RAR_GATE_THRESHOLD, LANE_WR_PAUSE_THRESHOLD, LANE_WR_MIN_SAMPLE
+    try:
+        from agents.shared.config_reader import cfg
+        RAR_GATE_THRESHOLD      = await cfg.get("futures", "rar_threshold", RAR_GATE_THRESHOLD)
+        LANE_WR_PAUSE_THRESHOLD = await cfg.get("futures", "lane_wr_pause_threshold", LANE_WR_PAUSE_THRESHOLD)
+        LANE_WR_MIN_SAMPLE      = int(await cfg.get("futures", "lane_wr_min_sample", LANE_WR_MIN_SAMPLE))
+    except Exception as exc:
+        logger.warning("agent_config_pull_failed", scope="risk_gate", error=str(exc)[:120])
+
     try:
         _wallet     = await get_or_create_balance("futures")
         wallet_base = _wallet.initial_balance + _wallet.deposited_total - _wallet.withdrawn_total

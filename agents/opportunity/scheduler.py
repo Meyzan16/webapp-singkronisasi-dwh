@@ -148,6 +148,23 @@ async def _bigmover_open_count() -> int:
         return int(r.scalar() or 0)
 
 
+async def _early_radar_open_count() -> int:
+    """PLAN_v5 Group A: count open early_radar positions for quota enforcement."""
+    from app.database import AsyncSessionLocal
+    from app.models.paper_trade import PaperTrade
+    from sqlalchemy import func, select
+
+    async with AsyncSessionLocal() as s:
+        r = await s.execute(
+            select(func.count(PaperTrade.id)).where(
+                PaperTrade.style      == "opportunity_spot",
+                PaperTrade.status     == "open",
+                PaperTrade.alert_type == "early_radar",
+            )
+        )
+        return int(r.scalar() or 0)
+
+
 async def _auto_open_position(coin: dict) -> bool:
     """
     Auto-open a SPOT paper trade for high-conviction opportunities (score ≥ 95).
@@ -276,9 +293,13 @@ async def _auto_open_position(coin: dict) -> bool:
                 return False
 
     # ── Balance check: size from real balance (§7.4: RAW pre-weight score) ───
+    # PLAN_v5 Group A: Early Radar sizing ½ normal (account_risk_pct=0.5%).
+    _acct_risk_pct = coin.get("account_risk_pct")
+    _risk_frac_override = (_acct_risk_pct / 100.0) if _acct_risk_pct else None
     sizing = await compute_spot_sizing(
         score    = coin.get("raw_score", coin.get("opportunity_score", 0)),
         risk_pct = coin.get("risk_pct", 0),
+        risk_fraction_override = _risk_frac_override,
     )
     if not sizing["can_open"]:
         logger.info("auto_open_blocked", symbol=symbol,
@@ -372,6 +393,19 @@ async def run_opportunity_loop() -> None:
 
     while True:
         try:
+            # PLAN_v5 Group C: pull DB overrides once per cycle (see scanner.py
+            # run_opportunity_scan for the full rationale on `global` here).
+            global MAX_OPENS_PER_CYCLE, MAX_BIGMOVER_OPENS, DAILY_LOSS_LIMIT_FRACTION
+            try:
+                from agents.shared.config_reader import cfg
+                MAX_OPENS_PER_CYCLE = int(await cfg.get("spot", "max_opens_per_cycle", MAX_OPENS_PER_CYCLE))
+                MAX_BIGMOVER_OPENS  = int(await cfg.get("spot", "max_bigmover_opens", MAX_BIGMOVER_OPENS))
+                DAILY_LOSS_LIMIT_FRACTION = await cfg.get(
+                    "spot", "daily_loss_limit_pct", DAILY_LOSS_LIMIT_FRACTION * 100
+                ) / 100
+            except Exception as exc:
+                logger.warning("agent_config_pull_failed", scope="spot_scheduler", error=str(exc)[:120])
+
             opp_store.set_scanning(True)
             result = await opp_scanner.run_opportunity_scan()
             opp_store.set_result(result)
@@ -407,6 +441,7 @@ async def run_opportunity_loop() -> None:
                             skipped=len(auto_candidates))
             else:
                 bm_open_now = await _bigmover_open_count()
+                er_open_now = await _early_radar_open_count()
                 for coin in auto_candidates:
                     if opened >= cycle_quota:
                         break
@@ -414,11 +449,17 @@ async def run_opportunity_loop() -> None:
                     is_bm = coin.get("entry_mode") == "bigmover_chase"
                     if is_bm and bm_open_now >= MAX_BIGMOVER_OPENS:
                         continue
+                    # PLAN_v5 Group A: separate quota for early_radar
+                    is_er = coin.get("entry_mode") == "early_radar"
+                    if is_er and er_open_now >= opp_scanner.EARLY_RADAR_MAX_OPEN:
+                        continue
                     if await _auto_open_position(coin):
                         opened += 1
                         _auto_opened += 1
                         if is_bm:
                             bm_open_now += 1
+                        if is_er:
+                            er_open_now += 1
 
             logger.info(
                 "opportunity_cycle_done",
