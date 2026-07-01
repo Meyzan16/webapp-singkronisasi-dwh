@@ -1,292 +1,707 @@
-// Static data for the architecture documentation page
+// Architecture page — complete data from source code analysis (2026-06-30)
+// All numbers verified against actual agent source files
 
-export const BUGS_FIXED = [
-  { id: "B1", sev: "🔴", title: "Spot Monitor menutup posisi sebagai 'tp' walau net P&L negatif", fix: "Hanya tandai 'tp' jika pnl_net > 0 setelah fee 0.2%", file: "agents/opportunity/monitor.py" },
-  { id: "B2", sev: "🔴", title: "Posisi ditutup dalam 53 detik — tidak ada minimum hold time", fix: "Tambah MIN_HOLD_MINUTES=30: risk-adjusted exits tidak bisa fire dalam 30 menit pertama", file: "agents/opportunity/monitor.py" },
-  { id: "B3", sev: "🔴", title: "trend_reversal menembak saat EMA sudah bearish SEBELUM entry", fix: "Simpan entry_ema_bullish di meta saat buka posisi, monitor cek apakah terjadi reversal nyata", file: "agents/opportunity/monitor.py + scheduler.py" },
-  { id: "B4", sev: "🔴", title: "Futures Auto-trader buka posisi di regime VOLATILE → langsung SL", fix: "Regime volatile blokir lane Pre-Move (momentum tetap jalan), threshold adaptif 70-77, dasar 72", file: "agents/futures/auto_trader.py" },
-  { id: "B5", sev: "🔴", title: "WBTCUSDT re-entry 3x berturut-turut tanpa jeda setelah SL", fix: "Cooldown 2 jam setelah SL hit — tidak bisa buka posisi yang sama dalam 2 jam", file: "agents/opportunity/monitor.py + scheduler.py" },
-  { id: "B6", sev: "🟡", title: "Win-rate inflasi: 'tp' dengan pnl=-0.16% dihitung sebagai menang", fix: "Fungsi _is_real_win() diterapkan di history, learning stats, futures analytics", file: "backend/app/api/v1/history.py + futures_learning.py" },
-  { id: "B7", sev: "🟡", title: "flow_reversal menutup terlalu agresif (taker < 0.40)", fix: "Naikkan threshold ke 0.38, minimum profit 1.0% net sebelum bisa menutup via flow_reversal", file: "agents/opportunity/monitor.py" },
-  { id: "B8", sev: "🟡", title: "Equity chart di History hanya pakai 'status==tp' bukan net pnl", fix: "Semua kalkulasi win/loss pakai _is_real_win() yang cek pnl_net > 0", file: "backend/app/api/v1/futures_learning.py" },
+// ─── SYSTEM OVERVIEW ──────────────────────────────────────────────────────────
+
+export const SYSTEM_OVERVIEW = {
+  spot: {
+    scanInterval: "3 menit",
+    monitorInterval: "60 detik",
+    fastpassInterval: "30 detik (BigMover)",
+    maxOpensCycle: 3,
+    maxAge: "5–10 hari",
+    minScore: 65,
+    autoOpenScore: 85,
+    minVolume: "$5,000,000",
+    rrMin: 3.5,
+    executionCostPct: 0.2,
+  },
+  futures: {
+    scanInterval: "5 menit",
+    monitorInterval: "2 menit",
+    maxOpensCycle: 3,
+    maxAge: "3–5 hari",
+    minScore: 52,
+    autoOpenScore: "70–75 (adaptive)",
+    rrMin: 3.0,
+    circuitBreakerPct: 15,
+  },
+};
+
+// ─── SPOT: 4 LANES ────────────────────────────────────────────────────────────
+
+export const SPOT_LANES = [
+  {
+    key: "accumulation",
+    label: "Accumulation",
+    emoji: "📦",
+    color: "bg-blue-50 border-blue-200 text-blue-800",
+    badgeColor: "bg-blue-100 text-blue-700",
+    desc: "Setup utama — cari koin SEBELUM breakout terjadi via BB Squeeze, smart money accumulation, dan OI building.",
+    trigger: "score ≥ 65, raw_score ≥ 85 untuk auto-open",
+    minScore: 65,
+    autoScore: 85,
+    slMethod: "Swing Low 4h/1h (last 20 candle) − 0.8% buffer",
+    slRange: "1.5% – 5.0%",
+    tp: ["Entry + risk × 2.5", "max(Entry + risk × 4.0, Entry × 1.06)", "max(Entry + risk × 7.0, Entry × 1.10)"],
+    rrMin: 3.5,
+    maxAge: "10 hari",
+    tp1Partial: "50% posisi dijual",
+  },
+  {
+    key: "breakout",
+    label: "Breakout Hunter",
+    emoji: "💥",
+    color: "bg-orange-50 border-orange-200 text-orange-800",
+    badgeColor: "bg-orange-100 text-orange-700",
+    desc: "Lane khusus volume spike ekstrem — masuk saat volume 5× rata-rata dalam 15m. Lebih agresif, SL berbasis ATR.",
+    trigger: "vol_spike_15m ≥ 5×, change_24h ≥ 3%",
+    minScore: 60,
+    autoScore: 75,
+    slMethod: "Entry − ATR(14, 1h) × 1.5",
+    slRange: "2.0% – 12.0%",
+    tp: ["Entry + risk × 2.0", "Entry + risk × 3.5", "Entry + risk × 6.0"],
+    rrMin: 3.0,
+    maxAge: "5 hari",
+    tp1Partial: "50% posisi dijual",
+  },
+  {
+    key: "bigmover",
+    label: "BigMover Chase",
+    emoji: "🚀",
+    color: "bg-amber-50 border-amber-200 text-amber-800",
+    badgeColor: "bg-amber-100 text-amber-700",
+    desc: "Wave Rider — masuk di tengah rally. Jika coin naik 2200%, agent bisa capture 1400% dengan masuk di gelombang.",
+    trigger: "change_24h ≥ 10% ATAU change_7d ≥ 30%",
+    minScore: 55,
+    autoScore: 65,
+    slMethod: "Swing Low 15m (12 candle terakhir) − 1.5% buffer, max 5% dari entry",
+    slRange: "1.0% – 5.5%",
+    tp: [
+      "Standard (< 50%): +5%, +12%, +25%",
+      "Explosive (≥ 50%): +8%, +20%, +45%",
+    ],
+    rrMin: 1.2,
+    maxAge: "5 hari",
+    tp1Partial: "50% posisi dijual",
+    extras: [
+      "Fastpass: rescan setiap 30 detik untuk coin ≥ 8% change_24h",
+      "Drift tolerance: 3% (bukan 1% seperti lane lain) karena coin bergerak cepat",
+      "RSI gate: >85 = skip; 80–85 OK jika change_1h ≥ 2% DAN 7d ≥ 30%",
+      "Entry trap (G18): skip jika change_30m > 15% — sudah di puncak",
+    ],
+  },
+  {
+    key: "weekly",
+    label: "Weekly Momentum (S4)",
+    emoji: "📅",
+    color: "bg-teal-50 border-teal-200 text-teal-800",
+    badgeColor: "bg-teal-100 text-teal-700",
+    desc: "Supplemental lane — scan rank 100–250 by volume yang bergerak kuat dalam 7 hari. Universe lebih luas.",
+    trigger: "change_7d ≥ 20%, volume ≥ $1M, rank 100–250",
+    minScore: 65,
+    autoScore: 85,
+    slMethod: "Sama dengan Accumulation",
+    slRange: "1.5% – 5.0%",
+    tp: ["Sama dengan Accumulation"],
+    rrMin: 3.5,
+    maxAge: "10 hari",
+    tp1Partial: "50% posisi dijual",
+    extras: [
+      "Pool: top 150 dari rank 100–250 by volume",
+      "Max 15 coin tambahan per cycle",
+      "Sama scoring logic dengan accumulation",
+    ],
+  },
 ];
 
-export const NEW_FEATURES = [
-  { icon: "⚡", title: "Auto-Trade Futures (1 Scanner, score ≥ 72 adaptif)", desc: "Satu pipeline gabungan semua lane (Pre-Move + Momentum + New-Listing) buka paper trade jika score ≥ threshold adaptif (70-77 per win-rate). Dedup GLOBAL per-symbol (cross-margin = 1 posisi/koin), max 6 posisi global (1 wallet). Volatile blokir Pre-Move saja.", file: "agents/futures/auto_trader.py" },
-  { icon: "🔍", title: "Futures Monitor — Risk Dashboard", desc: "GET /futures/monitor/risk: per posisi tampilkan liq_price, margin, liq_dist_pct, SAFE/WARNING/DANGER status. Portfolio: Sharpe proxy, max drawdown, total margin.", file: "backend/app/api/v1/futures_scanner.py" },
-  { icon: "🚨", title: "Liquidation Guard", desc: "Monitor cek jarak ke liquidation price setiap 2 menit. Jika price dalam 8% dari liq price → tutup posisi di SL sekarang (sebelum diliquidasi exchange).", file: "agents/futures/monitor.py" },
-  { icon: "📈", title: "TP Extension ke TP3", desc: "Jika TP1 sudah dicapai dan score masih ≥ 70, monitor otomatis extend TP2 ke TP3 untuk memaksimalkan profit. Satu kali per posisi.", file: "agents/futures/monitor.py" },
-  { icon: "📅", title: "Monthly Win Rate — per Strategi", desc: "History Futures tab: bandingkan win rate per strategi (Pre-Gainer / Accumulation / Momentum) per bulan dengan selector bulan dan progress bar.", file: "backend/app/api/v1/futures_learning.py + FuturesTab.tsx" },
-  { icon: "🔵🟣", title: "Open Positions per Strategi", desc: "History Monitor tab: posisi terbuka dikelompokkan per strategi (Pre-Gainer / Accumulation / Momentum). Margin/liq/upnl dari nilai backend nyata (balance-aware), bukan hitung ulang client.", file: "frontend/src/features/history/components/FuturesTab.tsx" },
-  { icon: "💼", title: "Spot Portfolio Real Holdings", desc: "Dashboard section: real Binance spot holdings dengan harga masuk rata-rata (FIFO dari trade history), unrealized PnL per koin, alokasi portfolio. Debug endpoint: /market/spot-debug.", file: "backend/app/api/v1/market.py" },
-  { icon: "📊", title: "Scanner — Open Positions Monitor Banner", desc: "Futures Scanner page: banner aktif menampilkan semua posisi terbuka dengan unrealized PnL, risk status (SAFE/WARNING/DANGER), dan liq distance. Auto-refresh 30s.", file: "frontend/src/features/scanner/page.tsx" },
+// ─── SPOT: 12 SCORING SIGNALS ────────────────────────────────────────────────
+
+export const SPOT_SIGNALS = [
+  {
+    id: 1,
+    name: "BB Squeeze Multi-TF",
+    emoji: "🔵",
+    maxPts: 35,
+    category: "setup",
+    formula: "BB_width = (upper − lower) / middle\nSqueeze jika width < threshold per TF:\n  15m: 3.5% | 1h: 5.0% | 4h: 7.0%",
+    scoring: [
+      { cond: "≥ 2 TF squeeze + direction gate",  pts: 35 },
+      { cond: "1 TF squeeze saja",                 pts: 10 },
+      { cond: "Tanpa direction gate (downgrade)",   pts: 10, note: "auto-open diblokir" },
+    ],
+    why: "Volatilitas menyempit (BB menguncup) = energi terkompresi sebelum breakout besar. Makin sempit, makin besar potensi ledakan.",
+  },
+  {
+    id: 2,
+    name: "Smart Money Accumulation",
+    emoji: "📦",
+    maxPts: 25,
+    category: "setup",
+    formula: "vol_slope  = (vol[-1] − vol[-5]) / vol[-5]\nprice_slope = (close[-1] − close[-5]) / close[-5]",
+    scoring: [
+      { cond: "vol_slope > 0.25 AND |price_slope| < 3%",       pts: 25, note: "paling kuat" },
+      { cond: "vol_ratio > 2.0 AND |price_slope| < 4%",        pts: 15 },
+      { cond: "vol_slope > 0.15 AND price_slope < 0 (turun)",  pts: 20, note: "hidden strength" },
+    ],
+    why: "Volume naik tapi harga flat = institutional buying diam-diam. Mereka tidak mau memompa harga sebelum posisi penuh.",
+  },
+  {
+    id: 3,
+    name: "Volume Z-Score",
+    emoji: "📊",
+    maxPts: 10,
+    category: "setup",
+    formula: "vol_z = (current_vol − mean_200) / stdev_200\nvs baseline 200 candle 1h",
+    scoring: [
+      { cond: "vol_z ≥ 2.5", pts: 10, note: "sangat abnormal" },
+      { cond: "vol_z ≥ 1.5", pts: 5  },
+    ],
+    why: "Volume yang sangat melebihi baseline historis (2.5 sigma) adalah tanda aktivitas yang bukan random.",
+  },
+  {
+    id: 4,
+    name: "RSI Sweet Spot",
+    emoji: "📈",
+    maxPts: 12,
+    category: "timing",
+    formula: "RSI(14) atau RSI(4) untuk timeframe lebih pendek",
+    scoring: [
+      { cond: "RSI 40–55 (momentum turning)", pts: 8 },
+      { cond: "RSI 35–43 (recovering)",       pts: 5 },
+      { cond: "RSI 55–63 (building)",         pts: 3 },
+    ],
+    penalties: [
+      { cond: "RSI(4h) > 82 (bukan strong weekly)", pts: -99, note: "AUTO-SKIP" },
+      { cond: "RSI > 75 AND bukan strong weekly",   pts: -15 },
+      { cond: "RSI > 75 AND strong weekly",         pts: -5  },
+      { cond: "RSI > 72",                           pts: -10 },
+      { cond: "RSI > 65",                           pts: -5  },
+    ],
+    why: "RSI 40–55 = momentum sedang bangun, belum terlambat. RSI > 75 = overbought, entry terlambat.",
+  },
+  {
+    id: 5,
+    name: "Funding Rate",
+    emoji: "💸",
+    maxPts: 15,
+    category: "market",
+    formula: "Dari Binance Futures funding rate per 8 jam",
+    scoring: [
+      { cond: "fr < −0.04%", pts: 15, note: "short squeeze fuel" },
+      { cond: "fr < −0.01%", pts: 10 },
+      { cond: "fr ≤ 0.01%",  pts: 6,  note: "neutral, healthy" },
+    ],
+    penalties: [
+      { cond: "fr > 0.05%", pts: -8, note: "longs overcrowded" },
+      { cond: "fr > 0.03%", pts: -4 },
+    ],
+    why: "Funding negatif = shorts overcrowded, siap di-squeeze. Funding tinggi = longs berlebihan, reversal risk.",
+  },
+  {
+    id: 6,
+    name: "Open Interest Building",
+    emoji: "🏗",
+    maxPts: 18,
+    category: "market",
+    formula: "oi_chg = (oi_now − oi_prev) / oi_prev × 100\noi_chg_prev = perubahan OI periode sebelumnya",
+    scoring: [
+      { cond: "oi_chg ≥ 3.0%", pts: 12, note: "institutional build-up" },
+      { cond: "oi_chg ≥ 1.5%", pts: 8  },
+      { cond: "oi_chg ≥ 0.5%", pts: 4  },
+      { cond: "OI Acceleration: oi_chg > oi_chg_prev > 0", pts: 6, note: "bonus akselerasi" },
+    ],
+    penalties: [
+      { cond: "oi_chg < −2.0%", pts: -5, note: "posisi ditutup massal" },
+    ],
+    why: "OI naik = posisi baru dibuka (konviksi). OI akselerasi = institutional buying yang semakin agresif.",
+  },
+  {
+    id: 7,
+    name: "Near Resistance / Breakout",
+    emoji: "🎯",
+    maxPts: 15,
+    category: "setup",
+    formula: "dist_to_resistance = (resistance − price) / price × 100",
+    scoring: [
+      { cond: "dist < 3% dari resistance",              pts: 10 },
+      { cond: "Fresh breakout: price > recent_high × 0.99 AND change_24h 0–2%", pts: 5, note: "baru breakout, belum mahal" },
+    ],
+    penalties: [
+      { cond: "−0.5% sd 0% dari ATH",    pts: -10, note: "sangat late entry" },
+      { cond: "−2% sd −0.5% dari ATH",   pts: -5  },
+    ],
+    why: "Dekat resistance = titik keputusan kritis. Fresh breakout = momentum baru, belum banyak yang masuk.",
+  },
+  {
+    id: 8,
+    name: "EMA Alignment",
+    emoji: "⚡",
+    maxPts: 15,
+    category: "trend",
+    formula: "EMA9, EMA21 dihitung di setiap timeframe (15m, 1h, 4h)",
+    scoring: [
+      { cond: "EMA9 > EMA21 di ≥ 2 TF", pts: 10 },
+      { cond: "Ketiga TF bullish",        pts: 5,  note: "bonus full align" },
+    ],
+    why: "EMA9 > EMA21 = trend bullish jangka pendek. Makin banyak TF yang align, makin kuat trennya.",
+  },
+  {
+    id: 9,
+    name: "Buy Pressure Shift",
+    emoji: "🟢",
+    maxPts: 15,
+    category: "momentum",
+    formula: "taker_ratio = taker_buy_vol / total_vol (rata-rata 15 candle)\nshift = taker_now − taker_prev",
+    scoring: [
+      { cond: "shift > 0.20", pts: 15, note: "dominasi buyer tiba-tiba" },
+      { cond: "shift > 0.10", pts: 8  },
+    ],
+    why: "Pergeseran tiba-tiba ke dominasi taker buy = institutional market order. Sinyal konviksi kuat.",
+  },
+  {
+    id: 10,
+    name: "Volume Spike",
+    emoji: "📈",
+    maxPts: 10,
+    category: "momentum",
+    formula: "vol_ratio = current_vol / avg_vol (rata-rata historis)",
+    scoring: [
+      { cond: "vol_ratio ≥ 5.0×", pts: 10, note: "anomali besar" },
+      { cond: "vol_ratio ≥ 3.0×", pts: 5  },
+    ],
+    why: "Volume spike 5× = ada event besar. Coupled dengan harga, ini sinyal momentum yang tidak bisa diabaikan.",
+  },
+  {
+    id: 11,
+    name: "Momentum Context",
+    emoji: "🚀",
+    maxPts: 20,
+    category: "momentum",
+    formula: "change_24h dari Binance ticker\nchange_7d dari 4h klines",
+    scoring: [
+      { cond: "change_24h 3–20%",  pts: 8, note: "healthy momentum" },
+      { cond: "change_7d ≥ 50%",   pts: 8, note: "weekly bonus" },
+      { cond: "change_7d ≥ 30%",   pts: 5, note: "weekly bonus" },
+    ],
+    penalties: [
+      { cond: "change_24h > 15% AND change_1h < −2%",  pts: -5,  note: "pullback saat sudah tinggi" },
+      { cond: "change_24h > 15% AND change_1h ≥ −2%",  pts: -25, note: "sedang chasing" },
+      { cond: "change_24h 8–15% AND change_1h < −1%",  pts: -6  },
+      { cond: "change_24h 8–15%",                       pts: -12 },
+      { cond: "change_24h < −15%",                      pts: -10, note: "dumping" },
+    ],
+    why: "Momentum 3–20% = sweet spot, masih ada room. Di atas 15% dengan 1h masih naik = terlambat masuk.",
+  },
+  {
+    id: 12,
+    name: "Momentum Chase (R8)",
+    emoji: "🔥",
+    maxPts: 23,
+    category: "momentum",
+    formula: "Khusus coin change_24h ≥ 10% ATAU change_7d ≥ 20%\n(weekly strong momentum)",
+    scoring: [
+      { cond: "RSI 40–65 AND EMA9 > EMA21 × 0.99", pts: 15 },
+      { cond: "Volume menurun saat pullback",        pts: 8, note: "healthy retracement" },
+    ],
+    why: "Kalau coin sudah bergerak kuat, konfirmasi RSI tidak overbought + volume pullback sehat = re-entry valid.",
+  },
 ];
 
-export const AGENTS = {
-  "Pre-Gainer": {
-    icon: "🎯", file: "agents/futures/agent1.py",
+// ─── SPOT: DIRECTION GATE ─────────────────────────────────────────────────────
+
+export const SPOT_DIRECTION_GATE = {
+  desc: "Gate wajib sebelum auto-open. Tanpa konfirmasi ini, BB Squeeze hanya 10 pts (bukan 35) dan auto-open diblokir paksa.",
+  conditions: [
+    "taker_ratio ≥ 0.55 (55% buyer agresif dalam 15 candle terakhir)",
+    "ATAU EMA9 > EMA21 pada timeframe 1h",
+  ],
+};
+
+// ─── SPOT: MONITOR LAYERS ────────────────────────────────────────────────────
+
+export const SPOT_MONITOR_LAYERS = [
+  {
+    layer: "L0",
+    title: "Wick Detection",
+    emoji: "🕯",
+    color: "bg-neutral-100 border-neutral-300",
+    desc: "Fetch 1m klines untuk deteksi wick yang menyentuh level DI ANTARA poll 60 detik. Mencegah miss TP/SL karena polling interval.",
+    closes: [
+      { reason: "TP dan SL keduanya tersentuh di window yang sama → SL wins (konservatif)" },
+    ],
+  },
+  {
+    layer: "L1",
+    title: "Hard Exits",
+    emoji: "🛑",
+    color: "bg-red-50 border-red-200",
+    desc: "Prioritas tertinggi — eksekusi langsung tanpa kondisi tambahan.",
+    closes: [
+      { reason: "TP3 hit", status: "tp", note: "close 100%, reason=tp3_hit" },
+      { reason: "TP2 hit", status: "tp", note: "close 100%, reason=tp2_hit" },
+      { reason: "TP1 hit", status: "partial", note: "jual 50%, SL geser ke entry + 50%×(TP1−entry)" },
+      { reason: "SL hit",  status: "sl", note: "close 100%; jika TP1 pernah hit → reason=tp1_breakeven" },
+    ],
+  },
+  {
+    layer: "L2",
+    title: "Risk-Adjusted Exits",
+    emoji: "⚠️",
+    color: "bg-yellow-50 border-yellow-200",
+    desc: "Hanya aktif SETELAH 30 menit hold (MIN_HOLD_MINUTES). Mencegah exit prematur karena noise.",
+    closes: [
+      { reason: "trend_reversal: EMA9 < EMA21×0.998 DAN entry_ema_bullish=True", note: "no profit floor" },
+      { reason: "profit_protection: RSI > 80 AND pnl ≥ 50% jalan ke TP2 AND range < 0.5% (stagnan)" },
+      { reason: "flow_reversal: taker_ratio < 0.38 AND pnl ≥ 50% jalan ke TP2" },
+      { reason: "risk_adjusted: RSI > 75 AND pnl_gross < −2% (loss-cutting, setup gagal)" },
+    ],
+  },
+  {
+    layer: "L2.5",
+    title: "Stagnant Rotation",
+    emoji: "🔄",
+    color: "bg-blue-50 border-blue-200",
+    desc: "Mulai dari hari ke-2 hold. Tukar posisi stagnan dengan kandidat yang lebih baik.",
+    closes: [
+      { reason: "Normal (hari 2+): harga ±3% dari entry, kandidat outscore ≥10 pts DAN kandidat ≥ 85 pts" },
+      { reason: "Urgent (hari 1+): kandidat outscore ≥25 pts DAN kandidat ≥ 90 pts" },
+    ],
+  },
+  {
+    layer: "L3",
+    title: "Profit Lock Absolute",
+    emoji: "🔒",
+    color: "bg-green-50 border-green-200",
+    desc: "Berjalan di SETIAP check cycle. Lock profit jika harga turun dari peak.",
+    closes: [
+      { reason: "peak_pnl ≥ 40% AND current_pnl < peak × 0.75 → LOCK (tutup)", note: "lock 30% dari peak" },
+      { reason: "peak_pnl ≥ 25% AND current_pnl < peak × 0.70 → LOCK", note: "lock 30% dari peak" },
+      { reason: "peak_pnl ≥ 15% AND current_pnl < peak × 0.60 → LOCK", note: "lock 40% dari peak" },
+    ],
+  },
+  {
+    layer: "L4",
+    title: "Max Age Expiry",
+    emoji: "⏰",
+    color: "bg-neutral-50 border-neutral-200",
+    desc: "Posisi yang terlalu lama ditutup otomatis untuk bebaskan modal.",
+    closes: [
+      { reason: "fresh_setup (accumulation): max 10 hari → close di market, reason=max_age_expired" },
+      { reason: "momentum_chase (bigmover, breakout): max 5 hari → close di market" },
+    ],
+  },
+];
+
+// ─── FUTURES: 4 AGENTS ───────────────────────────────────────────────────────
+
+export const FUTURES_AGENTS = [
+  {
+    key: "agent1",
+    label: "Pre-Gainer",
+    style: "futures_agent1",
+    emoji: "🎯",
     color: "from-blue-500/10 to-indigo-500/10 border-blue-300",
-    status: "✅ Lane dari 1 Scanner", interval: "Setiap 2 menit", group: "⚡ Futures",
-    desc: "Lane Pre-Move dari Scanner tunggal — cari koin SEBELUM bergerak via BB Squeeze, akumulasi volume, Funding/OI, S/R. SL floor sadar-leverage (min 1.5%), leverage direkonsiliasi dengan jarak SL.",
-    pipeline: [
-      "Ambil top-100 pair USDT Futures dari Binance (by volume)",
-      "Fetch funding rate: terlalu tinggi (+) → SHORT bias, terlalu rendah (−) → LONG bias",
-      "Analisis Open Interest: OI naik + harga naik → trend kuat; OI naik + harga turun → short squeeze risk",
-      "Deteksi liquidation zones: area dengan banyak posisi terancam = magnet harga",
-      "Analisis S/R Zones (swing pivot clustering, 20 candle 4H)",
-      "Hitung Entry/SL/TP dengan R:R ≥ 1:3 berbasis ATR + S/R",
-      "Filter: score ≥ threshold, R:R valid → log ke paper_trades (agent='futures_agent1')",
+    badgeColor: "bg-blue-100 text-blue-700",
+    file: "agents/futures/agent1.py",
+    philosophy: "Entry SEBELUM move terjadi. BB Squeeze + akumulasi volume + OI building = setup paling early.",
+    direction: "LONG + SHORT",
+    leverageMax: 15,
+    laneKey: "pre_gainer",
+    minScore: 52,
+    slMethod: "ATR(14, 15m) × 1.5",
+    slCap: "SL margin 18% dari entry",
+    maxMarginLoss: "30%",
+    signals: [
+      { name: "BB Squeeze Multi-TF",     maxPts: 30, detail: "4h strong 14pts / 1h strong 12pts / 15m strong 8pts. Adaptive threshold = max(2%, ATR×0.6)" },
+      { name: "Volume Accumulation",      maxPts: 25, detail: "vol_ratio≥2.5 AND price_move<3%: 25pts (1h). 4h/15m bobot lebih rendah" },
+      { name: "Volume Z-Score",           maxPts: 10, detail: "vs 200-candle 1h baseline. Z≥2.5: 10pts | Z≥1.5: 5pts" },
+      { name: "Funding Rate",             maxPts: 15, detail: "fr<-0.04%: 15pts | fr<-0.01%: 10pts | fr≤0.01%: 6pts | fr>0.05%: -8pts" },
+      { name: "OI Building",              maxPts: 18, detail: "oi_chg≥3%: 12pts | ≥1.5%: 8pts | ≥0.5%: 4pts | Acceleration: +6pts | <-2%: -5pts" },
+      { name: "Near Resistance",          maxPts: 10, detail: "dist<3%: 10pts | Fresh breakout bonus: +8pts | Near ATH penalty: -10pts" },
+      { name: "RSI Sweet Spot 40–55",     maxPts: 8,  detail: "43-55: 8pts | 35-43: 5pts | 55-63: 3pts" },
+      { name: "Taker Buy Ratio",          maxPts: 15, detail: "≥0.62: 15pts | ≥0.58: 10pts | ≥0.55: 5pts" },
     ],
-    code: `# agents/futures/scheduler.py → agent1.py
-async def run_agent1_scan(symbols: list[str]) -> list[Signal]:
-    for sym in symbols:
-        funding = await fetch_funding_rate(sym)
-        oi      = await fetch_open_interest(sym)
-        liq     = await fetch_liquidation_zones(sym)
-        sr      = await compute_sr_zones(sym)          # 4H swing pivots
-        signal  = await score_and_decide(funding, oi, liq, sr)
-        if signal.rr >= 1.3:
-            results.append(signal)
-    return results`,
+    penalties: [
+      "change_24h > 15% AND 1h masih naik: -25pts (chasing)",
+      "change_24h > 15% AND 1h pullback: -5pts",
+      "change_24h 8-15%: -12pts",
+      "RSI > 72: -10pts | RSI > 65: -5pts",
+    ],
   },
-  "Accumulation": {
-    icon: "📦", file: "agents/futures/agent2.py",
+  {
+    key: "agent2",
+    label: "Accumulation",
+    style: "futures_agent2",
+    emoji: "📦",
     color: "from-purple-500/10 to-violet-500/10 border-purple-300",
-    status: "✅ Lane dari 1 Scanner", interval: "Setiap 2 menit", group: "⚡ Futures",
-    desc: "Lane akumulasi (Wyckoff/T0-T4) dari Scanner tunggal — fase akumulasi sebelum markup. Skornya masuk pool ranking global yang sama; dedup per-symbol memilih lane skor tertinggi per koin.",
-    pipeline: [
-      "T0 — Wyckoff: deteksi phase Accumulation/Distribution/Markup/Markdown",
-      "T1 — Trend: EMA alignment (9/21/50), ADX strength, multi-TF confluence",
-      "T2 — S/R: swing pivot clustering, Fibonacci retracement zones",
-      "T3 — Pattern: BB Squeeze, Volume Accumulation, RSI divergence, candle patterns",
-      "T4 — Trigger: final confirmation (EMA cross, pressure shift, volume spike)",
-      "Hitung Entry/SL/TP dengan R:R ≥ 1:3 berbasis S/R + ATR",
-      "Log ke paper_trades (agent='futures_agent2') jika semua filter lolos",
+    badgeColor: "bg-purple-100 text-purple-700",
+    file: "agents/futures/agent2.py",
+    philosophy: "Wyckoff cycle — beli di fase akumulasi, hold sampai markup. Pipeline T0-T4 paling lengkap.",
+    direction: "LONG primary, SHORT distribution",
+    leverageMax: 10,
+    laneKey: "accumulation",
+    minScore: 52,
+    slMethod: "ATR(14, 15m) × 1.5",
+    slCap: "SL margin 15% dari entry (paling ketat)",
+    maxMarginLoss: "22.5%",
+    signals: [
+      { name: "T0: Wyckoff Phase",   maxPts: 20, detail: "Accumulation: 20pts | Markup: 8pts | Distribution: -10pts | Markdown: -10pts\n4h+1h keduanya accumulation: +8pts bonus" },
+      { name: "T0: OI + Acceleration", maxPts: 14, detail: "OI building: 8pts | OI acceleration: 6pts" },
+      { name: "T1: Trend Setup",     maxPts: 15, detail: "EMA alignment multi-TF + ADX strength" },
+      { name: "T1: Funding Rate",    maxPts: 8,  detail: "Sama dengan Agent 1" },
+      { name: "T2: S/R Breakout",   maxPts: 22, detail: "Breakout dari resistance: 14pts | Volume at zone: 4pts | Tests of zone: 4pts" },
+      { name: "T3: BB Compression", maxPts: 41, detail: "Compression: 18pts | Squeeze persistence: 5pts | Vol accumulation: 8pts | Z-Score: 10pts" },
+      { name: "T4: RSI Sweet Spot", maxPts: 13, detail: "RSI 43-55: 13pts | RSI 35-43: 8pts | RSI 55-63: 5pts" },
+      { name: "T4: Buy Pressure",   maxPts: 8,  detail: "Taker ratio ≥ 0.62: 8pts" },
     ],
-    code: `# agents/futures/agent2.py — T0-T4 pipeline
-async def run_agent2_scan(symbols: list[str]) -> list[Signal]:
-    for sym in symbols:
-        klines = await fetch_multi_tf(sym)   # 15m, 1H, 4H
-        phase  = wyckoff_phase(klines)       # T0
-        trend  = analyze_trend(klines)       # T1
-        zones  = compute_sr(klines)          # T2
-        patt   = detect_patterns(klines)     # T3
-        trig   = check_trigger(klines)       # T4
-        score  = aggregate_score(...)
-        if score >= MIN_SCORE and rr >= 1.3:
-            results.append(build_signal(...))`,
+    penalties: [
+      "RSI(4h) > 82: AUTO-SKIP (overbought hard kill)",
+      "Distribution/Markdown phase: -10pts",
+    ],
   },
-  "Momentum": {
-    icon: "🔥", file: "agents/futures/agent3.py",
+  {
+    key: "agent3",
+    label: "Momentum",
+    style: "futures_agent3",
+    emoji: "🔥",
     color: "from-orange-500/10 to-amber-500/10 border-orange-300",
-    status: "✅ Lane dari 1 Scanner", interval: "Setiap 2 menit", group: "⚡ Futures",
-    desc: "Lane Momentum dari Scanner tunggal — masuk SAAT gerakan sudah terbentuk (change 5-20%, volume + OI searah, RSI 55-72). Kebalikan Pre-Move. Leverage cap 10x, tetap pakai SL floor sadar-leverage.",
-    pipeline: [
-      "Reward koin yang sudah bergerak 5-20% dalam 24h (sweet spot 8-12%)",
-      "Konfirmasi volume surge + OI naik searah harga (konviksi, bukan squeeze kosong)",
-      "RSI 55-72 (LONG) / 28-45 (SHORT) — momentum ada, belum exhausted",
-      "Breakout di atas high / break di bawah low 30-candle",
-      "SL floor sadar-leverage + leverage cap 10x (already-moved = vol lebih tinggi)",
-      "Skor masuk pool ranking global yang sama dengan lane lain",
+    badgeColor: "bg-orange-100 text-orange-700",
+    file: "agents/futures/agent3.py",
+    philosophy: "Masuk SAAT momentum sudah ADA. Kebalikan Pre-Gainer — konfirmasi dulu, baru entry.",
+    direction: "LONG + SHORT",
+    leverageMax: 10,
+    laneKey: "momentum",
+    minScore: 65,
+    slMethod: "ATR(14, 15m) × 1.5",
+    slCap: "SL margin 25% dari entry",
+    maxMarginLoss: "25%",
+    signals: [
+      { name: "24h Move",       maxPts: 20, detail: "8-12%: 20pts (sweet spot) | 5-8%: 12pts | 12-18%: 15pts | 18-25%: 8pts | 25-35%: 5pts | 35-50%: 2pts" },
+      { name: "Pullback Mod",   maxPts: 8,  detail: "Untuk coin > 25%: 1h < -2%: +8pts (pullback sehat) | 1h > 3%: -5pts (masih chasing)" },
+      { name: "15m Re-entry",   maxPts: 10, detail: "Untuk > 25%: 15m last 3 candle -8% sd -2% dari peak: +10pts" },
+      { name: "Volume Momo",    maxPts: 25, detail: "Strong (vol≥2.5×, price≥1.5%): 25pts (1h) | Moderate: 16pts | Weak: 6pts" },
+      { name: "OI Rising",      maxPts: 15, detail: "≥5%: 15pts | ≥3%: 10pts | ≥1%: 5pts | < -2%: -10pts (squeeze risky)" },
+      { name: "Funding Healthy",maxPts: 12, detail: "fr<0%: 9pts | fr≤0.03%: 12pts | fr≤0.06%: 6pts | fr>0.10%: -8pts" },
+      { name: "RSI 55–72",      maxPts: 15, detail: "58-70: 15pts | 53-58: 10pts | 70-78: 6pts | <45: -6pts" },
+      { name: "Breakout Conf",  maxPts: 13, detail: "Breakout ≥2%: 13pts | ≥0.5%: 8pts (harus ada vol≥1.5×)" },
     ],
-    code: `# agents/futures/agent3.py — Momentum Capture
-async def scan_symbol(sym, tf_map, change_24h):
-    regime = detect_coin_regime(tf_map["1h"])   # per-coin, bukan BTC
-    score  = score_momentum(change_24h, vol, oi, rsi)
-    levels = _calc_levels(...)                   # SL floor sadar-leverage
-    lev    = calc_leverage_momentum(atr, score, levels["risk_pct"])  # cap 10x
-    return [{ ..., "setup_type": "momentum", "regime": regime }]`,
+    penalties: [
+      "change_24h < 5% AND bukan early breakout: -15pts",
+      "change_24h > 50%: -20pts (capitulation zone)",
+      "change_24h 35-50%: -8pts",
+      "RSI > 80: -15pts | RSI > 75: -8pts (unless regime=trending_up: +5pts)",
+      "20-25% range: -10pts (gap tidak ter-cover bracket lain)",
+    ],
   },
-  "Futures Monitor": {
-    icon: "👁", file: "agents/futures/monitor.py",
-    color: "from-indigo-500/10 to-blue-500/10 border-indigo-300",
-    status: "✅ Aktif 24/7", interval: "Setiap 120 detik", group: "⚡ Futures",
-    desc: "Monitor risk-adjusted semua posisi Futures (1 monitor). Wick detection 1m (TP/SL antar-poll tak terlewat), SL+ lifecycle, Liquidation Guard (tutup di harga dekat-liq), TP1 partial kecilkan size, expired masuk balance.",
-    pipeline: [
-      "Query semua futures paper_trades dengan status='open'",
-      "Batch fetch live prices dari Binance Futures",
-      "Layer 1 — Hard exits: SL hit → sl | TP2/TP3 hit → tp",
-      "Layer 2 — Liquidation Guard: jika price dalam 8% liq_price → tutup di SL (protect capital)",
-      "Layer 3 — Trail SL: 50% menuju TP1 → SL ke breakeven | TP1 hit → SL ke entry+50%",
-      "Layer 4 — TP Extension: TP1 dicapai + score ≥ 70 → extend TP2 ke TP3",
-      "Log liq_guards + tp_extended ke health endpoint",
+  {
+    key: "bigmover",
+    label: "Big Mover",
+    style: "futures_agent_bigmover",
+    emoji: "💥",
+    color: "from-amber-500/10 to-yellow-500/10 border-amber-300",
+    badgeColor: "bg-amber-100 text-amber-700",
+    file: "agents/futures/agent_bigmover.py",
+    philosophy: "Futures version dari Wave Rider — leverage untuk amplifikasi return di tengah rally besar.",
+    direction: "LONG only",
+    leverageMax: 15,
+    laneKey: "bigmover",
+    minScore: 55,
+    slMethod: "ATR-based, SL margin 30%",
+    slCap: "SL margin 30% dari entry (paling longgar)",
+    maxMarginLoss: "30%",
+    signals: [
+      { name: "Volume",   maxPts: 18, detail: "vol_ratio≥2.5: 18pts | vol_ratio≥1.3: 10pts" },
+      { name: "RSI",      maxPts: 15, detail: "55-72: 15pts | 50-55: 10pts | 72-80: 7pts | 80-85+confirm: 3pts | >85: SKIP" },
+      { name: "EMA",      maxPts: 15, detail: "3 TF bullish: 15pts | 2 TF: 10pts | 1 TF: 4pts" },
+      { name: "Taker",    maxPts: 15, detail: "≥0.62: 15pts | ≥0.55: 9pts" },
+      { name: "Momentum", maxPts: 20, detail: "10-20%: 7pts | 20-35%: 12pts | 35-70%: 18pts | 70-100%: 20pts" },
+      { name: "7d Bonus", maxPts: 8,  detail: "change_7d≥50%: 8pts | ≥30%: 5pts" },
+      { name: "1h Bonus", maxPts: 10, detail: "change_1h≥3%: 10pts" },
     ],
-    code: `# agents/futures/monitor.py — v2 (dengan Liq Guard + TP Extension)
-async def check_futures_positions():
-    for trade in open_trades:
-        # Layer 1: SL/TP hit
-        if sl_or_tp_hit(price, sl, tp2): close_position()
-        # Layer 2: Liquidation Guard (NEW)
-        liq = calc_liq_price(entry, leverage, direction)
-        if dist_to_liq(price, liq) < 8%: close_at_sl()
-        # Layer 3: Trail SL
-        if halfway_to_tp1: move_sl_to_breakeven()
-        # Layer 4: TP Extension (NEW)
-        if tp1_hit and score >= 70: extend_tp_to_tp3()`,
+    penalties: [
+      "RSI > 85: SKIP (overbought hard kill)",
+      "Gap 5m antar candle > 5%: SKIP",
+      "change_30m > 15%: SKIP (entry trap, sudah puncak)",
+      "change_24h > 200%: SKIP (parabolic)",
+    ],
   },
-  "Weight Updater": {
-    icon: "🧠", file: "agents/futures/weight_updater.py",
-    color: "from-green-500/10 to-teal-500/10 border-green-300",
-    status: "✅ Aktif 24/7", interval: "Setiap 6 jam", group: "⚡ Futures",
-    desc: "Adaptive learning — auto-tune bobot sinyal berdasarkan win rate historis. Sinyal dengan win rate tinggi mendapat bobot lebih besar di scan berikutnya.",
-    pipeline: [
-      "Ambil semua paper_trades (type='futures') yang sudah closed (tp/sl)",
-      "Hitung win rate per sinyal: BBSqueeze, EMA, Funding, OI, dsb",
-      "Normalisasi bobot: sinyal dengan WR > 60% → weight naik; WR < 40% → turun",
-      "Simpan ke signal_weights table di PostgreSQL",
-      "Agent1 & Agent2 baca weight terbaru di scan berikutnya",
-      "Log weight update ke structlog",
-    ],
-    code: `# agents/futures/weight_updater.py
-while True:
-    win_rates = await compute_signal_win_rates()
-    weights   = normalize_weights(win_rates)
-    await save_weights(weights)           # → signal_weights table
-    logger.info("weights_updated", n=len(weights))
-    await asyncio.sleep(6 * 3600)        # tiap 6 jam`,
-  },
-  "Spot Opp Scanner": {
-    icon: "🚀", file: "agents/opportunity/scheduler.py",
-    color: "from-teal-500/10 to-green-500/10 border-teal-300",
-    status: "✅ Aktif 24/7", interval: "Setiap 15 menit", group: "🎯 Spot",
-    desc: "Scan 100 pair USDT Spot berdasarkan volume. Cari koin dengan potensi naik (BB Squeeze, Akumulasi, Breakout). Broadcast hasil via WebSocket ke frontend.",
-    pipeline: [
-      "Ambil top-100 pair USDT Spot dari Binance (bukan Futures)",
-      "Analisis 3 TF serentak: 15m + 1H + 4H",
-      "9 sinyal: BB Squeeze, Vol Akumulasi, RSI Zone, Buy Pressure, EMA Align, Near Breakout, Momentum 24H, Short-term Mom, Taker Ratio",
-      "Hitung Entry (harga pasar) · SL (swing low −0.5%) · TP1/TP2/TP3 (R:R 1:1.5/3/5)",
-      "Filter: score ≥ 30 · SL max 8% · R:R ke TP2 ≥ 2.0",
-      "Top-30 kandidat disimpan ke opportunity store (in-memory)",
-      "WebSocket broadcast ke semua klien /ws/opportunity",
-    ],
-    code: `# agents/opportunity/scheduler.py
-while True:
-    result = await run_opportunity_scan()   # scan 100 spot pairs
-    opp_store.set_result(result)            # update in-memory cache
-    await broadcast_ws(result)             # push ke frontend via WS
-    await asyncio.sleep(15 * 60)`,
-  },
-  "Spot Monitor": {
-    icon: "📍", file: "agents/opportunity/monitor.py",
-    color: "from-amber-500/10 to-orange-500/10 border-amber-300",
-    status: "✅ Aktif 24/7", interval: "Setiap 60 detik", group: "🎯 Spot",
-    desc: "Risk-adjusted monitor untuk posisi Opportunity SPOT. v2: Min hold 30 menit, cooldown 2 jam setelah SL, trend_reversal hanya jika EMA memang berbalik (bukan sudah bearish sebelum entry).",
-    pipeline: [
-      "Query semua opportunity_spot trades dengan status='open'",
-      "Fetch live prices dari Binance Spot (batch concurrent)",
-      "Layer 1 Hard exits: SL hit → sl | TP2/TP3 hit → tp",
-      "TP1 hit → flag tp1_hit, SL pindah ke breakeven (entry × 1.002)",
-      "Layer 2 Risk-adjusted (hanya setelah 30 menit buka): EMA reversal, RSI overbought+stall, flow reversal",
-      "BUG FIX: status 'tp' hanya jika net pnl > 0 (setelah fee 0.2%)",
-      "SL hit → set cooldown 2 jam untuk symbol ini (cegah re-entry langsung)",
-    ],
-    code: `# agents/opportunity/monitor.py — v2 (bug fixes)
-# BUG FIX 1: min hold 30 menit sebelum risk-adjusted exits
-# BUG FIX 2: 'tp' hanya jika net P&L > 0 setelah fee
-# BUG FIX 3: trend_reversal hanya jika EMA berbalik setelah entry
-# BUG FIX 4: cooldown 2 jam setelah SL
+];
 
-if hold_minutes < MIN_HOLD_MINUTES: return None  # jangan tutup terlalu cepat
-pnl_net = pnl_gross - EXECUTION_COST_PCT         # fee + spread + slippage
-new_status = "tp" if pnl_net > 0 else "sl"       # bukan cuma price > entry
-# cooldown re-entry 2 jam: query DB di scheduler (tahan restart)`,
+// ─── FUTURES: LEVERAGE CALCULATION ───────────────────────────────────────────
+
+export const LEVERAGE_CALC = {
+  base: [
+    { atr: "> 5.0%", base: 2, note: "sangat volatile" },
+    { atr: "> 3.0%", base: 3 },
+    { atr: "> 2.0%", base: 5 },
+    { atr: "> 1.0%", base: 7 },
+    { atr: "≤ 1.0%", base: 10, note: "rendah volatilitas" },
+  ],
+  scoreBonus: [
+    { score: "≥ 80", bonus: "+3 (max 15×)" },
+    { score: "≥ 70", bonus: "+2 (max 12×)" },
+    { score: "≥ 60", bonus: "+1 (max 10×)" },
+  ],
+  laneCaps: [
+    { lane: "pre_gainer",   maxLev: 15, slMargin: "18%",  note: "early entry, sempit SL" },
+    { lane: "accumulation", maxLev: 10, slMargin: "15%",  note: "hold multi-hari, paling konservatif" },
+    { lane: "momentum",     maxLev: 10, slMargin: "25%",  note: "coin sudah bergerak, wider" },
+    { lane: "bigmover",     maxLev: 15, slMargin: "30%",  note: "ATR-based, volatile range OK" },
+  ],
+  liqGuard: [
+    { leverage: "≤ 5×",  guardPct: "8.0%",  note: "tutup jika liq < 8% dari entry" },
+    { leverage: "5–10×", guardPct: "6.0%" },
+    { leverage: "10–20×",guardPct: "4.0%" },
+    { leverage: "> 20×", guardPct: "3.0%" },
+  ],
+};
+
+// ─── FUTURES: MONITOR LAYERS ─────────────────────────────────────────────────
+
+export const FUTURES_MONITOR_LAYERS = [
+  {
+    label: "TP1 Partial",
+    emoji: "📊",
+    color: "bg-blue-50 border-blue-200",
+    detail: "Accumulation: tutup 25% | Lainnya: tutup 33%\nSL digeser ke: entry + 50% × (TP1 − entry)",
+  },
+  {
+    label: "Breakeven Trail",
+    emoji: "🛡",
+    color: "bg-green-50 border-green-200",
+    detail: "Accumulation: harga 90% jalan ke TP1 → SL ke entry\nBigMover: skip breakeven, langsung ride\nLainnya: harga 70% ke TP1 → SL ke entry",
+  },
+  {
+    label: "TP1 Lock",
+    emoji: "🔒",
+    color: "bg-teal-50 border-teal-200",
+    detail: "Stage 1 (TP1 hit): SL → entry + 75% × (TP1 − entry)\nStage 2 (midpoint TP1→TP2): SL → TP1 level",
+  },
+  {
+    label: "TP Extension (F81)",
+    emoji: "🚀",
+    color: "bg-purple-50 border-purple-200",
+    detail: "Saat TP1 hit DAN current_score ≥ 70:\n→ Target baru = TP3 (skip TP2)\n→ SL lock di TP1\n→ reason = tp3_extended",
+  },
+  {
+    label: "TP4 Extension (F78)",
+    emoji: "🌙",
+    color: "bg-indigo-50 border-indigo-200",
+    detail: "Saat TP3 hit DAN NOT tp4_extended DAN score ≥ 65:\n→ tp4 = tp3 + (tp3 − original_tp2) × 1.2\n→ SL lock di original TP2\n→ reason = tp4_extended",
+  },
+  {
+    label: "Rugpull Detection (G4)",
+    emoji: "🚨",
+    color: "bg-red-50 border-red-200",
+    detail: "Cek 5 menit terakhir (5× 1m candles)\ndrop = max(5%, ATR×2%) dari entry\nHold > 5 menit DAN drop terjadi → EMERGENCY CLOSE",
+  },
+  {
+    label: "Max Margin Loss Gate",
+    emoji: "⛔",
+    color: "bg-red-50 border-red-200",
+    detail: "margin_loss = |pnl_pct| × leverage\nPre-Gainer: >30% → CLOSE | Accumulation: >22.5%\nMomentum: >25% | BigMover: >30%",
+  },
+  {
+    label: "Funding Cost Gate (G6)",
+    emoji: "💸",
+    color: "bg-yellow-50 border-yellow-200",
+    detail: "Setiap 8 jam (Binance funding window):\n• Posisi profit: tutup jika funding cost > 30% of profit\n• Posisi rugi: tutup jika cost > 0.3% of notional",
+  },
+  {
+    label: "Max Age Expiry",
+    emoji: "⏰",
+    color: "bg-neutral-50 border-neutral-200",
+    detail: "Base: 3 hari\nExtension: +1 hari jika masih profit (max 2 extension = 5 hari)\nreason = max_age_expired",
+  },
+];
+
+// ─── FUTURES: RISK GATE ───────────────────────────────────────────────────────
+
+export const RISK_GATE = {
+  states: [
+    { state: "OPEN",    color: "bg-green-100 text-green-800 border-green-300",   desc: "Normal — max 3 posisi baru per cycle" },
+    { state: "REDUCED", color: "bg-yellow-100 text-yellow-800 border-yellow-300",desc: "Quota terpotong — max 1 posisi per cycle" },
+    { state: "CLOSED",  color: "bg-red-100 text-red-800 border-red-300",         desc: "Hard stop — tidak ada auto-open" },
+  ],
+  drawdownThresholds: [
+    { wallet: "< $500",   hardStop: "10%", recover: "5%"  },
+    { wallet: "< $750",   hardStop: "12%", recover: "6%"  },
+    { wallet: "< $1500",  hardStop: "15%", recover: "8%",  note: "default ($1000)" },
+    { wallet: "≥ $1500",  hardStop: "20%", recover: "10%" },
+  ],
+  rarGate: {
+    formula: "Sharpe proxy = mean(pnl_series) / stdev(pnl_series)",
+    trigger: "Sharpe < −0.5 DAN n_trades ≥ 10 → GATE CLOSED",
+  },
+  laneWRPause: {
+    rolling: 20,
+    threshold: "WR < 35%",
+    duration: "24 jam",
+    desc: "Per-lane auto-pause jika win rate rolling 20 trade < 35%. Cegah death spiral satu style.",
   },
 };
 
-export const TA_SIGNALS = {
-  "BB Squeeze": {
-    icon: "🔵", score: "+25 × w_squeeze",
-    formula: `BB Width = (StdDev(close, n) × 4) / BB_mid
-Squeeze    jika Width < threshold  (3–8% tergantung style)
-Tightening jika Width < threshold × 1.5`,
-    why: "Volatilitas menyempit (BB menguncup) = energi terkompresi sebelum breakout besar. Semakin sempit BB, semakin besar potensi pergerakan.",
-  },
-  "Vol Akumulasi": {
-    icon: "📦", score: "+22 × w_accum",
-    formula: `vol_slope  = (vol[-1] − vol[-5]) / vol[-5]
-price_slope = (close[-1] − close[-5]) / close[-5]
-Akumulasi  jika vol_slope > min_vol AND |price_slope| < 4%
-Hidden Str jika vol_slope tinggi AND price_slope < 0`,
-    why: "Volume naik saat harga flat = smart money masuk diam-diam (akumulasi). Volume naik saat harga turun = hidden strength.",
-  },
-  "Near Breakout": {
-    icon: "🎯", score: "+20 × w_breakout",
-    formula: `dist_high = (recent_high − price) / price
-dist_low  = (price − recent_low)  / price
-Near breakout  jika 0 < dist_high < 1.5–2.5%
-Near reversal  jika 0 < dist_low  < 1.5–2.5%`,
-    why: "Harga mendekati high/low terakhir = titik keputusan kritis. Bisa breakout (LONG) atau bounce dari support.",
-  },
-  "RSI": {
-    icon: "📈", score: "+15 × w_rsi (oversold)",
-    formula: `RSI = 100 − 100 / (1 + AvgGain / AvgLoss)
-Period: 9 (scalping) · 14 (day,swing) · 21 (position)
+// ─── ADAPTIVE LEARNING ───────────────────────────────────────────────────────
 
-< 30  = oversold → reversal LONG  (+15 pts)
-30–50 = energy building            (+12 pts)
-50–65 = momentum building           (+8 pts)
-> 75  = overbought → SHORT signal  (−10 + SHORT)`,
-    why: "RSI < 30 = jenuh jual, potensi reversal kuat. RSI > 75 dengan volume yang sudah pump = entry LONG terlambat.",
+export const ADAPTIVE_LEARNING = {
+  overview: "Setiap trade selesai (TP/SL/expired) → update weight sinyal yang aktif saat trade dibuka → scan berikutnya pakai weight baru.",
+  spotDecay: { halfLife: "7 hari",  window: "30 hari", note: "Spot berubah cepat" },
+  futuresDecay: { halfLife: "14 hari", window: "30 hari", note: "Futures lebih slow-moving" },
+  minSample: 3,
+  stepCap: "±10% per run",
+  weightFormula: [
+    { wr: "≥ 70%", target: 1.5, note: "↑ boost 50%" },
+    { wr: "≥ 55%", target: 1.2, note: "↑ boost 20%" },
+    { wr: "≥ 40%", target: 1.0, note: "neutral"     },
+    { wr: "< 40%", target: 0.7, note: "↓ penalize 30%" },
+  ],
+  laplace: "win_rate_adj = (wins + 1) / (n_eff + 2)  ← Laplace smoothing untuk avoid over-fit sample kecil",
+  confidence: "confidence = min(1.0, n_eff / 10.0)  ← makin banyak sample makin percaya",
+  futuresThresholds: [
+    { condition: "n < 30",            minScore: 52, autoThreshold: 72, note: "wait for sample" },
+    { condition: "WR < 40%",          minScore: 56, autoThreshold: 75, note: "lebih ketat" },
+    { condition: "WR 40–55%",         minScore: 54, autoThreshold: 74 },
+    { condition: "WR 55–65%",         minScore: 52, autoThreshold: 72, note: "normal" },
+    { condition: "WR > 65% AND n≥50", minScore: 50, autoThreshold: 70, note: "proven, relaxed" },
+  ],
+  coinBlacklist: {
+    trigger: "3 trade terakhir pada coin yang sama → semua SL",
+    action: "Blacklist coin tersebut selama 24 jam (directional)",
+    why: "Cegah death spiral: agent terus masuk di coin yang memang lagi broken.",
   },
-  "EMA": {
-    icon: "⚡", score: "+15 × w_ema (compress)",
-    formula: `EMA(n) = price × k + EMA_prev × (1−k),  k = 2/(n+1)
-Spread   = |EMA9 − EMA21| / price
-Compress jika spread < 0.3% (scalp) / 0.5% (day)
-Bullish  jika EMA9 > EMA21 > EMA50`,
-    why: "EMA 9/21 yang hampir menyatu = kondisi pra-breakout. Alignment EMA9>21>50 konfirmasi trend bullish.",
-  },
-  "Pressure Shift": {
-    icon: "🟢", score: "+15 × w_pressure",
-    formula: `bull_ratio = Σ vol[i] (candle hijau) / Σ vol_total (5 candle)
-shift = bull_ratio_now − bull_ratio_prev
-Buy pressure  jika shift > +15%
-Sell pressure jika shift < −15%`,
-    why: "Pergeseran dominasi buyer/seller dalam 5 candle = konfirmasi momentum nyata.",
-  },
-  "Candle Shrink": {
-    icon: "🕯", score: "+10 × w_candle",
-    formula: `body[i]    = |close[i] − open[i]|
-body_slope = (body[-1] − body[0]) / body[0]  (7 candle)
-Kompresi   jika body_slope < −50%`,
-    why: "Badan candle semakin kecil = kelelahan trend sebelumnya. Setup ideal untuk breakout berikutnya.",
-  },
-  "Taker Ratio": {
-    icon: "🔄", score: "+12 (Spot Opp only)",
-    formula: `taker_ratio = taker_buy_vol / total_vol  (avg 15 candle)
-Binance kline col[9] = taker_buy_base_volume
-Binance kline col[5] = total_volume
-
-> 0.60 = institusi akumulasi diam-diam  (+12 pts)
-0.55–0.60 = lebih banyak pembeli        (+6 pts)
-< 0.45 = seller dominan                 (bearish)`,
-    why: "Taker buy = market order dari pembeli agresif. Jika taker ratio tinggi tanpa lonjakan harga = smart money akumulasi sebelum pump.",
-  },
+  coinWRBonus: [
+    { condition: "Riwayat ≥ 3 trade, WR ≥ 70%", bonus: "+5 pts" },
+    { condition: "Riwayat ≥ 3 trade, WR < 30%",  bonus: "-5 pts" },
+    { condition: "Riwayat < 3 trade",             bonus: "0 pts (belum ada data)" },
+  ],
 };
 
-export const STYLES = {
-  "Scalping": {
-    icon: "⚡", tf: "15m", dur: "Menit–Jam",
-    color: "from-yellow-500/10 to-orange-500/10 border-yellow-300",
-    params: { "RSI Period": "9", "BB Period": "14", "BB Squeeze": "< 3% width", "Vol Slope Min": "> 20%", "Min SL": "≥ 0.8%", "SL Fallback": "ATR × 1.0", "TP Fallback": "ATR × 3.5", "Min Score": "25 pts" },
-    weights: "RSI×2.0 · Pressure×1.8 · Breakout×1.5 · Candle×1.5",
+// ─── TECH STACK ──────────────────────────────────────────────────────────────
+
+export const TECH_STACK = [
+  {
+    layer: "Frontend",
+    icon: "🖥",
+    color: "bg-blue-50 border-blue-200",
+    items: ["Next.js 16 (App Router)", "TypeScript strict", "Tailwind CSS v4", "Recharts (equity curve)", "WebSocket live updates", "Browser Notification API"],
   },
-  "Day Trade": {
-    icon: "📅", tf: "1H", dur: "Harian",
-    color: "from-blue-500/10 to-indigo-500/10 border-blue-300",
-    params: { "RSI Period": "14", "BB Period": "20", "BB Squeeze": "< 4.5% width", "Vol Slope Min": "> 25%", "Min SL": "≥ 1.2%", "SL Fallback": "ATR × 1.2", "TP Fallback": "ATR × 4.0", "Min Score": "28 pts" },
-    weights: "RSI×1.5 · Pressure×1.5 · Breakout×1.3 · EMA×1.3",
+  {
+    layer: "Backend",
+    icon: "⚙️",
+    color: "bg-purple-50 border-purple-200",
+    items: ["FastAPI + Python 3.12", "SQLAlchemy async + asyncpg", "PostgreSQL 16 (paper trades)", "Redis 7 (cache + pub/sub)", "HTTPX (Binance REST)", "Structlog (structured logs)"],
   },
-  "Swing": {
-    icon: "🌊", tf: "4H", dur: "Hari–Minggu",
-    color: "from-teal-500/10 to-green-500/10 border-teal-300",
-    params: { "RSI Period": "14", "BB Period": "20", "BB Squeeze": "< 6% width", "Vol Slope Min": "> 30%", "Min SL": "≥ 2.0%", "SL Fallback": "ATR × 1.5", "TP Fallback": "ATR × 5.0", "Min Score": "30 pts" },
-    weights: "Accumulation×2.0 · Squeeze×1.8 · Breakout×1.5",
+  {
+    layer: "TA Engine (T0–T4)",
+    icon: "🔭",
+    color: "bg-teal-50 border-teal-200",
+    items: ["T0: Wyckoff phase detection", "T1: EMA/ADX trend analysis", "T2: S/R swing pivot zones", "T3: BB/Vol/RSI/candle patterns", "T4: Trigger confirmation", "ATR + Fibonacci fallback"],
   },
-  "Position": {
-    icon: "🏔", tf: "1D", dur: "Minggu–Bulan",
-    color: "from-purple-500/10 to-violet-500/10 border-purple-300",
-    params: { "RSI Period": "21", "BB Period": "30", "BB Squeeze": "< 8% width", "Vol Slope Min": "> 40%", "Min SL": "≥ 3.0%", "SL Fallback": "ATR × 2.0", "TP Fallback": "ATR × 7.0", "Min Score": "35 pts" },
-    weights: "Accumulation×2.5 · Squeeze×2.0 · EMA×1.5",
+  {
+    layer: "Agents & Infra",
+    icon: "🤖",
+    color: "bg-amber-50 border-amber-200",
+    items: ["7 asyncio background agents", "Binance Spot + Futures REST", "Adaptive signal weight system", "Docker Compose (local dev)", "Lifespan-embedded agents", "Health endpoint per agent"],
   },
-};
+];
