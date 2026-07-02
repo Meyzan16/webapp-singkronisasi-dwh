@@ -37,7 +37,10 @@ from .utils import (
 
 logger = structlog.get_logger(__name__)
 
-MIN_RR     = 3.0
+MIN_RR     = 2.0   # PLAN_v6 P2b: was 3.0 — measured to TP2 which is now CAPPED at
+                   # 2.5×risk (P2b) so 3.0 was unreachable-by-construction. 2.0 keeps a
+                   # real asymmetry filter (reject if nearest target < 2×risk away).
+                   # Shared by agent2 (delegates _calc_levels) and agent3 (imports MIN_RR).
 AGENT_NAME = "futures_agent1"
 
 # BUG-L3/L5: minimum SL distance (%) — stops tighter than this get hit by market noise
@@ -203,17 +206,19 @@ def _rsi_sweet_spot(closes: list[float]) -> tuple[float, str]:
 # ── Leverage ──────────────────────────────────────────────────────────────────
 
 def calc_leverage(
-    atr_pct:  float,
-    score:    float,
-    risk_pct: float = 0.0,
-    lane:     str   = "pre_gainer",
+    atr_pct:    float,
+    score:      float,
+    risk_pct:   float = 0.0,
+    lane:       str   = "pre_gainer",
+    change_24h: float = 0.0,
 ) -> int:
     """Dynamic leverage from volatility (ATR%) + confidence (score), reconciled with SL.
 
     PLAN_v2 P1.2/P1.3 (replaces BUG-L6/L7):
       - lane-aware SL-margin cap (accumulation 15% / pre_move 18% / momentum 25%)
       - liquidation-safety cap so a wick to SL never lands at the liq line
-      - both caps applied via utils.cap_leverage_by_lane (shared with agent3)
+    PLAN_v6 P1a/P1b: hard per-lane ceiling + extended-entry (|change_24h|) halving —
+      all applied inside utils.cap_leverage_by_lane (shared by every agent).
     """
     if atr_pct > 5.0:   base = 2
     elif atr_pct > 3.0: base = 3
@@ -225,7 +230,7 @@ def calc_leverage(
     elif score >= 70:  base = min(base + 2, 12)
     elif score >= 60:  base = min(base + 1, 10)
 
-    return cap_leverage_by_lane(base, risk_pct, lane)
+    return cap_leverage_by_lane(base, risk_pct, lane, change_24h=change_24h)
 
 
 # ── Main scorer ───────────────────────────────────────────────────────────────
@@ -402,17 +407,22 @@ def _score_pregainer(
     if _d1h and len(_d1h.closes) >= 2:
         _change_1h = (_d1h.closes[-1] - _d1h.closes[-2]) / _d1h.closes[-2] * 100 if _d1h.closes[-2] > 0 else 0.0
 
+    # PLAN_v6 P4b: health-scaled with healthy_frac=0.5 — pre-gainer KEEPS its
+    # flat-coin identity (a moved coin is genuinely less "pre"-anything), but a
+    # move backed by rising OI + live volume no longer gets the full blind −25.
+    from agents.futures.utils import momentum_health, health_scaled_penalty
+    _mh1 = momentum_health(tf_map, "LONG")
     if change_24h > 15:
         if _change_1h < -2.0:   # pulled back 1h after big 24h move = potential continuation
             score -= 5
             signals.append(f"⚠ Up {change_24h:.1f}% but 1h pullback {_change_1h:.1f}% — possible re-entry zone")
         else:
-            score -= 25          # still chasing = high late-entry risk
+            score -= health_scaled_penalty(25, _mh1, healthy_frac=0.5)   # −12.5 healthy/neutral, −25 exhausted
     elif change_24h > 8:
         if _change_1h < -1.0:   # mild pullback
             score -= 6
         else:
-            score -= 12
+            score -= health_scaled_penalty(12, _mh1, healthy_frac=0.5)
 
     # Dumping coin = wrong direction for LONG
     if change_24h < -15:
@@ -692,9 +702,13 @@ def _calc_levels(
         s_highs   = _swing_highs(d1h.highs, lookback=5)
         if d4h:
             s_highs += _swing_highs(d4h.highs, lookback=3)
+        # PLAN_v6 P2a/P2b: TP1 near (1×risk, was 1.5×) so it's actually reachable;
+        # TP2 CAPPED at 2.5×risk so it can't float to a far resistance (the 16%-away
+        # TP2 that never hit while SL at 5% did). Take the NEARER of {resistance, cap}.
+        tp2_cap   = price + risk * 2.5
         valid_res = sorted([h for h in s_highs if h > price * 1.005])
-        tp2 = valid_res[0] if valid_res else rp(price + risk * 3.0, price)
-        tp1 = rp(price + risk * 1.5, price)
+        tp2 = min(valid_res[0], tp2_cap) if valid_res else tp2_cap
+        tp1 = rp(price + risk * 1.0, price)
         tp3 = rp(price + risk * 5.0, price)
         tp1_pct = (tp1 - price) / price * 100
         tp2_pct = (tp2 - price) / price * 100
@@ -722,9 +736,12 @@ def _calc_levels(
         s_lows   = _swing_lows(d1h.lows, lookback=5)
         if d4h:
             s_lows += _swing_lows(d4h.lows, lookback=3)
+        # PLAN_v6 P2a/P2b: TP1 near (1×risk), TP2 capped at 2.5×risk (nearer of
+        # {support, cap} — for SHORT the nearer target is the HIGHER price = max).
+        tp2_cap   = price - risk * 2.5
         valid_sup = sorted([l for l in s_lows if l < price * 0.995], reverse=True)
-        tp2 = valid_sup[0] if valid_sup else rp(price - risk * 3.0, price)
-        tp1 = rp(price - risk * 1.5, price)
+        tp2 = max(valid_sup[0], tp2_cap) if valid_sup else tp2_cap
+        tp1 = rp(price - risk * 1.0, price)
         tp3 = rp(price - risk * 5.0, price)
         tp1_pct = (price - tp1) / price * 100
         tp2_pct = (price - tp2) / price * 100
@@ -826,11 +843,21 @@ def scan_symbol(
             weight_updater.log_rejection(symbol, AGENT_NAME, direction, score, effective_min,
                                          regime=regime, weak_signals=[f"{k}:{w}" for k, w in _weak])
             continue
+        # PLAN_v6 P3: candle-level timing gate — reject entries into an exhaustion
+        # wick or a mature move that hasn't pulled back yet (score is a snapshot;
+        # this validates the entry candle itself). No OI-confirm for pre-gainer:
+        # its universe is flat coins where OI is legitimately quiet.
+        from agents.futures.utils import entry_timing_ok
+        _t_ok, _t_why = entry_timing_ok(tf_map, direction, change_24h)
+        if not _t_ok:
+            logger.debug("entry_timing_reject", symbol=symbol, agent=AGENT_NAME,
+                         direction=direction, reason=_t_why, score=round(score, 1))
+            continue
         levels = _calc_levels(direction, tf_map, price)
         if not levels:
             continue
         atr_pct  = levels.pop("atr_pct")
-        leverage = calc_leverage(atr_pct, score, levels["risk_pct"], lane="pre_gainer")
+        leverage = calc_leverage(atr_pct, score, levels["risk_pct"], lane="pre_gainer", change_24h=change_24h)
         results.append({
             "symbol":       symbol,
             "direction":    direction,

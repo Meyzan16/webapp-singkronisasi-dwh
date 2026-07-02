@@ -43,7 +43,11 @@ AGENT_NAME = "futures_agent_bigmover"
 MIN_SCORE        = 60          # fixed, no death spiral
 MIN_RR           = 2.0         # 1:2 — trade-off speed vs RR
 MIN_CHANGE_24H   = 15.0        # ±15% minimum to qualify
-MAX_CHANGE_24H   = 150.0       # ±150% maximum (skip wild parabolic)
+# PLAN_v6 P4a: was 150 — that cap made the Big Mover agent reject the biggest movers
+# (NFP/TAIKO/MZBT-type). 150–300% is now the "extreme" tier traded at HALF size
+# instead of rejected; only >300% (true blow-off territory) is skipped.
+MAX_CHANGE_24H     = 300.0
+EXTREME_CHANGE_24H = 150.0     # ≥ this → extreme tier: size ½ (time-stop 90m already on)
 
 # SL/TP bracket
 SL_ATR_MULT      = 1.5
@@ -100,14 +104,11 @@ def _has_data_gap(closes: list[float], volumes: list[float], lookback: int = 10)
     return flat >= 3
 
 
-def _looks_like_top(highs: list[float], current_price: float) -> bool:
-    """
-    BM2 mirror — skip kalau current_price == max recent 5 candles (puncak literal).
-    Hanya 5 candle 15m (~75min) supaya tidak terlalu strict.
-    """
-    if len(highs) < 5:
-        return False
-    return current_price >= max(highs[-5:]) * 0.999
+# PLAN_v6 P4a: _looks_like_top REMOVED — "skip when price == recent 5-candle high"
+# was self-defeating for THIS lane: a coin becoming a top gainer is, by definition,
+# printing new highs. For a momentum lane that's a strength signal, not a veto.
+# Exhaustion protection now comes from the P3 entry-timing gate (wick/chase checks)
+# in the other lanes, plus reduced size + 90m time-stop here.
 
 
 # ── Scoring ────────────────────────────────────────────────────────────────────
@@ -154,9 +155,12 @@ def _score_bigmover(
     elif 70 <= abs_chg < 120:
         score += 30
         signals.append(f"🚀 Δ24h {change_24h:+.1f}% — parabolic, sangat agresif")
-    else:  # 120-150 — extreme but still allowed
+    elif 120 <= abs_chg < EXTREME_CHANGE_24H:
         score += 25
         signals.append(f"⚠ Δ24h {change_24h:+.1f}% — di ujung jangkauan, hati-hati reversal")
+    else:  # PLAN_v6 P4a: 150-300 extreme tier — tradeable at half size, not rejected
+        score += 20
+        signals.append(f"🔥 Δ24h {change_24h:+.1f}% — EXTREME tier: size ½, time-stop ketat")
 
     # ── 2. B2.1 — direction confirm via change_1h ─────────────────────────────
     if direction == "LONG":
@@ -372,17 +376,23 @@ def scan_symbol(
     if _has_data_gap(ref.closes, ref.volumes, lookback=10):
         return []   # wash/broken feed — skip
 
-    # ── G18 — entry-trap (puncak literal) ─────────────────────────────────────
+    # ── G18 — entry-trap: PLAN_v6 P4a → REDUCE SIZE, not reject ────────────────
+    # A 15%+ 30-min burst IS risky (possible local climax), but for a big-mover lane
+    # rejecting it outright meant rejecting exactly the coins this lane exists for.
+    # Now: enter at half size instead. (price==high guard removed entirely — new highs
+    # are a strength signal for momentum, see _looks_like_top removal note above.)
+    size_mult = 1.0
     d15 = tf_map.get("15m")
     if d15 and len(d15.closes) >= 3:
         chg_30m = _change_pct(d15.closes, 2)
-        if direction == "LONG" and chg_30m > ENTRY_TRAP_30M_PCT:
-            return []   # baru pump 15% dalam 30min → puncak, jangan chase
-        if direction == "SHORT" and chg_30m < -ENTRY_TRAP_30M_PCT:
-            return []   # baru dump 15% dalam 30min → bottom likely
-        # Skip kalau price == recent_high_5 (puncak literal)
-        if direction == "LONG" and _looks_like_top(d15.highs, price):
-            return []
+        if (direction == "LONG" and chg_30m > ENTRY_TRAP_30M_PCT) or \
+           (direction == "SHORT" and chg_30m < -ENTRY_TRAP_30M_PCT):
+            size_mult *= 0.5
+
+    # PLAN_v6 P4a: extreme tier (150-300%) — tradeable but at half size
+    if abs_chg >= EXTREME_CHANGE_24H:
+        size_mult *= 0.5
+    size_mult = max(size_mult, 0.25)   # floor: compound reductions stop at ¼
 
     # ── Funding hard gate (also re-checked in auto_trader before order) ───────
     fr_pct = ref.funding_rate * 100
@@ -445,6 +455,7 @@ def scan_symbol(
         "agent":        AGENT_NAME,
         "setup_type":   "bigmover",
         "regime":       "n/a",         # bigmover lane bypasses regime filter — uses funding/dir confirm instead
+        "size_mult":    round(size_mult, 2),   # PLAN_v6 P4a: G18/extreme-tier size reduction (auto_trader applies)
         "atr_pct":       atr_pct,
         "quote_vol_24h": quote_vol_24h,    # P1: stored so auto_trader can compute slippage
         "entry_slippage_pct": slip_pct,    # P1: pre-computed for meta

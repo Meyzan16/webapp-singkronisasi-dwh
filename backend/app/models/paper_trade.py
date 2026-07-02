@@ -18,9 +18,13 @@ class PaperTrade(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Trade identity
-    symbol:     Mapped[str]   = mapped_column(String(20),  nullable=False, index=True)
+    # PLAN_v6 Bug#1 fix: style holds "futures_agent_bigmover" (22 chars) — was
+    # String(20) → StringDataRightTruncation on EVERY bigmover open, which aborted
+    # the whole auto-open batch (zero futures positions opened). Widened to 30.
+    # symbol widened too (some futures symbols exceed 20 chars).
+    symbol:     Mapped[str]   = mapped_column(String(30),  nullable=False, index=True)
     direction:  Mapped[str]   = mapped_column(String(5),   nullable=False)          # LONG / SHORT
-    style:      Mapped[str]   = mapped_column(String(20),  nullable=False, index=True)  # scalping / daytrading / swing / position
+    style:      Mapped[str]   = mapped_column(String(30),  nullable=False, index=True)  # e.g. futures_agent_bigmover
 
     # Price levels (from scanner)
     entry_price: Mapped[float] = mapped_column(Float, nullable=False)

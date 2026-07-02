@@ -56,6 +56,18 @@ FUTURES_ROTATION_MIN_DAYS  = 1.0   # start checking after 1 day
 FUTURES_ROTATION_DRIFT_PCT = 3.0   # ≤3% from entry = stagnant
 FUTURES_ROTATION_SCORE_GAP = 10    # candidate must outscore by at least 10
 
+# PLAN_v6 P1c: momentum time-stop (scratch exit) — a trade that hasn't reached
+# +0.5×risk within N minutes AND never hit TP1 is a failed thesis; close at market
+# (small loss/scratch) instead of bleeding to full SL over hours (AMAT held 21.6h → SL).
+TIME_STOP_MIN_BY_LANE: dict[str, float] = {
+    "momentum":     90.0,
+    "bigmover":     90.0,
+    "pre_gainer":   360.0,   # 6h
+    "pre_move":     360.0,   # legacy alias
+    "accumulation": 360.0,   # 6h — needs room to develop
+}
+TIME_STOP_PROGRESS_FRAC = 0.5   # must reach ≥ 0.5×risk favorable to survive time-stop
+
 # G4: rugpull detection constants
 RUGPULL_CANDLES       = 5     # 5×1m candles = 5-minute window
 RUGPULL_BASE_PCT      = 5.0   # minimum adverse-move threshold
@@ -76,7 +88,10 @@ COST_ABS_LOSS_GATE_PCT = 0.003      # B5.3: close losing trade if cost > 0.3% of
 # BUG-L8: wick detection — 1m candles checked per cycle so TP/SL touches BETWEEN the
 # 2-min polls aren't missed (spot monitor already does this; futures did not → a wick that
 # hit TP then pulled back was missed and the position later recorded as an SL loss).
-WICK_LOOKBACK_MIN = 3
+# PLAN_v6 P5a: was 3 — but the poll gap is 120s PLUS processing time (scan cycles run
+# 30-135s), so a slow cycle left minutes of candles unseen and a TP wick in that gap
+# was lost (then the trade bled to SL). 6 covers a full slow cycle; same API cost.
+WICK_LOOKBACK_MIN = 6
 
 _running     = False
 _cycle_count = 0
@@ -382,23 +397,24 @@ def _compute_trail(
     Returns (new_trail_sl, trail_now_active, event_label).
     Returns (None, trail_active, "") if no change needed.
 
-    P5.1: Breakeven trigger per setup_type:
-      - accumulation: 90% to TP1 (very patient — hold days, don't shake out on noise)
-      - pre_gainer / pre_move / default: 70% to TP1 (was 50%)
-      - momentum: 70% to TP1
-      - bigmover: 60% to TP1 (ATR-based, no breakeven stage — skips to tp1_trail)
+    PLAN_v6 P1d: breakeven arm EARLIER so more trades get protected before a reversal
+    (root-cause fix — old 70% arm meant trades that never reached ~+4.5% stayed at full
+    SL and bled to −5%). Per setup_type:
+      - momentum / pre_gainer / pre_move / default: 40% to TP1 (was 70%)
+      - accumulation: 60% to TP1 (was 90% — still patient but not reckless)
+      - bigmover: 40% to TP1 (was 60%)
 
     Stages (LONG) after breakeven:
       2. Price hits TP1     → SL to entry + 75%(TP1-entry)      [F14]
       3. Price 50% TP1→TP2  → SL to TP1 level (lock TP1 profit)  [F77]
     """
-    # P5.1: lane-specific breakeven fraction
+    # P5.1 + PLAN_v6 P1d: lane-specific breakeven fraction (armed earlier)
     if setup_type == "accumulation":
-        be_frac = 0.90   # very patient — let accumulation fully develop
+        be_frac = 0.60   # patient but protects before deep reversal (was 0.90)
     elif setup_type == "bigmover":
-        be_frac = 0.60   # skip breakeven — just ride ATR trail from entry
+        be_frac = 0.40   # volatile → lock breakeven fast (was 0.60)
     else:
-        be_frac = 0.70   # momentum / pre_gainer / pre_move (was 0.50)
+        be_frac = 0.40   # momentum / pre_gainer / pre_move (was 0.70)
 
     if direction == "LONG":
         halfway_to_tp1   = entry + (tp1 - entry) * be_frac
@@ -814,6 +830,34 @@ async def check_futures_positions() -> tuple[int, int]:
                 new_status   = "expired"
                 close_price  = round(price, 8)
                 close_reason = "max_age_expired"
+
+            # ── 0a-. PLAN_v6 P1c: momentum time-stop (scratch exit) ───────────
+            # If the trade never hit TP1 (trail inactive) and hasn't moved
+            # ≥0.5×risk in our favour within the lane's time budget, the thesis
+            # failed — scratch it at market instead of waiting for full SL.
+            if not new_status and not trail_active:
+                _ts_min = TIME_STOP_MIN_BY_LANE.get(lane)
+                if _ts_min:
+                    _hold_min = (time.time() - (trade.entry_at or time.time())) / 60
+                    if _hold_min >= _ts_min:
+                        _risk_dist = abs(entry - (trade.stop_loss or entry))
+                        _fav = (price - entry) if direction == "LONG" else (entry - price)
+                        if _risk_dist > 0 and _fav < TIME_STOP_PROGRESS_FRAC * _risk_dist:
+                            new_status   = "tp" if _pnl_now_pct > (ROUND_TRIP * 100) else "sl"
+                            close_price  = round(price, 8)
+                            close_reason = "time_stop_scratch"
+                            _append_trade_event(meta, "time_stop_scratch", {
+                                "lane":         lane,
+                                "hold_min":     round(_hold_min, 1),
+                                "pnl_pct":      round(_pnl_now_pct, 3),
+                                "fav_frac_risk": round(_fav / _risk_dist, 2) if _risk_dist else 0,
+                            })
+                            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                            logger.info(
+                                "time_stop_scratch",
+                                symbol=trade.symbol, lane=lane,
+                                hold_min=round(_hold_min, 1), pnl_pct=round(_pnl_now_pct, 2),
+                            )
 
             # ── 0a. Stagnant 48h check (F80) ─────────────────────────────────
             if not new_status and age_days > 2.0:

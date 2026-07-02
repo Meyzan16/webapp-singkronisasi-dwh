@@ -104,6 +104,14 @@ async def _migrate_columns(connection) -> None:
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS last_tick_pnl_pct FLOAT",
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS last_tick_event VARCHAR(40)",
         "CREATE INDEX IF NOT EXISTS ix_paper_trades_setup_type ON paper_trades (setup_type)",
+        # PLAN_v6 Bug#1: widen style/symbol — "futures_agent_bigmover" (22) overflowed
+        # VARCHAR(20) → every bigmover auto-open failed & aborted the batch (0 opens).
+        # ALTER TYPE to a wider VARCHAR is a safe, lossless, idempotent widening.
+        "ALTER TABLE paper_trades ALTER COLUMN style  TYPE VARCHAR(30)",
+        "ALTER TABLE paper_trades ALTER COLUMN symbol TYPE VARCHAR(30)",
+        # PLAN_v6 Bug#2: predictive_log created before `regime` was added to the model,
+        # so inserts including regime failed every cycle (analytics only, non-blocking).
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS regime VARCHAR(30)",
         # PLAN_v2 P7.1 — rejection_log indexes (table created via Base.metadata.create_all)
         "CREATE INDEX IF NOT EXISTS ix_rl_symbol_ts ON rejection_log (symbol, rejected_at)",
         # Safety-net: create tables that may be missing if backend started before these models were added.

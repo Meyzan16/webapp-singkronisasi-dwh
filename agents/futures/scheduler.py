@@ -374,12 +374,18 @@ def _build_big_movers(tickers: list[dict], all_results: list[dict]) -> list[dict
             reason = f"Lolos {best['agent']} ({best['direction']}) score {best['score']}"
         else:
             status = "tidak_lolos"
-            if abs(change_24h) > 50:
-                reason = "24h change >50% — di luar jangkauan scoring saat ini (parabolic, risk reversal tinggi)"
-            elif abs(change_24h) > 25:
-                reason = "24h change >25% — extended move, kemungkinan RSI overbought/oversold atau volume sudah turun dari peak"
+            # PLAN_v6 P5b: reasons updated for P4 reality — big movers are now
+            # tradeable up to 300% (extreme tier at half size) and extended-move
+            # penalties are health-scaled. The old ">50% out of scoring range"
+            # text described pre-P4 behavior and misled the owner.
+            if abs(change_24h) > 300:
+                reason = "24h change >300% — blow-off territory, sengaja di-skip (satu-satunya hard cap tersisa)"
+            elif abs(change_24h) >= 150:
+                reason = ("Masuk jangkauan EXTREME tier (150-300%, size ½) tapi score/health belum lolos — "
+                          "cek OI turun / funding crowded / volume memudar, atau slot bigmover penuh (2)")
             else:
-                reason = "Sinyal lain (volume/OI/RSI/breakout) belum cukup kuat untuk lolos threshold"
+                reason = ("Score belum lolos threshold lane manapun — momentum-health (OI/volume/funding), "
+                          "timing gate (wick/chase), slot penuh, atau cooldown SL")
 
         # Phase 1 T1: include last price + funding so the watchlist can populate
         # the force-open modal without an extra Binance browser call.
@@ -596,7 +602,7 @@ async def run_futures_loop() -> None:
             try:
                 await _log_predictive_snapshot(result)
             except Exception as exc:
-                logger.warning("predictive_log_failed", error=str(exc)[:80])
+                logger.warning("predictive_log_failed", error=str(exc)[:400])
 
             # D4.1: resolve stale predictions every 12 cycles (~24 min)
             if _cycle_count % 12 == 0:
@@ -625,7 +631,9 @@ async def run_futures_loop() -> None:
                     logger.info("auto_positions_opened", opened=total_auto,
                                 pool=len(all_candidates))
             except Exception as exc:
-                logger.warning("auto_open_error", error=str(exc)[:80])
+                # PLAN_v6 P5: was [:80] which hid the failing column — widen so a
+                # DB insert failure (blocking ALL futures opens) is diagnosable.
+                logger.warning("auto_open_error", error=str(exc)[:400])
 
             # Update regime cache + signal weights after each cycle
             try:

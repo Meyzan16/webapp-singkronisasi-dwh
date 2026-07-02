@@ -46,9 +46,15 @@ MAX_BIGMOVER_POSITIONS = 2
 # Phase 2 BM1: cross-margin wallet utilization cap — total locked margin ≤ 70% wallet
 MAX_WALLET_MARGIN_PCT = 70.0
 
-# Phase 2 BM1: funding hard gate (Phase 3 G3-funding pre-applied for bigmover)
-MAX_LONG_FUNDING_PCT  = 0.12
-MIN_SHORT_FUNDING_PCT = -0.12
+# Phase 2 BM1: funding gate (Phase 3 G3-funding pre-applied for bigmover)
+# PLAN_v6 P4c: now TWO-ZONE instead of a single hard veto. Top gainers routinely
+# carry elevated funding (crowded) — that's a reason to size down, not to skip
+# the move entirely. Soft zone trades at half size; only truly extreme funding vetoes.
+MAX_LONG_FUNDING_PCT   = 0.12    # soft threshold: beyond this → size ½
+MIN_SHORT_FUNDING_PCT  = -0.12
+HARD_LONG_FUNDING_PCT  = 0.25    # hard threshold: beyond this → veto (unsustainable cost)
+HARD_SHORT_FUNDING_PCT = -0.25
+FUNDING_SOFT_SIZE_MULT = 0.5
 
 # Regimes where auto-open is fully disabled
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
@@ -270,19 +276,26 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 logger.debug("auto_trade_cooldown_skip", symbol=symbol)
                 continue
 
-            # Phase 3 G3-funding: GLOBAL funding hard gate (all lanes — not just BM).
+            # Phase 3 G3-funding + PLAN_v6 P4c: two-zone funding gate (all lanes).
+            # HARD zone (>0.25%) → veto: funding cost eats any realistic profit.
+            # SOFT zone (0.12–0.25%) → trade at half size: crowded but tradeable.
             # Cheap scoring-cache check first; revalidate live before order (B3.1).
             scored_funding_pct = sig.get("funding_rate", 0.0)
-            if direction == "LONG" and scored_funding_pct > MAX_LONG_FUNDING_PCT:
-                logger.debug("auto_trade_funding_skip",
-                             symbol=symbol, agent=agent, direction=direction,
-                             funding_pct=scored_funding_pct)
-                continue
-            if direction == "SHORT" and scored_funding_pct < MIN_SHORT_FUNDING_PCT:
-                logger.debug("auto_trade_funding_skip",
-                             symbol=symbol, agent=agent, direction=direction,
-                             funding_pct=scored_funding_pct)
-                continue
+            funding_mult = 1.0
+            if direction == "LONG":
+                if scored_funding_pct > HARD_LONG_FUNDING_PCT:
+                    logger.debug("auto_trade_funding_skip", symbol=symbol, agent=agent,
+                                 direction=direction, funding_pct=scored_funding_pct)
+                    continue
+                if scored_funding_pct > MAX_LONG_FUNDING_PCT:
+                    funding_mult = FUNDING_SOFT_SIZE_MULT
+            else:  # SHORT
+                if scored_funding_pct < HARD_SHORT_FUNDING_PCT:
+                    logger.debug("auto_trade_funding_skip", symbol=symbol, agent=agent,
+                                 direction=direction, funding_pct=scored_funding_pct)
+                    continue
+                if scored_funding_pct < MIN_SHORT_FUNDING_PCT:
+                    funding_mult = FUNDING_SOFT_SIZE_MULT
 
             # Phase 2 BM1: dedicated bigmover slot cap
             # bm_open_count starts as DB pre-existing count and is incremented after
@@ -346,6 +359,15 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             pos_size        = sizing["position_size"]
             risk_dollar_val = sizing["risk_dollar"]
             bal_snapshot    = sizing["balance"]
+
+            # PLAN_v6 P4a/P4c: apply size reductions — agent-signal size_mult
+            # (bigmover G18 hot-entry / extreme tier) × funding soft-zone mult.
+            _size_mult = float(sig.get("size_mult", 1.0) or 1.0) * funding_mult
+            if _size_mult < 1.0:
+                pos_size        = round(pos_size * _size_mult, 2)
+                risk_dollar_val = round(risk_dollar_val * _size_mult, 2)
+                logger.info("auto_trade_size_reduced", symbol=symbol, agent=agent,
+                            size_mult=_size_mult, pos_size=pos_size)
 
             # BC3: skip if resulting notional is below Binance minimum
             if pos_size < _min_not:
@@ -448,8 +470,10 @@ async def _revalidate_funding(symbol: str, direction: str) -> bool:
     except Exception:
         return True
 
-    if direction == "LONG" and fr_pct > MAX_LONG_FUNDING_PCT:
+    # PLAN_v6 P4c: live re-check enforces the HARD threshold only — the soft zone
+    # (0.12–0.25%) is handled by size reduction at gate time, not a veto here.
+    if direction == "LONG" and fr_pct > HARD_LONG_FUNDING_PCT:
         return False
-    if direction == "SHORT" and fr_pct < MIN_SHORT_FUNDING_PCT:
+    if direction == "SHORT" and fr_pct < HARD_SHORT_FUNDING_PCT:
         return False
     return True

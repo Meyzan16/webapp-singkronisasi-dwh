@@ -414,13 +414,18 @@ def _score_accumulation(
         score += 1
 
     # ── Penalties: already big mover ─────────────────────────────────────────
-    # If the coin already moved big, we're late — this is NOT pre-gainer anymore
+    # If the coin already moved big, we're late — this is NOT pre-gainer anymore.
+    # PLAN_v6 P4b: health-scaled at healthy_frac=0.5 — accumulation keeps its
+    # quiet-coin identity, but stops blindly punishing a move that new money
+    # (OI up, volume live, sane funding) is still actively supporting.
+    from agents.futures.utils import momentum_health, health_scaled_penalty
+    _mh2 = momentum_health(tf_map, "LONG")
     if change_24h > 12:
-        score -= 20   # already in markup — dangerous late entry
+        score -= health_scaled_penalty(20, _mh2, healthy_frac=0.5)   # −10 healthy/neutral, −20 exhausted
     elif change_24h > 7:
-        score -= 10   # partially missed
+        score -= health_scaled_penalty(10, _mh2, healthy_frac=0.5)
     elif change_24h < -15:
-        score -= 8    # dumping = wrong direction for LONG pre-gainer
+        score -= 8    # dumping = wrong direction for LONG pre-gainer (not momentum-related)
 
     return score, signals[:5]
 
@@ -679,12 +684,20 @@ def scan_symbol(
             except Exception:
                 pass
             continue
+        # PLAN_v6 P3: candle-level timing gate (see utils.entry_timing_ok) — no
+        # OI-confirm here either: accumulation targets quiet coins by design.
+        from agents.futures.utils import entry_timing_ok
+        _t_ok, _t_why = entry_timing_ok(tf_map, direction, change_24h)
+        if not _t_ok:
+            logger.debug("entry_timing_reject", symbol=symbol, agent=AGENT_NAME,
+                         direction=direction, reason=_t_why, score=round(score, 1))
+            continue
         levels = _calc_levels(direction, tf_map, price)
         if not levels:
             continue
         atr_pct  = levels.pop("atr_pct")
         # PLAN_v2 P1.3 — accumulation hold-time lebih lama → cap margin loss lebih ketat (15%).
-        leverage = calc_leverage(atr_pct, score, levels["risk_pct"], lane="accumulation")
+        leverage = calc_leverage(atr_pct, score, levels["risk_pct"], lane="accumulation", change_24h=change_24h)
         results.append({
             "symbol":       symbol,
             "direction":    direction,

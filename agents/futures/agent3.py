@@ -50,11 +50,13 @@ AGENT_NAME = "futures_agent3"
 _MAX_LEV = 10
 
 
-def calc_leverage_momentum(atr_pct: float, score: float, risk_pct: float = 0.0) -> int:
-    """Dynamic leverage — more conservative than pre-gainer agents (max 10x).
+def calc_leverage_momentum(atr_pct: float, score: float, risk_pct: float = 0.0,
+                           change_24h: float = 0.0) -> int:
+    """Dynamic leverage — more conservative than pre-gainer agents.
 
-    PLAN_v2 P1.2/P1.3: lane-aware SL-margin cap (momentum 25%) + liquidation safety
-    delegated to utils.cap_leverage_by_lane.
+    PLAN_v2 P1.2/P1.3: lane-aware SL-margin cap (momentum 25%) + liquidation safety.
+    PLAN_v6 P1a/P1b: hard per-lane ceiling (momentum 6×) + extended-entry halving,
+    both inside utils.cap_leverage_by_lane.
     """
     if atr_pct > 5.0:   base = 2
     elif atr_pct > 3.0: base = 3
@@ -65,7 +67,7 @@ def calc_leverage_momentum(atr_pct: float, score: float, risk_pct: float = 0.0) 
     if score >= 80:    base = min(base + 2, _MAX_LEV)
     elif score >= 70:  base = min(base + 1, _MAX_LEV)
 
-    base = cap_leverage_by_lane(base, risk_pct, lane="momentum")
+    base = cap_leverage_by_lane(base, risk_pct, lane="momentum", change_24h=change_24h)
     return max(1, min(base, _MAX_LEV))
 
 
@@ -303,22 +305,31 @@ def _score_momentum_long(
     # the -15 "overextended" AND -25 "parabolic" penalty = -40 total before any other
     # signal, making it mathematically impossible to reach MIN_SCORE).
     # D2.4 (PLAN_v3): skip -15 for early breakout confirmed (3-7% with vol+OI+breakout).
+    # PLAN_v6 P4b: extended-move penalties are now HEALTH-SCALED — a big move backed
+    # by rising OI + live volume + sane funding is this lane's REASON TO EXIST, not a
+    # defect. Full penalty only fires on actual exhaustion evidence.
+    from agents.futures.utils import momentum_health, health_scaled_penalty
+    _mh = momentum_health(tf_map, "LONG")
     if change_24h < 5.0 and not _early_breakout_confirmed:
         score -= 15   # not enough momentum — pre-gainers better handles this
     elif change_24h < 5.0 and _early_breakout_confirmed:
         pass          # early breakout path — skip penalty, already given +10 bonus
     elif change_24h > 50.0:
-        score -= 20   # parabolic >50% → exit risk tinggi
+        score -= health_scaled_penalty(20, _mh)   # parabolic: 0 healthy / 10 neutral / 20 exhausted
     elif change_24h > 35.0:
-        score -= 8    # extended, tapi tidak as harsh
+        score -= health_scaled_penalty(8, _mh)
     elif change_24h > 25.0:
-        score -= 5    # sedikit extended
+        score -= health_scaled_penalty(5, _mh)
 
     # P4.7: late momentum penalty for the 20-25% gap not covered by bracket above.
-    # Coins >25% already penalised by bracket; stacking P4.7 on top would double-penalise.
+    # PLAN_v6 P4b: also health-scaled.
     if 20.0 < change_24h < 25.0:
-        score -= 10   # late entry = risk reward makin tipis, chasing lebih berbahaya
-        signals.append(f"⚠ Late momentum +{change_24h:.1f}% — sudah jauh dari base, entry risiko tinggi (−10)")
+        _pen47 = health_scaled_penalty(10, _mh)
+        score -= _pen47
+        if _pen47 > 0:
+            signals.append(f"⚠ Late momentum +{change_24h:.1f}% — sudah jauh dari base (−{_pen47:.0f}, health={_mh})")
+        else:
+            signals.append(f"✅ Momentum +{change_24h:.1f}% sehat — OI naik, volume kuat, tanpa penalti late-entry")
 
 
     if rsi_val > 80:
@@ -487,19 +498,25 @@ def _score_momentum_short(
 
     # ── Penalties ─────────────────────────────────────────────────────────────
     # PLAN-SIGNAL-GAP P1: non-stacking (mirror of LONG side fix).
+    # PLAN_v6 P4b: health-scaled (mirror of LONG) — a dump with OI still building
+    # and live volume is valid short momentum, not automatically "already bottomed".
+    from agents.futures.utils import momentum_health, health_scaled_penalty
+    _mh_s = momentum_health(tf_map, "SHORT")
     if drop < 5.0:
         score -= 15   # not enough downward momentum
     elif drop > 50.0:
-        score -= 20   # capitulation = dangerous to short here
+        score -= health_scaled_penalty(20, _mh_s)   # capitulation risk unless move is healthy
     elif drop > 35.0:
-        score -= 8
+        score -= health_scaled_penalty(8, _mh_s)
     elif drop > 25.0:
-        score -= 5    # oversold-ish — bounce risk elevated but not disqualifying
+        score -= health_scaled_penalty(5, _mh_s)
 
-    # P4.7: late momentum penalty — SHORT coin yang sudah dump >20% kemungkinan sudah bottomed.
+    # P4.7: late momentum penalty — PLAN_v6 P4b: health-scaled.
     if drop > 20.0:
-        score -= 10
-        signals.append(f"⚠ Late dump {change_24h:.1f}% — sudah jauh dari top, short risiko bounce tinggi (−10)")
+        _pen47s = health_scaled_penalty(10, _mh_s)
+        score -= _pen47s
+        if _pen47s > 0:
+            signals.append(f"⚠ Late dump {change_24h:.1f}% — short risiko bounce (−{_pen47s:.0f}, health={_mh_s})")
 
     if rsi_val < 22:
         score -= 15   # extreme oversold = reversal imminent
@@ -569,9 +586,12 @@ def _calc_levels(
         s_highs   = _swing_highs(ref.highs, lookback=4)
         if d4h:
             s_highs += _swing_highs(d4h.highs, lookback=3)
+        # PLAN_v6 P2a/P2b: TP1 near (1×risk), TP2 capped at 2.5×risk — the momentum
+        # root-cause fix (TP2 was landing 13-17% away vs 5% SL → never hit).
+        tp2_cap   = price + risk * 2.5
         valid_res = sorted([h for h in s_highs if h > price * 1.005])
-        tp2 = valid_res[0] if valid_res else rp(price + risk * 3.0, price)
-        tp1 = rp(price + risk * 1.5, price)
+        tp2 = min(valid_res[0], tp2_cap) if valid_res else tp2_cap
+        tp1 = rp(price + risk * 1.0, price)
         tp3 = rp(price + risk * 5.0, price)
         tp1_pct = (tp1 - price) / price * 100
         tp2_pct = (tp2 - price) / price * 100
@@ -599,9 +619,12 @@ def _calc_levels(
         s_lows   = _swing_lows(ref.lows, lookback=4)
         if d4h:
             s_lows += _swing_lows(d4h.lows, lookback=3)
+        # PLAN_v6 P2a/P2b: TP1 near (1×risk), TP2 capped at 2.5×risk (SHORT → nearer
+        # target = higher price = max of {support, cap}).
+        tp2_cap   = price - risk * 2.5
         valid_sup = sorted([l for l in s_lows if l < price * 0.995], reverse=True)
-        tp2 = valid_sup[0] if valid_sup else rp(price - risk * 3.0, price)
-        tp1 = rp(price - risk * 1.5, price)
+        tp2 = max(valid_sup[0], tp2_cap) if valid_sup else tp2_cap
+        tp1 = rp(price - risk * 1.0, price)
         tp3 = rp(price - risk * 5.0, price)
         tp1_pct = (price - tp1) / price * 100
         tp2_pct = (price - tp2) / price * 100
@@ -701,11 +724,20 @@ def scan_symbol(
             except Exception:
                 pass
             continue
+        # PLAN_v6 P3: candle-level timing gate — score is a snapshot; this checks
+        # the ENTRY CANDLE itself (exhaustion wick / still-chasing / OI agreement).
+        # Momentum requires live OI confirmation: price-up + OI-down = hollow rally.
+        from agents.futures.utils import entry_timing_ok
+        _t_ok, _t_why = entry_timing_ok(tf_map, direction, change_24h, require_oi_confirm=True)
+        if not _t_ok:
+            logger.debug("entry_timing_reject", symbol=symbol, agent=AGENT_NAME,
+                         direction=direction, reason=_t_why, score=round(score, 1))
+            continue
         levels = _calc_levels(direction, tf_map, price)
         if not levels:
             continue
         atr_pct  = levels.pop("atr_pct")
-        leverage = calc_leverage_momentum(atr_pct, score, levels["risk_pct"])
+        leverage = calc_leverage_momentum(atr_pct, score, levels["risk_pct"], change_24h=change_24h)
         results.append({
             "symbol":       symbol,
             "direction":    direction,
