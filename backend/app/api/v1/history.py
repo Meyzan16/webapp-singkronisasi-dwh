@@ -227,6 +227,44 @@ def _is_real_win(t: PaperTrade) -> bool:
     return (t.pnl_pct or 0.0) > 0
 
 
+# ── PLAN_v8 P3: clean vs gross WR ─────────────────────────────────────────────
+# Bug: exit paksa (rotation, time-stop, breakeven, trend-reversal, dll) di-bucket
+# jadi tp/sl berdasar tanda pnl → WR menyesatkan (mayoritas trade tertutup ternyata
+# rotation/time-stop, bukan tesis TP/SL yang benar-benar tercapai).
+#
+#   CLEAN  = hanya outcome tesis: TP level tercapai (win) vs SL level kena (loss).
+#   MANAGED= exit risk-management (rotation/time-stop/breakeven/…) → DIKELUARKAN dari clean.
+#   GROSS  = semua closed by pnl sign (perilaku lama, tetap disediakan).
+_WIN_REASONS  = {"tp2_hit", "tp3_hit", "tp4_hit"}
+_LOSS_REASONS = {"sl_hit", "sl_hit_fast_loop", "max_margin_loss",
+                 "flash_dump_exit", "flash_pump_exit", "liquidation", "liq_guard"}
+
+
+def _close_reason(t: PaperTrade) -> str:
+    """Extract close_reason from signals_json meta (falls back to status)."""
+    import json
+    try:
+        meta = json.loads(t.signals_json or "{}")
+        if isinstance(meta, dict) and meta.get("close_reason"):
+            return str(meta["close_reason"])
+    except Exception:
+        pass
+    return t.status or ""
+
+
+def _clean_bucket(t: PaperTrade) -> Optional[bool]:
+    """True=clean win, False=clean loss, None=managed exit (excluded from clean WR)."""
+    r = _close_reason(t)
+    if r in _WIN_REASONS:
+        return True
+    if r in _LOSS_REASONS:
+        return False
+    # sl_plus = trailing SL above entry (a protected win); breakeven = scratch → managed
+    if r == "sl_plus":
+        return True
+    return None
+
+
 @router.get("/history/stats", dependencies=[_db])
 async def get_stats(days: int = Query(90)) -> dict:
     cutoff = time.time() - days * 86400   # F48: bound query by time window
@@ -240,7 +278,9 @@ async def get_stats(days: int = Query(90)) -> dict:
     # BUG FIX: real wins require positive net pnl (status "tp" with negative pnl is a loss)
     wins   = [t for t in closed if _is_real_win(t)]
 
-    by_style: dict = defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "avg_pnl": 0.0})
+    by_style: dict = defaultdict(lambda: {"total": 0, "wins": 0, "losses": 0, "win_rate": 0.0,
+                                           "avg_pnl": 0.0, "clean_wins": 0, "clean_losses": 0,
+                                           "managed_exits": 0, "clean_win_rate": 0.0})
     for t in closed:
         st = by_style[t.style]
         st["total"] += 1
@@ -248,10 +288,26 @@ async def get_stats(days: int = Query(90)) -> dict:
             st["wins"] += 1
         else:
             st["losses"] += 1
+        # PLAN_v8 P3: per-style clean/managed buckets
+        cb = _clean_bucket(t)
+        if cb is True:
+            st["clean_wins"] += 1
+        elif cb is False:
+            st["clean_losses"] += 1
+        else:
+            st["managed_exits"] += 1
         if t.pnl_pct is not None:
             st["avg_pnl"] = (st["avg_pnl"] * (st["total"] - 1) + t.pnl_pct) / st["total"]
     for st in by_style.values():
         st["win_rate"] = st["wins"] / st["total"] * 100 if st["total"] > 0 else 0.0
+        _ct = st["clean_wins"] + st["clean_losses"]
+        st["clean_win_rate"] = st["clean_wins"] / _ct * 100 if _ct > 0 else 0.0
+
+    # PLAN_v8 P3: clean WR — only genuine TP-hit vs SL-hit; managed exits excluded.
+    clean_win  = sum(1 for t in closed if _clean_bucket(t) is True)
+    clean_loss = sum(1 for t in closed if _clean_bucket(t) is False)
+    managed    = sum(1 for t in closed if _clean_bucket(t) is None)
+    clean_total = clean_win + clean_loss
 
     return {
         "overall": {
@@ -260,9 +316,16 @@ async def get_stats(days: int = Query(90)) -> dict:
             "closed":   len(closed),
             "wins":     len(wins),
             "losses":   len(closed) - len(wins),
+            # gross WR (all closed by pnl sign) — kept for back-compat
             "win_rate": len(wins) / len(closed) * 100 if closed else 0.0,
             # F53: include break-even (pnl_pct == 0.0) in the average
             "avg_pnl":  sum(t.pnl_pct for t in closed if t.pnl_pct is not None) / len(closed) if closed else 0.0,
+            # PLAN_v8 P3: clean WR — genuine thesis outcomes only
+            "clean_wins":     clean_win,
+            "clean_losses":   clean_loss,
+            "managed_exits":  managed,   # rotation / time-stop / breakeven / etc.
+            "clean_total":    clean_total,
+            "clean_win_rate": clean_win / clean_total * 100 if clean_total else 0.0,
         },
         "by_style": dict(by_style),
     }
@@ -303,23 +366,32 @@ async def get_equity(style: str = Query("futures")) -> dict:
     for i, t in enumerate(trades, 1):
         if t.pnl_pct is None or t.entry_price <= 0:
             continue
-        # F44: use original risk_pct from signals_json — current SL may be trailed
-        try:
-            meta = json.loads(t.signals_json or "{}")
-            if not isinstance(meta, dict):
+        # DASH-FIX: prefer the ACTUAL recorded pnl_dollar (real-balance sizing,
+        # Phase 9+) so the curve matches wallet balance exactly. The risk-model
+        # reconstruction below stays only as fallback for legacy rows that
+        # predate pnl_dollar (their sizing genuinely followed this model).
+        if t.pnl_dollar is not None:
+            pnl_dollar = t.pnl_dollar
+        else:
+            # F44: use original risk_pct from signals_json — current SL may be trailed
+            try:
+                meta = json.loads(t.signals_json or "{}")
+                if not isinstance(meta, dict):
+                    meta = {}
+            except Exception:
                 meta = {}
-        except Exception:
-            meta = {}
-        risk_pct_val = meta.get("risk_pct_original") or meta.get("risk_pct") or 2.0
-        if risk_pct_val <= 0:
-            continue
-        notional = RISK_DOLLAR / (risk_pct_val / 100)
-        pnl_dollar = (t.pnl_pct / 100) * notional
+            risk_pct_val = meta.get("risk_pct_original") or meta.get("risk_pct") or 2.0
+            if risk_pct_val <= 0:
+                continue
+            notional   = RISK_DOLLAR / (risk_pct_val / 100)
+            pnl_dollar = (t.pnl_pct / 100) * notional
         balance = max(0, balance + pnl_dollar)
         points.append({
             "trade_n": i,
             "balance": round(balance, 2),
-            "win":     t.status == "tp",
+            # DASH-FIX: win by actual pnl sign, not status label (a "tp" closed
+            # below entry after fees is not a win — same rule as /history/stats)
+            "win":     (t.pnl_pct or 0) > 0,
             "symbol":  t.symbol,
         })
 

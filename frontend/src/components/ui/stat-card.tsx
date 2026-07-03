@@ -1,10 +1,14 @@
 "use client";
+import Link from "next/link";
 
-export function KpiCard({ label, value, sub, color, icon }: {
+export function KpiCard({ label, value, sub, color, icon, href }: {
   label: string; value: string; sub?: string; color: string; icon: string;
+  /** DASH-FIX: optional drill-down target — makes the KPI interactive (click → detail page) */
+  href?: string;
 }) {
-  return (
-    <div className="bg-white rounded-2xl border border-neutral-200 px-5 py-4">
+  const inner = (
+    <div className={`bg-white rounded-2xl border border-neutral-200 px-5 py-4 h-full ${
+      href ? "transition-all hover:border-teal-300 hover:shadow-sm cursor-pointer" : ""}`}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1">{label}</p>
@@ -15,6 +19,7 @@ export function KpiCard({ label, value, sub, color, icon }: {
       </div>
     </div>
   );
+  return href ? <Link href={href} className="block">{inner}</Link> : inner;
 }
 
 export function WinRateBar({ rate, label }: { rate: number; label: string }) {
@@ -33,7 +38,7 @@ export function WinRateBar({ rate, label }: { rate: number; label: string }) {
 }
 
 export function MiniEquityChart({ points, height = 32 }: {
-  points: { balance: number; win: boolean }[];
+  points: { balance: number; win: boolean; symbol?: string }[];
   height?: number;
 }) {
   if (points.length < 2) return null;
@@ -45,7 +50,13 @@ export function MiniEquityChart({ points, height = 32 }: {
       {points.slice(-40).map((pt, i) => {
         const h = Math.max(((pt.balance - min) / range) * 100, 3);
         const cls = i === 0 ? "bg-neutral-300" : pt.win ? "bg-green-400" : "bg-red-400";
-        return <div key={i} className={`flex-1 min-w-[2px] rounded-sm ${cls}`} style={{ height: `${h}%` }} />;
+        // DASH-FIX: native tooltip per bar — hover shows the exact balance (+symbol)
+        const tip = `${pt.symbol ? pt.symbol + " · " : ""}$${pt.balance.toFixed(2)}`;
+        return (
+          <div key={i} title={tip}
+            className={`flex-1 min-w-[2px] rounded-sm hover:opacity-70 ${cls}`}
+            style={{ height: `${h}%` }} />
+        );
       })}
     </div>
   );

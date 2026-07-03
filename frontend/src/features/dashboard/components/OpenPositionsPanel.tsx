@@ -3,11 +3,14 @@ import { fmtPrice } from "@/lib/format";
 import { DirBadge, TypeBadge } from "@/components/ui/trading-badges";
 import { SectionPanel } from "@/components/ui/section-panel";
 import { EmptyState } from "@/components/ui/feedback";
+import { laneForSpot, openReason } from "@/lib/lanes";
 
 interface OppPos {
   id: number; symbol: string; entry: number;
   current_price: number | null; unrealized_pnl_pct: number | null;
   tp1_hit: boolean; signals: string[]; position_size?: number | null; risk_dollar?: number | null;
+  // PLAN_v8 P2/P5 — lane + open-reason
+  alert_type?: string | null; entry_mode?: string | null; manual?: boolean; score?: number | null;
 }
 
 interface FutPos {
@@ -67,21 +70,28 @@ export function OpenPositionsPanel({ oppOpen, futOpen }: { oppOpen: OppPos[]; fu
         <EmptyState title="Tidak ada posisi terbuka" />
       ) : (
         <div className="divide-y divide-neutral-100 max-h-72 overflow-y-auto">
-          {oppOpen.map(p => (
-            <PositionRow key={`o-${p.id}`}
-              symbol={p.symbol}
-              badges={<>
-                <TypeBadge type="spot" />
-                {p.tp1_hit && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold">TP1✓</span>}
-              </>}
-              sub={p.position_size != null
-                ? `~$${p.position_size.toFixed(0)} · Risk $${(p.risk_dollar ?? 0).toFixed(1)}`
-                : (p.signals[0] ?? "")}
-              entry={p.entry}
-              currentPrice={p.current_price}
-              pnlBadge={<UnrealizedBadge pct={p.unrealized_pnl_pct} />}
-            />
-          ))}
+          {oppOpen.map(p => {
+            const lane = laneForSpot(p.alert_type, p.entry_mode);
+            return (
+              <PositionRow key={`o-${p.id}`}
+                symbol={p.symbol}
+                badges={<>
+                  <TypeBadge type="spot" />
+                  {/* PLAN_v8 P2: lane badge — jelas dari lane mana (BigMover/Accum/…) */}
+                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${lane.badge}`}>{lane.emoji} {lane.label}</span>
+                  {/* PLAN_v8 P5: force-open marker */}
+                  {p.manual && <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold">🖐 Manual</span>}
+                  {p.tp1_hit && <span className="text-[9px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-bold">TP1✓</span>}
+                </>}
+                // PLAN_v8 P2: sub kini menjelaskan ALASAN buka + score, bukan sinyal mentah
+                sub={`${openReason(p.alert_type, p.entry_mode, p.manual)}${p.score != null ? ` · score ${Math.round(p.score)}` : ""}${
+                  p.position_size != null ? ` · ~$${p.position_size.toFixed(0)}` : ""}`}
+                entry={p.entry}
+                currentPrice={p.current_price}
+                pnlBadge={<UnrealizedBadge pct={p.unrealized_pnl_pct} />}
+              />
+            );
+          })}
           {futOpen.map(p => {
             const agentShort = p.agent === "futures_agent1" ? "Pre" : p.agent === "futures_agent3" ? "Momo" : "Accum";
             return (

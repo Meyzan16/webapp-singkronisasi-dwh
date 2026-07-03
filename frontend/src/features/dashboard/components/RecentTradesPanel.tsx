@@ -8,9 +8,35 @@ export interface RecentTrade {
   id: string; symbol: string; type: "spot" | "fut"; dir: string;
   status: string; entry: number; pnl_pct: number | null; pnl$: number;
   agent?: string; leverage?: number; entry_at: number; closed_at: number | null;
+  close_reason?: string | null;   // PLAN_v8 P2-B2
 }
 
-function StatusPill({ status }: { status: string }) {
+// PLAN_v8 P2-B2 — bedakan outcome ASLI (TP/SL murni) dari EXIT DIKELOLA
+// (rotation, time-stop, breakeven, expiry). Sebelumnya semua ditulis tp/sl
+// berdasar tanda pnl → owner tak bisa lihat mana kemenangan strategi murni.
+const CLEAN_WIN  = new Set(["tp2_hit", "tp3_hit", "tp4_hit", "sl_plus"]);
+const CLEAN_LOSS = new Set(["sl_hit", "sl_hit_fast_loop", "max_margin_loss",
+  "flash_dump_exit", "flash_pump_exit", "liquidation", "liq_guard"]);
+
+const REASON_LABEL: Record<string, string> = {
+  urgent_rotation: "🔄 Rotasi", stagnant_rotation: "🔄 Rotasi",
+  time_stop_scratch: "⏱ Time-stop", tp1_breakeven: "⚖ Breakeven",
+  max_age_expired: "⏰ Expired", trend_reversal: "↩ Reversal",
+  profit_protection: "🔒 Lock", flow_reversal: "↩ Flow", risk_adjusted: "✂ Cut",
+};
+
+function StatusPill({ status, reason }: { status: string; reason?: string | null }) {
+  const r = reason || "";
+  // exit dikelola → tampilkan label spesifik + warna netral (bukan menang/kalah strategi)
+  const managed = r && !CLEAN_WIN.has(r) && !CLEAN_LOSS.has(r) && r !== "tp" && r !== "sl";
+  if (managed) {
+    return (
+      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full border bg-blue-50 text-blue-600 border-blue-200"
+        title={`Exit dikelola: ${r} (tidak dihitung di WR bersih)`}>
+        {REASON_LABEL[r] ?? "⚙ Dikelola"}
+      </span>
+    );
+  }
   const win  = status === "tp";
   const loss = status === "sl";
   return (
@@ -18,7 +44,7 @@ function StatusPill({ status }: { status: string }) {
       win  ? "bg-green-100 text-green-700 border-green-300" :
       loss ? "bg-red-100 text-red-600 border-red-300" :
              "bg-neutral-100 text-neutral-500 border-neutral-300"
-    }`}>
+    }`} title={r || status}>
       {win ? "✅ TP" : loss ? "🛑 SL" : "🤚"}
     </span>
   );
@@ -76,7 +102,7 @@ export function RecentTradesPanel({ trades }: { trades: RecentTrade[] }) {
                   ) : <span className="text-neutral-300 text-xs">—</span>}
                 </div>
                 <div className="text-right">
-                  <StatusPill status={t.status} />
+                  <StatusPill status={t.status} reason={t.close_reason} />
                 </div>
               </div>
             ))}

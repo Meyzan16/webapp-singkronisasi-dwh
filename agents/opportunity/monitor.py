@@ -94,6 +94,12 @@ def get_state() -> dict:
 
 # ── Stagnant rotation helper ─────────────────────────────────────────────────
 
+# PLAN_v8 P4: rotation must not fire on a STALE scan. If the last scan is older
+# than this (scan failed / agent stalled / Binance down), rotating a position based
+# on ghost candidates would force-close a live trade on outdated evidence.
+ROTATION_MAX_STALE_SEC = 10 * 60   # scan cache older than 10 min → do not rotate
+
+
 def _has_better_candidate(
     current_score: float,
     exclude_symbol: str,
@@ -104,10 +110,17 @@ def _has_better_candidate(
     True if the latest scan cache has an auto-open candidate with materially
     higher score than the stagnant position being considered for rotation.
     Requires: candidate.score >= current_score + min_gap AND >= min_score.
+    PLAN_v8 P4: refuses to signal on a stale scan cache (fail-safe = no rotation).
     """
     from agents.opportunity import store as opp_store
     cached = opp_store.get_result()
     if not cached:
+        return False
+    # P4: staleness guard — never rotate based on an outdated scan.
+    gen_at = cached.get("generated_at") or 0
+    if gen_at and (time.time() - gen_at) > ROTATION_MAX_STALE_SEC:
+        logger.debug("rotation_skip_stale_scan",
+                     age_sec=round(time.time() - gen_at), exclude=exclude_symbol)
         return False
     for c in cached.get("results", []):
         if c.get("symbol") == exclude_symbol:

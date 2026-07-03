@@ -27,20 +27,26 @@ function StatMini({ stats }: { stats: StatItem[] }) {
   );
 }
 
-export function SpotBalancePanel({ balance, initial, unrealizedPnl, spotBal, oppOpen, oppClosedAll, equityPoints, winRate }: {
+// DASH-FIX: stats dari /history/stats (source of truth) — bukan hitung ulang lokal
+export interface WalletStats { total: number; wins: number; losses: number; win_rate: number }
+
+export function SpotBalancePanel({ balance, initial, unrealizedPnl, spotBal, oppOpen, oppClosedAll, equityPoints, winRate, stats }: {
   balance: number;
   initial: number;
   unrealizedPnl: number;
   spotBal: { balance: number; available: number; locked_margin: number; realized_pnl: number; total_pnl: number; open_positions: number } | null;
   oppOpen: { id: number }[];
   oppClosedAll: { status: string }[];
-  equityPoints: { balance: number; win: boolean }[];
+  equityPoints: { balance: number; win: boolean; symbol?: string }[];
   winRate: number;
+  stats?: WalletStats;
 }) {
   const pnl = spotBal?.total_pnl ?? (balance - initial);
-  const wins  = oppClosedAll.filter(p => p.status === "tp").length;
-  const losses = oppClosedAll.filter(p => p.status === "sl").length;
-  const denom = oppClosedAll.filter(p => p.status === "tp" || p.status === "sl").length;
+  // DASH-FIX: pakai history stats bila tersedia; fallback ke hitung lokal lama
+  const wins   = stats?.wins   ?? oppClosedAll.filter(p => p.status === "tp").length;
+  const losses = stats?.losses ?? oppClosedAll.filter(p => p.status === "sl").length;
+  const denom  = stats?.total  ?? (wins + losses);
+  const roiPct = initial > 0 ? (pnl / initial) * 100 : 0;
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4">
@@ -52,6 +58,10 @@ export function SpotBalancePanel({ balance, initial, unrealizedPnl, spotBal, opp
         <span className={`text-2xl font-black ${balance >= initial ? "text-green-600" : "text-red-500"}`}>${balance.toFixed(2)}</span>
         <span className={`text-xs font-bold ${pnl >= 0 ? "text-green-500" : "text-red-400"}`}>
           {pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}
+        </span>
+        {/* DASH-FIX: ROI selalu tampil — dulu tidak ada sama sekali */}
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${roiPct >= 0 ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+          ROI {roiPct >= 0 ? "+" : ""}{roiPct.toFixed(1)}%
         </span>
       </div>
       <div className="space-y-1.5 text-[11px]">
@@ -86,7 +96,7 @@ export function SpotBalancePanel({ balance, initial, unrealizedPnl, spotBal, opp
   );
 }
 
-export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futBal, futOpen, learning }: {
+export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futBal, futOpen, learning, equityPoints, stats }: {
   balance: number;
   initial: number;
   unrealizedPnl: number;
@@ -98,10 +108,18 @@ export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futBal, f
     overall: { open: number; wins: number; losses: number; closed: number; win_rate: number };
     regime?: string;
   } | null;
+  /** DASH-FIX: kurva & stats dari history API (source of truth) */
+  equityPoints?: { balance: number; win: boolean; symbol?: string }[];
+  stats?: WalletStats;
 }) {
   const pnl = balance - initial;
-  const winRate = learning?.overall.win_rate ?? 0;
+  // DASH-FIX: WR dari history stats (definisi sama dgn halaman History);
+  // learning.overall hanya fallback saat history belum ter-load.
+  const winRate = stats && stats.total > 0 ? stats.win_rate : (learning?.overall.win_rate ?? 0);
+  const wrDenom = stats?.total ?? learning?.overall.closed ?? 0;
   const walletBalance = futBal?.balance ?? balance;
+  const roiPct = initial > 0 ? (pnl / initial) * 100 : 0;
+  const curve  = (equityPoints && equityPoints.length > 1) ? equityPoints : (learning?.equity_points ?? []);
 
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4">
@@ -112,6 +130,10 @@ export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futBal, f
       <div className="flex items-baseline gap-2 mb-3">
         <span className={`text-2xl font-black ${balance >= initial ? "text-green-600" : "text-red-500"}`}>${balance.toFixed(2)}</span>
         <span className={`text-xs font-bold ${pnl >= 0 ? "text-green-500" : "text-red-400"}`}>{pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}</span>
+        {/* DASH-FIX: ROI badge (mirror Spot) */}
+        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${roiPct >= 0 ? "bg-green-50 text-green-600" : "bg-red-50 text-red-500"}`}>
+          ROI {roiPct >= 0 ? "+" : ""}{roiPct.toFixed(1)}%
+        </span>
       </div>
       <div className="space-y-1.5 text-[11px]">
         <BalanceRowItem label="Wallet Balance" value={`$${walletBalance.toFixed(2)}`} />
@@ -139,14 +161,14 @@ export function FuturesBalancePanel({ balance, initial, unrealizedPnl, futBal, f
           </span>
         </div>
       </div>
-      {learning?.equity_points && learning.equity_points.length > 1 && (
-        <div className="mt-3"><MiniEquityChart points={learning.equity_points} /></div>
+      {curve.length > 1 && (
+        <div className="mt-3"><MiniEquityChart points={curve} /></div>
       )}
       <StatMini stats={[
-        { label: "Open",  val: String(learning?.overall.open   ?? futOpen.length), color: "text-blue-600"  },
-        { label: "Win",   val: String(learning?.overall.wins   ?? 0),              color: "text-green-600" },
-        { label: "Loss",  val: String(learning?.overall.losses ?? 0),              color: "text-red-500"   },
-        { label: "WR",    val: learning && learning.overall.closed > 0 ? `${winRate.toFixed(0)}%` : "—", color: winRate >= 50 ? "text-green-600" : "text-red-500" },
+        { label: "Open",  val: String(futBal?.open_positions ?? futOpen.length),          color: "text-blue-600"  },
+        { label: "Win",   val: String(stats?.wins   ?? learning?.overall.wins   ?? 0),    color: "text-green-600" },
+        { label: "Loss",  val: String(stats?.losses ?? learning?.overall.losses ?? 0),    color: "text-red-500"   },
+        { label: "WR",    val: wrDenom > 0 ? `${winRate.toFixed(0)}%` : "—", color: winRate >= 50 ? "text-green-600" : "text-red-500" },
       ]} />
       {learning?.regime && (
         <div className="mt-2 flex items-center gap-1.5">

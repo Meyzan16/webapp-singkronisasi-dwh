@@ -165,6 +165,76 @@ function InfoRow({ label, val }: { label: string; val: string }) {
   );
 }
 
+// ─── CARA POSISI DIBUKA (auto-open per lane + force-open) ─────────────────────
+// PLAN_v8 P1 — transparansi. Menjawab kebingungan "kenapa score 65 open?":
+// tiap lane punya auto-open threshold sendiri (BigMover 65, Breakout 75,
+// Accumulation/Early/Weekly 85). Plus jalur manual "Force-Open" yang bypass gate.
+function OpenLogicSection() {
+  const { data } = useAgentConfig();
+  const live = data?.spot;
+
+  const rows = SPOT_LANES.map(l => {
+    const t = live?.score_thresholds?.[l.key];
+    return { emoji: l.emoji, label: l.label, min: t?.min ?? l.minScore, auto: t?.auto ?? l.autoScore };
+  });
+
+  return (
+    <div>
+      <SectionTitle icon="🚪" title="Cara Posisi Dibuka" sub="Dua jalur: AUTO (skor lolos threshold per-lane) atau FORCE-OPEN (manual, bypass gate)" />
+
+      {/* Jalur 1: AUTO per-lane threshold */}
+      <div className="rounded-xl border border-neutral-200 overflow-hidden mb-4">
+        <div className="bg-teal-50 px-4 py-2 border-b border-neutral-200">
+          <p className="text-xs font-bold text-teal-800">1️⃣ Auto-Open — threshold berbeda per lane</p>
+          <p className="text-[11px] text-teal-700 mt-0.5">
+            Skor yang sama bisa auto-open di satu lane tapi tidak di lane lain. Ini kenapa score <b>65 bisa langsung open</b> lewat BigMover, padahal Accumulation butuh 85.
+          </p>
+        </div>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-[10px] uppercase tracking-wide text-neutral-400 border-b border-neutral-100">
+              <th className="text-left font-semibold px-4 py-1.5">Lane</th>
+              <th className="text-right font-semibold px-4 py-1.5">Min Score (masuk radar)</th>
+              <th className="text-right font-semibold px-4 py-1.5">Auto-Open (langsung buka)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.label} className="border-b border-neutral-50 last:border-0">
+                <td className="px-4 py-2 font-bold">{r.emoji} {r.label}</td>
+                <td className="px-4 py-2 text-right tabular-nums text-neutral-600">≥ {r.min}</td>
+                <td className="px-4 py-2 text-right tabular-nums font-black text-teal-700">≥ {r.auto}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Jalur 2: FORCE-OPEN manual */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <p className="text-xs font-bold text-amber-800 mb-1">2️⃣🖐 Force-Open — override manual dari UI</p>
+        <p className="text-[11px] text-amber-700 leading-relaxed mb-2">
+          Tombol manual (<code className="bg-white/60 px-1 rounded">POST /opportunity/trade</code> dengan <code className="bg-white/60 px-1 rounded">force_open=true</code>) membuka posisi <b>tanpa menunggu skor lolos threshold</b>. Dipakai untuk eksekusi keyakinan manual di luar sinyal agent.
+        </p>
+        <div className="grid md:grid-cols-3 gap-2">
+          <div className="bg-white/70 rounded-lg px-3 py-2">
+            <p className="text-[10px] font-bold text-amber-600 uppercase">Rate limit</p>
+            <p className="text-xs font-semibold text-neutral-700">5 / jam / sesi</p>
+          </div>
+          <div className="bg-white/70 rounded-lg px-3 py-2">
+            <p className="text-[10px] font-bold text-amber-600 uppercase">Penanda</p>
+            <p className="text-xs font-semibold text-neutral-700"><code>manual:true</code> di signals_json</p>
+          </div>
+          <div className="bg-white/70 rounded-lg px-3 py-2">
+            <p className="text-[10px] font-bold text-amber-600 uppercase">Terlihat sebagai</p>
+            <p className="text-xs font-semibold text-neutral-700">Badge 🖐 Manual (dashboard & history)</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── 12 SIGNALS ───────────────────────────────────────────────────────────────
 function SignalsSection() {
   const [active, setActive] = useState(SPOT_SIGNALS[0].id);
@@ -260,7 +330,7 @@ function MonitorSection() {
   const [open, setOpen] = useState<string | null>("L1");
   return (
     <div>
-      <SectionTitle icon="👁" title="Monitor — 5 Exit Layers" sub="Berjalan setiap 60s (+ wick detection 1m). Layer diproses berurutan L0 → L4." />
+      <SectionTitle icon="👁" title="Monitor — 6 Exit Layers" sub="Berjalan setiap 60s (+ wick detection 1m). Diproses berurutan L0 → L4, termasuk L2.5 Rotation (tukar posisi stagnan)." />
       <div className="space-y-2">
         {SPOT_MONITOR_LAYERS.map(layer => (
           <div key={layer.layer} className={`rounded-xl border overflow-hidden ${layer.color}`}>
@@ -299,6 +369,7 @@ export function SpotSection() {
   return (
     <div className="space-y-2">
       <Card><CardContent className="pt-5"><UniverseBar /><LanesSection /></CardContent></Card>
+      <Card><CardContent className="pt-5"><OpenLogicSection /></CardContent></Card>
       <Card><CardContent className="pt-5"><SignalsSection /></CardContent></Card>
       <Card><CardContent className="pt-5"><MonitorSection /></CardContent></Card>
     </div>

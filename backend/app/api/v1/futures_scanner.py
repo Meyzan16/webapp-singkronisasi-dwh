@@ -431,6 +431,7 @@ async def get_futures_positions(
             "entry_at":              t.entry_at,
             "close_price":           t.close_price,
             "closed_at":             t.closed_at,
+            "close_reason":          meta.get("close_reason"),   # PLAN_v8 P2-B2: bedakan exit dikelola dari TP/SL asli
             "pnl_pct":               t.pnl_pct,
             "pnl_dollar":            t.pnl_dollar,
             "position_size":         t.position_size,

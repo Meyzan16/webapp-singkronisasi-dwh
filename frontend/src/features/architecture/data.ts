@@ -399,6 +399,7 @@ export const SPOT_MONITOR_LAYERS = [
     closes: [
       { reason: "Normal (hari 2+): harga ±3% dari entry, kandidat outscore ≥10 pts DAN kandidat ≥ 85 pts" },
       { reason: "Urgent (hari 1+): kandidat outscore ≥25 pts DAN kandidat ≥ 90 pts" },
+      { reason: "Guard staleness: rotasi di-skip jika scan cache > 10 menit", note: "cegah tukar posisi berdasar kandidat basi (PLAN_v8 P4)" },
     ],
   },
   {

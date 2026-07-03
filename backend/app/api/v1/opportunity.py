@@ -468,6 +468,8 @@ async def get_open_positions(days: int = Query(default=30, ge=1, le=365)) -> dic
             "signals":            meta.get("signals", []),
             "entry_type":         t.entry_type,           # "market" | "auto"
             "auto_open":          meta.get("auto_open", t.entry_type == "auto"),
+            "manual":             bool(meta.get("manual", False)),   # PLAN_v8 P5: force-open marker
+            "entry_mode":         meta.get("entry_mode"),            # PLAN_v8 P2: lane hint (bigmover_chase, etc.)
             "close_reason":       meta.get("close_reason"),
             "entry_at":           t.entry_at,
             "close_price":        t.close_price,
