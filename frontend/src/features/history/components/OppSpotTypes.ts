@@ -32,6 +32,8 @@ export interface OppPosition {
   score:               number;
   confidence:          number;
   alert_type:          string;
+  entry_mode?:         string | null;   // PLAN_v9 — lane hint
+  manual?:             boolean;          // PLAN_v9 G3b — force-open marker
   signals:             string[];
   entry_at:            number;
   close_price:         number | null;
@@ -77,26 +79,5 @@ export interface OppStats {
   riskDollar:        number;
 }
 
-export interface AlertStat {
-  type:    string;
-  total:   number;
-  wins:    number;
-  winRate: number;
-  avgPnl:  number;
-}
-
-export interface ScoreBucket {
-  label: string;
-  min:   number;
-  max:   number;
-  total: number;
-  wins:  number;
-  rate:  number;
-}
-
-export interface SignalStat {
-  sig:   string;
-  wins:  number;
-  total: number;
-  rate:  number;
-}
+// PLAN_v9 — AlertStat/ScoreBucket/SignalStat dihapus: analitik sinyal individual
+// kini hidup di halaman /signals (Signal Performance). History fokus ke TRADE + lane.

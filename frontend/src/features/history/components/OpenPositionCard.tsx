@@ -1,5 +1,6 @@
 "use client";
 import { fmtPrice } from "@/lib/format";
+import { laneForSpot } from "@/lib/lanes";
 import type { OppPosition } from "./OppSpotTypes";
 
 interface OpenPositionCardProps {
@@ -27,6 +28,7 @@ export function OpenPositionCard({
     : Math.min(85, Math.round(40 + Math.max(0, p.score - 30) * 0.75));
   const tp1Prob   = Math.min(85, conf);
   const tp2Prob   = Math.round(tp1Prob * 0.65);
+  const lane      = laneForSpot(p.alert_type, p.entry_mode);   // PLAN_v9 G3
 
   return (
     <div className="px-4 py-3 hover:bg-blue-50/50">
@@ -40,8 +42,19 @@ export function OpenPositionCard({
             <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-semibold">
               LONG SPOT
             </span>
-            <span className="text-[10px] bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded font-mono">
-              Score {p.score}
+            {/* PLAN_v9 G3a — badge lane: jelas dari lane mana posisi ini */}
+            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${lane.badge}`} title={`Auto-open lane ini ≥${lane.autoScore}`}>
+              {lane.emoji} {lane.label}
+            </span>
+            {/* PLAN_v9 G3b — bedakan force-open manual dari auto */}
+            {p.manual && (
+              <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold" title="Dibuka manual via Force-Open (bypass threshold)">
+                🖐 Manual
+              </span>
+            )}
+            <span className="text-[10px] bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded font-mono"
+              title={p.manual ? "Force-open manual" : `Auto-open ${lane.label} ≥${lane.autoScore}`}>
+              Score {p.score}{!p.manual ? ` / ≥${lane.autoScore}` : ""}
             </span>
             {p.tp1_hit && (
               <span className="text-[10px] bg-yellow-100 text-yellow-700 border border-yellow-300 px-2 py-0.5 rounded-full font-bold">

@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtPrice } from "@/lib/format";
+import { laneForSpot } from "@/lib/lanes";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -520,6 +521,10 @@ export function DBHistoryTable({
                     <div className="px-4 py-3 bg-teal-50/40 border-t border-teal-100 text-xs">
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-3">
                         {[
+                          // PLAN_v9 G1b — lane hanya relevan untuk SPOT (futures = agent, bukan lane)
+                          ...(reasonScope === "spot"
+                            ? [{ label: "Lane", val: `${laneForSpot(t.alert_type).emoji} ${laneForSpot(t.alert_type).label}` }]
+                            : []),
                           { label: "Entry Price",  val: `$${fmtPrice(t.entry)}` },
                           { label: "Stop Loss",    val: `$${fmtPrice(t.sl)}` },
                           { label: "Close Price",  val: t.close_price != null ? `$${fmtPrice(t.close_price)}` : "—" },

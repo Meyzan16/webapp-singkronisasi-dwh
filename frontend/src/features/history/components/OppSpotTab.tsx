@@ -5,17 +5,15 @@ import { DBHistoryTable } from "@/features/health/components/DBHistoryTable";
 import type {
   ApiBalance, OppPosition,
   OppStats,
-  AlertStat, ScoreBucket, SignalStat,
 } from "./OppSpotTypes";
 import { DepositModal }       from "./DepositModal";
 import { BalanceBanner }      from "./BalanceBanner";
 import { StatsRow }           from "./StatsRow";
 import { PnlCalendar, localDayKey } from "./PnlCalendar";
-import { AlertTypeStats }     from "./AlertTypeStats";
-import { ScoreDistribution }  from "./ScoreDistribution";
-import { SignalPerformance }  from "./SignalPerformance";
+import { LanePerformance, type LaneStat } from "./LanePerformance";
 import { OpenPositionsList }  from "./OpenPositionsList";
 import { OppSpotToolbar }     from "./OppSpotToolbar";
+import { laneForSpot }        from "@/lib/lanes";
 
 const REFRESH_INTERVAL = 15_000;
 
@@ -135,11 +133,13 @@ export function OppSpotTab() {
 
   const exportCSV = useCallback(() => {
     const headers = [
-      "ID","Symbol","Status","Alert Type","Entry","SL","TP1","TP2",
+      "ID","Symbol","Status","Lane","Alert Type","Manual","Entry","SL","TP1","TP2",
       "Close Price","P&L %","Score","R:R","Entry Date","Close Date",
     ];
     const rows = positions.map(p => [
-      p.id, p.symbol, p.status, p.alert_type,
+      p.id, p.symbol, p.status,
+      laneForSpot(p.alert_type, p.entry_mode).label,     // PLAN_v9 G1c
+      p.alert_type, p.manual ? "yes" : "",
       p.entry, p.sl, p.tp1 ?? "", p.tp2,
       p.close_price ?? "", p.pnl_pct ?? "",
       p.score, p.rr_ratio,
@@ -259,56 +259,29 @@ export function OppSpotTab() {
     [positions]
   );
 
-  const alertStats = useMemo((): AlertStat[] => {
+  // PLAN_v9 G1a — performa per LANE, dinamis dari data aktual (semua lane yang
+  // benar-benar muncul, termasuk BigMover & Early Radar yang dulu invisible).
+  const laneStats = useMemo((): LaneStat[] => {
     const base = positions.filter(p => p.status === "tp" || p.status === "sl");
-    return ["squeeze", "accumulation", "breakout"].map(type => {
-      const all    = base.filter(p => p.alert_type === type);
-      const wins   = all.filter(p => p.status === "tp" && (p.pnl_pct ?? 0) > 0);
-      const avgPnl = all.length > 0
-        ? all.reduce((s, p) => s + (p.pnl_pct ?? 0), 0) / all.length
-        : 0;
-      return {
-        type, total: all.length, wins: wins.length,
-        winRate: all.length > 0 ? wins.length / all.length * 100 : 0, avgPnl,
-      };
-    });
-  }, [positions]);
-
-  const scoreDist = useMemo((): ScoreBucket[] => {
-    const base = positions.filter(p => p.status === "tp" || p.status === "sl");
-    return [
-      { label: "30–49", min: 30, max: 49 },
-      { label: "50–69", min: 50, max: 69 },
-      { label: "70–99", min: 70, max: 99 },
-    ].map(b => {
-      const grp  = base.filter(p => p.score >= b.min && p.score <= b.max);
-      const wins = grp.filter(p => p.status === "tp" && (p.pnl_pct ?? 0) > 0);
-      return {
-        ...b, total: grp.length, wins: wins.length,
-        rate: grp.length > 0 ? wins.length / grp.length * 100 : 0,
-      };
-    });
-  }, [positions]);
-
-  const signalStats = useMemo((): SignalStat[] => {
-    const closed = positions.filter(
-      p => (p.status === "tp" || p.status === "sl") && p.signals?.length > 0
-    );
-    const map = new Map<string, { wins: number; total: number }>();
-    closed.forEach(p => {
+    const map = new Map<string, { label: string; emoji: string; total: number; wins: number; sumPnl: number; pnl$: number }>();
+    base.forEach(p => {
+      const lane = laneForSpot(p.alert_type, p.entry_mode);
+      const cur  = map.get(lane.key) ?? { label: lane.label, emoji: lane.emoji, total: 0, wins: 0, sumPnl: 0, pnl$: 0 };
       const isWin = p.status === "tp" && (p.pnl_pct ?? 0) > 0;
-      (p.signals ?? []).forEach(s => {
-        const key = s.replace(/[🔵🟢📦🎯📊⚠️]/g, "").trim().split(" ").slice(0, 4).join(" ");
-        if (!key) return;
-        const cur = map.get(key) ?? { wins: 0, total: 0 };
-        map.set(key, { wins: cur.wins + (isWin ? 1 : 0), total: cur.total + 1 });
-      });
+      cur.total  += 1;
+      cur.wins   += isWin ? 1 : 0;
+      cur.sumPnl += p.pnl_pct ?? 0;
+      cur.pnl$   += p.pnl_dollar ?? 0;
+      map.set(lane.key, cur);
     });
     return [...map.entries()]
-      .filter(([, v]) => v.total >= 2)
-      .map(([sig, v]) => ({ sig, ...v, rate: v.wins / v.total * 100 }))
-      .sort((a, b) => b.rate - a.rate)
-      .slice(0, 8);
+      .map(([key, v]) => ({
+        key, label: v.label, emoji: v.emoji, total: v.total, wins: v.wins,
+        winRate: v.total > 0 ? v.wins / v.total * 100 : 0,
+        avgPnl:  v.total > 0 ? v.sumPnl / v.total : 0,
+        pnl$:    v.pnl$,
+      }))
+      .sort((a, b) => b.total - a.total);
   }, [positions]);
 
   const openList = useMemo(() => positions.filter(p => p.status === "open"), [positions]);
@@ -372,20 +345,7 @@ export function OppSpotTab() {
         balance={stats.currentBalance}
       />
 
-      <AlertTypeStats
-        alertStats={alertStats}
-        totalClosed={stats.tp + stats.sl}
-      />
-
-      <ScoreDistribution
-        scoreDist={scoreDist}
-        totalClosed={stats.tp + stats.sl}
-      />
-
-      <SignalPerformance
-        signalStats={signalStats}
-        closedCount={stats.tp + stats.sl}
-      />
+      <LanePerformance laneStats={laneStats} />
 
       <OppSpotToolbar
         positionCount={positions.length}
