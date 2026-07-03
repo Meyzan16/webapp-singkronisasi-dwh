@@ -392,13 +392,13 @@ export const SPOT_MONITOR_LAYERS = [
   },
   {
     layer: "L2.5",
-    title: "Stagnant Rotation",
+    title: "Stagnant / Urgent Rotation",
     emoji: "🔄",
     color: "bg-blue-50 border-blue-200",
-    desc: "Mulai dari hari ke-2 hold. Tukar posisi stagnan dengan kandidat yang lebih baik.",
+    desc: "Tukar posisi stagnan dengan kandidat yang lebih baik. Dua reason: stagnant_rotation (normal) & urgent_rotation.",
     closes: [
-      { reason: "Normal (hari 2+): harga ±3% dari entry, kandidat outscore ≥10 pts DAN kandidat ≥ 85 pts" },
-      { reason: "Urgent (hari 1+): kandidat outscore ≥25 pts DAN kandidat ≥ 90 pts" },
+      { reason: "🔁 stagnant_rotation (hari 2+): harga ±3% dari entry, kandidat outscore ≥10 pts DAN kandidat ≥ 85 pts" },
+      { reason: "🔄 urgent_rotation (hari 1+): kandidat outscore ≥25 pts DAN kandidat ≥ 90 pts (apa pun drift)" },
       { reason: "Guard staleness: rotasi di-skip jika scan cache > 10 menit", note: "cegah tukar posisi berdasar kandidat basi (PLAN_v8 P4)" },
     ],
   },

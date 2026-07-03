@@ -125,6 +125,7 @@ const CLOSE_REASON_META: Record<string, { label: string; color: string; emoji: s
   flow_reversal:     { label: "Flow Reversal",   color: "bg-purple-100 text-purple-700",   emoji: "🔄", scope: "spot" },
   risk_adjusted:     { label: "Risk Adjusted",   color: "bg-pink-100 text-pink-700",       emoji: "⚖️", scope: "spot" },
   stagnant_rotation: { label: "Stagnant Rotate", color: "bg-neutral-100 text-neutral-500", emoji: "🔁", scope: "spot" },
+  urgent_rotation:   { label: "Urgent Rotate",   color: "bg-blue-100 text-blue-600",       emoji: "🔄", scope: "spot" },
   liq_guard:         { label: "Liq Guard",       color: "bg-red-200 text-red-800",         emoji: "🚨", scope: "futures" },
   stagnant_48h:      { label: "Stagnant 48h",    color: "bg-neutral-100 text-neutral-500", emoji: "💤", scope: "futures" },
   max_age_expired:      { label: "Max Age",          color: "bg-neutral-100 text-neutral-500", emoji: "⏰", scope: "both" },
