@@ -50,7 +50,12 @@ STARTUP_DELAY      = 45
 MIN_HOLD_MINUTES   = 30
 
 # G5b: absolute profit lock tiers — same as futures monitor
+# PLAN_v10 P3 — tiers ordered HIGHEST peak first so the tightest applicable
+# lock wins (loop returns on first match). Big runners (100%+, 300%+) give back
+# very little before locking, so a 1000% move can't evaporate.
 _PROFIT_LOCK_TIERS_SPOT = [
+    (300.0, 0.90),
+    (100.0, 0.85),
     (40.0, 0.75),
     (25.0, 0.70),
     (15.0, 0.60),
@@ -59,6 +64,21 @@ _PROFIT_LOCK_TIERS_SPOT = [
 # G5: dynamic TP extension thresholds
 G5_MIN_SCORE      = 75
 G5_MIN_VOL_RATIO  = 1.5
+
+# ── PLAN_v10 — dynamic profit ladder + ratcheting trail ──────────────────────
+# Scale out a small slice at each rung (banked = permanent), keep a runner that
+# rides while the "still-strong" gate (flow + TA) stays green. Rungs TP4..TP-n
+# are born dynamically as price climbs — no cap, ride the whole move.
+LADDER_FRAC_TP1     = 0.30    # jual 30% di TP1 (dulu 50%) — sisakan runner besar
+LADDER_FRAC_TP2     = 0.20    # jual 20% di TP2 (dulu tutup 100% — INI cap lama)
+LADDER_FRAC_TP3     = 0.15    # jual 15% di TP3, sisanya jadi runner trailing
+DYN_RUNG_FRAC       = 0.05    # jual 5% tiap rung dinamis TP4..n
+RUNNER_MIN_FRACTION = 0.15    # jangan pernah jual runner di bawah ini via rung dinamis
+DYN_RUNG_ATR_MULT   = 1.0     # jarak ke rung berikut = 1×ATR14(1h)
+DYN_RUNG_STEP_PCT   = 8.0     # floor jarak rung bila ATR terlalu kecil (% dari entry)
+GATE_MIN_SCORE      = 50      # skor live minimal agar dianggap "masih kuat"
+GATE_MIN_TAKER      = 0.50    # taker buy ratio — pembeli masih dominan
+GATE_MIN_VOL_RATIO  = 1.2     # volume belum sepi
 # BM7: per entry_mode — accumulation needs more time, failed momentum exits faster
 MAX_AGE_DAYS_FRESH_SETUP    = 10   # akumulasi butuh waktu lebih lama untuk resolve
 MAX_AGE_DAYS_MOMENTUM_CHASE = 5    # momentum yang gagal bergerak = capital idle, exit lebih cepat
@@ -256,6 +276,38 @@ def _compute_trailing_sl(klines_4h: list, current_sl: float) -> float:
     return max(current_sl, candidate)
 
 
+def _atr(klines: list, n: int = 14) -> float:
+    """PLAN_v10 — Average True Range over last n candles (0.0 if insufficient)."""
+    if len(klines) < n + 1:
+        return 0.0
+    trs = []
+    for i in range(len(klines) - n, len(klines)):
+        high = float(klines[i][2]); low = float(klines[i][3])
+        prev_close = float(klines[i - 1][4])
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        trs.append(tr)
+    return sum(trs) / len(trs) if trs else 0.0
+
+
+def _still_strong_gate(symbol: str, klines_1h: list) -> tuple[bool, str]:
+    """
+    PLAN_v10 — "masih kuat?" gate untuk memutuskan runner terus ride & rung baru
+    lahir. Pakai flow (taker ratio, volume) + TA (skor live). Hijau = lanjut,
+    merah = berhenti buat rung baru, biar trailing SL yang urus exit.
+    """
+    score = _get_current_spot_score(symbol)
+    if score < GATE_MIN_SCORE:
+        return False, f"score {score:.0f}<{GATE_MIN_SCORE}"
+    if klines_1h:
+        taker = _taker_ratio(klines_1h)
+        if taker < GATE_MIN_TAKER:
+            return False, f"taker {taker:.2f}"
+        vr = _vol_ratio([float(k[5]) for k in klines_1h])
+        if vr < GATE_MIN_VOL_RATIO:
+            return False, f"vol {vr:.2f}"
+    return True, "strong"
+
+
 def _wick_extremes(klines_1m: list, entry_at: float) -> tuple[Optional[float], Optional[float]]:
     """(low, high) across 1m candles that closed after entry. None if no data."""
     lows, highs = [], []
@@ -370,7 +422,11 @@ def _final_pnl(
     """
     pnl_net_pct = (close_price - entry) / entry * 100 - EXECUTION_COST_PCT
     remaining   = meta.get("remaining_fraction", 1.0)
-    partial_dlr = meta.get("tp1_partial_dollar", 0.0)
+    # PLAN_v10 — banked_dollar akumulasi SEMUA rung scale-out (permanen).
+    # Fallback ke tp1_partial_dollar untuk trade lama sebelum ladder multi-partial.
+    partial_dlr = meta.get("banked_dollar")
+    if partial_dlr is None:
+        partial_dlr = meta.get("tp1_partial_dollar", 0.0)
     final_dlr   = (pnl_net_pct / 100) * position_size * remaining + partial_dlr
     blended_pct = (final_dlr / position_size * 100) if position_size > 0 else pnl_net_pct
     return round(blended_pct, 2), round(final_dlr, 2)
@@ -559,6 +615,23 @@ async def _process_trade(
                         peak_pnl=round(_peak_pnl_spot, 2), current_pnl=round(_pnl_now_spot, 2))
             return 1, 0
 
+    # ── PLAN_v10 — scale-out helper: jual `frac` posisi asli di `rung_price`,
+    # bank realized $ (permanen), kecilkan runner, catat ladder, ratchet floor.
+    def _scale_out(frac: float, rung_name: str, rung_price: float, floor_price: float) -> None:
+        rung_net_pct = (rung_price - entry) / entry * 100 - EXECUTION_COST_PCT
+        slice_dlr    = round((rung_net_pct / 100) * (trade.position_size or 0.0) * frac, 2)
+        meta["banked_dollar"]      = round(meta.get("banked_dollar", 0.0) + slice_dlr, 2)
+        meta["remaining_fraction"] = round(max(0.0, meta.get("remaining_fraction", 1.0) - frac), 4)
+        _ladder = meta.get("ladder", [])
+        _ladder.append({"rung": rung_name, "price": round(rung_price, 8),
+                        "frac": frac, "pnl_dollar": slice_dlr})
+        meta["ladder"] = _ladder
+        # ratchet floor — hanya boleh NAIK, & jangan di atas harga sekarang (anti wick-stop)
+        _new_floor = min(max(sl, floor_price), price * 0.999)
+        if _new_floor > sl:
+            meta["current_sl"] = round(_new_floor, 8)
+            trade.stop_loss    = round(_new_floor, 8)
+
     # ── Layer 3: max age — BM7: per entry_mode ──────────────────────────────
     _entry_mode = meta.get("entry_mode", "fresh_setup")
     if _entry_mode == "momentum_entry":
@@ -589,8 +662,26 @@ async def _process_trade(
         pnl_probe  = (close_price - entry) / entry * 100 - EXECUTION_COST_PCT
         new_status = "tp" if (meta.get("tp1_hit") and pnl_probe > 0) else "sl"
     elif is_momentum_chase and meta.get("tp1_hit"):
-        # Trailing mode: skip hard TP2/TP3 targets (let winner run further).
-        # Only close on trend structure break: EMA9(4h) crosses below EMA21(4h).
+        # ── PLAN_v10 RUNNER: ride winner tanpa cap. Lahirkan rung dinamis
+        # TP4..TP-n selama gate (flow+TA) hijau; kalau tidak, keluar hanya saat
+        # struktur 4h patah. Trailing SL (di atas) sudah ratchet floor tiap cycle.
+        _atr1h     = _atr(k1h)
+        _remaining = meta.get("remaining_fraction", 1.0)
+        _last_rung = meta.get("last_rung_price") or tp3 or tp2 or tp1 or entry
+        _rung_gap  = max(_atr1h * DYN_RUNG_ATR_MULT, DYN_RUNG_STEP_PCT / 100 * entry)
+        _next_rung = _last_rung + _rung_gap
+        _gate_ok, _gate_why = _still_strong_gate(trade.symbol, k1h)
+        if (eff_high >= _next_rung and _gate_ok
+                and _remaining - DYN_RUNG_FRAC >= RUNNER_MIN_FRACTION):
+            _floor = (_next_rung - _atr1h) if _atr1h > 0 else _next_rung * 0.98
+            _scale_out(DYN_RUNG_FRAC, "tp_dyn", _next_rung, _floor)
+            meta["last_rung_price"] = round(_next_rung, 8)
+            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+            logger.info("v10_dynamic_rung", symbol=trade.symbol,
+                        rung=round(_next_rung, 8), banked=meta["banked_dollar"],
+                        remaining=meta["remaining_fraction"])
+            return 0, 1
+        # tidak ada rung baru → cek struktur patah (ambil sisa runner sekaligus)
         if len(k4h) >= 21:
             closes4h = [float(k[4]) for k in k4h]
             ema9_4h  = _ema(closes4h, 9)
@@ -605,63 +696,58 @@ async def _process_trade(
                             ema9=round(ema9_4h, 6), ema21=round(ema21_4h, 6),
                             pnl_net=round(pnl_probe, 2))
     elif tp3 and eff_high >= tp3 and not meta.get("tp3_hit"):
-        # ── G5: Dynamic TP extension — ride winner past TP3 if still strong ──
-        _g5_score    = _get_current_spot_score(trade.symbol)
-        _vols_1h     = [float(k[5]) for k in k1h] if k1h else []
-        _g5_vol      = _vol_ratio(_vols_1h)
-        if (not meta.get("tp_extended")
-                and _g5_score >= G5_MIN_SCORE
-                and _g5_vol >= G5_MIN_VOL_RATIO):
-            # Convert to momentum_chase trailing mode instead of closing
-            meta["tp_extended"]         = True
-            meta["tp3_hit"]             = True
-            meta["tp3_hit_at"]          = time.time()
-            meta["entry_mode"]          = "momentum_chase"
-            meta["tp1_hit"]             = meta.get("tp1_hit", False)  # don't assume TP1 was hit
-            meta["current_sl"]          = round(tp3 * 0.98, 8)       # initial trail = 2% below TP3
-            trade.stop_loss             = round(tp3 * 0.98, 8)
-            trade.signals_json          = json.dumps(meta, ensure_ascii=False)
-            logger.info(
-                "g5_dynamic_tp_extension",
-                symbol=trade.symbol, tp3=tp3, score=_g5_score, vol_ratio=round(_g5_vol, 2),
-            )
-            return 0, 1
-        else:
-            # Conditions not met — close at TP3 as normal
-            meta["tp3_hit"] = True
-            new_status, close_price, close_reason = "tp", tp3, "tp3_hit"
-    elif eff_high >= tp2:
-        new_status, close_price, close_reason = "tp", tp2, "tp2_hit"
+        # PLAN_v10 — TP3 tidak lagi tutup 100%: scale-out 15% lalu jadi runner.
+        meta["tp3_hit"]    = True
+        meta["tp3_hit_at"] = time.time()
+        _scale_out(LADDER_FRAC_TP3, "tp3", tp3, max(sl, tp2 or tp1 or entry))
+        meta["entry_mode"]      = "momentum_chase"
+        meta["tp_extended"]     = True
+        meta["tp1_hit"]         = True
+        meta["last_rung_price"] = round(tp3, 8)
+        trade.signals_json      = json.dumps(meta, ensure_ascii=False)
+        logger.info("v10_tp3_scaleout_runner", symbol=trade.symbol, tp3=tp3,
+                    banked=meta["banked_dollar"], remaining=meta["remaining_fraction"])
+        return 0, 1
+    elif eff_high >= tp2 and not meta.get("tp2_hit"):
+        # PLAN_v10 — CAP LAMA ADA DI SINI (dulu tutup 100% di TP2). Sekarang:
+        # scale-out 20%, kunci floor ≥ TP1, konversi jadi runner → ikut pump besar.
+        meta["tp2_hit"]    = True
+        meta["tp2_hit_at"] = time.time()
+        _scale_out(LADDER_FRAC_TP2, "tp2", tp2, max(sl, tp1 or entry))
+        meta["entry_mode"]      = "momentum_chase"
+        meta["tp_extended"]     = True
+        meta["tp1_hit"]         = True      # pastikan runner path aktif cycle berikut
+        meta["last_rung_price"] = round(tp2, 8)
+        trade.signals_json      = json.dumps(meta, ensure_ascii=False)
+        logger.info("v10_tp2_scaleout_runner", symbol=trade.symbol, tp2=tp2,
+                    banked=meta["banked_dollar"], remaining=meta["remaining_fraction"])
+        return 0, 1
     elif tp1 and eff_high >= tp1 and not meta.get("tp1_hit"):
-        # §15.3 PARTIAL SELL 50% at TP1 — lock profit, let the rest ride
-        tp1_net_pct  = (tp1 - entry) / entry * 100 - EXECUTION_COST_PCT
-        sell_frac    = 0.5
-        partial_dlr  = round((tp1_net_pct / 100) * (trade.position_size or 0.0) * sell_frac, 2)
-        # §12.6: post-TP1 SL = entry + 50% of TP1 gain (not bare breakeven)
-        new_sl = entry * (1 + ((tp1 - entry) / entry) * 0.5)
+        # PLAN_v10 — scale-out 30% di TP1 (dulu 50%), floor = entry + 50% gain TP1.
+        sell_frac = LADDER_FRAC_TP1
+        new_sl    = entry * (1 + ((tp1 - entry) / entry) * 0.5)   # §12.6
+        meta["tp1_hit"]         = True
+        meta["tp1_hit_price"]   = round(float(eff_high), 8)
+        meta["tp1_hit_at"]      = time.time()
+        meta["last_rung_price"] = round(tp1, 8)
+        _scale_out(sell_frac, "tp1", tp1, new_sl)
+        # kompat lama: tp1_partial_dollar = slice pertama ladder
+        meta["tp1_partial_dollar"] = meta.get("ladder", [{}])[-1].get("pnl_dollar", 0.0)
 
-        meta["tp1_hit"]            = True
-        meta["tp1_hit_price"]      = round(float(eff_high), 8)
-        meta["tp1_hit_at"]         = time.time()
-        meta["tp1_partial_dollar"] = partial_dlr
-        meta["remaining_fraction"] = 1.0 - sell_frac
-        meta["current_sl"]         = round(new_sl, 8)
-
-        # BM6: if fresh_setup TP1 hit with volume spike → upgrade to momentum_chase
-        # trailing stop so the position can ride a real pump instead of exiting at TP2
+        # BM6: fresh_setup + volume spike → langsung mode runner trailing
         if _entry_mode == "fresh_setup" and not meta.get("upgraded_to_trailing"):
             _vol_spike_now = _vol_ratio([float(k[5]) for k in k1h]) if k1h else 1.0
             if _vol_spike_now >= 5.0:
-                meta["entry_mode"]          = "momentum_chase"
+                meta["entry_mode"]           = "momentum_chase"
                 meta["upgraded_to_trailing"] = True
                 logger.info("fresh_setup_upgraded_to_trailing",
                             symbol=trade.symbol, vol_spike=round(_vol_spike_now, 1))
 
         trade.signals_json = json.dumps(meta, ensure_ascii=False)
-        trade.stop_loss    = round(new_sl, 8)   # §1.11: keep column in sync
         logger.info("opportunity_tp1_partial", symbol=trade.symbol,
-                    tp1=tp1, sold_frac=sell_frac, locked_dollar=partial_dlr,
-                    new_sl=round(new_sl, 8))
+                    tp1=tp1, sold_frac=sell_frac,
+                    locked_dollar=meta.get("tp1_partial_dollar", 0.0),
+                    new_sl=meta.get("current_sl"))
         return 0, 1
 
     # ── Layer 2: risk-adjusted exits ─────────────────────────────────────────

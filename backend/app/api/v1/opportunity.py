@@ -484,6 +484,12 @@ async def get_open_positions(days: int = Query(default=30, ge=1, le=365)) -> dic
             "risk_dollar":        t.risk_dollar,
             "balance_snapshot":   t.balance_snapshot,
             "pnl_dollar":         t.pnl_dollar,
+            # ── PLAN_v10 — dynamic profit ladder (banked = permanen, runner ride) ──
+            "ladder":             meta.get("ladder", []),
+            "banked_dollar":      meta.get("banked_dollar", meta.get("tp1_partial_dollar", 0.0)),
+            "remaining_fraction": meta.get("remaining_fraction", 1.0),
+            "is_runner":          meta.get("entry_mode") == "momentum_chase" and bool(meta.get("tp1_hit")),
+            "last_rung_price":    meta.get("last_rung_price"),
         })
 
     return {"positions": positions, "total": len(positions)}

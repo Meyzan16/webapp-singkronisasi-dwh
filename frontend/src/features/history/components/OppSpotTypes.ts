@@ -47,6 +47,12 @@ export interface OppPosition {
   risk_dollar?:        number;
   balance_snapshot?:   number;
   pnl_dollar?:         number;
+  // PLAN_v10 — dynamic profit ladder
+  ladder?:             { rung: string; price: number; frac: number; pnl_dollar: number }[];
+  banked_dollar?:      number;
+  remaining_fraction?: number;
+  is_runner?:          boolean;
+  last_rung_price?:    number | null;
 }
 
 

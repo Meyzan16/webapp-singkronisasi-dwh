@@ -30,6 +30,12 @@ export function OpenPositionCard({
   const tp2Prob   = Math.round(tp1Prob * 0.65);
   const lane      = laneForSpot(p.alert_type, p.entry_mode);   // PLAN_v9 G3
 
+  // PLAN_v10 — dynamic profit ladder
+  const banked     = p.banked_dollar ?? 0;
+  const runnerPct  = Math.round((p.remaining_fraction ?? 1) * 100);
+  const ladder     = p.ladder ?? [];
+  const isRunner   = !!p.is_runner;
+
   return (
     <div className="px-4 py-3 hover:bg-blue-50/50">
       {/* Row 1: symbol + unrealized PnL + close button */}
@@ -56,9 +62,14 @@ export function OpenPositionCard({
               title={p.manual ? "Force-open manual" : `Auto-open ${lane.label} ≥${lane.autoScore}`}>
               Score {p.score}{!p.manual ? ` / ≥${lane.autoScore}` : ""}
             </span>
-            {p.tp1_hit && (
+            {/* PLAN_v10 — runner aktif: ride sampai TP-n */}
+            {isRunner ? (
+              <span className="text-[10px] bg-green-100 text-green-700 border border-green-300 px-2 py-0.5 rounded-full font-bold" title="Runner aktif — ride winner sampai struktur patah / gate merah">
+                🏃 Riding · {runnerPct}% sisa
+              </span>
+            ) : p.tp1_hit && (
               <span className="text-[10px] bg-yellow-100 text-yellow-700 border border-yellow-300 px-2 py-0.5 rounded-full font-bold">
-                🟡 TP1 Hit — Riding to TP2
+                🟡 TP1 Hit — {runnerPct}% riding
               </span>
             )}
           </div>
@@ -82,6 +93,30 @@ export function OpenPositionCard({
           {closingId === p.id ? "..." : "Tutup"}
         </button>
       </div>
+
+      {/* PLAN_v10 — ladder strip: profit yang sudah dikunci (tak bisa hilang) + rung */}
+      {(banked > 0 || ladder.length > 0) && (
+        <div className="mb-2 flex items-center gap-2 flex-wrap bg-green-50/70 border border-green-100 rounded-lg px-2.5 py-1.5">
+          <span className="text-[10px] font-bold text-green-700">
+            🔒 Locked: +${banked.toFixed(2)}
+          </span>
+          <span className="text-[9px] text-neutral-400">·</span>
+          <span className="text-[10px] text-neutral-500">Runner {runnerPct}%</span>
+          {ladder.length > 0 && (
+            <>
+              <span className="text-[9px] text-neutral-400">·</span>
+              <div className="flex items-center gap-1 flex-wrap">
+                {ladder.map((r, i) => (
+                  <span key={i} className="text-[9px] bg-white border border-green-200 text-green-700 px-1.5 py-0.5 rounded font-semibold"
+                    title={`${r.rung} @ $${fmtPrice(r.price)} — jual ${Math.round(r.frac * 100)}%`}>
+                    {r.rung.toUpperCase()} +${r.pnl_dollar.toFixed(2)}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Row 2: 4 info tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
