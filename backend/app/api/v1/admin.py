@@ -139,6 +139,15 @@ async def reset_simulation(body: ResetBody) -> dict:
     except Exception as exc:
         logger.warning("cache_clear_skipped", target="shared.cross_agent_learning", error=str(exc)[:80])
 
+    # PLAN_v11 P4: clear RAR/lane-pause gate state — metrik lama tak boleh
+    # menahan gate tetap tertutup setelah DB direset (anti-deadlock).
+    try:
+        from agents.futures import risk_gate
+        risk_gate.reset_state()
+        cleared.append("futures.risk_gate")
+    except Exception as exc:
+        logger.warning("cache_clear_skipped", target="futures.risk_gate", error=str(exc)[:80])
+
     logger.warning(
         "simulation_reset_executed",
         preserve_initial=body.preserve_initial_deposit,

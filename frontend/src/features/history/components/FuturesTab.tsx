@@ -4,6 +4,7 @@ import { FuturesAnalytics } from "./FuturesAnalytics";
 import { LoadingPage } from "@/components/ui/feedback";
 import { MonitorTab } from "./futures/MonitorTab";
 import { OverviewTab } from "./futures/OverviewTab";
+import { localDayKey } from "./PnlCalendar";
 import { type FuturesPosition, type LearningStats, type RiskDashboard, isRealWin, tradePnlDollar } from "./futures/types";
 
 const FALLBACK_BALANCE = 1000;
@@ -169,13 +170,25 @@ export function FuturesTab() {
   }, [positions, learning, startingBalance, riskDollar]);
 
   // OV1: equity chart uses same set as win rate (tp|sl only) — expired excluded from both
-  const equityPoints = useMemo(
-    () => buildEquity(
-      positions.filter(p => p.status === "tp" || p.status === "sl"),
-      startingBalance, riskDollar,
-    ),
-    [positions, startingBalance, riskDollar],
+  const closedTrades = useMemo(
+    () => positions.filter(p => p.status === "tp" || p.status === "sl"),
+    [positions],
   );
+  const equityPoints = useMemo(
+    () => buildEquity(closedTrades, startingBalance, riskDollar),
+    [closedTrades, startingBalance, riskDollar],
+  );
+
+  // PLAN_v11 P5 E1: P&L kalender harian (WIB) — reuse komponen SPOT
+  const calendarMap = useMemo(() => {
+    const m = new Map<string, number>();
+    closedTrades.forEach(p => {
+      if (!p.closed_at) return;
+      const day = localDayKey(new Date(p.closed_at * 1000));
+      m.set(day, (m.get(day) ?? 0) + (tradePnlDollar(p, riskDollar) ?? 0));
+    });
+    return m;
+  }, [closedTrades, riskDollar]);
 
   // ── Sub-tab bar ───────────────────────────────────────────────────────────────
 
@@ -219,6 +232,7 @@ export function FuturesTab() {
           equityPoints={equityPoints} stats={stats} autoThreshold={autoThreshold}
           agentFilter={agentFilter} setAgentFilter={setAgentFilter}
           lastUpdated={lastUpdated} loading={loading}
+          calendarMap={calendarMap} closedTrades={closedTrades}
           onWalletChanged={() => void fetchPositions(true)}
         />
       )}

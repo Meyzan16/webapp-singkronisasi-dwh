@@ -689,7 +689,7 @@ def _calc_levels(
         risk_pct = risk / price * 100
 
         # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
-        min_sl_pct = max(MIN_SL_PCT, atr_pct * 0.8)
+        min_sl_pct = max(MIN_SL_PCT, atr_pct * 1.0)   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
         if risk_pct > 8.0:
             sl       = price - atr * 1.5
             risk     = price - sl
@@ -723,7 +723,7 @@ def _calc_levels(
         risk_pct = risk / price * 100
 
         # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
-        min_sl_pct = max(MIN_SL_PCT, atr_pct * 0.8)
+        min_sl_pct = max(MIN_SL_PCT, atr_pct * 1.0)   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
         if risk_pct > 8.0:
             sl       = price + atr * 1.5
             risk     = sl - price

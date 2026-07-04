@@ -29,6 +29,15 @@ RAR_GATE_THRESHOLD = -0.5   # Sharpe proxy < −0.5 → RAR gate closes
 RAR_MIN_TRADES     = 10     # P6.3: was 12 → 10 (more responsive to early bad runs)
 STATE_TTL          = 5 * 60 # state older than 5 min is considered stale
 
+# ── PLAN_v11 P1 — RAR anti-deadlock ─────────────────────────────────────────
+# Bug lama: Sharpe dihitung dari SEMUA trade closed (kumulatif). Begitu gate
+# tutup, agent stop buka posisi → tak ada trade baru → Sharpe beku negatif →
+# gate tak pernah pulih (deadlock). Perbaikan:
+RAR_ROLLING_WINDOW  = 20        # A1: Sharpe hanya dari N trade TERAKHIR (bukan kumulatif)
+RAR_RELAX_THRESHOLD = -0.8      # A3: ambang lebih longgar saat regime bullish & DD rendah
+PROBE_INTERVAL_SEC  = 6 * 3600  # A2: izinkan 1 posisi probe (½-risk) tiap 6 jam saat RAR aktif
+_last_probe_at      = 0.0       # A2: kapan probe terakhir dibuka
+
 # P6.4: per-lane WR auto-pause
 LANE_WR_PAUSE_THRESHOLD = 0.35   # WR < 35% → pause lane
 LANE_WR_MIN_SAMPLE      = 20     # rolling N=20 trades before judging lane
@@ -56,17 +65,25 @@ _lane_paused_until: dict[str, float] = {}
 _lane_wr: dict[str, dict] = {}
 
 
-def update_gate_state(drawdown_pct: float, rar: float, n_trades: int) -> None:
+def update_gate_state(drawdown_pct: float, rar: float, n_trades: int,
+                      regime: str = "ranging") -> None:
     """
     Refresh gate state from pre-computed metrics.
     Called from get_risk_dashboard() — frontend polls this every 15 s.
     G10: fires emergency_tighten on NEW circuit breaker activation (transition only).
+    PLAN_v11 A3: `regime` melonggarkan ambang RAR saat market bullish & DD rendah.
     """
     global _state, _emergency_tighten_pending, _prev_circuit_breaker_active
     _state["drawdown_pct"] = drawdown_pct
     _state["rar"]          = rar
     _state["n_trades"]     = n_trades
     _state["updated_at"]   = time.time()
+
+    # PLAN_v11 A3: di regime trending_up dengan DD < ½ batas, pakai ambang longgar.
+    _rar_thr = RAR_GATE_THRESHOLD
+    if (regime == "trending_up" and drawdown_pct is not None
+            and drawdown_pct < DD_HARD_STOP_PCT / 2):
+        _rar_thr = RAR_RELAX_THRESHOLD
 
     # Manual override wins over auto-logic
     if _state["override"] is not None:
@@ -90,13 +107,14 @@ def update_gate_state(drawdown_pct: float, rar: float, n_trades: int) -> None:
             f"melampaui batas keras {DD_HARD_STOP_PCT:.0f}%. "
             f"Agen berhenti buka posisi baru hingga drawdown < {DD_RECOVER_PCT:.0f}%."
         )
-    elif n_trades >= RAR_MIN_TRADES and rar < RAR_GATE_THRESHOLD:
+    elif n_trades >= RAR_MIN_TRADES and rar < _rar_thr:
         _state["active"]    = True
         _state["gate_type"] = "rar"
         _state["reason"]    = (
             f"RAR gate aktif: Sharpe {rar:.3f} di bawah threshold "
-            f"{RAR_GATE_THRESHOLD} ({n_trades} trade tertutup). "
-            f"Strategi sedang negatif risk-adjusted."
+            f"{_rar_thr} (rolling {n_trades} trade). Strategi sedang negatif "
+            f"risk-adjusted. Probe ½-risk diizinkan tiap "
+            f"{int(PROBE_INTERVAL_SEC // 3600)}h untuk memulihkan gate."
         )
     else:
         _prev_circuit_breaker_active = False
@@ -208,11 +226,14 @@ async def evaluate_risk_gate() -> None:
             wins  = sum(1 for t in recent if t.status == "tp" and (t.pnl_pct or 0) > 0)
             update_lane_wr(lane_name, wins, len(recent))
 
+        # PLAN_v11 A1: Sharpe dari window rolling (N terakhir), bukan kumulatif —
+        # supaya performa terbaru bisa MEMBUKA kembali gate (keluar dari deadlock).
         sharpe = 0.0
-        if len(pnl_series) >= RAR_MIN_TRADES:
+        _window = pnl_series[-RAR_ROLLING_WINDOW:]
+        if len(_window) >= RAR_MIN_TRADES:
             try:
-                mu     = statistics.mean(pnl_series)
-                std    = statistics.stdev(pnl_series)
+                mu     = statistics.mean(_window)
+                std    = statistics.stdev(_window)
                 sharpe = round(mu / std, 3) if std > 0 else 0.0
             except Exception:
                 pass
@@ -222,7 +243,14 @@ async def evaluate_risk_gate() -> None:
         DD_HARD_STOP_PCT = _hard_stop
         DD_RECOVER_PCT   = _recover
 
-        update_gate_state(max_dd, sharpe, len(pnl_series))
+        # PLAN_v11 A3: regime-aware — jangan matikan strategi saat market jelas bullish
+        _regime = "ranging"
+        try:
+            from agents.futures.regime import get_cached_regime
+            _regime = get_cached_regime()
+        except Exception:
+            pass
+        update_gate_state(max_dd, sharpe, len(_window), regime=_regime)
 
     except Exception as exc:
         logger.warning("risk_gate_evaluate_failed", error=str(exc))
@@ -286,6 +314,45 @@ def is_state_stale() -> bool:
     return _state["updated_at"] == 0.0 or (time.time() - _state["updated_at"]) > STATE_TTL
 
 
+def probe_allowed() -> bool:
+    """
+    PLAN_v11 A2 — saat RAR gate aktif (BUKAN circuit-breaker DD), izinkan SATU
+    posisi probe ½-risk tiap PROBE_INTERVAL_SEC. Tujuannya menghasilkan data
+    trade baru agar Sharpe rolling bisa memulihkan gate — memecah deadlock.
+    Circuit-breaker DD & override-closed TIDAK boleh diprobe (risiko nyata).
+    """
+    if not _state["active"] or _state["gate_type"] != "rar":
+        return False
+    return (time.time() - _last_probe_at) >= PROBE_INTERVAL_SEC
+
+
+def record_probe() -> None:
+    """PLAN_v11 A2 — tandai probe terakhir dibuka (dipanggil auto_trader)."""
+    global _last_probe_at
+    _last_probe_at = time.time()
+    logger.info("rar_probe_opened", rar=_state.get("rar"), n=_state.get("n_trades"))
+
+
+def reset_state() -> None:
+    """
+    PLAN_v11 P4 — clear seluruh state gate in-memory (dipanggil reset_simulation).
+    Setelah reset DB, metrik lama tak boleh menahan gate tetap tertutup.
+    """
+    global _state, _last_probe_at, _lane_paused_until, _lane_wr
+    global _emergency_tighten_pending, _prev_circuit_breaker_active
+    _state.update({
+        "active": False, "gate_type": "none", "reason": "ok",
+        "drawdown_pct": 0.0, "rar": 0.0, "n_trades": 0,
+        "updated_at": 0.0, "override": None,
+    })
+    _last_probe_at = 0.0
+    _lane_paused_until = {}
+    _lane_wr = {}
+    _emergency_tighten_pending = False
+    _prev_circuit_breaker_active = False
+    logger.info("risk_gate_state_reset")
+
+
 def set_override(value) -> None:
     """
     Manual override:
@@ -338,6 +405,11 @@ def get_gate_state() -> dict:
         "dd_recover":    DD_RECOVER_PCT,
         "rar_threshold": RAR_GATE_THRESHOLD,
         "rar_min_trades": RAR_MIN_TRADES,
+        # PLAN_v11 A1/A2 — transparansi anti-deadlock
+        "rar_window":     RAR_ROLLING_WINDOW,
+        "probe_allowed":  probe_allowed(),
+        "next_probe_in_sec": max(0, int(PROBE_INTERVAL_SEC - (time.time() - _last_probe_at)))
+                             if (_state["active"] and _state["gate_type"] == "rar") else None,
         "stale":         is_state_stale(),
         "lane_pauses":   lane_pause_info,  # P6.4
         "lane_wr":       {

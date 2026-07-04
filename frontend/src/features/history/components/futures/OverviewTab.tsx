@@ -6,6 +6,8 @@ import { DBHistoryTable } from "@/features/health/components/DBHistoryTable";
 import { GateBanner } from "./GateBanner";
 import { OpenPosCard } from "./OpenPosCard";
 import { BigMoversWatchlist } from "./BigMoversWatchlist";
+import { PnlCalendar } from "../PnlCalendar";
+import type { OppPosition } from "../OppSpotTypes";
 import type { FuturesPosition, RiskDashboard, LearningStats, RiskPosition } from "./types";
 
 const TARGET_WIN_RATE = 80;
@@ -45,6 +47,8 @@ interface Props {
   countdown:       number;
   lastUpdated:     Date | null;
   loading:         boolean;
+  calendarMap:     Map<string, number>;   // PLAN_v11 P5 E1
+  closedTrades:    FuturesPosition[];      // PLAN_v11 P5 E1 — detail per-hari
   onRefresh:       () => void;
   onWalletChanged: () => void;
 }
@@ -53,7 +57,7 @@ type AgentKey = "agent1" | "agent2" | "agent3" | "agent_bigmover";
 
 export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
   equityPoints, stats, autoThreshold, agentFilter, setAgentFilter,
-  countdown, lastUpdated, loading, onRefresh, onWalletChanged }: Props) {
+  countdown, lastUpdated, loading, calendarMap, closedTrades, onRefresh, onWalletChanged }: Props) {
 
   const [selectedMonth, setSelectedMonth] = useState("all");
 
@@ -314,9 +318,18 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
         </div>
       )}
 
+      {/* PLAN_v11 P5 E1 — P&L Calendar harian (reuse komponen SPOT) */}
+      {closedTrades.length > 0 && (
+        <PnlCalendar
+          calendarMap={calendarMap}
+          closedTrades={closedTrades as unknown as OppPosition[]}
+          balance={stats.currentBalance}
+        />
+      )}
+
       {/* Position sizing info */}
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-        <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">💡 Logika Position Sizing</p>
+        <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">💡 Logika Position Sizing (real-wallet + portfolio heat)</p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
           {[
             { label: "Modal Awal",   value: `$${startingBalance.toLocaleString()}`,          sub: "paper balance"   },

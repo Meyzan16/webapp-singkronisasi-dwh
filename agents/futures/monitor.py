@@ -67,14 +67,23 @@ TIME_STOP_MIN_BY_LANE: dict[str, float] = {
     "accumulation": 360.0,   # 6h — needs room to develop
 }
 TIME_STOP_PROGRESS_FRAC = 0.5   # must reach ≥ 0.5×risk favorable to survive time-stop
+# PLAN_v11 B2: "scratch" hanya untuk trade STAGNAN (dekat breakeven). Kalau sudah
+# rugi ≥ 0.5×risk, JANGAN scratch — biarkan SL asli yang eksekusi. Bug lama:
+# AERGO ditutup −13% berlabel "time_stop_scratch" (realisasi loser besar dini).
+TIME_STOP_LOSS_GUARD_FRAC = 0.5   # jika _fav ≤ −0.5×risk → skip scratch, serahkan ke SL
 
 # G4: rugpull detection constants
 RUGPULL_CANDLES       = 5     # 5×1m candles = 5-minute window
 RUGPULL_BASE_PCT      = 5.0   # minimum adverse-move threshold
-RUGPULL_MIN_HOLD_MIN  = 5.0   # skip if held < 5 min (noise at open)
+RUGPULL_MIN_HOLD_MIN  = 10.0  # PLAN_v11 B3: 5→10 min — hindari panic-exit di noise buka posisi
+RUGPULL_CONFIRM_MULT  = 1.2   # PLAN_v11 B3: adverse move harus 1.2× ambang (bukan pas-pasan) → flash asli
 
 # G5b: absolute profit lock — tier thresholds (peak_pnl → lock if drop below fraction)
+# PLAN_v11 P3: tier tinggi (100%/300% margin) untuk pump besar — 1000% tak boleh menguap.
+# Urut tertinggi dulu supaya lock paling ketat yang berlaku.
 _PROFIT_LOCK_TIERS = [
+    (300.0, 0.90),  # peak ≥ 300%: beri balik maks 10%
+    (100.0, 0.85),  # peak ≥ 100%: beri balik maks 15%
     (40.0, 0.75),   # peak ≥ 40%: lock at 75% of peak
     (25.0, 0.70),   # peak ≥ 25%: lock at 70% of peak
     (15.0, 0.60),   # peak ≥ 15%: lock at 60% of peak
@@ -707,7 +716,7 @@ async def check_futures_positions() -> tuple[int, int]:
                 _atr_pct_g4  = float(meta.get("atr_pct", 0.0) or 0.0)
                 _rp_thresh   = _rugpull_threshold(_atr_pct_g4)
                 _adverse_pct = _flash_adverse_pct(_k1m_g4, direction)
-                if _adverse_pct > _rp_thresh:
+                if _adverse_pct > _rp_thresh * RUGPULL_CONFIRM_MULT:   # PLAN_v11 B3: butuh konfirmasi jelas
                     new_status   = "sl"
                     close_price  = round(price, 8)
                     close_reason = "flash_dump_exit" if direction == "LONG" else "flash_pump_exit"
@@ -842,7 +851,13 @@ async def check_futures_positions() -> tuple[int, int]:
                     if _hold_min >= _ts_min:
                         _risk_dist = abs(entry - (trade.stop_loss or entry))
                         _fav = (price - entry) if direction == "LONG" else (entry - price)
-                        if _risk_dist > 0 and _fav < TIME_STOP_PROGRESS_FRAC * _risk_dist:
+                        # PLAN_v11 B2: scratch HANYA saat stagnan (fav antara −0.5×risk
+                        # dan +0.5×risk). Loser lebih dalam → biar SL asli, jangan
+                        # realisasi loss besar berlabel "scratch".
+                        _stagnant = (_risk_dist > 0
+                                     and _fav < TIME_STOP_PROGRESS_FRAC * _risk_dist
+                                     and _fav > -TIME_STOP_LOSS_GUARD_FRAC * _risk_dist)
+                        if _stagnant:
                             new_status   = "tp" if _pnl_now_pct > (ROUND_TRIP * 100) else "sl"
                             close_price  = round(price, 8)
                             close_reason = "time_stop_scratch"
@@ -893,13 +908,15 @@ async def check_futures_positions() -> tuple[int, int]:
                             price=round(price, 6), sl=round(sl, 6),
                         )
 
-            # ── 0b. TP4 extension (F78) — must run before auto-close so tp2 is updated ──
-            if (not new_status
-                    and meta.get("tp_extended")
-                    and not meta.get("tp4_extended")):
-                _tp3_hit = (direction == "LONG" and eff_high >= tp2) or \
-                           (direction == "SHORT" and eff_low <= tp2)
-                if _tp3_hit:
+            # ── 0b. PLAN_v11 P3 — UNBOUNDED dynamic TP ladder (TP4..TP-n) ─────
+            # Ride winner tanpa cap: tiap kali harga menembus target sekarang &
+            # gate masih kuat (score≥65), geser target +1 step DAN ratchet trail
+            # SL ke target sebelumnya. Profit yang lewat terkunci (tak hilang) —
+            # winner leverage bisa lari sampai TP-n / 1000%. (Dulu berhenti di TP4.)
+            if not new_status and meta.get("tp_extended"):
+                _rung_hit = (direction == "LONG" and eff_high >= tp2) or \
+                            (direction == "SHORT" and eff_low <= tp2)
+                if _rung_hit:
                     _cur_score4 = 0
                     try:
                         from agents.futures import store as futures_store
@@ -912,29 +929,38 @@ async def check_futures_positions() -> tuple[int, int]:
                                     break
                     except Exception:
                         pass
-                    _score4 = _cur_score4 or (trade.probability or 0)
+                    _score4   = _cur_score4 or (trade.probability or 0)
                     _orig_tp2 = float(meta.get("tp2") or 0)
-                    if _score4 >= 65 and _orig_tp2 > 0:
-                        # tp2 local var currently = tp3 level (after TP3 extension)
-                        _tp3_level = tp2
-                        if direction == "LONG":
-                            _tp4 = round(_tp3_level + (_tp3_level - _orig_tp2) * 1.2, 8)
-                        else:
-                            _tp4 = round(_tp3_level - (_orig_tp2 - _tp3_level) * 1.2, 8)
-                        trade.take_profit  = _tp4
-                        tp2                = _tp4   # update local var so step 1 sees new target
-                        trade.trail_sl     = round(_orig_tp2, 8)  # lock SL at original TP2
-                        trade.trail_active = True
-                        meta["tp4_extended"] = True
-                        meta["tp4"]          = _tp4
-                        trade.signals_json   = json.dumps(meta, ensure_ascii=False)
+                    # step ladder konsisten: jarak TP3→TP2 asli (fallback TP2→TP1)
+                    _step = float(meta.get("tp_ladder_step", 0.0))
+                    if _step <= 0:
+                        _step = abs(tp2 - _orig_tp2) if _orig_tp2 > 0 else abs(tp2 - tp1)
+                    if _score4 >= 65 and _step > 0:
+                        _prev_target = tp2
+                        _next = round(_prev_target + _step, 8) if direction == "LONG" \
+                                else round(_prev_target - _step, 8)
+                        trade.take_profit = _next
+                        tp2               = _next   # step 1 lihat target baru
+                        # ratchet trail ke target sebelumnya — lock profit (monoton naik)
+                        _lock = round(_prev_target, 8)
+                        if (not trail_active
+                                or (direction == "LONG"  and (trade.trail_sl or 0.0)  < _lock)
+                                or (direction == "SHORT" and (trade.trail_sl or 1e18) > _lock)):
+                            trade.trail_sl     = _lock
+                            trade.trail_active = True
+                            trail_active       = True
+                            sl                 = _lock
+                        _rung = int(meta.get("tp_rung", 3)) + 1
+                        meta["tp_rung"]        = _rung
+                        meta["tp_ladder_step"] = _step
+                        meta["tp4_extended"]   = True   # kompat label tp4_hit di step 1
+                        trade.signals_json     = json.dumps(meta, ensure_ascii=False)
                         _tp_extended += 1
                         updated      += 1
                         logger.info(
-                            "tp_extended_to_tp4",
-                            symbol=trade.symbol, direction=direction,
-                            tp3=round(_tp3_level, 6), tp4=round(_tp4, 6),
-                            sl_locked_at=round(_orig_tp2, 6), score=_score4,
+                            "tp_ladder_extended",
+                            symbol=trade.symbol, direction=direction, rung=_rung,
+                            new_target=round(_next, 6), sl_locked=round(_lock, 6), score=_score4,
                         )
 
             # ── 1. Auto-close: SL or TP2 hit (BUG-L8: wick-aware; SL wins if both) ──
@@ -1365,7 +1391,7 @@ async def check_futures_positions() -> tuple[int, int]:
                     except Exception:
                         pass
                     score = _cur_score or (trade.probability or 0)
-                    if score >= 70:
+                    if score >= 65:   # PLAN_v11 P3: 70→65 — biar ladder benar-benar aktif (dulu "TP Extended: 0")
                         trade.take_profit = tp3
                         # F81: lock SL at TP1 when extending to TP3
                         _curr_trail = trade.trail_sl or 0.0

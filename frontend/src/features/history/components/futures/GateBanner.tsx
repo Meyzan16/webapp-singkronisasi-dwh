@@ -36,6 +36,20 @@ export function GateBanner({ gate }: { gate: GateState | undefined }) {
               <span className="opacity-60 text-neutral-500">{gate.n_trades} trade tertutup</span>
             </div>
           )}
+          {/* PLAN_v11 P1 — jawab "kapan berakhir": Sharpe rolling + probe schedule */}
+          {isRAR && (
+            <div className="mt-2 text-[11px] text-orange-800 bg-orange-100/60 rounded-lg px-2.5 py-1.5 leading-relaxed">
+              <strong>Kapan berakhir?</strong> Sharpe dihitung dari{" "}
+              <strong>{gate.rar_window ?? 20} trade terakhir</strong> (rolling) — gate akan
+              terbuka begitu performa terbaru membaik. Untuk memecah kebuntuan, agent
+              membuka <strong>1 posisi probe ½-risk</strong>{" "}
+              {gate.probe_allowed
+                ? "sekarang (jatuh tempo)."
+                : gate.next_probe_in_sec != null
+                ? `dalam ~${Math.ceil((gate.next_probe_in_sec ?? 0) / 60)} menit.`
+                : "berkala."}
+            </div>
+          )}
         </div>
       </div>
     </div>

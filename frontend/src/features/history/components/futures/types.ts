@@ -80,6 +80,10 @@ export interface GateState {
   n_trades:      number;
   dd_threshold:  number;
   rar_threshold: number;
+  // PLAN_v11 P1 — anti-deadlock transparansi
+  rar_window?:        number;
+  probe_allowed?:     boolean;
+  next_probe_in_sec?: number | null;
 }
 
 export interface LearningStats {

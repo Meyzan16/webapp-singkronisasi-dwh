@@ -568,12 +568,12 @@ def _calc_levels(
         s_lows  = _swing_lows(ref.lows, lookback=4)
         below   = [s for s in s_lows if s < price * 0.999]
         swing_sl = max(below) if below else min(ref.lows[-15:])
-        sl       = swing_sl - atr * 0.25   # tighter buffer for momentum
+        sl       = swing_sl - atr * 0.5    # PLAN_v11 B1: buffer lebih lebar (was 0.25) — kurangi noise stop-out
         risk     = price - sl
         risk_pct = risk / price * 100
 
         # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
-        min_sl_pct = max(MIN_SL_PCT, atr_pct * 0.8)
+        min_sl_pct = max(MIN_SL_PCT, atr_pct * 1.0)   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
         if risk_pct > 7.0:
             sl       = price - atr * 1.2
             risk     = price - sl
@@ -601,12 +601,12 @@ def _calc_levels(
         s_highs  = _swing_highs(ref.highs, lookback=4)
         above    = [h for h in s_highs if h > price * 1.001]
         swing_sl = min(above) if above else max(ref.highs[-15:])
-        sl       = swing_sl + atr * 0.25
+        sl       = swing_sl + atr * 0.5    # PLAN_v11 B1: buffer lebih lebar (was 0.25)
         risk     = sl - price
         risk_pct = risk / price * 100
 
         # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
-        min_sl_pct = max(MIN_SL_PCT, atr_pct * 0.8)
+        min_sl_pct = max(MIN_SL_PCT, atr_pct * 1.0)   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
         if risk_pct > 7.0:
             sl       = price + atr * 1.2
             risk     = sl - price

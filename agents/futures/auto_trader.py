@@ -159,13 +159,22 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     regime = get_cached_regime()
 
     # Phase 10: risk gate — circuit-breaker (DD > 20%) + RAR gate (Sharpe < −0.5)
-    from agents.futures.risk_gate import is_gate_open, is_state_stale, evaluate_risk_gate
+    from agents.futures.risk_gate import (
+        is_gate_open, is_state_stale, evaluate_risk_gate, probe_allowed, record_probe,
+    )
     if is_state_stale():
         await evaluate_risk_gate()
     gate_open, gate_reason = is_gate_open()
+    # PLAN_v11 A2: RAR deadlock breaker — jika gate RAR tertutup tapi probe jatuh
+    # tempo, izinkan SATU posisi ½-risk agar ada data baru pemulih Sharpe.
+    _is_probe = False
     if not gate_open:
-        logger.info("auto_trade_gate_blocked", reason=gate_reason)
-        return 0
+        if probe_allowed():
+            _is_probe = True
+            logger.info("auto_trade_rar_probe", reason=gate_reason)
+        else:
+            logger.info("auto_trade_gate_blocked", reason=gate_reason)
+            return 0
 
     # Dedup by symbol — keep the highest-score candidate (global ranking, BUG-L1).
     # Per-candidate adaptive threshold (its own lane) + ranging bar; BUG-L12 volatile gate.
@@ -360,6 +369,11 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             risk_dollar_val = sizing["risk_dollar"]
             bal_snapshot    = sizing["balance"]
 
+            # PLAN_v11 A2: probe = ½-risk (batasi kerugian saat gate RAR masih aktif)
+            if _is_probe:
+                pos_size        = round(pos_size * 0.5, 2)
+                risk_dollar_val = round(risk_dollar_val * 0.5, 2)
+
             # PLAN_v6 P4a/P4c: apply size reductions — agent-signal size_mult
             # (bigmover G18 hot-entry / extreme tier) × funding soft-zone mult.
             _size_mult = float(sig.get("size_mult", 1.0) or 1.0) * funding_mult
@@ -446,8 +460,13 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 agent=agent, symbol=symbol, setup_type=sig.get("setup_type"),
                 direction=sig.get("direction"), score=sig.get("score"),
                 leverage=sig.get("leverage"), entry=sig.get("entry"),
-                pos_size=pos_size, risk_dollar=risk_dollar_val,
+                pos_size=pos_size, risk_dollar=risk_dollar_val, probe=_is_probe,
             )
+
+            # PLAN_v11 A2: probe = tepat SATU posisi. Catat & hentikan siklus.
+            if _is_probe:
+                record_probe()
+                break
 
     return opened
 
