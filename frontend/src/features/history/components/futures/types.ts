@@ -27,6 +27,11 @@ export interface FuturesPosition {
   current_price:         number | null;
   unrealized_pnl:        number | null;
   unrealized_pnl_dollar: number | null;
+  close_reason:          string | null;
+  // PLAN_v12 P3 — TP ladder dinamis
+  tp_rung?:              number | null;
+  trail_sl?:             number | null;
+  is_runner?:            boolean;
 }
 
 export interface MonitorEvent {

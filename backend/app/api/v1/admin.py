@@ -27,11 +27,20 @@ router = APIRouter(tags=["admin"])
 CONFIRM_TOKEN = "RESET_ALL"
 
 
+_FUTURES_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover"]
+_SPOT_STYLES    = ["opportunity_spot"]
+
+
 class ResetBody(BaseModel):
     confirm: str = Field(..., description=f"Must equal {CONFIRM_TOKEN!r}")
     preserve_initial_deposit: bool = Field(
         default=True,
         description="Keep paper_balances rows; reset balance to initial_balance + deposits - withdrawals.",
+    )
+    # PLAN_v12 P4 — batasi reset ke satu market. "all" = perilaku lama (kompat).
+    scope: str = Field(
+        default="all",
+        description="'all' | 'spot' | 'futures' — which market's trades+balance to wipe.",
     )
 
 
@@ -58,54 +67,60 @@ async def reset_simulation(body: ResetBody) -> dict:
     if body.confirm != CONFIRM_TOKEN:
         raise HTTPException(status_code=400, detail=f"confirm must equal {CONFIRM_TOKEN!r}")
 
-    summary: dict[str, int] = {}
+    scope = body.scope if body.scope in ("all", "spot", "futures") else "all"
+    summary: dict[str, int] = {"scope": scope}
 
     async with AsyncSessionLocal() as session:
-        # 1. paper_trades — all styles (futures + spot + legacy scanner)
-        r = await session.execute(delete(PaperTrade))
+        # 1. paper_trades — scoped ke market yang diminta (SPOT aman saat scope=futures)
+        if scope == "all":
+            r = await session.execute(delete(PaperTrade))
+        else:
+            _styles = _FUTURES_STYLES if scope == "futures" else _SPOT_STYLES
+            r = await session.execute(delete(PaperTrade).where(PaperTrade.style.in_(_styles)))
         summary["paper_trades"] = r.rowcount or 0
 
-        # 2. agent_signal_weights
-        r = await session.execute(delete(AgentSignalWeight))
-        summary["agent_signal_weights"] = r.rowcount or 0
+        # 2-5. Wipe learning/log tables HANYA saat scope=all (shared antar-market —
+        # jangan sentuh saat reset satu market agar market lain tak terganggu).
+        if scope == "all":
+            r = await session.execute(delete(AgentSignalWeight))
+            summary["agent_signal_weights"] = r.rowcount or 0
+            r = await session.execute(delete(SignalWeightHistory))
+            summary["signal_weight_history"] = r.rowcount or 0
+            r = await session.execute(delete(HealthEvent))
+            summary["health_events"] = r.rowcount or 0
+            for sql in [
+                "DELETE FROM balance_transactions",
+                "DELETE FROM weekly_backtest_result",
+                "DELETE FROM force_open_log",
+                "DELETE FROM big_mover_log",
+            ]:
+                try:
+                    r = await session.execute(text(sql))
+                    summary[sql.split()[-1]] = r.rowcount or 0
+                except Exception as exc:
+                    logger.warning("reset_table_skipped", sql=sql, error=str(exc)[:80])
+                    summary[sql.split()[-1]] = -1
 
-        # 3. signal_weight_history
-        r = await session.execute(delete(SignalWeightHistory))
-        summary["signal_weight_history"] = r.rowcount or 0
-
-        # 4. health_events
-        r = await session.execute(delete(HealthEvent))
-        summary["health_events"] = r.rowcount or 0
-
-        # 5. Ancillary tables that may not have ORM classes loaded here — raw SQL.
-        for sql in [
-            "DELETE FROM balance_transactions",
-            "DELETE FROM weekly_backtest_result",
-            "DELETE FROM force_open_log",
-            "DELETE FROM big_mover_log",
-        ]:
-            try:
-                r = await session.execute(text(sql))
-                summary[sql.split()[-1]] = r.rowcount or 0
-            except Exception as exc:
-                # Table may not exist on a fresh DB — log and continue.
-                logger.warning("reset_table_skipped", sql=sql, error=str(exc)[:80])
-                summary[sql.split()[-1]] = -1
-
-        # 6. paper_balances — reset to base equity or delete entirely
+        # 6. paper_balances — reset ke base equity (scoped ke market bila bukan all)
+        _bal_where = "" if scope == "all" else " WHERE style = :style"
+        _params: dict = {"now": time.time()}
+        if scope != "all":
+            _params["style"] = scope
         if body.preserve_initial_deposit:
             r = await session.execute(
                 text(
                     "UPDATE paper_balances "
                     "SET balance = initial_balance + deposited_total - withdrawn_total, "
                     "    realized_pnl = 0.0, "
-                    "    updated_at = :now"
+                    "    updated_at = :now" + _bal_where
                 ),
-                {"now": time.time()},
+                _params,
             )
             summary["paper_balances_reset"] = r.rowcount or 0
         else:
-            r = await session.execute(text("DELETE FROM paper_balances"))
+            r = await session.execute(
+                text("DELETE FROM paper_balances" + _bal_where), _params
+            )
             summary["paper_balances_deleted"] = r.rowcount or 0
 
         await session.commit()

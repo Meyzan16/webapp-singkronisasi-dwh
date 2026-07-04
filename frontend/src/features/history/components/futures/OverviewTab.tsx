@@ -1,11 +1,10 @@
 "use client";
 import { useState } from "react";
 import { WinRateBar } from "@/components/ui/stat-card";
-import { FuturesWallet } from "../FuturesWallet";
+import { ChartCarousel, type CarouselSlide } from "@/components/ui/chart-carousel";
 import { DBHistoryTable } from "@/features/health/components/DBHistoryTable";
 import { GateBanner } from "./GateBanner";
 import { OpenPosCard } from "./OpenPosCard";
-import { BigMoversWatchlist } from "./BigMoversWatchlist";
 import { PnlCalendar } from "../PnlCalendar";
 import type { OppPosition } from "../OppSpotTypes";
 import type { FuturesPosition, RiskDashboard, LearningStats, RiskPosition } from "./types";
@@ -42,6 +41,7 @@ interface Props {
     bm: { total: number; wins: number; rate: number; pnl$: number };
   };
   autoThreshold:   number | null;
+  autoPerAgent:    Record<string, number>;   // PLAN_v12 P2-B4
   agentFilter:     "all" | "agent1" | "agent2" | "agent3" | "agent_bigmover";
   setAgentFilter:  (f: "all" | "agent1" | "agent2" | "agent3" | "agent_bigmover") => void;
   countdown:       number;
@@ -56,8 +56,8 @@ interface Props {
 type AgentKey = "agent1" | "agent2" | "agent3" | "agent_bigmover";
 
 export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
-  equityPoints, stats, autoThreshold, agentFilter, setAgentFilter,
-  countdown, lastUpdated, loading, calendarMap, closedTrades, onRefresh, onWalletChanged }: Props) {
+  equityPoints, stats, agentFilter, setAgentFilter,
+  countdown, lastUpdated, loading, calendarMap, closedTrades, autoPerAgent, onRefresh }: Props) {
 
   const [selectedMonth, setSelectedMonth] = useState("all");
 
@@ -128,10 +128,8 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
         )}
       </div>
 
-      <FuturesWallet onChanged={onWalletChanged} />
-
-      {/* Phase 1 T1 — Big Movers Watchlist (manual override) */}
-      <BigMoversWatchlist onChanged={onRefresh} />
+      {/* PLAN_v12 P6-F0: panel "Dompet Futures" dibuang (duplikat balance banner).
+          P6-F4: Big Movers Watchlist dipindah ke halaman Futures Market. */}
 
       {/* Open positions */}
       {hasOpen && (
@@ -193,9 +191,16 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
           return (
             <div key={a.key} onClick={() => setAgentFilter(agentFilter === a.key ? "all" : a.key)}
               className={`rounded-2xl border-2 p-4 cursor-pointer transition-all ${agentFilter === a.key ? `${borderCls} ring-2 ring-offset-1 ${ringCls}` : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
-              <div className="flex items-center gap-2 mb-2">
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
                 <span className="text-lg">{a.emoji}</span>
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${badgeCls}`}>{a.label}</span>
+                {/* PLAN_v12 P2-B4: threshold auto-open ADAPTIF per-agent (bukan "≥72" tunggal) */}
+                {autoPerAgent[`futures_${a.key}`] != null && (
+                  <span className="text-[9px] font-semibold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded"
+                    title="Threshold auto-open adaptif untuk agent ini">
+                    auto ≥{autoPerAgent[`futures_${a.key}`]}
+                  </span>
+                )}
               </div>
               {a.data.total > 0 ? (
                 <>
@@ -211,45 +216,7 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
         })}
       </div>
 
-      {/* Monthly win rate */}
-      {learning?.monthly_stats && learning.monthly_stats.length > 0 && (
-        <div className="bg-white border border-neutral-200 rounded-2xl p-4">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">📅 Win Rate Bulanan — per Strategi</p>
-            <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
-              className="text-xs border border-neutral-200 rounded-lg px-2 py-1 bg-white text-neutral-700 focus:outline-none">
-              <option value="all">Semua bulan</option>
-              {learning.monthly_stats.map(m => <option key={m.month} value={m.month}>{fmtMonth(m.month)}</option>)}
-            </select>
-          </div>
-          <div className="space-y-3">
-            {learning.monthly_stats.filter(m => selectedMonth === "all" || m.month === selectedMonth).map(m => (
-              <div key={m.month} className={`rounded-xl p-3 ${selectedMonth === m.month ? "bg-teal-50 border border-teal-200" : "bg-neutral-50"}`}>
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-bold text-neutral-700">{fmtMonth(m.month)}</p>
-                  <div className="flex gap-3 text-[10px] text-neutral-500">
-                    <span>Pre: {m.agent1.wins}/{m.agent1.total}</span>
-                    <span>Acc: {m.agent2.wins}/{m.agent2.total}</span>
-                    {m.agent3 && <span>Momo: {m.agent3.wins}/{m.agent3.total}</span>}
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <WinRateBar rate={m.agent1.win_rate} label={`🎯 Pre-Gainer: ${m.agent1.win_rate.toFixed(0)}%`} />
-                  <WinRateBar rate={m.agent2.win_rate} label={`📦 Accumulation: ${m.agent2.win_rate.toFixed(0)}%`} />
-                  {m.agent3 && <WinRateBar rate={m.agent3.win_rate} label={`🔥 Momentum: ${m.agent3.win_rate.toFixed(0)}%`} />}
-                </div>
-              </div>
-            ))}
-          </div>
-          {selectedMonth !== "all" && (
-            <div className="mt-2 text-center">
-              <button onClick={() => setSelectedMonth("all")} className="text-xs text-neutral-400 hover:text-neutral-600 underline">Tampilkan semua bulan</button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Regime + monitor status */}
+      {/* Regime + monitor status — chip ringkas (di luar carousel) */}
       {learning && (
         <div className="flex flex-wrap gap-2 items-center">
           {(() => {
@@ -276,66 +243,98 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
         </div>
       )}
 
-      {/* Win rate trend */}
-      {learning && learning.win_rate_trend.length > 2 && (
-        <div className="bg-white border border-neutral-200 rounded-2xl p-4">
-          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-3">📊 Win Rate Trend (rolling 10 trades)</p>
-          <div className="flex items-end gap-0.5 h-12">
-            {learning.win_rate_trend.map((pt, i) => {
-              const h = Math.max((pt.win_rate / 100) * 100, 4);
-              const cls = pt.win_rate >= TARGET_WIN_RATE ? "bg-green-500" : pt.win_rate >= 50 ? "bg-yellow-400" : "bg-red-400";
-              return <div key={i} title={`Trade #${pt.trade_n}: ${pt.win_rate}%`} className={`flex-1 min-w-[4px] rounded-t ${cls}`} style={{ height: `${h}%` }} />;
-            })}
-          </div>
-          <div className="flex justify-between text-[9px] text-neutral-400 mt-1">
-            <span>0%</span>
-            <span className="text-green-600 font-semibold">Target {TARGET_WIN_RATE}%</span>
-            <span>100%</span>
-          </div>
-        </div>
-      )}
+      {/* PLAN_v12 P6 F1-F3 — chart analitik dalam CAROUSEL (ringkas, 1 terlihat) */}
+      {(() => {
+        const slides: CarouselSlide[] = [];
+        if (closedTrades.length > 0) {
+          slides.push({ key: "cal", label: "📆 Kalender", node: (
+            <PnlCalendar calendarMap={calendarMap} closedTrades={closedTrades as unknown as OppPosition[]} balance={stats.currentBalance} />
+          )});
+        }
+        if (equityPoints.length > 1) {
+          slides.push({ key: "eq", label: "📈 Balance", node: (
+            <div className="p-1">
+              <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-3">📈 Pertumbuhan Balance (per trade)</p>
+              <div className="flex items-end gap-0.5 h-16">
+                {equityPoints.map((pt, i) => {
+                  const minBal = Math.min(...equityPoints.map(p => p.balance));
+                  const maxBal = Math.max(...equityPoints.map(p => p.balance));
+                  const heightPct = ((pt.balance - minBal) / Math.max(maxBal - minBal, 1)) * 100;
+                  return (
+                    <div key={i} title={pt.n === 0 ? `Start $${pt.balance.toFixed(0)}` : `#${pt.n} ${pt.symbol} → $${pt.balance.toFixed(0)}`}
+                      className={`flex-1 min-w-[3px] rounded-t transition-all ${i === 0 ? "bg-neutral-300" : pt.win ? "bg-green-400" : "bg-red-400"}`}
+                      style={{ height: `${Math.max(heightPct, 5)}%` }} />
+                  );
+                })}
+              </div>
+              <div className="flex justify-between text-[9px] text-neutral-400 mt-1">
+                <span>${startingBalance.toLocaleString()} start</span>
+                <span className={`font-bold ${balanceColor}`}>${stats.currentBalance.toFixed(0)} sekarang</span>
+              </div>
+            </div>
+          )});
+        }
+        if (learning && learning.win_rate_trend.length > 2) {
+          slides.push({ key: "trend", label: "📊 WR Trend", node: (
+            <div className="p-1">
+              <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-3">📊 Win Rate Trend (rolling 10 trades)</p>
+              <div className="flex items-end gap-0.5 h-12">
+                {learning.win_rate_trend.map((pt, i) => {
+                  const h = Math.max((pt.win_rate / 100) * 100, 4);
+                  const cls = pt.win_rate >= TARGET_WIN_RATE ? "bg-green-500" : pt.win_rate >= 50 ? "bg-yellow-400" : "bg-red-400";
+                  return <div key={i} title={`Trade #${pt.trade_n}: ${pt.win_rate}%`} className={`flex-1 min-w-[4px] rounded-t ${cls}`} style={{ height: `${h}%` }} />;
+                })}
+              </div>
+              <div className="flex justify-between text-[9px] text-neutral-400 mt-1">
+                <span>0%</span><span className="text-green-600 font-semibold">Target {TARGET_WIN_RATE}%</span><span>100%</span>
+              </div>
+            </div>
+          )});
+        }
+        if (learning?.monthly_stats && learning.monthly_stats.length > 0) {
+          slides.push({ key: "month", label: "🗓 Bulanan", node: (
+            <div className="p-1">
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">📅 Win Rate Bulanan — per Strategi</p>
+                <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}
+                  className="text-xs border border-neutral-200 rounded-lg px-2 py-1 bg-white text-neutral-700 focus:outline-none">
+                  <option value="all">Semua bulan</option>
+                  {learning.monthly_stats.map(m => <option key={m.month} value={m.month}>{fmtMonth(m.month)}</option>)}
+                </select>
+              </div>
+              <div className="space-y-3">
+                {learning.monthly_stats.filter(m => selectedMonth === "all" || m.month === selectedMonth).map(m => (
+                  <div key={m.month} className={`rounded-xl p-3 ${selectedMonth === m.month ? "bg-teal-50 border border-teal-200" : "bg-neutral-50"}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs font-bold text-neutral-700">{fmtMonth(m.month)}</p>
+                      <div className="flex gap-3 text-[10px] text-neutral-500">
+                        <span>Pre: {m.agent1.wins}/{m.agent1.total}</span>
+                        <span>Acc: {m.agent2.wins}/{m.agent2.total}</span>
+                        {m.agent3 && <span>Momo: {m.agent3.wins}/{m.agent3.total}</span>}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <WinRateBar rate={m.agent1.win_rate} label={`🎯 Pre-Gainer: ${m.agent1.win_rate.toFixed(0)}%`} />
+                      <WinRateBar rate={m.agent2.win_rate} label={`📦 Accumulation: ${m.agent2.win_rate.toFixed(0)}%`} />
+                      {m.agent3 && <WinRateBar rate={m.agent3.win_rate} label={`🔥 Momentum: ${m.agent3.win_rate.toFixed(0)}%`} />}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )});
+        }
+        return slides.length > 0 ? <ChartCarousel slides={slides} /> : null;
+      })()}
 
-      {/* Equity chart */}
-      {equityPoints.length > 1 && (
-        <div className="bg-white border border-neutral-200 rounded-2xl p-4">
-          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-3">📈 Pertumbuhan Balance (per trade)</p>
-          <div className="flex items-end gap-0.5 h-16">
-            {equityPoints.map((pt, i) => {
-              const minBal    = Math.min(...equityPoints.map(p => p.balance));
-              const maxBal    = Math.max(...equityPoints.map(p => p.balance));
-              const heightPct = ((pt.balance - minBal) / Math.max(maxBal - minBal, 1)) * 100;
-              return (
-                <div key={i} title={pt.n === 0 ? `Start $${pt.balance.toFixed(0)}` : `#${pt.n} ${pt.symbol} → $${pt.balance.toFixed(0)}`}
-                  className={`flex-1 min-w-[3px] rounded-t transition-all ${i === 0 ? "bg-neutral-300" : pt.win ? "bg-green-400" : "bg-red-400"}`}
-                  style={{ height: `${Math.max(heightPct, 5)}%` }} />
-              );
-            })}
-          </div>
-          <div className="flex justify-between text-[9px] text-neutral-400 mt-1">
-            <span>${startingBalance.toLocaleString()} start</span>
-            <span className={`font-bold ${balanceColor}`}>${stats.currentBalance.toFixed(0)} sekarang</span>
-          </div>
-        </div>
-      )}
-
-      {/* PLAN_v11 P5 E1 — P&L Calendar harian (reuse komponen SPOT) */}
-      {closedTrades.length > 0 && (
-        <PnlCalendar
-          calendarMap={calendarMap}
-          closedTrades={closedTrades as unknown as OppPosition[]}
-          balance={stats.currentBalance}
-        />
-      )}
-
-      {/* Position sizing info */}
+      {/* Position sizing info — PLAN_v12 P2-B4: Auto-Open dibuang (beda per-agent, ada di kartu agent) */}
       <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
         <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">💡 Logika Position Sizing (real-wallet + portfolio heat)</p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+        <div className="grid grid-cols-3 gap-3 text-center">
           {[
             { label: "Modal Awal",   value: `$${startingBalance.toLocaleString()}`,          sub: "paper balance"   },
             { label: "Risk/Trade",   value: `$${riskDollar.toFixed(0)} (1%)`,                sub: "fixed per trade" },
             { label: "R:R Minimum",  value: "1 : 3",                                         sub: `win $${(riskDollar * 3).toFixed(0)}, lose $${riskDollar.toFixed(0)}` },
-            { label: "Auto-Open",    value: autoThreshold != null ? `≥ ${autoThreshold}pt` : "—", sub: "score threshold" },
           ].map(x => (
             <div key={x.label} className="bg-white/60 rounded-xl p-2.5">
               <p className="text-[10px] text-amber-600 font-semibold">{x.label}</p>

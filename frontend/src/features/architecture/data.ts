@@ -620,13 +620,25 @@ export const FUTURES_MONITOR_LAYERS = [
     label: "TP Extension (F81)",
     emoji: "🚀",
     color: "bg-purple-50 border-purple-200",
-    detail: "Saat TP1 hit DAN current_score ≥ 70:\n→ Target baru = TP3 (skip TP2)\n→ SL lock di TP1\n→ reason = tp3_extended",
+    detail: "Saat TP1 hit DAN current_score ≥ 65 (PLAN_v11):\n→ Target baru = TP3 (skip TP2)\n→ SL lock di TP1\n→ mode runner aktif",
   },
   {
-    label: "TP4 Extension (F78)",
-    emoji: "🌙",
+    label: "Dynamic TP Ladder — TP4..TP-n (PLAN_v11)",
+    emoji: "🪜",
     color: "bg-indigo-50 border-indigo-200",
-    detail: "Saat TP3 hit DAN NOT tp4_extended DAN score ≥ 65:\n→ tp4 = tp3 + (tp3 − original_tp2) × 1.2\n→ SL lock di original TP2\n→ reason = tp4_extended",
+    detail: "UNBOUNDED (dulu berhenti di TP4). Tiap target ditembus & score ≥ 65:\n→ geser target +1 step (jarak TP3→TP2)\n→ ratchet trail SL ke target sebelumnya (profit terkunci)\n→ ride winner sampai TP-n / 1000%; reason = tp4_hit/tp_ladder_hit",
+  },
+  {
+    label: "Time-Stop Scratch (PLAN_v6/v11)",
+    emoji: "⏱",
+    color: "bg-amber-50 border-amber-200",
+    detail: "Belum hit TP1 & stagnan dalam budget waktu (momentum/bigmover 90m, pregain/accum 6h):\n→ HANYA jika fav ∈ [−0.5×risk, +0.5×risk] (stagnan) → scratch\n→ loser lebih dalam diserahkan ke SL asli (PLAN_v11 B2)\n→ reason = time_stop_scratch",
+  },
+  {
+    label: "Absolute Profit Lock (PLAN_v11)",
+    emoji: "🔒",
+    color: "bg-green-50 border-green-200",
+    detail: "Lock jika harga jatuh dari peak. Tier tinggi untuk pump besar:\npeak ≥ 300% → beri balik maks 10% | ≥ 100% → maks 15%\n≥ 40%/25%/15% → 25%/30%/40%; reason = absolute_profit_lock",
   },
   {
     label: "Rugpull Detection (G4)",
@@ -669,8 +681,8 @@ export const RISK_GATE = {
     { wallet: "≥ $1500",  hardStop: "20%", recover: "10%" },
   ],
   rarGate: {
-    formula: "Sharpe proxy = mean(pnl_series) / stdev(pnl_series)",
-    trigger: "Sharpe < −0.5 DAN n_trades ≥ 10 → GATE CLOSED",
+    formula: "Sharpe proxy = mean / stdev dari 20 trade TERAKHIR (rolling, PLAN_v11)",
+    trigger: "Sharpe < −0.5 DAN n ≥ 10 → CLOSED. Anti-deadlock: probe ½-risk tiap 6 jam saat aktif (hasilkan data pemulih); ambang longgar −0.8 saat regime bullish & DD rendah",
   },
   laneWRPause: {
     rolling: 20,

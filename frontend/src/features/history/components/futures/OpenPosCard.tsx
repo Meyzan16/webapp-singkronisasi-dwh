@@ -45,7 +45,15 @@ export function OpenPosCard({ p, risk, riskDollar }: {
         <DirBadge dir={p.direction} size="xs" />
         <span className="text-[9px] bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded">{p.leverage}x</span>
         {risk?.auto_opened  && <span className="text-[9px] bg-teal-100 text-teal-700 px-1.5 py-0.5 rounded font-bold border border-teal-200">AUTO</span>}
-        {risk?.trail_active && <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Trailing</span>}
+        {/* PLAN_v12 P3 — TP ladder runner: rung ke berapa + profit terkunci di trail */}
+        {p.is_runner ? (
+          <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold border border-green-200"
+            title={p.trail_sl != null ? `Trail terkunci $${fmtPrice(p.trail_sl)} — profit tak hilang` : "Runner aktif"}>
+            🏃 Riding{p.tp_rung ? ` · rung ${p.tp_rung}` : ""}
+          </span>
+        ) : risk?.trail_active && (
+          <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Trailing</span>
+        )}
         <RiskStatusBadge status={rStatus} />
       </div>
 

@@ -989,7 +989,8 @@ async def check_futures_positions() -> tuple[int, int]:
                         # be the extended TP3 level (see TP Extension below) — was hardcoded
                         # "tp2_hit" even when the level actually hit was the extended TP3.
                         if meta.get("tp4_extended"):
-                            close_reason = "tp4_hit"
+                            # PLAN_v12 P3: rung >4 → label ladder (bukan "TP4" untuk semua)
+                            close_reason = "tp_ladder_hit" if int(meta.get("tp_rung", 4)) > 4 else "tp4_hit"
                         elif meta.get("tp_extended"):
                             close_reason = "tp3_hit"
                         else:
@@ -1013,7 +1014,8 @@ async def check_futures_positions() -> tuple[int, int]:
                         close_price  = tp2
                         # PLAN-SIGNAL-GAP F2: mirror of LONG tp3_hit fix above.
                         if meta.get("tp4_extended"):
-                            close_reason = "tp4_hit"
+                            # PLAN_v12 P3: rung >4 → label ladder (bukan "TP4" untuk semua)
+                            close_reason = "tp_ladder_hit" if int(meta.get("tp_rung", 4)) > 4 else "tp4_hit"
                         elif meta.get("tp_extended"):
                             close_reason = "tp3_hit"
                         else:

@@ -129,7 +129,22 @@ const CLOSE_REASON_META: Record<string, { label: string; color: string; emoji: s
   liq_guard:         { label: "Liq Guard",       color: "bg-red-200 text-red-800",         emoji: "🚨", scope: "futures" },
   stagnant_48h:      { label: "Stagnant 48h",    color: "bg-neutral-100 text-neutral-500", emoji: "💤", scope: "futures" },
   max_age_expired:      { label: "Max Age",          color: "bg-neutral-100 text-neutral-500", emoji: "⏰", scope: "both" },
-  trend_structure_broken: { label: "Structure Break", color: "bg-orange-100 text-orange-700",   emoji: "📉", scope: "spot" },
+  trend_structure_broken: { label: "Structure Break", color: "bg-orange-100 text-orange-700",   emoji: "📉", scope: "both" },
+  // PLAN_v12 P1 — reason futures yang sebelumnya tampil teks mentah (tak ada di legend)
+  time_stop_scratch:  { label: "Time-Stop",      color: "bg-amber-100 text-amber-700",     emoji: "⏱", scope: "futures" },
+  flash_dump_exit:    { label: "Flash Exit",     color: "bg-orange-100 text-orange-700",   emoji: "⚡", scope: "futures" },
+  flash_pump_exit:    { label: "Flash Exit",     color: "bg-orange-100 text-orange-700",   emoji: "⚡", scope: "futures" },
+  sl_hit_fast_loop:   { label: "SL Fast",        color: "bg-red-100 text-red-700",         emoji: "🛑", scope: "futures" },
+  tp4_hit:            { label: "TP4+ Hit",       color: "bg-emerald-100 text-emerald-700", emoji: "🎯", scope: "futures" },
+  tp_ladder_hit:      { label: "TP Ladder",      color: "bg-emerald-100 text-emerald-700", emoji: "🪜", scope: "futures" },
+  stagnant_post_tp1:  { label: "Stagnan pasca-TP1", color: "bg-neutral-100 text-neutral-500", emoji: "💤", scope: "futures" },
+  max_margin_loss:    { label: "Max Loss",       color: "bg-red-200 text-red-800",         emoji: "🛑", scope: "futures" },
+  absolute_profit_lock: { label: "Profit Lock",  color: "bg-green-100 text-green-700",     emoji: "🔒", scope: "both" },
+  funding_window_exit:  { label: "Funding Exit", color: "bg-purple-100 text-purple-700",   emoji: "💸", scope: "futures" },
+  cost_exceeds_profit:  { label: "Cost Gate",    color: "bg-purple-100 text-purple-700",   emoji: "💸", scope: "futures" },
+  cost_exceeds_loss_threshold: { label: "Cost Gate", color: "bg-purple-100 text-purple-700", emoji: "💸", scope: "futures" },
+  emergency_close_circuit_breaker: { label: "Emergency", color: "bg-red-200 text-red-800", emoji: "⛔", scope: "futures" },
+  rotation_stagnant:  { label: "Rotasi Stagnan", color: "bg-blue-100 text-blue-600",       emoji: "🔄", scope: "futures" },
 };
 
 function CloseReasonBadge({ reason }: { reason: string | null }) {
@@ -532,10 +547,13 @@ export function DBHistoryTable({
                           { label: "Score",        val: `${t.score.toFixed(0)} pt` },
                           { label: "R:R",          val: t.rr_ratio ? `1:${t.rr_ratio}` : "—" },
                           { label: "Risk %",       val: `${t.risk_pct.toFixed(2)}%` },
-                          { label: "Notional",     val: t.position_size != null ? `$${t.position_size.toFixed(2)}` : "—" },
-                          { label: "Margin (Jaminan)", val: (t.position_size != null && t.leverage != null) ? `$${(t.position_size / t.leverage).toFixed(2)}` : "—" },
+                          { label: reasonScope === "spot" ? "Modal Spot" : "Notional", val: t.position_size != null ? `$${t.position_size.toFixed(2)}` : "—" },
+                          // PLAN_v12 P5 — Margin & Leverage TAK relevan untuk SPOT (no leverage) → sembunyikan
+                          ...(reasonScope === "spot" ? [] : [
+                            { label: "Margin (Jaminan)", val: (t.position_size != null && t.leverage != null) ? `$${(t.position_size / t.leverage).toFixed(2)}` : "—" },
+                            { label: "Leverage",     val: t.leverage ? `${t.leverage}x` : "—" },
+                          ]),
                           { label: "Risk $",       val: t.risk_dollar != null ? `$${t.risk_dollar.toFixed(2)}` : "—" },
-                          { label: "Leverage",     val: t.leverage ? `${t.leverage}x` : "—" },
                           { label: "P&L Gross",    val: t.pnl_gross_pct != null ? `${t.pnl_gross_pct >= 0 ? "+" : ""}${t.pnl_gross_pct.toFixed(2)}%` : "—" },
                           { label: "Fee",          val: t.fee_pct != null ? `-${t.fee_pct.toFixed(2)}%` : "—" },
                           { label: "TP1 Hit",      val: t.tp1_hit ? "✅ Ya" : "❌ Tidak" },

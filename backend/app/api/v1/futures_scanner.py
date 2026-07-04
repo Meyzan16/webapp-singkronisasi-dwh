@@ -432,6 +432,10 @@ async def get_futures_positions(
             "close_price":           t.close_price,
             "closed_at":             t.closed_at,
             "close_reason":          meta.get("close_reason"),   # PLAN_v8 P2-B2: bedakan exit dikelola dari TP/SL asli
+            # PLAN_v12 P3: TP ladder dinamis — rung ke berapa + trail terkunci (ride winner)
+            "tp_rung":               int(meta.get("tp_rung", 0)) or None,
+            "trail_sl":              t.trail_sl,
+            "is_runner":             bool(t.trail_active and meta.get("tp_extended")),
             "pnl_pct":               t.pnl_pct,
             "pnl_dollar":            t.pnl_dollar,
             "position_size":         t.position_size,
@@ -865,10 +869,21 @@ async def get_force_open_budget(session_id: str = Query("default")) -> dict:
 @router.get("/futures/auto/status")
 async def get_auto_status() -> dict:
     """Get auto-trade status and settings."""
-    from agents.futures.auto_trader import is_auto_enabled, get_auto_threshold, MAX_AUTO_POSITIONS
+    from agents.futures.auto_trader import (
+        is_auto_enabled, get_auto_threshold, MAX_AUTO_POSITIONS, _effective_threshold,
+    )
+    # PLAN_v12 P2-B4: threshold auto-open BEDA per-agent & adaptif — "≥72" tunggal
+    # menyesatkan. Kembalikan per-agent supaya UI bisa tampil badge "auto ≥N".
+    per_agent: dict[str, int] = {}
+    for _a in ("futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover"):
+        try:
+            per_agent[_a] = int(_effective_threshold(_a))
+        except Exception:
+            per_agent[_a] = get_auto_threshold()
     return {
         "enabled":       is_auto_enabled(),
         "threshold":     get_auto_threshold(),   # F102: reflects manual override if set
+        "per_agent":     per_agent,              # PLAN_v12 P2-B4
         "max_positions": MAX_AUTO_POSITIONS,
     }
 

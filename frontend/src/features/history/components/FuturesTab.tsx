@@ -35,6 +35,7 @@ export function FuturesTab() {
   const [agentFilter,  setAgentFilter]  = useState<"all" | "agent1" | "agent2" | "agent3" | "agent_bigmover">("all");
   const [countdown,    setCountdown]    = useState(REFRESH_MS / 1000);
   const [autoThreshold, setAutoThreshold] = useState<number | null>(null);
+  const [autoPerAgent,  setAutoPerAgent]  = useState<Record<string, number>>({});   // PLAN_v12 P2-B4
   const countRef = useRef(REFRESH_MS / 1000);
 
   const fetchPositions = useCallback(async (silent = false) => {
@@ -59,8 +60,9 @@ export function FuturesTab() {
         // always update when no "error" key — let MonitorTab handle empty portfolio gracefully
       }
       if (autoRes.ok) {
-        const ad = await autoRes.json() as { threshold?: number };
+        const ad = await autoRes.json() as { threshold?: number; per_agent?: Record<string, number> };
         if (typeof ad.threshold === "number") setAutoThreshold(ad.threshold);
+        if (ad.per_agent) setAutoPerAgent(ad.per_agent);
       }
       setLastUpdated(new Date());
     } catch { /* stale data shown */ }
@@ -229,7 +231,7 @@ export function FuturesTab() {
         <MonitorTab {...sharedProps} positions={positions} />
       ) : (
         <OverviewTab {...sharedProps}
-          equityPoints={equityPoints} stats={stats} autoThreshold={autoThreshold}
+          equityPoints={equityPoints} stats={stats} autoThreshold={autoThreshold} autoPerAgent={autoPerAgent}
           agentFilter={agentFilter} setAgentFilter={setAgentFilter}
           lastUpdated={lastUpdated} loading={loading}
           calendarMap={calendarMap} closedTrades={closedTrades}

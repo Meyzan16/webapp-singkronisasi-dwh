@@ -5,6 +5,8 @@ import { PctBadge } from "@/components/ui/trading-badges";
 import { type Overview, fmtChangeColor, MOOD_CFG } from "./components/types";
 import { FundingBadge, CoinRow, NewListingCard, HeatTile } from "./components/CoinWidgets";
 import { SentimenTab } from "./components/SentimenTab";
+// PLAN_v12 P6-F4 — watchlist force-open dipindah ke halaman MARKET (konsisten SPOT)
+import { BigMoversWatchlist } from "@/features/history/components/futures/BigMoversWatchlist";
 
 type TabKey = "overview" | "gainers" | "losers" | "new" | "volume" | "sentiment" | "heatmap" | "radar";
 
@@ -203,6 +205,9 @@ export default function FuturesMarketPage() {
           <p className="text-xs text-neutral-400 mt-1">exchangeInfo + premiumIndex + 24H ticker + OI semua pair</p>
         </div>
       )}
+
+      {/* PLAN_v12 P6-F4 — Big Movers Watchlist (force-open manual) di halaman MARKET */}
+      {tab === "overview" && <BigMoversWatchlist onChanged={() => void fetchData(true)} />}
 
       {/* Overview Tab */}
       {tab === "overview" && data && (
