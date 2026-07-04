@@ -54,6 +54,13 @@ export function OpenPosCard({ p, risk, riskDollar }: {
         ) : risk?.trail_active && (
           <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">Trailing</span>
         )}
+        {/* PLAN_v14 P3 — profit yang sudah dibank dari partial TP1/TP2 (tak bisa hilang) */}
+        {(p.banked_dollar ?? 0) > 0 && (
+          <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold border border-green-200"
+            title="Profit dari partial TP1/TP2 sudah terealisasi — permanen">
+            🔒 +${(p.banked_dollar as number).toFixed(2)}
+          </span>
+        )}
         <RiskStatusBadge status={rStatus} />
       </div>
 

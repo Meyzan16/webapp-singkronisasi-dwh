@@ -32,6 +32,9 @@ export interface FuturesPosition {
   tp_rung?:              number | null;
   trail_sl?:             number | null;
   is_runner?:            boolean;
+  // PLAN_v14 P3 — profit yang sudah dibank dari partial (permanen)
+  banked_dollar?:        number;
+  tp1_partial_done?:     boolean;
 }
 
 export interface MonitorEvent {

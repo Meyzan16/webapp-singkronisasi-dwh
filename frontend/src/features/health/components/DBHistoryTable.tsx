@@ -423,9 +423,10 @@ export function DBHistoryTable({
             Tutup <SortIcon col="closed_at" active={sortBy} dir={sortDir} />
           </button>
           <span className="w-16 text-center">Durasi</span>
-          <span className="w-16 text-right">Notional</span>
+          {/* PLAN_v14 P1 — futures: Margin·Lev (leverage nyata); spot: Notional */}
+          <span className="w-16 text-right">{reasonScope === "futures" ? "Margin·Lev" : "Notional"}</span>
           <button className="w-20 text-right flex items-center justify-end hover:text-neutral-600" onClick={() => handleSort("pnl_pct")}>
-            P&L% <SortIcon col="pnl_pct" active={sortBy} dir={sortDir} />
+            {reasonScope === "futures" ? "ROI%" : "P&L%"} <SortIcon col="pnl_pct" active={sortBy} dir={sortDir} />
           </button>
           <span className="w-20 text-right">P&L $</span>
           <span className="w-28 text-center">Alasan Tutup</span>
@@ -520,31 +521,44 @@ export function DBHistoryTable({
                       </span>
                     </div>
 
-                    {/* Notional + margin (F116) */}
+                    {/* PLAN_v14 P1 — futures: Margin (jaminan) + Lev; spot: Notional */}
                     <div className="w-16 text-right">
                       {t.position_size != null ? (
-                        <div>
+                        reasonScope === "futures" && t.leverage != null ? (
+                          <div>
+                            <p className="text-[10px] font-mono font-bold text-blue-600 tabular-nums">
+                              ${Math.round(t.position_size / t.leverage)}
+                            </p>
+                            <p className="text-[9px] text-neutral-400 tabular-nums">{t.leverage}×</p>
+                          </div>
+                        ) : (
                           <p className="text-[10px] font-mono font-bold text-neutral-600 tabular-nums">
                             ${t.position_size.toFixed(0)}
                           </p>
-                          {t.leverage != null && (
-                            <p className="text-[9px] text-neutral-400 tabular-nums">
-                              ${Math.round(t.position_size / t.leverage)} mrg
-                            </p>
-                          )}
-                        </div>
+                        )
                       ) : (
                         <span className="text-neutral-300 text-xs">—</span>
                       )}
                     </div>
 
-                    {/* PnL % */}
+                    {/* PLAN_v14 P1 — futures: ROI on margin (pnl×lev); spot: pnl% harga */}
                     <div className="w-20 text-right">
-                      {t.pnl_pct != null ? (
-                        <span className={`text-xs font-black tabular-nums ${t.pnl_pct > 0 ? "text-green-600" : t.pnl_pct < 0 ? "text-red-500" : "text-neutral-400"}`}>
-                          {t.pnl_pct >= 0 ? "+" : ""}{t.pnl_pct.toFixed(2)}%
-                        </span>
-                      ) : (
+                      {t.pnl_pct != null ? (() => {
+                        const isFut = reasonScope === "futures" && t.leverage != null;
+                        const roi   = isFut ? t.pnl_pct * (t.leverage as number) : t.pnl_pct;
+                        return (
+                          <div>
+                            <span className={`text-xs font-black tabular-nums ${roi > 0 ? "text-green-600" : roi < 0 ? "text-red-500" : "text-neutral-400"}`}>
+                              {roi >= 0 ? "+" : ""}{roi.toFixed(isFut ? 0 : 2)}%
+                            </span>
+                            {isFut && (
+                              <p className="text-[8px] text-neutral-400 tabular-nums">
+                                {t.pnl_pct >= 0 ? "+" : ""}{t.pnl_pct.toFixed(1)}% harga
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })() : (
                         <span className="text-neutral-300 text-xs">—</span>
                       )}
                     </div>

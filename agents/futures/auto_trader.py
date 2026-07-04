@@ -120,7 +120,15 @@ def _effective_threshold(agent: str) -> int:
     if _manual_threshold is not None:
         return _manual_threshold
     from agents.futures.weight_updater import get_adaptive_thresholds
-    return get_adaptive_thresholds(agent)["auto_threshold"]
+    _base = get_adaptive_thresholds(agent)["auto_threshold"]
+    # PLAN_v14 P2-B1: Pre-Gainer & Accumulation nyaris dormant — setup "quiet coil"
+    # skornya 52-72 tapi auto-open butuh 72 (default). Turunkan ke 65 SUPAYA lane ini
+    # aktif. Skor 65 sendiri sudah mensyaratkan OI/funding/volume/breakout selaras
+    # (konfirmasi B2 inheren). Hanya override default 72 yang belum disentuh adaptif —
+    # jika adaptif menaikkan (WR jelek), biarkan (jangan lawan proteksi).
+    if agent in ("futures_agent1", "futures_agent2") and _base == 72:
+        _base = 65
+    return _base
 
 
 async def auto_open_positions(candidates: list[dict]) -> int:
@@ -191,6 +199,10 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         if coin_regime == "ranging":
             threshold += 5
         if r.get("score", 0) < threshold:
+            # PLAN_v14 B3: audit lane dormant — log kenapa Pre-Gainer/Accumulation di-skip
+            if r.get("agent") in ("futures_agent1", "futures_agent2"):
+                logger.debug("lane_skip_below_threshold", agent=r.get("agent"),
+                             symbol=symbol, score=r.get("score", 0), threshold=threshold)
             continue
         # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
         if coin_regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":

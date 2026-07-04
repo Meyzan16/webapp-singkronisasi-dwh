@@ -436,6 +436,10 @@ async def get_futures_positions(
             "tp_rung":               int(meta.get("tp_rung", 0)) or None,
             "trail_sl":              t.trail_sl,
             "is_runner":             bool(t.trail_active and meta.get("tp_extended")),
+            # PLAN_v14 P3: profit yang SUDAH dibank dari partial TP1/TP2 (permanen, tak hilang)
+            "banked_dollar":         round(float(meta.get("tp1_partial_pnl_dollar", 0.0))
+                                            + float(meta.get("tp2_partial_pnl_dollar", 0.0)), 2),
+            "tp1_partial_done":      bool(meta.get("tp1_partial_done")),
             "pnl_pct":               t.pnl_pct,
             "pnl_dollar":            t.pnl_dollar,
             "position_size":         t.position_size,
