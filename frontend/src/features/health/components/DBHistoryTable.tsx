@@ -85,7 +85,12 @@ function TypeBadge({ style }: { style: string }) {
     return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200 shrink-0">📦 Accumulation</span>;
   if (style === "futures_agent3")
     return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200 shrink-0">🔥 Momentum</span>;
-  return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200 shrink-0">{style}</span>;
+  // PLAN_v13 P1 — Big Mover sebelumnya jatuh ke fallback slug mentah ("futures_agent_bigm…")
+  if (style === "futures_agent_bigmover")
+    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200 shrink-0">💥 Big Mover</span>;
+  // Fallback ramah: strip prefix futures_agent_ → Title Case (bukan slug penuh)
+  const pretty = style.replace(/^futures_agent_?/, "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) || style;
+  return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200 shrink-0">{pretty}</span>;
 }
 
 function StatusBadge({ status, pnl }: { status: string; pnl: number | null }) {
@@ -147,12 +152,47 @@ const CLOSE_REASON_META: Record<string, { label: string; color: string; emoji: s
   rotation_stagnant:  { label: "Rotasi Stagnan", color: "bg-blue-100 text-blue-600",       emoji: "🔄", scope: "futures" },
 };
 
+// PLAN_v13 P2 — penjelasan bahasa manusia per reason (legenda + tooltip). Bukan slug.
+const CLOSE_REASON_DESC: Record<string, string> = {
+  sl_hit:            "Harga menyentuh stop loss — rugi sesuai risk yang direncanakan.",
+  sl_plus:           "Trail SL sudah di atas entry saat tersentuh — tetap ditutup untung.",
+  sl_hit_fast_loop:  "SL kena cepat di menit-menit awal (loop pengecekan 30 detik).",
+  breakeven_stop:    "Trail SL sudah di entry (breakeven) saat tersentuh — bukan rugi nyata.",
+  tp1_breakeven:     "Setelah TP1, SL geser ke breakeven lalu tersentuh — profit TP1 aman.",
+  tp2_hit:           "Target TP2 tercapai.",
+  tp3_hit:           "Target TP3 (extended) tercapai.",
+  tp4_hit:           "Target TP4 (ladder) tercapai.",
+  tp_ladder_hit:     "Runner ladder mencapai rung TP dinamis (TP5+) — ride winner.",
+  trend_reversal:    "Tren berbalik (EMA cross) setelah min-hold — keluar lindungi modal.",
+  profit_protection: "RSI overbought + profit sudah jalan tapi stagnan — kunci profit.",
+  flow_reversal:     "Aliran taker berbalik jual saat sudah profit — amankan.",
+  risk_adjusted:     "RSI ekstrem + posisi rugi — potong lebih awal, setup gagal.",
+  stagnant_rotation: "Stagnan ≥2 hari, ditukar ke kandidat scanner yang lebih baik.",
+  urgent_rotation:   "Ditutup demi modal pindah ke kandidat jauh lebih baik (outscore ≥25).",
+  rotation_stagnant: "Rotasi karena posisi stagnan — bebaskan modal ke peluang lebih baik.",
+  liq_guard:         "Harga terlalu dekat likuidasi — ditutup paksa sebelum liq.",
+  stagnant_48h:      "Tak ada progres ≥48 jam — bebaskan modal.",
+  stagnant_post_tp1: "Setelah TP1 lalu mandek di trail ≥24 jam — ambil profit yang ada.",
+  max_age_expired:   "Umur posisi melewati batas — ditutup otomatis di market.",
+  trend_structure_broken: "Struktur tren 4h patah (EMA9<EMA21) — runner keluar.",
+  time_stop_scratch: "Belum hit TP1 & stagnan melewati budget waktu — ditutup ~breakeven.",
+  flash_dump_exit:   "Drop mendadak & tajam (5 menit) terdeteksi — exit darurat sebelum SL.",
+  flash_pump_exit:   "Lonjakan mendadak melawan posisi short — exit darurat.",
+  max_margin_loss:   "Rugi margin (pnl×leverage) melewati batas keras lane — stop.",
+  absolute_profit_lock: "Harga jatuh dari puncak — kunci profit (tier makin ketat makin besar).",
+  funding_window_exit:  "Biaya funding menggerus profit di window 8 jam — ditutup.",
+  cost_exceeds_profit:  "Akumulasi biaya (funding+fee) > 30% profit — tak sepadan, tutup.",
+  cost_exceeds_loss_threshold: "Biaya > 0.3% notional pada posisi rugi — hentikan pendarahan.",
+  emergency_close_circuit_breaker: "Circuit-breaker drawdown aktif — tutup darurat semua.",
+};
+
 function CloseReasonBadge({ reason }: { reason: string | null }) {
   if (!reason) return <span className="text-neutral-300 text-[10px]">—</span>;
   const meta = CLOSE_REASON_META[reason];
   if (!meta) return <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-mono">{reason}</span>;
   return (
-    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${meta.color}`}>
+    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${meta.color}`}
+      title={CLOSE_REASON_DESC[reason] ?? reason}>
       {meta.emoji} {meta.label}
     </span>
   );
@@ -649,7 +689,8 @@ export function DBHistoryTable({
             .map(([key, meta]) => (
             <div key={key} className={`rounded-xl px-3 py-2 border ${meta.color.replace("text-", "border-").replace(/[-\d]+$/, "200")}`}>
               <p className={`text-xs font-bold mb-0.5 ${meta.color}`}>{meta.emoji} {meta.label}</p>
-              <p className="text-[9px] text-neutral-500 font-mono">{key}</p>
+              {/* PLAN_v13 P2 — penjelasan manusia (bukan nama variabel); slug → tooltip */}
+              <p className="text-[9px] text-neutral-500 leading-snug" title={key}>{CLOSE_REASON_DESC[key] ?? key}</p>
             </div>
           ))}
         </div>

@@ -6,6 +6,7 @@ import { DBHistoryTable } from "@/features/health/components/DBHistoryTable";
 import { GateBanner } from "./GateBanner";
 import { OpenPosCard } from "./OpenPosCard";
 import { PnlCalendar } from "../PnlCalendar";
+import { FuturesWalletChips } from "./FuturesWalletChips";
 import type { OppPosition } from "../OppSpotTypes";
 import type { FuturesPosition, RiskDashboard, LearningStats, RiskPosition } from "./types";
 
@@ -57,7 +58,7 @@ type AgentKey = "agent1" | "agent2" | "agent3" | "agent_bigmover";
 
 export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
   equityPoints, stats, agentFilter, setAgentFilter,
-  countdown, lastUpdated, loading, calendarMap, closedTrades, autoPerAgent, onRefresh }: Props) {
+  countdown, lastUpdated, loading, calendarMap, closedTrades, autoPerAgent, onRefresh, onWalletChanged }: Props) {
 
   const [selectedMonth, setSelectedMonth] = useState("all");
 
@@ -94,6 +95,10 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
               {" · "}Risk <strong className="text-yellow-300">${riskDollar.toFixed(0)}/trade (1%)</strong>
               {" · "}Target R:R ≥ 1:3
             </p>
+            {/* PLAN_v12 P6-F0 — Bebas/Terkunci + Deposit/Withdraw (ganti panel Dompet penuh) */}
+            <div className="mt-2">
+              <FuturesWalletChips onChanged={onWalletChanged} />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-center">
             {[
@@ -311,12 +316,15 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
                         <span>Pre: {m.agent1.wins}/{m.agent1.total}</span>
                         <span>Acc: {m.agent2.wins}/{m.agent2.total}</span>
                         {m.agent3 && <span>Momo: {m.agent3.wins}/{m.agent3.total}</span>}
+                        {m.bigmover && <span>BM: {m.bigmover.wins}/{m.bigmover.total}</span>}
                       </div>
                     </div>
                     <div className="space-y-1.5">
                       <WinRateBar rate={m.agent1.win_rate} label={`🎯 Pre-Gainer: ${m.agent1.win_rate.toFixed(0)}%`} />
                       <WinRateBar rate={m.agent2.win_rate} label={`📦 Accumulation: ${m.agent2.win_rate.toFixed(0)}%`} />
                       {m.agent3 && <WinRateBar rate={m.agent3.win_rate} label={`🔥 Momentum: ${m.agent3.win_rate.toFixed(0)}%`} />}
+                      {/* PLAN_v13 P3 — line ke-4 Big Mover (backend sudah kirim, dulu tak dirender) */}
+                      {m.bigmover && <WinRateBar rate={m.bigmover.win_rate} label={`💥 Big Mover: ${m.bigmover.win_rate.toFixed(0)}%`} />}
                     </div>
                   </div>
                 ))}

@@ -103,7 +103,7 @@ export interface LearningStats {
   win_rate_trend:  { trade_n: number; win_rate: number; win: boolean }[];
   top_signals:     { key: string; agent: string; win_rate: number; weight: number; total: number; wins: number }[];
   bottom_signals:  { key: string; agent: string; win_rate: number; weight: number; total: number }[];
-  monthly_stats?:  { month: string; agent1: { total: number; wins: number; win_rate: number }; agent2: { total: number; wins: number; win_rate: number }; agent3?: { total: number; wins: number; win_rate: number } }[];
+  monthly_stats?:  { month: string; agent1: { total: number; wins: number; win_rate: number }; agent2: { total: number; wins: number; win_rate: number }; agent3?: { total: number; wins: number; win_rate: number }; bigmover?: { total: number; wins: number; win_rate: number } }[];
   monitor:         { running: boolean; cycle_count: number; closed_today: number; liq_guards?: number; tp_extended?: number };
 }
 
