@@ -133,6 +133,24 @@ async def _migrate_columns(connection) -> None:
         "  move_4h_pct FLOAT, move_24h_pct FLOAT,"
         "  resolved_at FLOAT"
         ")",
+        # PLAN_v4 unblock — tabel predictive_log versi LAMA (PLAN_v2: predicted_at/outcome/
+        # actual_pnl_pct) selamat dari CREATE IF NOT EXISTS di atas, jadi kolom skema baru
+        # (PLAN_v3) tak pernah ada → writer scheduler & endpoint /predictive/* gagal (0 baris,
+        # 500). ALTER idempoten di bawah menyembuhkan tabel lama tanpa drop (nullable — app
+        # selalu mengisi saat insert).
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS signals_json TEXT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS price_at_scan FLOAT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS oi_change FLOAT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS funding_rate FLOAT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS change_24h FLOAT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS scanned_at FLOAT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS price_4h FLOAT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS price_24h FLOAT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS hit_4h BOOLEAN",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS hit_24h BOOLEAN",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS move_4h_pct FLOAT",
+        "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS move_24h_pct FLOAT",
+        "CREATE INDEX IF NOT EXISTS ix_pl_scanned_at ON predictive_log (scanned_at)",
     ]
     for sql in migrations:
         try:
