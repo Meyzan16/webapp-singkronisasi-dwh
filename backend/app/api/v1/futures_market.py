@@ -32,7 +32,27 @@ logger  = structlog.get_logger(__name__)
 
 _cache:    Optional[dict] = None
 _cache_ts: float          = 0.0
+_refresh_task = None       # background refresh (stale-while-revalidate)
 CACHE_TTL = 60  # seconds
+COLD_WAIT_SEC = 12         # cold-start: tunggu maksimal segini untuk fill pertama
+# Batasi OI fetch ke top-N by volume — mencegah hang (~500 request → rate-limit).
+# OI/volume leaders + big movers semua ada di rentang ini; sisanya OI=None.
+OI_FETCH_TOP_N = 80
+
+
+def _empty_overview() -> dict:
+    """Struktur valid-kosong — dipakai saat cold-start & Binance belum merespons,
+    supaya frontend tak crash (ganti hang/ECONNRESET dengan payload kosong yang sah)."""
+    return {
+        "new_listings": [], "top_gainers": [], "top_losers": [], "top_volume": [],
+        "big_movers": [], "top_funding_long": [], "top_funding_short": [], "top_oi": [],
+        "market_stats": {"total_pairs": 0, "up_count": 0, "down_count": 0,
+                         "neutral_count": 0, "avg_change_pct": 0.0, "total_vol_usdt": 0,
+                         "new_count": 0, "big_mover_count": 0},
+        "sentiment": {"avg_funding_rate": 0.0, "funding_pos_count": 0,
+                      "funding_neg_count": 0, "funding_neu_count": 0, "market_mood": "unknown"},
+        "loading": True,
+    }
 
 _SKIP_BASE = {
     "USDC","FDUSD","TUSD","USDP","DAI","FRAX","USDD","RLUSD","USD1","UUSD",
@@ -198,8 +218,12 @@ async def _fetch_overview() -> dict:
             async with _oi_sem:
                 return await _get_oi(client, sym)
 
-        all_syms   = [x["symbol"] for x in enriched]          # F96: every coin, not just top-50
-        oi_results = await asyncio.gather(*[_throttled_oi(s) for s in all_syms])
+        # FIX: F96 mengambil OI untuk SEMUA ~500+ simbol (1 request/simbol, konkurensi 10)
+        # → 50+ batch kena rate-limit Binance → endpoint HANG >15s → proxy ECONNRESET
+        # (cold cache tak pernah terisi). OI leaders/big-movers cukup dari top-volume;
+        # sisanya biarkan open_interest=None. Cap ke OI_FETCH_TOP_N.
+        _oi_syms   = [x["symbol"] for x in enriched_sorted_vol[:OI_FETCH_TOP_N]]
+        oi_results = await asyncio.gather(*[_throttled_oi(s) for s in _oi_syms])
         oi_map     = {sym: oi for sym, oi in oi_results}
 
         # Back-fill OI into enriched rows
@@ -310,25 +334,38 @@ async def futures_overview(
     funding rate extremes, open interest leaders, and market sentiment.
     Cached 60 seconds.
     """
-    global _cache, _cache_ts
+    global _cache, _cache_ts, _refresh_task
 
-    if not refresh and _cache and (time.time() - _cache_ts) < CACHE_TTL:
+    fresh = _cache and (time.time() - _cache_ts) < CACHE_TTL
+    if fresh and not refresh:
         return _cache
 
+    # Stale-while-revalidate: refresh di BACKGROUND — request tak pernah blok lama
+    # (Binance bisa lambat 5s/call di sebagian lingkungan → dulu hang → ECONNRESET).
+    async def _refresh() -> None:
+        global _cache, _cache_ts
+        try:
+            result    = await _fetch_overview()
+            _cache    = result
+            _cache_ts = time.time()
+            logger.info("futures_market_overview",
+                        pairs=result["market_stats"]["total_pairs"],
+                        new=result["market_stats"]["new_count"],
+                        mood=result["sentiment"]["market_mood"])
+        except Exception as exc:
+            logger.error("futures_market_overview_error", error=str(exc)[:120])
+
+    if _refresh_task is None or _refresh_task.done():
+        _refresh_task = asyncio.create_task(_refresh())
+
+    # Ada cache (walau stale) → kembalikan segera; refresh jalan di belakang.
+    if _cache:
+        return _cache
+
+    # Cold-start: tunggu fill pertama SEBENTAR; kalau Binance lambat → kembalikan
+    # struktur kosong-valid (loading=True) daripada menggantung proxy.
     try:
-        result    = await _fetch_overview()
-        _cache    = result
-        _cache_ts = time.time()
-        logger.info(
-            "futures_market_overview",
-            pairs=result["market_stats"]["total_pairs"],
-            new=result["market_stats"]["new_count"],
-            mood=result["sentiment"]["market_mood"],
-            avg_fr=result["sentiment"]["avg_funding_rate"],
-        )
-        return result
-    except Exception as exc:
-        logger.error("futures_market_overview_error", error=str(exc)[:120])
-        if _cache:
-            return _cache
-        raise
+        await asyncio.wait_for(asyncio.shield(_refresh_task), timeout=COLD_WAIT_SEC)
+    except (asyncio.TimeoutError, Exception):
+        pass
+    return _cache or _empty_overview()
