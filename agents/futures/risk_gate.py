@@ -1,19 +1,30 @@
 """
 Risk Gate — circuit-breaker and RAR gate for futures position opens.
 
-Three independent guards:
+Independent guards:
   1. Drawdown circuit-breaker: portfolio drawdown from peak > DD_HARD_STOP_PCT
      → hard stop, no new positions until drawdown recovers below DD_RECOVER_PCT.
   2. Risk-Adjusted Return gate: Sharpe proxy < RAR_GATE_THRESHOLD and >= RAR_MIN_TRADES
      → gate closed (strategy is producing negative risk-adjusted returns).
   3. Per-lane WR auto-pause (P6.4): if any lane has WR < 35% in rolling 20 trades
      → that lane is paused for 24h to prevent death-spirals in a single style.
+  4. PLAN_v15 P1 — daily loss breaker: realized futures PnL today (WIB) below
+     −daily_loss_limit_pct × balance → no new positions until the WIB day rolls over.
+  5. PLAN_v15 P8 — daily profit lock: once today's realized PnL PEAKS above
+     +daily_profit_lock_pct × balance, only A-grade (score ≥ 80) candidates open at
+     ½ size; if realized PnL then gives back to ≤ +GIVEBACK floor → stop opens.
+  6. PLAN_v15 P2 — consecutive-loss breaker: 3 real losses in a row in one lane
+     (window 6h) → lane paused 12h; 5 in a row across lanes → all lanes paused 6h.
+
+All PLAN_v15 gates are computed STATELESS from the DB (closed trades of the current
+WIB day / rolling window) so a backend restart can never forget an active breaker.
 
 State is refreshed by the risk dashboard endpoint (polled by frontend every 15 s).
 auto_trader and POST /futures/trade evaluate inline when state is stale (backend restart,
 no frontend polling yet).
 """
 
+import json
 import time
 
 import structlog
@@ -42,6 +53,216 @@ _last_probe_at      = 0.0       # A2: kapan probe terakhir dibuka
 LANE_WR_PAUSE_THRESHOLD = 0.35   # WR < 35% → pause lane
 LANE_WR_MIN_SAMPLE      = 20     # rolling N=20 trades before judging lane
 LANE_PAUSE_HOURS        = 24     # pause duration (hours)
+
+# ── PLAN_v15 P1/P2/P8 — daily gates & consecutive-loss breaker ────────────────
+WIB_UTC_OFFSET_H          = 7      # daily boundaries follow WIB (UTC+7), same as spot
+DAILY_LOSS_LIMIT_PCT      = 2.5    # P1: realized day loss ≥ this % of balance → stop opens
+DAILY_PROFIT_LOCK_PCT     = 1.0    # P8: day peak ≥ this % → A-grade-only at ½ size
+PROFIT_GIVEBACK_FLOOR_PCT = 0.3    # P8: after lock, day PnL back at ≤ this % → stop opens
+CONSEC_SL_LANE_LIMIT      = 3      # P2: real losses in a row per lane…
+CONSEC_SL_LANE_PAUSE_H    = 12.0   #     → lane paused this long
+CONSEC_SL_GLOBAL_LIMIT    = 5      # P2: real losses in a row across ALL lanes…
+CONSEC_SL_GLOBAL_PAUSE_H  = 6.0    #     → everything paused this long
+CONSEC_SL_WINDOW_H        = 6.0    # streak only counts losses inside this rolling window
+DAILY_GATES_TTL_SEC       = 60.0   # cached evaluation validity
+
+# P2: close reasons that count as a REAL loss (full-size damage). breakeven_stop,
+# time_stop_scratch, sl_plus etc. neither count toward nor break a streak — only a
+# PROFITABLE close breaks it (a scratch between two SLs doesn't mean the bleeding stopped).
+REAL_LOSS_REASONS = {
+    "sl_hit", "sl_hit_fast_loop",
+    "max_margin_loss", "max_margin_loss_fast_loop",
+    "liq_guard",
+    "flash_dump_exit", "flash_pump_exit",
+    "fail_fast",                      # PLAN_v15 P9
+    "offline_reconcile_sl",           # PLAN_v15 P5
+    "emergency_close_circuit_breaker",
+}
+
+_FUTURES_STYLES_RG = (
+    "futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover",
+)
+
+# Cached result of evaluate_daily_gates() — recomputed from DB when older than TTL.
+_daily_gates: dict = {
+    "updated_at":          0.0,
+    "day_pnl":             0.0,
+    "day_peak_pnl":        0.0,
+    "balance":             0.0,
+    "loss_breaker":        False,   # P1
+    "profit_lock":         False,   # P8 (latched via day PEAK — restart-safe)
+    "giveback_stop":       False,   # P8
+    "bm_real_sl_today":    0,       # P3b input for auto_trader
+    "lane_pause_until":    {},      # P2 {lane: epoch}
+    "global_pause_until":  0.0,     # P2
+    "reason":              "ok",
+}
+
+
+def wib_day_start_epoch(now: float | None = None) -> float:
+    """Epoch of 00:00 WIB (UTC+7) of the current WIB day."""
+    now = now if now is not None else time.time()
+    off = WIB_UTC_OFFSET_H * 3600
+    return (int(now + off) // 86400) * 86400 - off
+
+
+def _close_reason_of(trade) -> str:
+    try:
+        return (json.loads(trade.signals_json or "{}") or {}).get("close_reason") or ""
+    except Exception:
+        return ""
+
+
+def _consec_pauses(trades_window: list) -> tuple[dict, float]:
+    """
+    P2: compute {lane: pause_until} + global pause_until from trades closed inside
+    the rolling window (ordered by closed_at ASC). Streak rules per lane and global:
+    walk newest→oldest; profitable close breaks the streak; real loss counts;
+    scratches are transparent (neither count nor break).
+    """
+    now = time.time()
+
+    def _streak(trades_desc: list) -> tuple[int, float]:
+        count, newest_loss_at = 0, 0.0
+        for t in trades_desc:
+            pnl = t.pnl_dollar or 0.0
+            if pnl > 0:
+                break
+            if _close_reason_of(t) in REAL_LOSS_REASONS and pnl < 0:
+                count += 1
+                if not newest_loss_at:
+                    newest_loss_at = t.closed_at or 0.0
+        return count, newest_loss_at
+
+    desc = sorted(trades_window, key=lambda t: t.closed_at or 0.0, reverse=True)
+
+    lane_until: dict[str, float] = {}
+    lanes = {(t.setup_type or "") for t in desc}
+    for lane in lanes:
+        if not lane:
+            continue
+        n, newest = _streak([t for t in desc if (t.setup_type or "") == lane])
+        if n >= CONSEC_SL_LANE_LIMIT:
+            until = newest + CONSEC_SL_LANE_PAUSE_H * 3600
+            if until > now:
+                lane_until[lane] = until
+
+    g_n, g_newest = _streak(desc)
+    global_until = g_newest + CONSEC_SL_GLOBAL_PAUSE_H * 3600 if g_n >= CONSEC_SL_GLOBAL_LIMIT else 0.0
+    if global_until <= now:
+        global_until = 0.0
+    return lane_until, global_until
+
+
+async def evaluate_daily_gates(force: bool = False) -> dict:
+    """
+    PLAN_v15 P1/P2/P8 — recompute the daily gates from the DB (TTL-cached).
+    Fully stateless: day PnL, day PEAK PnL (max prefix sum over today's closes,
+    floored at 0) and loss streaks are all derived from closed trades, so the
+    flags survive restarts and never need manual reset.
+    Fail-open: on DB error the previous cached state is returned unchanged.
+    """
+    global DAILY_LOSS_LIMIT_PCT, DAILY_PROFIT_LOCK_PCT, CONSEC_SL_LANE_LIMIT
+
+    now = time.time()
+    if not force and (now - _daily_gates["updated_at"]) < DAILY_GATES_TTL_SEC:
+        return _daily_gates
+
+    from sqlalchemy import select
+    from app.database import AsyncSessionLocal, is_db_available
+    from app.models.paper_trade import PaperTrade
+    from app.models.paper_balance import PaperBalance
+
+    if not is_db_available():
+        return _daily_gates
+
+    try:
+        from agents.shared.config_reader import cfg
+        DAILY_LOSS_LIMIT_PCT  = await cfg.get("futures", "daily_loss_limit_pct", DAILY_LOSS_LIMIT_PCT)
+        DAILY_PROFIT_LOCK_PCT = await cfg.get("futures", "daily_profit_lock_pct", DAILY_PROFIT_LOCK_PCT)
+        CONSEC_SL_LANE_LIMIT  = int(await cfg.get("futures", "lane_consec_sl_pause", CONSEC_SL_LANE_LIMIT))
+    except Exception as exc:
+        logger.warning("agent_config_pull_failed", scope="daily_gates", error=str(exc)[:120])
+
+    day_start    = wib_day_start_epoch(now)
+    window_start = min(day_start, now - CONSEC_SL_WINDOW_H * 3600)
+
+    try:
+        async with AsyncSessionLocal() as session:
+            rows = list((await session.execute(
+                select(PaperTrade).where(
+                    PaperTrade.style.in_(list(_FUTURES_STYLES_RG)),
+                    PaperTrade.status.in_(["tp", "sl", "expired", "manual"]),
+                    PaperTrade.pnl_dollar.isnot(None),
+                    PaperTrade.closed_at >= window_start,
+                ).order_by(PaperTrade.closed_at.asc())
+            )).scalars().all())
+
+            bal_row = (await session.execute(
+                select(PaperBalance).where(PaperBalance.style == "futures")
+            )).scalar_one_or_none()
+            balance = max(bal_row.balance, 1.0) if bal_row else 1000.0
+
+        today = [t for t in rows if (t.closed_at or 0) >= day_start]
+
+        day_pnl, day_peak, cum = 0.0, 0.0, 0.0
+        bm_real_sl_today = 0
+        for t in today:
+            cum += t.pnl_dollar or 0.0
+            day_peak = max(day_peak, cum)
+            if (t.setup_type or "") == "bigmover" and \
+               (t.pnl_dollar or 0.0) < 0 and _close_reason_of(t) in REAL_LOSS_REASONS:
+                bm_real_sl_today += 1
+        day_pnl = cum
+
+        loss_breaker = day_pnl <= -(balance * DAILY_LOSS_LIMIT_PCT / 100.0)
+        profit_lock  = day_peak >= (balance * DAILY_PROFIT_LOCK_PCT / 100.0)
+        giveback     = profit_lock and day_pnl <= (balance * PROFIT_GIVEBACK_FLOOR_PCT / 100.0)
+
+        in_window = [t for t in rows if (t.closed_at or 0) >= now - CONSEC_SL_WINDOW_H * 3600]
+        lane_until, global_until = _consec_pauses(in_window)
+
+        if loss_breaker:
+            reason = (f"Daily loss breaker: realized {day_pnl:+.2f} USD hari ini (WIB) "
+                      f"melewati batas −{DAILY_LOSS_LIMIT_PCT}% dari balance {balance:.0f}. "
+                      f"Auto-open berhenti sampai ganti hari.")
+        elif giveback:
+            reason = (f"Profit giveback stop: day peak {day_peak:+.2f} → sisa {day_pnl:+.2f}. "
+                      f"Sisa profit dilindungi — auto-open berhenti sampai ganti hari.")
+        elif global_until:
+            reason = (f"{CONSEC_SL_GLOBAL_LIMIT} loss nyata beruntun lintas lane — "
+                      f"semua lane pause s/d {time.strftime('%H:%M', time.localtime(global_until))}.")
+        elif profit_lock:
+            reason = (f"Profit lock aktif (day peak {day_peak:+.2f}): "
+                      f"hanya kandidat score ≥ 80 @ ½ size.")
+        else:
+            reason = "ok"
+
+        _daily_gates.update({
+            "updated_at":         now,
+            "day_pnl":            round(day_pnl, 2),
+            "day_peak_pnl":       round(day_peak, 2),
+            "balance":            round(balance, 2),
+            "loss_breaker":       loss_breaker,
+            "profit_lock":        profit_lock,
+            "giveback_stop":      giveback,
+            "bm_real_sl_today":   bm_real_sl_today,
+            "lane_pause_until":   lane_until,
+            "global_pause_until": global_until,
+            "reason":             reason,
+        })
+        if loss_breaker or giveback or global_until or lane_until:
+            logger.warning("plan_v15_daily_gates", **{k: v for k, v in _daily_gates.items()
+                                                      if k != "updated_at"})
+    except Exception as exc:
+        logger.warning("daily_gates_evaluate_failed", error=str(exc)[:160])
+
+    return _daily_gates
+
+
+def get_daily_gates() -> dict:
+    """Last evaluated daily-gate state (call evaluate_daily_gates() to refresh)."""
+    return dict(_daily_gates)
 
 # ── In-memory state ────────────────────────────────────────────────────────────
 _state: dict = {
@@ -279,7 +500,8 @@ def is_gate_open() -> tuple[bool, str]:
 
 
 def is_lane_paused(lane: str) -> tuple[bool, str]:
-    """P6.4: True if the given lane (setup_type) is currently on a WR-based auto-pause."""
+    """P6.4 + PLAN_v15 P2: True if the lane (setup_type) is on a WR-based auto-pause
+    OR a consecutive-loss pause (whichever is active)."""
     until = _lane_paused_until.get(lane, 0.0)
     if time.time() < until:
         hrs_left = round((until - time.time()) / 3600, 1)
@@ -288,6 +510,14 @@ def is_lane_paused(lane: str) -> tuple[bool, str]:
         return True, (
             f"Lane '{lane}' auto-paused: WR {wr:.0%} < {LANE_WR_PAUSE_THRESHOLD:.0%} "
             f"({wr_data.get('total', 0)} trades). Resumes in {hrs_left}h."
+        )
+    # PLAN_v15 P2: consecutive-real-loss pause (computed by evaluate_daily_gates)
+    consec_until = _daily_gates["lane_pause_until"].get(lane, 0.0)
+    if time.time() < consec_until:
+        hrs_left = round((consec_until - time.time()) / 3600, 1)
+        return True, (
+            f"Lane '{lane}' pause {CONSEC_SL_LANE_LIMIT} loss beruntun "
+            f"(window {CONSEC_SL_WINDOW_H:.0f}h). Resumes in {hrs_left}h."
         )
     return False, "ok"
 
@@ -350,6 +580,14 @@ def reset_state() -> None:
     _lane_wr = {}
     _emergency_tighten_pending = False
     _prev_circuit_breaker_active = False
+    # PLAN_v15: daily gates are DB-derived, but clear the cache so a reset DB
+    # is re-evaluated immediately instead of serving pre-reset flags for TTL secs.
+    _daily_gates.update({
+        "updated_at": 0.0, "day_pnl": 0.0, "day_peak_pnl": 0.0,
+        "loss_breaker": False, "profit_lock": False, "giveback_stop": False,
+        "bm_real_sl_today": 0, "lane_pause_until": {}, "global_pause_until": 0.0,
+        "reason": "ok",
+    })
     logger.info("risk_gate_state_reset")
 
 
@@ -411,6 +649,7 @@ def get_gate_state() -> dict:
         "next_probe_in_sec": max(0, int(PROBE_INTERVAL_SEC - (time.time() - _last_probe_at)))
                              if (_state["active"] and _state["gate_type"] == "rar") else None,
         "stale":         is_state_stale(),
+        "daily_gates":   get_daily_gates(),  # PLAN_v15 P1/P2/P8
         "lane_pauses":   lane_pause_info,  # P6.4
         "lane_wr":       {
             lane: {"wins": d["wins"], "total": d["total"],

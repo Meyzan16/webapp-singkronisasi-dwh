@@ -69,6 +69,18 @@ MIN_SHORT_FUNDING_PCT = -0.12  # < -0.12% SHORT bayar mahal
 # G18 — entry-trap threshold: 30-min move > 15% same direction = puncak
 ENTRY_TRAP_30M_PCT = 15.0
 
+# PLAN_v15 P3c — weekend damper (WIB): Sabtu/Minggu likuiditas tipis = pump-and-fade
+# territory (forensik 4 Juli = Sabtu). Score bar naik & size dipangkas.
+WEEKEND_SIZE_MULT  = 0.5   # DB-overridable: futures.weekend_size_mult (scheduler pulls)
+WEEKEND_SCORE_BUMP = 5     # MIN_SCORE + this on weekends
+_WIB_UTC_OFFSET_H  = 7
+
+
+def _is_weekend_wib(now: float | None = None) -> bool:
+    """True if the current WIB (UTC+7) day is Saturday or Sunday."""
+    t = time.gmtime((now if now is not None else time.time()) + _WIB_UTC_OFFSET_H * 3600)
+    return t.tm_wday >= 5   # 5=Sat, 6=Sun
+
 # Cost guard — fees ≈ 0.10% round-trip + 0.3% slippage on extreme movers
 MIN_TP1_NET_PCT  = 2.0         # TP1 wajib ≥ 2× cost (~1% all-in)
 FUTURES_FEE_PCT  = 0.08        # 0.04% × 2 round-trip taker fee
@@ -392,6 +404,12 @@ def scan_symbol(
     # PLAN_v6 P4a: extreme tier (150-300%) — tradeable but at half size
     if abs_chg >= EXTREME_CHANGE_24H:
         size_mult *= 0.5
+
+    # PLAN_v15 P3c: weekend damper — thin-liquidity pump-and-fade risk
+    _weekend = _is_weekend_wib()
+    if _weekend:
+        size_mult *= WEEKEND_SIZE_MULT
+
     size_mult = max(size_mult, 0.25)   # floor: compound reductions stop at ¼
 
     # ── Funding hard gate (also re-checked in auto_trader before order) ───────
@@ -417,7 +435,9 @@ def scan_symbol(
     except Exception:
         pass   # never block scan due to weight error
 
-    if score < MIN_SCORE:
+    # PLAN_v15 P3c: weekend raises the score bar — only clearly-stronger setups trade
+    _effective_min = MIN_SCORE + (WEEKEND_SCORE_BUMP if _weekend else 0)
+    if score < _effective_min:
         return []
 
     levels = _calc_levels(direction, tf_map, price)

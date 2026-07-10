@@ -23,6 +23,11 @@ _subscribers: list[asyncio.Queue] = []
 _big_movers:    list[Any] = []
 _big_movers_ts: float     = 0.0
 
+# PLAN_v15 P3a: market breadth — fraction of top gainers (24h > +10%) whose 1h
+# change is negative this cycle. High fade_frac = pump-and-fade day (4 Juli pattern).
+_market_breadth:    dict  = {}
+_market_breadth_ts: float = 0.0
+
 
 # ── Write ──────────────────────────────────────────────────────────────────────
 
@@ -50,6 +55,13 @@ def set_big_movers(movers: list) -> None:
     global _big_movers, _big_movers_ts
     _big_movers    = movers
     _big_movers_ts = time.time()
+
+
+def set_market_breadth(breadth: dict) -> None:
+    """PLAN_v15 P3a: called by scheduler after each scan cycle."""
+    global _market_breadth, _market_breadth_ts
+    _market_breadth    = breadth
+    _market_breadth_ts = time.time()
 
 
 # ── Read ───────────────────────────────────────────────────────────────────────
@@ -80,6 +92,13 @@ def get_big_movers() -> list:
     if time.time() - _big_movers_ts > STALE_SEC:
         return []
     return _big_movers
+
+
+def get_market_breadth() -> dict:
+    """PLAN_v15 P3a: stale-checked (5 min TTL) — empty dict = unknown → gates fail open."""
+    if time.time() - _market_breadth_ts > STALE_SEC:
+        return {}
+    return _market_breadth
 
 
 def is_scanning() -> bool:

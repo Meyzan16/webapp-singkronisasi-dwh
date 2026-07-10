@@ -753,6 +753,7 @@ def scan_symbol(
             "agent":        AGENT_NAME,
             "setup_type":   "momentum",   # P2: lane tag for unified scanner
             "regime":       regime,       # BUG-L13: per-coin regime (for trade.regime/learning)
+            "atr_pct":      atr_pct,      # PLAN_v15: monitor needs it (G4 rugpull + P9 fail-fast)
             **levels,
         })
     return results

@@ -88,6 +88,21 @@ DEFAULTS: list[dict] = [
      "description": "Sharpe proxy minimum — di bawah ini RAR gate menutup auto-open"},
     {"group": "futures", "key": "lane_wr_pause_threshold", "default": 0.35, "category": "risk",
      "description": "Win rate lane di bawah ini men-trigger auto-pause 24 jam"},
+    # ── FUTURES — PLAN_v15 (anti loss-day / target 25:5) ─────────────────────
+    {"group": "futures", "key": "daily_loss_limit_pct", "default": 2.5, "category": "risk",
+     "description": "P1: rugi harian realized (WIB) sebagai %% balance yang menghentikan auto-open"},
+    {"group": "futures", "key": "daily_profit_lock_pct", "default": 1.0, "category": "risk",
+     "description": "P8: day-peak profit (WIB, %% balance) yang mengunci hari — open baru hanya score≥80 @ ½ size"},
+    {"group": "futures", "key": "lane_consec_sl_pause", "default": 3, "category": "risk",
+     "description": "P2: jumlah loss nyata beruntun per lane (window 6h) sebelum lane pause 12 jam"},
+    {"group": "futures", "key": "bigmover_daily_sl_stop", "default": 2, "category": "risk",
+     "description": "P3b: jumlah SL nyata BigMover per hari (WIB) sebelum lane BM tutup sampai besok"},
+    {"group": "futures", "key": "weekend_size_mult", "default": 0.5, "category": "risk",
+     "description": "P3c: pengali size BigMover di Sabtu/Minggu WIB (pump-and-fade risk)"},
+    {"group": "futures", "key": "max_same_direction", "default": 4, "category": "quota",
+     "description": "P3d: max posisi futures terbuka dengan arah sama (LONG/SHORT)"},
+    {"group": "futures", "key": "failfast_atr_mult", "default": 1.0, "category": "risk",
+     "description": "P9: kelipatan ATR adverse (10-45 mnt pertama, tanpa progres) yang memicu fail-fast exit"},
 
     # ── LEARNING ──────────────────────────────────────────────────────────────
     {"group": "learning", "key": "training_window_days", "default": 90, "category": "timing",

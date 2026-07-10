@@ -713,6 +713,7 @@ def scan_symbol(
             "agent":        AGENT_NAME,
             "setup_type":   "accumulation",  # PLAN_v2 — disambiguated from pre_gainer
             "regime":       regime,          # BUG-L13: per-coin regime (for trade.regime/learning)
+            "atr_pct":      atr_pct,         # PLAN_v15: monitor needs it (G4 rugpull + P9 fail-fast)
             **levels,
         })
 

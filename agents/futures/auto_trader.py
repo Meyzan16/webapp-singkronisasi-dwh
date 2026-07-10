@@ -59,6 +59,15 @@ FUNDING_SOFT_SIZE_MULT = 0.5
 # Regimes where auto-open is fully disabled
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
 
+# ── PLAN_v15 P3/P8 — fade-day & profit-lock knobs ─────────────────────────────
+MAX_SAME_DIRECTION      = 4     # P3d: max open positions sharing one direction (of 6 slots)
+BIGMOVER_DAILY_BUDGET   = 6     # P3b: max BM entries per WIB day
+BIGMOVER_DAILY_SL_STOP  = 2     # P3b: BM real-SL closes today → BM done for the day
+PROFIT_LOCK_MIN_SCORE   = 80    # P8: after profit lock, only A-grade candidates…
+PROFIT_LOCK_SIZE_MULT   = 0.5   #     …at half size ("play with house money")
+BREADTH_FADE_FRAC       = 0.60  # P3a: ≥60% of top gainers fading on 1h → market is pump-and-fade
+BREADTH_MIN_SAMPLE      = 5     # P3a: need ≥5 gainers in sample before the gate can fire
+
 # BC2: hedge mode — when True, allow LONG + SHORT on the same symbol simultaneously.
 # Default: False (one-way mode, one position per symbol across all lanes).
 HEDGE_MODE: bool = os.getenv("HEDGE_MODE", "false").lower() == "true"
@@ -149,13 +158,16 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     # PLAN_v5 Group C: pull DB overrides once per cycle — see scanner.py
     # run_opportunity_scan for the `global` rationale (resolved at call time).
     global MAX_AUTO_POSITIONS, MAX_BIGMOVER_POSITIONS, FUTURES_COOLDOWN_HOURS, \
-        MAX_WALLET_MARGIN_PCT, LANE_QUOTAS
+        MAX_WALLET_MARGIN_PCT, LANE_QUOTAS, MAX_SAME_DIRECTION, BIGMOVER_DAILY_SL_STOP
     try:
         from agents.shared.config_reader import cfg
         MAX_AUTO_POSITIONS     = int(await cfg.get("futures", "max_auto_positions", MAX_AUTO_POSITIONS))
         MAX_BIGMOVER_POSITIONS = int(await cfg.get("futures", "max_bigmover_positions", MAX_BIGMOVER_POSITIONS))
         FUTURES_COOLDOWN_HOURS = await cfg.get("futures", "cooldown_hours", FUTURES_COOLDOWN_HOURS)
         MAX_WALLET_MARGIN_PCT  = await cfg.get("futures", "max_wallet_margin_pct", MAX_WALLET_MARGIN_PCT)
+        # PLAN_v15 P3b/P3d
+        MAX_SAME_DIRECTION     = int(await cfg.get("futures", "max_same_direction", MAX_SAME_DIRECTION))
+        BIGMOVER_DAILY_SL_STOP = int(await cfg.get("futures", "bigmover_daily_sl_stop", BIGMOVER_DAILY_SL_STOP))
         # LANE_QUOTAS is a dict shared by reference with importers — mutate in
         # place so `from auto_trader import LANE_QUOTAS` bindings elsewhere stay in sync.
         LANE_QUOTAS["momentum"]     = int(await cfg.get("futures", "lane_quota_momentum", LANE_QUOTAS["momentum"]))
@@ -169,6 +181,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     # Phase 10: risk gate — circuit-breaker (DD > 20%) + RAR gate (Sharpe < −0.5)
     from agents.futures.risk_gate import (
         is_gate_open, is_state_stale, evaluate_risk_gate, probe_allowed, record_probe,
+        evaluate_daily_gates,
     )
     if is_state_stale():
         await evaluate_risk_gate()
@@ -183,6 +196,30 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         else:
             logger.info("auto_trade_gate_blocked", reason=gate_reason)
             return 0
+
+    # PLAN_v15 P1/P2/P8 — daily gates (stateless from DB, TTL-cached 60s)
+    _dg = await evaluate_daily_gates()
+    if _dg["loss_breaker"] or _dg["giveback_stop"]:
+        logger.info("auto_trade_daily_gate_blocked", reason=_dg["reason"],
+                    day_pnl=_dg["day_pnl"], day_peak=_dg["day_peak_pnl"])
+        return 0
+    if _dg["global_pause_until"] > time.time():
+        logger.info("auto_trade_consec_sl_global_pause", reason=_dg["reason"])
+        return 0
+    # P8: profit lock — only A-grade at ½ size (checked per candidate below)
+    _profit_lock_mode = bool(_dg["profit_lock"])
+
+    # P3a: market breadth — pump-and-fade day detection (computed each scan cycle)
+    _breadth = {}
+    try:
+        from agents.futures import store as _fstore
+        _breadth = _fstore.get_market_breadth() or {}
+    except Exception:
+        pass
+    _fade_day = (
+        _breadth.get("gainers", 0) >= BREADTH_MIN_SAMPLE
+        and _breadth.get("fade_frac", 0.0) >= BREADTH_FADE_FRAC
+    )
 
     # Dedup by symbol — keep the highest-score candidate (global ranking, BUG-L1).
     # Per-candidate adaptive threshold (its own lane) + ranging bar; BUG-L12 volatile gate.
@@ -203,6 +240,16 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             if r.get("agent") in ("futures_agent1", "futures_agent2"):
                 logger.debug("lane_skip_below_threshold", agent=r.get("agent"),
                              symbol=symbol, score=r.get("score", 0), threshold=threshold)
+                # PLAN_v15 R0d: persist the near-miss (score passed min but failed
+                # auto-open) to rejection_log so P6 calibration has real data on the
+                # 52-64 score band. reason distinguishes it from scoring rejects.
+                try:
+                    from agents.futures.weight_updater import log_rejection
+                    log_rejection(symbol, r.get("agent", ""), r.get("direction", ""),
+                                  r.get("score", 0), threshold,
+                                  regime=coin_regime, reason="below_auto_threshold")
+                except Exception:
+                    pass
             continue
         # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
         if coin_regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":
@@ -239,6 +286,27 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             )
         )
         bm_open_count: int = bm_count_q.scalar() or 0
+
+        # PLAN_v15 P3d: open-position count per direction (alert_type stores it lowercase)
+        dir_q = await session.execute(
+            select(PaperTrade.alert_type, func.count(PaperTrade.id)).where(
+                PaperTrade.style.in_(_FUTURES_STYLES),
+                PaperTrade.status == "open",
+            ).group_by(PaperTrade.alert_type)
+        )
+        dir_open_counts: dict[str, int] = {
+            (row[0] or "").upper(): row[1] for row in dir_q.fetchall()
+        }
+
+        # PLAN_v15 P3b: BM entries opened today (WIB) — daily budget
+        from agents.futures.risk_gate import wib_day_start_epoch
+        bm_today_q = await session.execute(
+            select(func.count(PaperTrade.id)).where(
+                PaperTrade.style == "futures_agent_bigmover",
+                PaperTrade.entry_at >= wib_day_start_epoch(),
+            )
+        )
+        bm_opened_today: int = bm_today_q.scalar() or 0
 
         # P4.3: per-setup_type lane quota — count open positions per setup_type
         lane_q = await session.execute(
@@ -296,6 +364,34 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             if symbol in sl_cooldown_syms:
                 logger.debug("auto_trade_cooldown_skip", symbol=symbol)
                 continue
+
+            # PLAN_v15 P8: profit lock — A-grade only (score ≥ 80), ½ size applied below
+            if _profit_lock_mode and sig.get("score", 0) < PROFIT_LOCK_MIN_SCORE:
+                logger.debug("auto_trade_profit_lock_skip", symbol=symbol,
+                             score=sig.get("score", 0))
+                continue
+
+            # PLAN_v15 P3d: direction concentration cap — 4 Juli was 21/22 LONG at once.
+            if dir_open_counts.get(direction, 0) >= MAX_SAME_DIRECTION:
+                logger.info("auto_trade_direction_cap_skip", symbol=symbol,
+                            direction=direction, cap=MAX_SAME_DIRECTION)
+                continue
+
+            if agent == "futures_agent_bigmover":
+                # PLAN_v15 P3b: BM daily budget + daily real-SL stop
+                if bm_opened_today >= BIGMOVER_DAILY_BUDGET:
+                    logger.info("bigmover_daily_budget_reached", opened=bm_opened_today)
+                    continue
+                if _dg.get("bm_real_sl_today", 0) >= BIGMOVER_DAILY_SL_STOP:
+                    logger.info("bigmover_daily_sl_stop", sl_today=_dg.get("bm_real_sl_today"))
+                    continue
+                # PLAN_v15 P3a: fade-day breadth gate — chasing pumps LONG on a day
+                # where most top gainers are already fading 1h = buying exit liquidity.
+                if direction == "LONG" and _fade_day:
+                    logger.info("bigmover_fade_day_skip", symbol=symbol,
+                                fade_frac=_breadth.get("fade_frac"),
+                                gainers=_breadth.get("gainers"))
+                    continue
 
             # Phase 3 G3-funding + PLAN_v6 P4c: two-zone funding gate (all lanes).
             # HARD zone (>0.25%) → veto: funding cost eats any realistic profit.
@@ -389,6 +485,9 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             # PLAN_v6 P4a/P4c: apply size reductions — agent-signal size_mult
             # (bigmover G18 hot-entry / extreme tier) × funding soft-zone mult.
             _size_mult = float(sig.get("size_mult", 1.0) or 1.0) * funding_mult
+            # PLAN_v15 P8: profit-lock mode trades at half size (house-money rule)
+            if _profit_lock_mode:
+                _size_mult *= PROFIT_LOCK_SIZE_MULT
             if _size_mult < 1.0:
                 pos_size        = round(pos_size * _size_mult, 2)
                 risk_dollar_val = round(risk_dollar_val * _size_mult, 2)
@@ -425,6 +524,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 "liq_short":    sig.get("liq_short", 0),
                 "margin_type":  "cross",
                 "setup_type":   sig.get("setup_type", "pre_move"),   # P2: lane tag
+                "atr_pct":      sig.get("atr_pct", 0),   # PLAN_v15: G4 rugpull + P9 fail-fast read this
                 "auto_opened":  True,
                 # P1 / B4.1: slippage info for analytics (not applied to entry_price)
                 "entry_slippage_pct": round(_slip_pct, 4),
@@ -461,8 +561,11 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             await session.commit()
             existing_syms.add(_open_key)  # BC2: add (symbol, direction) or symbol
             opened += 1
+            # PLAN_v15 P3b/P3d: keep in-cycle counters honest for the next candidate
+            dir_open_counts[direction] = dir_open_counts.get(direction, 0) + 1
             if agent == "futures_agent_bigmover":
                 bm_open_count += 1
+                bm_opened_today += 1
             # P4.3: track lane count for quota enforcement within this cycle
             if setup and setup in LANE_QUOTAS:
                 lane_opened_this_cycle[setup] = lane_opened_this_cycle.get(setup, 0) + 1

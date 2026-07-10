@@ -102,105 +102,164 @@ async def log_big_movers(
     return inserted
 
 
-async def _fetch_mark_price(symbol: str, market: str) -> Optional[float]:
-    """Get current mark/last price from Binance."""
-    url = fapi("/fapi/v1/ticker/price") if market == "futures" else spot("/api/v3/ticker/price")
+async def _fetch_klines_1h(
+    client: httpx.AsyncClient, symbol: str, market: str, start_ts: float, limit: int = 180
+) -> list:
+    """1h klines from start_ts forward (limit 180 covers the full 7d horizon)."""
+    url = fapi("/fapi/v1/klines") if market == "futures" else spot("/api/v3/klines")
     try:
-        async with httpx.AsyncClient(timeout=8) as c:
-            r = await c.get(url, params={"symbol": symbol})
-            if r.status_code == 200:
-                return float(r.json()["price"])
+        r = await client.get(url, params={
+            "symbol": symbol, "interval": "1h",
+            "startTime": int(start_ts * 1000), "limit": limit,
+        })
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, list):
+                return data
     except Exception:
         pass
-    return None
+    return []
 
 
-def _hypothetical_outcome(
+def _price_at_horizon(klines: list, ts: float, horizon_sec: int) -> Optional[float]:
+    """PLAN_v15 R0a: close price of the candle containing ts+horizon — EXACT horizon,
+    not "whatever the price was when backfill happened to run" (the old bug that made
+    pnl_1h_pct == pnl_4h_pct on late-backfilled rows)."""
+    target_ms = (ts + horizon_sec) * 1000
+    best = None
+    for k in klines:
+        try:
+            if float(k[0]) <= target_ms:
+                best = k
+            else:
+                break
+        except (IndexError, ValueError):
+            continue
+    if best is None:
+        return None
+    try:
+        return float(best[4])
+    except (IndexError, ValueError):
+        return None
+
+
+def _bracket_outcome_path(
     direction: str,
     entry: float,
-    current: float,
-    quote_vol_24h: float = 0.0,
+    klines: list,
+    ts: float,
+    horizon_sec: int = 24 * 3600,
 ) -> tuple[Optional[str], Optional[float]]:
     """
-    Simulate 1:3 RR outcome with B1.1 assumptions:
-      Entry: scan_price × (1 ± slippage)  — B4.1: dynamic slippage by volume
-      SL:    entry × (1 ∓ ASSUMED_SL_PCT/100)
-      TP:    entry × (1 ± ASSUMED_TP_PCT/100)
-    Returns (status, pnl_pct) — status one of tp/sl/open.
+    PLAN_v15 R0a: PATH-AWARE 1:3 bracket simulation over the first `horizon_sec`.
+    Walks candles in order: SL/TP touch decides the outcome the moment it happens
+    (SL wins on a shared candle — conservative). The old version only looked at the
+    endpoint price, so a wick-to-TP-then-dump was recorded as sl/open.
+      Entry: scan_price × (1 ± slippage)   SL: ∓ASSUMED_SL_PCT   TP: ±ASSUMED_TP_PCT
     """
-    if entry <= 0 or current <= 0:
+    if entry <= 0 or not klines:
         return None, None
 
-    # B4.1: volume-parameterized slippage (default 0.40% for unknown vol)
-    slip = calculate_entry_slippage(quote_vol_24h) / 100
+    slip = calculate_entry_slippage(0.0) / 100   # no per-row volume stored — default tier
     if direction == "LONG":
-        eff_entry = entry * (1 + slip)
-        sl = eff_entry * (1 - ASSUMED_SL_PCT / 100)
-        tp = eff_entry * (1 + ASSUMED_TP_PCT / 100)
-        pnl_pct = (current - eff_entry) / eff_entry * 100
-        if current <= sl:
-            return "sl", -ASSUMED_SL_PCT
-        if current >= tp:
-            return "tp", ASSUMED_TP_PCT
+        eff = entry * (1 + slip)
+        sl, tp = eff * (1 - ASSUMED_SL_PCT / 100), eff * (1 + ASSUMED_TP_PCT / 100)
     else:
-        eff_entry = entry * (1 - slip)
-        sl = eff_entry * (1 + ASSUMED_SL_PCT / 100)
-        tp = eff_entry * (1 - ASSUMED_TP_PCT / 100)
-        pnl_pct = (eff_entry - current) / eff_entry * 100
-        if current >= sl:
-            return "sl", -ASSUMED_SL_PCT
-        if current <= tp:
-            return "tp", ASSUMED_TP_PCT
-    return "open", round(pnl_pct, 2)
+        eff = entry * (1 - slip)
+        sl, tp = eff * (1 + ASSUMED_SL_PCT / 100), eff * (1 - ASSUMED_TP_PCT / 100)
+
+    end_ms     = (ts + horizon_sec) * 1000
+    last_close = None
+    for k in klines:
+        try:
+            open_ms = float(k[0])
+            hi, lo, cl = float(k[2]), float(k[3]), float(k[4])
+        except (IndexError, ValueError):
+            continue
+        if open_ms >= end_ms:
+            break
+        if direction == "LONG":
+            if lo <= sl:
+                return "sl", -ASSUMED_SL_PCT
+            if hi >= tp:
+                return "tp", ASSUMED_TP_PCT
+        else:
+            if hi >= sl:
+                return "sl", -ASSUMED_SL_PCT
+            if lo <= tp:
+                return "tp", ASSUMED_TP_PCT
+        last_close = cl
+
+    if last_close is None:
+        return None, None
+    pnl = (last_close - eff) / eff * 100 if direction == "LONG" else (eff - last_close) / eff * 100
+    return "open", round(pnl, 2)
 
 
 async def backfill_pending(max_rows: int = 50) -> int:
     """
     Fill horizon pnl columns for rows past their horizon mark.
-    Returns number of rows updated.
+
+    PLAN_v15 R0a rewrite — three fixes over the original:
+      1. EXACT horizons: prices come from 1h klines at ts+1h/4h/24h/7d, not from
+         the mark price at whatever moment backfill ran.
+      2. Per-horizon repick: a row first backfilled at age 1h used to keep 4h/24h
+         NULL until the 7d pass — now any row with a due-but-NULL horizon qualifies.
+      3. Path-aware would_be bracket: SL/TP decided by walking candles, not by
+         the 24h endpoint price.
+    One klines request per row (weight 2) — max_rows=150 per 20-min cycle ≈ trivial.
     """
     if not is_db_available():
         return 0
+
+    from sqlalchemy import and_, or_
 
     now = time.time()
     updated = 0
 
     async with AsyncSessionLocal() as s:
-        # Find rows where last_backfill_at is None OR oldest horizon hasn't been filled yet
         r = await s.execute(
             select(BigMoverLog).where(
-                BigMoverLog.ts < now - HORIZONS[0][0],   # at least 1h old
-                ((BigMoverLog.last_backfill_at.is_(None))
-                 | (BigMoverLog.pnl_7d_pct.is_(None) & (BigMoverLog.ts < now - HORIZONS[-1][0])))
+                or_(
+                    and_(BigMoverLog.pnl_1h_pct.is_(None),  BigMoverLog.ts < now - HORIZONS[0][0]),
+                    and_(BigMoverLog.pnl_4h_pct.is_(None),  BigMoverLog.ts < now - HORIZONS[1][0]),
+                    and_(BigMoverLog.pnl_24h_pct.is_(None), BigMoverLog.ts < now - HORIZONS[2][0]),
+                    and_(BigMoverLog.pnl_7d_pct.is_(None),  BigMoverLog.ts < now - HORIZONS[3][0]),
+                )
             ).order_by(BigMoverLog.ts).limit(max_rows)
         )
         rows = list(r.scalars().all())
+        if not rows:
+            return 0
 
-        for row in rows:
-            current = await _fetch_mark_price(row.symbol, row.market)
-            if current is None:
-                continue
+        async with httpx.AsyncClient(timeout=15) as client:
+            for row in rows:
+                klines = await _fetch_klines_1h(client, row.symbol, row.market, row.ts)
+                patch: dict = {"last_backfill_at": now}
+                age = now - row.ts
 
-            patch: dict = {"last_backfill_at": now}
-            age = now - row.ts
-            for horizon_sec, col in HORIZONS:
-                if age >= horizon_sec and getattr(row, col) is None:
-                    if row.scan_price > 0:
-                        if row.direction == "LONG":
-                            pnl = (current - row.scan_price) / row.scan_price * 100
-                        else:
-                            pnl = (row.scan_price - current) / row.scan_price * 100
-                        patch[col] = round(pnl, 2)
+                if klines and row.scan_price > 0:
+                    for horizon_sec, col in HORIZONS:
+                        if age >= horizon_sec and getattr(row, col) is None:
+                            h_price = _price_at_horizon(klines, row.ts, horizon_sec)
+                            if h_price is None:
+                                continue
+                            if row.direction == "LONG":
+                                pnl = (h_price - row.scan_price) / row.scan_price * 100
+                            else:
+                                pnl = (row.scan_price - h_price) / row.scan_price * 100
+                            patch[col] = round(pnl, 2)
 
-            # Hypothetical TP/SL outcome (best determinable at 24h horizon)
-            if age >= HORIZONS[2][0]:  # 24h
-                status_h, pnl_h = _hypothetical_outcome(row.direction, row.scan_price, current)
-                if status_h:
-                    patch["would_be_status"] = status_h
-                if pnl_h is not None:
-                    patch["would_be_pnl_pct"] = pnl_h
+                    # Path-aware TP/SL bracket, decided over the first 24h
+                    if age >= HORIZONS[2][0] and row.would_be_status is None:
+                        status_h, pnl_h = _bracket_outcome_path(
+                            row.direction, row.scan_price, klines, row.ts
+                        )
+                        if status_h:
+                            patch["would_be_status"] = status_h
+                        if pnl_h is not None:
+                            patch["would_be_pnl_pct"] = pnl_h
 
-            if patch:
                 await s.execute(
                     update(BigMoverLog).where(BigMoverLog.id == row.id).values(**patch)
                 )

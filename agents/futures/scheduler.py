@@ -216,6 +216,12 @@ async def _run_scan() -> dict:
     a3_results: list[dict] = []
     bm_results: list[dict] = []   # Phase 2 BM1
 
+    # PLAN_v15 P3a: market breadth — of the top gainers (24h > +10%) we scanned,
+    # how many are already fading on 1h? High fraction = pump-and-fade day →
+    # auto_trader blocks new BigMover LONGs. Uses data already in hand (no extra API).
+    _breadth_gainers = 0
+    _breadth_fading  = 0
+
     for ticker in tickers:
         symbol     = ticker["symbol"]
         change_24h = float(ticker.get("priceChangePercent", 0))
@@ -223,6 +229,13 @@ async def _run_scan() -> dict:
 
         if not tf_map:
             continue
+
+        # PLAN_v15 P3a: breadth sample — gainer >+10% 24h, 1h candle direction
+        _d1h_b = tf_map.get("1h")
+        if change_24h > 10.0 and _d1h_b and len(_d1h_b.closes) >= 2 and _d1h_b.closes[-2] > 0:
+            _breadth_gainers += 1
+            if _d1h_b.closes[-1] < _d1h_b.closes[-2]:
+                _breadth_fading += 1
 
         # F71: skip coins blacklisted due to 3 consecutive SL (24h cooldown)
         if is_blacklisted(symbol):
@@ -270,6 +283,17 @@ async def _run_scan() -> dict:
         tickers,
         a1_results_full + a2_results_full + a3_results_full + bm_results_full,
     )
+
+    # PLAN_v15 P3a: publish breadth for auto_trader's fade-day gate
+    _fade_frac = round(_breadth_fading / _breadth_gainers, 3) if _breadth_gainers else 0.0
+    futures_store.set_market_breadth({
+        "gainers":   _breadth_gainers,
+        "fading":    _breadth_fading,
+        "fade_frac": _fade_frac,
+    })
+    if _breadth_gainers >= 5 and _fade_frac >= 0.6:
+        logger.warning("market_breadth_fade_day", gainers=_breadth_gainers,
+                       fading=_breadth_fading, fade_frac=_fade_frac)
 
     elapsed  = round(time.time() - start, 1)
     gen_time = int(time.time())
@@ -563,6 +587,9 @@ async def run_futures_loop() -> None:
             try:
                 from agents.shared.config_reader import cfg
                 a_bm.MIN_SCORE = int(await cfg.get("futures", "bigmover_min_score", a_bm.MIN_SCORE))
+                # PLAN_v15 P3c: weekend size damper — DB-overridable like MIN_SCORE
+                a_bm.WEEKEND_SIZE_MULT = await cfg.get(
+                    "futures", "weekend_size_mult", a_bm.WEEKEND_SIZE_MULT)
             except Exception as exc:
                 logger.warning("agent_config_pull_failed", scope="futures_scheduler", error=str(exc)[:120])
 
@@ -676,7 +703,9 @@ async def run_futures_loop() -> None:
             if _cycle_count % 10 == 0:
                 try:
                     from app.services.big_mover_logger import backfill_pending
-                    await backfill_pending(max_rows=100)
+                    # PLAN_v15 R0a: 150 rows × weight-2 klines per 20 min — clears the
+                    # exact-horizon backlog in ~2 hari tanpa menyentuh rate limit.
+                    await backfill_pending(max_rows=150)
                 except Exception as exc:
                     logger.warning("big_mover_backfill_failed", error=str(exc)[:80])
 

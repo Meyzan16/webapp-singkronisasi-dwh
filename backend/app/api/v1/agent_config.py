@@ -149,6 +149,14 @@ async def _futures_config() -> dict:
     rar_threshold       = await cfg.get("futures", "rar_threshold", rg.RAR_GATE_THRESHOLD)
     lane_wr_pause       = await cfg.get("futures", "lane_wr_pause_threshold", rg.LANE_WR_PAUSE_THRESHOLD)
     lane_wr_min_sample  = await cfg.get("futures", "lane_wr_min_sample", rg.LANE_WR_MIN_SAMPLE)
+    # PLAN_v15 — daily gates & fade-day knobs
+    daily_loss_limit    = await cfg.get("futures", "daily_loss_limit_pct", rg.DAILY_LOSS_LIMIT_PCT)
+    daily_profit_lock   = await cfg.get("futures", "daily_profit_lock_pct", rg.DAILY_PROFIT_LOCK_PCT)
+    lane_consec_sl      = await cfg.get("futures", "lane_consec_sl_pause", rg.CONSEC_SL_LANE_LIMIT)
+    bm_daily_sl_stop    = await cfg.get("futures", "bigmover_daily_sl_stop", at.BIGMOVER_DAILY_SL_STOP)
+    weekend_size_mult   = await cfg.get("futures", "weekend_size_mult", agent_bigmover.WEEKEND_SIZE_MULT)
+    max_same_direction  = await cfg.get("futures", "max_same_direction", at.MAX_SAME_DIRECTION)
+    failfast_atr_mult   = await cfg.get("futures", "failfast_atr_mult", fmon.FAILFAST_ATR_MULT)
 
     return {
         "scan_interval_sec": fsched.INTERVAL_SEC,
@@ -201,6 +209,20 @@ async def _futures_config() -> dict:
             "rar_min_trades":         rg.RAR_MIN_TRADES,
             "lane_wr_pause_threshold": lane_wr_pause,
             "lane_wr_min_sample":      int(lane_wr_min_sample),
+        },
+        "plan_v15": {   # anti loss-day / target 25 win-day : 5 loss-day
+            "daily_loss_limit_pct":      daily_loss_limit,
+            "daily_profit_lock_pct":     daily_profit_lock,
+            "profit_giveback_floor_pct": rg.PROFIT_GIVEBACK_FLOOR_PCT,
+            "lane_consec_sl_pause":      int(lane_consec_sl),
+            "consec_sl_window_h":        rg.CONSEC_SL_WINDOW_H,
+            "bigmover_daily_sl_stop":    int(bm_daily_sl_stop),
+            "bigmover_daily_budget":     at.BIGMOVER_DAILY_BUDGET,
+            "weekend_size_mult":         weekend_size_mult,
+            "max_same_direction":        int(max_same_direction),
+            "failfast_atr_mult":         failfast_atr_mult,
+            "breadth_fade_frac":         at.BREADTH_FADE_FRAC,
+            "daily_gates":               rg.get_daily_gates(),
         },
     }
 

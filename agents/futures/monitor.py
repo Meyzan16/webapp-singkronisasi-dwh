@@ -78,6 +78,22 @@ RUGPULL_BASE_PCT      = 5.0   # minimum adverse-move threshold
 RUGPULL_MIN_HOLD_MIN  = 10.0  # PLAN_v11 B3: 5→10 min — hindari panic-exit di noise buka posisi
 RUGPULL_CONFIRM_MULT  = 1.2   # PLAN_v11 B3: adverse move harus 1.2× ambang (bukan pas-pasan) → flash asli
 
+# PLAN_v15 P9: fail-fast exit — momentum/bigmover entries that move ≥1×ATR AGAINST
+# the position early on and never showed progress are a failed thesis; cut at ≈−ATR
+# instead of bleeding to full SL (July-4 sl_hits averaged −$11 with peaks ≤ +3%).
+FAILFAST_LANES         = {"momentum", "bigmover"}
+FAILFAST_MIN_HOLD_MIN  = 10.0   # align with RUGPULL_MIN_HOLD_MIN — skip open noise
+FAILFAST_MAX_HOLD_MIN  = 45.0   # after this, time-stop (90m) becomes the authority
+FAILFAST_ATR_MULT      = 1.0    # DB-overridable: futures.failfast_atr_mult
+FAILFAST_PROGRESS_FRAC = 0.3    # never reached +0.3×risk favorable = no thesis progress
+FAILFAST_CONFIRM_FRAC  = 0.8    # prior 1m CLOSE must also be ≥0.8× threshold adverse (not one wick)
+
+# PLAN_v15 P4: bigmover breakeven-arm absolute floor — TP1 = ATR×2 on a volatile coin
+# can sit 6-12% away, so the 40%-of-TP1 arm was rarely reached (loser peaks were +1-3%).
+# A +1.5% favorable move now always arms breakeven for the bigmover lane.
+BM_BE_ARM_ABS_PCT      = 1.5
+BM_HALF_PARTIAL_FRAC   = 0.5    # PLAN_v15 P4: bigmover de-risk 50% at halfway-to-TP1 (=1×ATR)
+
 # G5b: absolute profit lock — tier thresholds (peak_pnl → lock if drop below fraction)
 # PLAN_v11 P3: tier tinggi (100%/300% margin) untuk pump besar — 1000% tak boleh menguap.
 # Urut tertinggi dulu supaya lock paling ketat yang berlaku.
@@ -427,6 +443,10 @@ def _compute_trail(
 
     if direction == "LONG":
         halfway_to_tp1   = entry + (tp1 - entry) * be_frac
+        # PLAN_v15 P4: bigmover — absolute arm floor: +1.5% favorable always arms
+        # breakeven, even when TP1 (ATR×2 on a volatile coin) sits far away.
+        if setup_type == "bigmover":
+            halfway_to_tp1 = min(halfway_to_tp1, entry * (1 + BM_BE_ARM_ABS_PCT / 100))
         sl_after_tp1     = entry + (tp1 - entry) * 0.75
 
         # F77: after TP1 hit (trail_active), when 50% toward TP2, advance SL to TP1
@@ -443,6 +463,9 @@ def _compute_trail(
 
     else:  # SHORT
         halfway_to_tp1   = entry - (entry - tp1) * be_frac
+        # PLAN_v15 P4: bigmover absolute arm floor (mirror of LONG above)
+        if setup_type == "bigmover":
+            halfway_to_tp1 = max(halfway_to_tp1, entry * (1 - BM_BE_ARM_ABS_PCT / 100))
         sl_after_tp1     = entry - (entry - tp1) * 0.75
 
         # F77: after TP1 hit (trail_active), when 50% toward TP2, advance SL to TP1
@@ -528,11 +551,21 @@ async def check_futures_positions() -> tuple[int, int]:
     updated = 0
 
     # G10: check if emergency tighten was requested by the risk gate (circuit breaker trip)
-    from agents.futures.risk_gate import consume_emergency_tighten
+    from agents.futures.risk_gate import consume_emergency_tighten, evaluate_daily_gates
     _do_emergency_tighten = consume_emergency_tighten()
     if _do_emergency_tighten:
         logger.warning("emergency_tighten_cycle_start",
                        msg="Circuit breaker tripped — tightening all open SLs")
+
+    # PLAN_v15 P8: daily profit lock — when today's realized peak crossed the lock
+    # threshold, profitable open positions get their SL raised to breakeven so the
+    # locked day cannot bleed back through open-position giveback.
+    _profit_lock_tighten = False
+    try:
+        _dg_cycle = await evaluate_daily_gates()
+        _profit_lock_tighten = bool(_dg_cycle.get("profit_lock"))
+    except Exception as exc:
+        logger.warning("daily_gates_monitor_check_failed", error=str(exc)[:80])
 
     async with AsyncSessionLocal() as session:
         # Monitor all futures-type positions (including legacy styles)
@@ -792,6 +825,30 @@ async def check_futures_positions() -> tuple[int, int]:
 
             sl = trade.trail_sl or trade.stop_loss   # read AFTER potential F79 adjustment
 
+            # ── PLAN_v15 P8: profit-lock tighten — protect the locked day ──────
+            # Only ever moves SL TOWARD profit (monotonic), only for positions in
+            # profit beyond fees, once per trade (meta flag).
+            if (_profit_lock_tighten and not new_status
+                    and not meta.get("profit_lock_tightened")
+                    and _pnl_now_pct > ROUND_TRIP * 100):
+                _needs_raise = (
+                    (direction == "LONG"  and sl < entry) or
+                    (direction == "SHORT" and sl > entry)
+                )
+                if _needs_raise:
+                    trade.trail_sl     = round(entry, 8)
+                    trade.trail_active = True
+                    trail_active       = True
+                    sl                 = entry
+                    meta["profit_lock_tightened"] = True
+                    _append_trade_event(meta, "profit_lock_tighten", {
+                        "pnl_pct": round(_pnl_now_pct, 3),
+                    })
+                    trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                    updated += 1
+                    logger.info("profit_lock_tighten", symbol=trade.symbol,
+                                direction=direction, new_sl=round(entry, 6))
+
             # ── G5b: Absolute profit lock — prevent large give-back from peak ──
             # _pnl_now_pct was already computed at the top of the trade loop
             # (PLAN_v2 P1.1 needs it for the max-loss gate).
@@ -813,6 +870,57 @@ async def check_futures_positions() -> tuple[int, int]:
                         threshold=_peak_thresh, lock_frac=_lock_frac,
                     )
                     break
+
+            # ── PLAN_v15 P9: fail-fast exit (momentum/bigmover only) ───────────
+            # Thesis check on the ENTRY, not the exit: a real momentum move goes
+            # favorable quickly. ≥1×ATR against us in the first 10-45 min with no
+            # progress ever (peak < 0.3×risk) = failed thesis → cut at ≈−ATR now
+            # instead of riding to full SL (July-4 sl_hits: avg −$11, peaks ≤ +3%).
+            if not new_status and not trail_active and lane in FAILFAST_LANES:
+                _hold_ff = (time.time() - (trade.entry_at or time.time())) / 60
+                if FAILFAST_MIN_HOLD_MIN <= _hold_ff <= FAILFAST_MAX_HOLD_MIN:
+                    _atr_pct_ff  = float(meta.get("atr_pct", 0.0) or 0.0)
+                    _risk_pct_ff = abs(entry - (trade.stop_loss or entry)) / entry * 100 if entry > 0 else 0.0
+                    # Legacy rows without atr_pct: fall back to 0.6× SL distance
+                    _thresh_ff = FAILFAST_ATR_MULT * _atr_pct_ff if _atr_pct_ff > 0 \
+                                 else 0.6 * _risk_pct_ff
+                    _adverse_now = -_pnl_now_pct   # positive when losing
+                    if (_thresh_ff > 0
+                            and _adverse_now >= _thresh_ff
+                            and _peak_pnl < FAILFAST_PROGRESS_FRAC * _risk_pct_ff):
+                        # Anti-noise: previous 1m CLOSE must confirm the adverse move
+                        # (a single wick that already snapped back must not exit).
+                        _k_ff = klines_1m.get(trade.symbol, [])
+                        _confirm_ff = False
+                        if len(_k_ff) >= 2:
+                            try:
+                                _prev_close = float(_k_ff[-2][4])
+                                _prev_adverse = (
+                                    (entry - _prev_close) / entry * 100 if direction == "LONG"
+                                    else (_prev_close - entry) / entry * 100
+                                ) if entry > 0 else 0.0
+                                _confirm_ff = _prev_adverse >= _thresh_ff * FAILFAST_CONFIRM_FRAC
+                            except (IndexError, ValueError):
+                                _confirm_ff = False
+                        if _confirm_ff:
+                            new_status   = "sl"
+                            close_price  = round(price, 8)
+                            close_reason = "fail_fast"
+                            _append_trade_event(meta, "fail_fast", {
+                                "lane":       lane,
+                                "hold_min":   round(_hold_ff, 1),
+                                "pnl_pct":    round(_pnl_now_pct, 3),
+                                "threshold":  round(_thresh_ff, 3),
+                                "peak_pnl":   round(_peak_pnl, 3),
+                            })
+                            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                            logger.warning(
+                                "fail_fast_exit",
+                                symbol=trade.symbol, lane=lane, direction=direction,
+                                hold_min=round(_hold_ff, 1),
+                                pnl_pct=round(_pnl_now_pct, 2),
+                                threshold=round(_thresh_ff, 2),
+                            )
 
             # ── 0. Max age check (G11: adaptive — extend for profitable trailing) ──
             age_days = (time.time() - (trade.entry_at or 0)) / 86400
@@ -1073,10 +1181,13 @@ async def check_futures_positions() -> tuple[int, int]:
                 # F76/BUG-L17: partial sold at TP1 (25% or 33%). New rows shrank position_size
                 # to the remaining fraction (tp1_size_reduced) → no extra multiplier needed.
                 # Legacy rows kept full size → derive remainder from stored tp1_partial_frac.
+                # PLAN_v15 P4: bigmover half-partial banked before TP1 must survive
+                # the final close (position_size was already shrunk at partial time).
+                _bm_partial = meta.get("bm_half_partial_pnl_dollar", 0.0)
                 if meta.get("tp1_partial_done"):
                     _partial_pnl  = meta.get("tp1_partial_pnl_dollar", 0.0)
                     _mid_pnl      = meta.get("tp2_partial_pnl_dollar", 0.0)  # P5.2
-                    _all_partials = _partial_pnl + _mid_pnl
+                    _all_partials = _partial_pnl + _mid_pnl + _bm_partial
                     if meta.get("tp1_size_reduced"):
                         _rem = Decimal("1.0")
                     else:
@@ -1086,7 +1197,9 @@ async def check_futures_positions() -> tuple[int, int]:
                     _final_pnl   = float(round(pnl_net / 100 * _notional_d * _rem, 2))
                     _total_pnl   = float(round(Decimal(str(_all_partials)) + Decimal(str(_final_pnl)), 2))
                 else:
-                    _total_pnl = float(round(pnl_net / 100 * _notional_d, 2))
+                    _total_pnl = float(round(
+                        Decimal(str(_bm_partial)) + pnl_net / 100 * _notional_d, 2
+                    ))
                 trade.status      = new_status
                 trade.close_price = close_price
                 trade.closed_at   = time.time()
@@ -1156,6 +1269,46 @@ async def check_futures_positions() -> tuple[int, int]:
                         partial_frac=float(_partial_frac),
                         partial_pnl_dollar=_partial_dollar,
                         tp1=round(tp1, 6), price=price, lane=lane,
+                    )
+
+            # ── 3a-BM. PLAN_v15 P4: bigmover 50% de-risk at halfway-to-TP1 (=1×ATR) ──
+            # TP1 for this lane is ATR×2 away — often never reached on fade days.
+            # Banking half the position at +1×ATR converts "peaked +3% then SL"
+            # trades into small winners/scratches instead of −$10 full losses.
+            if (lane == "bigmover"
+                    and not new_status
+                    and not meta.get("bm_half_partial_done")
+                    and not meta.get("tp1_partial_done")
+                    and entry > 0 and tp1 and tp1 != entry):
+                _bm_mid = entry + (tp1 - entry) * 0.5   # SHORT: tp1 < entry → mid below entry
+                _bm_hit = (direction == "LONG" and eff_high >= _bm_mid) or \
+                          (direction == "SHORT" and eff_low <= _bm_mid)
+                if _bm_hit:
+                    _mid_d_bm   = Decimal(str(_bm_mid))
+                    _entry_d_bm = Decimal(str(entry))
+                    _bm_pnl_pct = (
+                        (_mid_d_bm - _entry_d_bm) / _entry_d_bm * 100 if direction == "LONG"
+                        else (_entry_d_bm - _mid_d_bm) / _entry_d_bm * 100
+                    )
+                    _bm_net      = _bm_pnl_pct - Decimal(str(ROUND_TRIP * 100 * 0.5))
+                    _notional_bm = trade.position_size or futures_notional(meta.get("risk_pct") or 2.0)
+                    _bm_dollar   = float(round(
+                        _bm_net / 100 * Decimal(str(_notional_bm)) * Decimal(str(BM_HALF_PARTIAL_FRAC)), 2
+                    ))
+                    meta["bm_half_partial_done"]       = True
+                    meta["bm_half_partial_pnl_dollar"] = _bm_dollar
+                    trade.pnl_dollar    = (trade.pnl_dollar or 0.0) + _bm_dollar
+                    trade.position_size = round(_notional_bm * (1 - BM_HALF_PARTIAL_FRAC), 2)
+                    _append_trade_event(meta, "bm_half_partial", {
+                        "mid":            round(_bm_mid, 8),
+                        "partial_dollar": _bm_dollar,
+                    })
+                    trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                    updated += 1
+                    logger.info(
+                        "bm_half_partial_close",
+                        symbol=trade.symbol, direction=direction,
+                        partial_dollar=_bm_dollar, mid=round(_bm_mid, 6),
                     )
 
             # ── 3b. P5.2: Accumulation second partial at TP1→TP2 midpoint ────────
@@ -1450,6 +1603,152 @@ async def check_futures_positions() -> tuple[int, int]:
     return closed, updated   # B3: return tuple so caller can track closes separately
 
 
+# ── PLAN_v15 P5: offline catch-up reconciliation ──────────────────────────────
+# Kasus XAG (−$24.89): backend mati 5–9 Juli, posisi tak termonitor 4,7 hari lalu
+# ditutup max_age_expired di harga terburuk. Saat monitor start (atau gap antar
+# cycle > threshold), replay klines 15m sejak tick terakhir: kalau SL/TP tersentuh
+# SELAMA offline → close retroaktif di harga SL/TP dengan timestamp candle-nya,
+# bukan membiarkan posisi bleed. SL menang bila keduanya tersentuh di candle sama
+# (konservatif, konsisten aturan wick BUG-L8).
+
+RECONCILE_GAP_MIN = 15.0   # minutes without a tick before a position is reconciled
+
+
+async def _fetch_futures_klines_15m(client: "httpx.AsyncClient", symbol: str,
+                                    start_ts: float) -> list:
+    """15m klines from start_ts → now (limit 1000 ≈ 10.4 days of gap coverage)."""
+    try:
+        r = await client.get(
+            fapi(f"/fapi/v1/klines?symbol={symbol}&interval=15m"
+                 f"&startTime={int(start_ts * 1000)}&limit=1000")
+        )
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+    return []
+
+
+def _reconcile_apply_close(trade, meta: dict, close_price: float, status: str,
+                           reason: str, closed_ts: float) -> None:
+    """Close a trade retroactively with the SAME fee/partial accounting as the
+    main loop (banked partials survive, position_size is the post-partial size)."""
+    _entry_d = Decimal(str(trade.entry_price))
+    _close_d = Decimal(str(close_price))
+    pnl_gross = (
+        (_close_d - _entry_d) / _entry_d * 100 if trade.direction == "LONG"
+        else (_entry_d - _close_d) / _entry_d * 100
+    )
+    pnl_net   = pnl_gross - Decimal(str(ROUND_TRIP * 100))
+    _notional = trade.position_size or futures_notional(meta.get("risk_pct") or 2.0)
+    _partials = (meta.get("tp1_partial_pnl_dollar", 0.0)
+                 + meta.get("tp2_partial_pnl_dollar", 0.0)
+                 + meta.get("bm_half_partial_pnl_dollar", 0.0))
+    if meta.get("tp1_partial_done") and not meta.get("tp1_size_reduced"):
+        _rem = Decimal(str(round(1.0 - float(meta.get("tp1_partial_frac", 0.33)), 4)))
+    else:
+        _rem = Decimal("1.0")
+    meta["close_reason"]  = reason
+    meta["pnl_gross_pct"] = float(round(pnl_gross, 2))
+    meta["fee_pct"]       = round(ROUND_TRIP * 100, 2)
+    _append_trade_event(meta, "offline_reconcile", {
+        "reason": reason, "close_price": close_price, "closed_ts": closed_ts,
+    })
+    trade.signals_json = json.dumps(meta, ensure_ascii=False)
+    trade.status       = status
+    trade.close_price  = round(close_price, 8)
+    trade.closed_at    = min(closed_ts, time.time())
+    trade.pnl_pct      = float(round(pnl_net, 2))
+    trade.pnl_dollar   = float(round(
+        Decimal(str(_partials)) + pnl_net / 100 * Decimal(str(_notional)) * _rem, 2
+    ))
+
+
+async def reconcile_offline_positions() -> int:
+    """Replay the gap for every open futures position without a recent tick.
+    Returns count of retroactively closed positions. Fail-open: klines errors
+    leave the position alone (the normal cycle takes over from here anyway).
+    Scope: only SL/TP crossings — trails/partials are NOT simulated for the gap
+    (conservative: the position keeps whatever protection it had at last tick)."""
+    if not is_db_available():
+        return 0
+
+    closed = 0
+    now    = time.time()
+    async with AsyncSessionLocal() as session:
+        trades = list((await session.execute(
+            select(PaperTrade).where(
+                PaperTrade.style.in_(list(_FUTURES_STYLES)),
+                PaperTrade.status == "open",
+            )
+        )).scalars().all())
+        if not trades:
+            return 0
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            for trade in trades:
+                gap_start = trade.last_tick_at or trade.entry_at
+                if not gap_start or (now - gap_start) < RECONCILE_GAP_MIN * 60:
+                    continue
+
+                try:
+                    meta = json.loads(trade.signals_json or "{}")
+                except Exception:
+                    meta = {}
+                sl  = trade.trail_sl or trade.stop_loss
+                tp2 = trade.take_profit
+                if not sl and not tp2:
+                    continue
+
+                klines = await _fetch_futures_klines_15m(client, trade.symbol, gap_start)
+                for k in klines:
+                    try:
+                        k_open_ts = float(k[0]) / 1000
+                        k_high    = float(k[2])
+                        k_low     = float(k[3])
+                    except (IndexError, ValueError):
+                        continue
+                    if k_open_ts + 900 < (trade.entry_at or 0):
+                        continue
+                    k_close_ts = k_open_ts + 900
+                    if trade.direction == "LONG":
+                        if sl and k_low <= sl:      # SL wins on shared candle
+                            _reconcile_apply_close(trade, meta, sl, "sl",
+                                                   "offline_reconcile_sl", k_close_ts)
+                        elif tp2 and k_high >= tp2:
+                            _reconcile_apply_close(trade, meta, tp2, "tp",
+                                                   "offline_reconcile_tp", k_close_ts)
+                        else:
+                            continue
+                    else:  # SHORT
+                        if sl and k_high >= sl:
+                            _reconcile_apply_close(trade, meta, sl, "sl",
+                                                   "offline_reconcile_sl", k_close_ts)
+                        elif tp2 and k_low <= tp2:
+                            _reconcile_apply_close(trade, meta, tp2, "tp",
+                                                   "offline_reconcile_tp", k_close_ts)
+                        else:
+                            continue
+                    closed += 1
+                    logger.warning(
+                        "offline_reconcile_closed",
+                        symbol=trade.symbol, direction=trade.direction,
+                        reason=meta.get("close_reason"),
+                        gap_hours=round((now - gap_start) / 3600, 1),
+                        close_price=trade.close_price,
+                        pnl_pct=trade.pnl_pct,
+                    )
+                    break   # trade closed — stop walking candles
+
+        if closed:
+            await session.commit()
+
+    if closed:
+        await _update_futures_balance()
+        logger.warning("offline_reconcile_done", closed=closed)
+    return closed
+
+
 # ── P5.4: Fast loop for high-risk positions ──────────────────────────────────
 
 async def _run_fast_loop() -> None:
@@ -1514,11 +1813,24 @@ async def _run_fast_loop() -> None:
                                      else (_ep_d - _cp_d) / _ep_d * 100)
                         pnl_net = pnl_gross - _D(str(ROUND_TRIP * 100))
                         _notional = t.position_size or futures_notional(meta.get("risk_pct") or 2.0)
+                        # PLAN_v15 bugfix: banked partials (TP1 / accumulation mid / BM half)
+                        # were dropped when the FAST loop closed the trade — the main loop
+                        # already added them; mirror that accounting here.
+                        _partials = (meta.get("tp1_partial_pnl_dollar", 0.0)
+                                     + meta.get("tp2_partial_pnl_dollar", 0.0)
+                                     + meta.get("bm_half_partial_pnl_dollar", 0.0))
+                        if meta.get("tp1_partial_done") and not meta.get("tp1_size_reduced"):
+                            _frac = float(meta.get("tp1_partial_frac", 0.33))
+                            _rem  = _D(str(round(1.0 - _frac, 4)))
+                        else:
+                            _rem  = _D("1.0")
                         t.status      = "tp" if float(pnl_net) > 0 else "sl"
                         t.close_price = round(cp, 8)
                         t.closed_at   = time.time()
                         t.pnl_pct     = float(round(pnl_net, 2))
-                        t.pnl_dollar  = float(round(pnl_net / 100 * _D(str(_notional)), 2))
+                        t.pnl_dollar  = float(round(
+                            _D(str(_partials)) + pnl_net / 100 * _D(str(_notional)) * _rem, 2
+                        ))
                         meta["close_reason"] = reason
                         t.signals_json = json.dumps(meta, ensure_ascii=False)
 
@@ -1563,6 +1875,12 @@ async def run_futures_monitor() -> None:
     # Rebuild the single futures wallet on startup so /balance/futures is accurate after restarts
     await _update_futures_balance()
 
+    # PLAN_v15 P5: reconcile positions that went unmonitored while the backend was down
+    try:
+        await reconcile_offline_positions()
+    except Exception as exc:
+        logger.warning("offline_reconcile_failed", error=str(exc)[:120])
+
     # P5.4: start the fast-loop for high-risk positions concurrently
     _fast_task = asyncio.create_task(_run_fast_loop())
 
@@ -1580,6 +1898,10 @@ async def run_futures_monitor() -> None:
             # anywhere else that imported it keep pointing at the same object.
             try:
                 from agents.shared.config_reader import cfg
+                # PLAN_v15 P9: fail-fast threshold is DB-tunable
+                global FAILFAST_ATR_MULT
+                FAILFAST_ATR_MULT = await cfg.get(
+                    "futures", "failfast_atr_mult", FAILFAST_ATR_MULT)
                 MAX_SL_MARGIN_PCT_BY_LANE["accumulation"] = await cfg.get(
                     "futures", "lane_cap_accumulation", MAX_SL_MARGIN_PCT_BY_LANE["accumulation"])
                 MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"] = await cfg.get(
@@ -1593,6 +1915,15 @@ async def run_futures_monitor() -> None:
                 logger.warning("agent_config_pull_failed", scope="futures_monitor", error=str(exc)[:120])
 
             await _check_server_time_drift()   # EC5: NTP drift warning (no-op if < 30 min since last)
+
+            # PLAN_v15 P5: if the previous cycle is unexpectedly old (laptop sleep,
+            # long stall), replay the gap before acting on current prices.
+            if _last_check and (time.time() - _last_check) > RECONCILE_GAP_MIN * 60:
+                try:
+                    await reconcile_offline_positions()
+                except Exception as exc:
+                    logger.warning("offline_reconcile_failed", error=str(exc)[:120])
+
             closed_n, updated_n = await check_futures_positions()  # B3: unpack tuple
             n = closed_n + updated_n
             _cycle_count += 1
