@@ -26,6 +26,40 @@ fade, (c) posisi tak termonitor saat backend mati. Ketiganya sudah ditutup di at
 
 ---
 
+## 1b. Basis data pasca-reset 10 Jul (audit 2026-07-10 malam)
+
+Reset `scope=futures` menghapus trade+balance, TAPI tidak semua turunannya. Audit:
+
+**SELAMAT & tetap VALID (independen dari trade — backlog C/D/E aman):**
+- `predictive_log` (6 hari, resolved a2=431/BM=371/a3=161/a1=17) — mengukur akurasi
+  SKOR vs harga, bukan trade → basis item C & E tetap sah.
+- `big_mover_log` (33rb) — outcome harga; riset WAJIB filter
+  `last_backfill_at > 1783600000` (baris lama endpoint-biased).
+- `rejection_log` pasca-reset (`rejected_at ≥ 1783698144`) — basis item B.
+
+**YATIM (turunan trade yang sudah dihapus) — PERLU PURGE, menunggu konfirmasi
+eksplisit owner (auto-mode menolak mass-delete tanpa penyebutan tabel):**
+- `agent_signal_weights` rows agent futures + `cross_agent` (70 baris) — bobot
+  hasil belajar dari trade lama. **BOCOR AKTIF**: `cross_agent_learning` membacanya
+  tiap cycle → `get_cross_weight()` menyuntik learning lama ke scoring baru.
+  Zombie-prune internal baru membersihkan setelah 45 hari — terlalu lambat.
+- `signal_weight_history` rows futures (4.471 baris) — trajectory chart tanpa induk.
+- `rejection_log` pre-reset (445rb baris) — mencerminkan bobot/threshold sistem
+  lama; auto-prune 7 hari akan menghapusnya sendiri ±17 Jul, purge hanya mempercepat.
+
+SQL purge (jalankan setelah dikonfirmasi):
+```sql
+DELETE FROM agent_signal_weights WHERE agent IN
+  ('futures_agent1','futures_agent2','futures_agent3','futures_agent_bigmover','cross_agent');
+DELETE FROM signal_weight_history WHERE agent IN
+  ('futures_agent1','futures_agent2','futures_agent3','futures_agent_bigmover');
+DELETE FROM rejection_log WHERE rejected_at < 1783698144;
+```
+(`cross_agent` aman dihapus: dibangun ulang otomatis tiap cycle dari tabel yang
+sudah bersih; baris spot tidak disentuh.)
+
+---
+
 ## 2. BACKLOG AKTIF (urut jatuh tempo)
 
 ### A. Kerangka validasi TUNGGAL (baseline 2026-07-10, menyatukan v6 P7 + v15 §5 + v16 F6)
@@ -47,6 +81,7 @@ Agent1 0 trade sepanjang sejarah (max skor ~51/190rb evaluasi). Data near-miss
 (`rejection_log` reason `below_auto_threshold`) terkumpul sejak 10 Jul → setelah
 ≥3 hari: kalibrasi bobot sinyal inti supaya setup bagus realistis capai 65.
 JANGAN turunkan ambang lagi (v14 sudah 72→65 tanpa efek — masalahnya di skor).
+Pasca-reset: query kalibrasi WAJIB `rejected_at >= 1783698144` (lihat §1b).
 
 ### C. Learning loop dari predictive_log — v4 P2 · **due ~2026-07-11**
 Status data 10 Jul: 6 hari; resolved a2=431, BM=371, a3=161 ✓, a1=17 (tunggu ≥20).
