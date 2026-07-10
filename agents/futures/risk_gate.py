@@ -522,6 +522,14 @@ def is_lane_paused(lane: str) -> tuple[bool, str]:
     return False, "ok"
 
 
+def get_lane_wr(lane: str) -> tuple[float, int]:
+    """PLAN_v16 F5: rolling WR lane (dari evaluate_risk_gate). Returns (wr, sample)."""
+    d = _lane_wr.get(lane) or {}
+    total = int(d.get("total", 0))
+    wr = (d.get("wins", 0) / total) if total else 0.0
+    return wr, total
+
+
 def update_lane_wr(lane: str, wins: int, total: int) -> None:
     """P6.4: Update per-lane rolling WR and trigger pause if threshold crossed."""
     global _lane_wr, _lane_paused_until

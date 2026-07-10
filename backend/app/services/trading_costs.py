@@ -28,6 +28,14 @@ SL_SLIPPAGE_PCT      = 0.10
 FUTURES_STARTING_BALANCE = 1_000.0   # paper wallet starting equity ($)
 FUTURES_RISK_PCT         = 0.01      # 1% risk per trade (fixed-fractional)
 
+# ── PLAN_v16 F1/F2 — futures true-cost model ──────────────────────────────────
+# Binance USDT-M VIP0: taker 0.05%/side (maker 0.02% — F4 live phase).
+FUTURES_TAKER_FEE_PCT      = 0.05    # % per side
+FUTURES_ROUND_TRIP_FEE_PCT = 0.10    # % taker both legs (matches monitor.ROUND_TRIP)
+# Stop-market fills execute into a falling/rising book — worse than trigger price.
+# Applied at close for stop-type reasons only (sl_hit/liq_guard/fail_fast/...).
+FUTURES_SL_SLIPPAGE_PCT    = 0.08    # % extra adverse on stop-market fills
+
 # F15/F33: statuses that count toward WIN-RATE only.
 # "expired" (stagnant/max-age closes) is EXCLUDED — not a real win/loss outcome.
 FUTURES_CLOSED_STATUSES = ("tp", "sl")

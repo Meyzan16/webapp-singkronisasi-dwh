@@ -31,6 +31,7 @@ from app.services.binance_urls import fapi
 from app.services.trading_costs import (
     FUTURES_STARTING_BALANCE,
     FUTURES_BALANCE_STATUSES, futures_notional,   # Phase 9: fallback notional for legacy rows
+    FUTURES_SL_SLIPPAGE_PCT,                      # PLAN_v16 F1: stop-market fill slippage
 )
 from agents.futures.utils import (
     MAX_LOSS_PCT_OF_MARGIN_BY_LANE, DEFAULT_MAX_LOSS_PCT,
@@ -93,6 +94,52 @@ FAILFAST_CONFIRM_FRAC  = 0.8    # prior 1m CLOSE must also be ≥0.8× threshold
 # A +1.5% favorable move now always arms breakeven for the bigmover lane.
 BM_BE_ARM_ABS_PCT      = 1.5
 BM_HALF_PARTIAL_FRAC   = 0.5    # PLAN_v15 P4: bigmover de-risk 50% at halfway-to-TP1 (=1×ATR)
+
+# ── PLAN_v16 F1/F3 — true-cost accounting & anti-churn exits ──────────────────
+# Diagnosa: 77% close = churn scratch/breakeven yang bayar RT fee $0.28-0.30 untuk
+# bank ≈$0, sementara paper tidak memotong slippage & funding (lebih murah dari live).
+# Close-reasons yang eksekusinya stop-MARKET (kena FUTURES_SL_SLIPPAGE_PCT ekstra):
+_STOP_MARKET_REASONS = {
+    "sl_hit", "sl_hit_fast_loop",
+    "max_margin_loss", "max_margin_loss_fast_loop",
+    "liq_guard", "fail_fast",
+    "flash_dump_exit", "flash_pump_exit",
+    "offline_reconcile_sl",
+    "emergency_close_circuit_breaker",
+}
+MIN_BANK_COST_MULT = 3.0   # F3: dilarang bank profit sukarela < 3× cost floor
+
+
+def _true_close_costs(meta: dict, close_reason: str) -> tuple[float, float]:
+    """PLAN_v16 F1 — biaya live yang selama ini tak dipotong dari pnl paper.
+    Returns (extra_cost_pct, funding_dollar):
+      extra_cost_pct = entry slippage (market entry, dari slippage_sim vol-tier)
+                       + SL-fill slippage utk close bertipe stop-market;
+      funding_dollar = akumulasi funding G6 (cumulative_funding_paid) — dipotong $ di close.
+    Fee RT 0.10% TIDAK di sini (sudah lama dipotong sebagai ROUND_TRIP)."""
+    slip_entry = float(meta.get("entry_slippage_pct") or 0.0)
+    slip_sl    = FUTURES_SL_SLIPPAGE_PCT if close_reason in _STOP_MARKET_REASONS else 0.0
+    funding    = float(meta.get("cumulative_funding_paid") or 0.0)
+    return slip_entry + slip_sl, funding
+
+
+def _cost_floor_pct(meta: dict) -> float:
+    """PLAN_v16 F2/F3 — biaya round-trip total (%) satu trade. Prefer nilai yang
+    dihitung auto_trader saat open; fallback utk row lama: fee RT + 2× slippage."""
+    cf = float(meta.get("cost_floor_pct") or 0.0)
+    if cf <= 0:
+        cf = ROUND_TRIP * 100 + 2 * float(meta.get("entry_slippage_pct") or 0.1)
+    return cf
+
+
+def _protective_sl(entry: float, direction: str, cost_pct: float, above: bool) -> float:
+    """PLAN_v16 F3 — level SL protektif berbasis biaya.
+    above=True  → entry + cost (lock net-nol SETELAH semua biaya; utk posisi profit tipis)
+    above=False → entry − cost (kasih ruang sebesar biaya; utk posisi stagnan)."""
+    off = cost_pct / 100.0
+    if direction == "LONG":
+        return entry * (1 + off) if above else entry * (1 - off)
+    return entry * (1 - off) if above else entry * (1 + off)
 
 # G5b: absolute profit lock — tier thresholds (peak_pnl → lock if drop below fraction)
 # PLAN_v11 P3: tier tinggi (100%/300% margin) untuk pump besar — 1000% tak boleh menguap.
@@ -417,6 +464,7 @@ def _compute_trail(
     price:        float,
     trail_active: bool,
     setup_type:   str = "",
+    cost_pct:     float = 0.0,   # PLAN_v16 F3: breakeven sejati = entry ± total biaya
 ) -> tuple[Optional[float], bool, str]:
     """
     Returns (new_trail_sl, trail_now_active, event_label).
@@ -458,8 +506,11 @@ def _compute_trail(
         if price >= tp1 and (not trail_active or sl < sl_after_tp1):
             return sl_after_tp1, True, "tp1_trail"
 
-        if price >= halfway_to_tp1 and not trail_active and sl < entry:
-            return entry, True, "breakeven"
+        # PLAN_v16 F3: "breakeven" sejati SETELAH semua biaya — dulu SL=entry polos
+        # → stop-out di sana masih rugi fee+slippage (breakeven_stop avg −$0.30).
+        _be = entry * (1 + cost_pct / 100)
+        if price >= halfway_to_tp1 and not trail_active and sl < _be and price > _be:
+            return _be, True, "breakeven"
 
     else:  # SHORT
         halfway_to_tp1   = entry - (entry - tp1) * be_frac
@@ -477,8 +528,10 @@ def _compute_trail(
         if price <= tp1 and (not trail_active or sl > sl_after_tp1):
             return sl_after_tp1, True, "tp1_trail"
 
-        if price <= halfway_to_tp1 and not trail_active and sl > entry:
-            return entry, True, "breakeven"
+        # PLAN_v16 F3: mirror LONG — breakeven sejati setelah biaya
+        _be = entry * (1 - cost_pct / 100)
+        if price <= halfway_to_tp1 and not trail_active and sl > _be and price < _be:
+            return _be, True, "breakeven"
 
     return None, trail_active, ""
 
@@ -830,16 +883,22 @@ async def check_futures_positions() -> tuple[int, int]:
             # profit beyond fees, once per trade (meta flag).
             if (_profit_lock_tighten and not new_status
                     and not meta.get("profit_lock_tightened")
-                    and _pnl_now_pct > ROUND_TRIP * 100):
+                    and _pnl_now_pct > _cost_floor_pct(meta)):
+                # PLAN_v16 F3: lock di entry+cost (net-nol SETELAH biaya), bukan entry
+                # polos — fallback entry polos bila harga belum melewati entry+cost.
+                _pl_target = _protective_sl(entry, direction, _cost_floor_pct(meta), above=True)
+                if (direction == "LONG" and price <= _pl_target) or \
+                   (direction == "SHORT" and price >= _pl_target):
+                    _pl_target = entry
                 _needs_raise = (
-                    (direction == "LONG"  and sl < entry) or
-                    (direction == "SHORT" and sl > entry)
+                    (direction == "LONG"  and sl < _pl_target) or
+                    (direction == "SHORT" and sl > _pl_target)
                 )
                 if _needs_raise:
-                    trade.trail_sl     = round(entry, 8)
+                    trade.trail_sl     = round(_pl_target, 8)
                     trade.trail_active = True
                     trail_active       = True
-                    sl                 = entry
+                    sl                 = _pl_target
                     meta["profit_lock_tightened"] = True
                     _append_trade_event(meta, "profit_lock_tighten", {
                         "pnl_pct": round(_pnl_now_pct, 3),
@@ -965,21 +1024,39 @@ async def check_futures_positions() -> tuple[int, int]:
                         _stagnant = (_risk_dist > 0
                                      and _fav < TIME_STOP_PROGRESS_FRAC * _risk_dist
                                      and _fav > -TIME_STOP_LOSS_GUARD_FRAC * _risk_dist)
-                        if _stagnant:
-                            new_status   = "tp" if _pnl_now_pct > (ROUND_TRIP * 100) else "sl"
-                            close_price  = round(price, 8)
-                            close_reason = "time_stop_scratch"
-                            _append_trade_event(meta, "time_stop_scratch", {
-                                "lane":         lane,
-                                "hold_min":     round(_hold_min, 1),
-                                "pnl_pct":      round(_pnl_now_pct, 3),
+                        # PLAN_v16 F3 (anti-churn): JANGAN market-close posisi stagnan —
+                        # itu 14× churn @ −$0.28 fee untuk bank ≈$0 (77% dari semua close).
+                        # Ganti: tighten SL ke entry − cost_floor (biar market yang
+                        # memutuskan; hemat 1 leg fee bila ternyata jalan). Pembebasan
+                        # slot tetap ditangani rotation G3 (butuh kandidat lebih baik)
+                        # dan stagnant-48h F80.
+                        if _stagnant and not meta.get("time_stop_tightened"):
+                            _cf_ts  = _cost_floor_pct(meta)
+                            _prot   = _protective_sl(entry, direction, _cf_ts, above=False)
+                            _improves = (
+                                (direction == "LONG"  and _prot > sl) or
+                                (direction == "SHORT" and _prot < sl)
+                            )
+                            if _improves:
+                                trade.trail_sl     = round(_prot, 8)
+                                trade.trail_active = True
+                                trail_active       = True
+                                sl                 = _prot
+                            meta["time_stop_tightened"] = True
+                            _append_trade_event(meta, "time_stop_tighten", {
+                                "lane":          lane,
+                                "hold_min":      round(_hold_min, 1),
+                                "pnl_pct":       round(_pnl_now_pct, 3),
                                 "fav_frac_risk": round(_fav / _risk_dist, 2) if _risk_dist else 0,
+                                "new_sl":        round(_prot, 8) if _improves else None,
                             })
                             trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                            updated += 1
                             logger.info(
-                                "time_stop_scratch",
+                                "time_stop_tighten",
                                 symbol=trade.symbol, lane=lane,
                                 hold_min=round(_hold_min, 1), pnl_pct=round(_pnl_now_pct, 2),
+                                new_sl=round(_prot, 6) if _improves else None,
                             )
 
             # ── 0a. Stagnant 48h check (F80) ─────────────────────────────────
@@ -1165,11 +1242,16 @@ async def check_futures_positions() -> tuple[int, int]:
                     if direction == "LONG"
                     else (_entry_d - _close_d) / _entry_d * 100
                 )
-                pnl_net = pnl_gross - Decimal(str(ROUND_TRIP * 100))
+                # PLAN_v16 F1: true-cost net — fee RT + entry slippage + SL-fill slippage
+                _extra_cost_pct, _funding_d = _true_close_costs(meta, close_reason or "")
+                pnl_net = pnl_gross - Decimal(str(ROUND_TRIP * 100)) - Decimal(str(_extra_cost_pct))
                 try:
                     meta["close_reason"]  = close_reason
                     meta["pnl_gross_pct"] = float(round(pnl_gross, 2))
                     meta["fee_pct"]       = round(ROUND_TRIP * 100, 2)
+                    # F1: cost breakdown per trade (transparansi di history UI)
+                    meta["cost_slippage_pct"]   = round(_extra_cost_pct, 4)
+                    meta["cost_funding_dollar"] = round(_funding_d, 4)
                     trade.signals_json    = json.dumps(meta, ensure_ascii=False)
                 except Exception:
                     pass
@@ -1200,6 +1282,9 @@ async def check_futures_positions() -> tuple[int, int]:
                     _total_pnl = float(round(
                         Decimal(str(_bm_partial)) + pnl_net / 100 * _notional_d, 2
                     ))
+                # PLAN_v16 F1: funding yang diakru G6 akhirnya benar-benar dibayar
+                if _funding_d > 0:
+                    _total_pnl = float(round(Decimal(str(_total_pnl)) - Decimal(str(_funding_d)), 2))
                 trade.status      = new_status
                 trade.close_price = close_price
                 trade.closed_at   = time.time()
@@ -1220,7 +1305,8 @@ async def check_futures_positions() -> tuple[int, int]:
 
             # ── 3. Trail SL (P5.1: lane-specific breakeven + F77 TP1→TP2 lock) ──
             new_sl, now_active, event = _compute_trail(
-                direction, entry, sl, tp1, tp2, price, trail_active, setup_type=lane
+                direction, entry, sl, tp1, tp2, price, trail_active, setup_type=lane,
+                cost_pct=_cost_floor_pct(meta),   # PLAN_v16 F3: breakeven = entry ± biaya
             )
             if new_sl is not None:
                 trade.trail_sl     = round(new_sl, 8)
@@ -1398,16 +1484,38 @@ async def check_futures_positions() -> tuple[int, int]:
                     _cum_cost = float(meta.get("cumulative_funding_paid", 0.0)) + \
                                 float(meta.get("cumulative_fee_paid", 0.0))
                     _pnl_dollar_now = _pnl_now_pct / 100 * _notional_g6  # uses G5b var
+                    # PLAN_v16 F3 bank-gate: exit sukarela hanya boleh BANK profit bila
+                    # net ≥ 3× cost_floor — di bawah itu, tighten SL ke entry+cost
+                    # (net-nol terkunci) dan biarkan posisi cari profit yang layak.
+                    _bank_ok = _pnl_now_pct >= MIN_BANK_COST_MULT * _cost_floor_pct(meta)
                     if _pnl_dollar_now > 0 and _cum_cost > _pnl_dollar_now * COST_TO_PROFIT_GATE:
-                        # Profitable but costs eating >30% of unrealized → exit now
-                        new_status   = "tp"
-                        close_price  = round(price, 8)
-                        close_reason = "cost_exceeds_profit"
-                        logger.info(
-                            "cost_gate_profit",
-                            symbol=trade.symbol, cum_cost=round(_cum_cost, 4),
-                            unrealized=round(_pnl_dollar_now, 4),
-                        )
+                        if _bank_ok:
+                            # Profitable but costs eating >30% of unrealized → exit now
+                            new_status   = "tp"
+                            close_price  = round(price, 8)
+                            close_reason = "cost_exceeds_profit"
+                            logger.info(
+                                "cost_gate_profit",
+                                symbol=trade.symbol, cum_cost=round(_cum_cost, 4),
+                                unrealized=round(_pnl_dollar_now, 4),
+                            )
+                        elif not meta.get("anti_churn_tightened"):
+                            _prot_cg = _protective_sl(entry, direction,
+                                                      _cost_floor_pct(meta), above=True)
+                            if ((direction == "LONG"  and _prot_cg > sl and price > _prot_cg) or
+                                    (direction == "SHORT" and _prot_cg < sl and price < _prot_cg)):
+                                trade.trail_sl     = round(_prot_cg, 8)
+                                trade.trail_active = True
+                                trail_active       = True
+                                sl                 = _prot_cg
+                                meta["anti_churn_tightened"] = True
+                                _append_trade_event(meta, "anti_churn_tighten", {
+                                    "from": "cost_gate", "pnl_pct": round(_pnl_now_pct, 3),
+                                })
+                                trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                                updated += 1
+                                logger.info("anti_churn_tighten", symbol=trade.symbol,
+                                            source="cost_gate", new_sl=round(_prot_cg, 6))
                     elif _pnl_dollar_now <= 0 and _cum_cost > _notional_g6 * COST_ABS_LOSS_GATE_PCT:
                         # B5.3: losing AND paying significant funding → too expensive to hold
                         new_status   = "sl"
@@ -1433,6 +1541,10 @@ async def check_futures_positions() -> tuple[int, int]:
                                 _unr_dollar > 0
                                 and _exp_fund_cost > 0
                                 and (_exp_fund_cost / _unr_dollar) > 0.30
+                                # PLAN_v16 F3 bank-gate: profit tipis < 3× cost_floor
+                                # tidak layak dibayar 1 round-trip fee — tahan posisi
+                                # (funding 1 window lebih murah dari churn close+reopen).
+                                and _pnl_now_pct >= MIN_BANK_COST_MULT * _cost_floor_pct(meta)
                             )
                             if _fund_too_costly:
                                 if direction == "LONG" and _cur_fr > 0.1:
@@ -1473,7 +1585,12 @@ async def check_futures_positions() -> tuple[int, int]:
                         and (time.time() - _tp1_done_at) > 48 * 3600
                         and _drift_pct <= FUTURES_ROTATION_DRIFT_PCT
                     )
-                    _plain_stagnant = (not trail_active) and _drift_pct <= FUTURES_ROTATION_DRIFT_PCT
+                    # PLAN_v16 F3: posisi yang di-tighten time-stop tetap rotate-eligible
+                    # (trail_active-nya protektif, bukan tanda TP1 tercapai).
+                    _plain_stagnant = (
+                        (not trail_active or meta.get("time_stop_tightened"))
+                        and _drift_pct <= FUTURES_ROTATION_DRIFT_PCT
+                    )
                     if _plain_stagnant or _trail_stagnant_post_tp1:
                         _cur_score_g3 = trade.probability or 60
                         if _futures_has_better_candidate(_cur_score_g3, trade.symbol, trade.style):
@@ -1639,7 +1756,9 @@ def _reconcile_apply_close(trade, meta: dict, close_price: float, status: str,
         (_close_d - _entry_d) / _entry_d * 100 if trade.direction == "LONG"
         else (_entry_d - _close_d) / _entry_d * 100
     )
-    pnl_net   = pnl_gross - Decimal(str(ROUND_TRIP * 100))
+    # PLAN_v16 F1: true-cost net (reconcile pakai formula yang sama dengan main loop)
+    _xc_pct, _fund_d = _true_close_costs(meta, reason)
+    pnl_net   = pnl_gross - Decimal(str(ROUND_TRIP * 100)) - Decimal(str(_xc_pct))
     _notional = trade.position_size or futures_notional(meta.get("risk_pct") or 2.0)
     _partials = (meta.get("tp1_partial_pnl_dollar", 0.0)
                  + meta.get("tp2_partial_pnl_dollar", 0.0)
@@ -1651,6 +1770,8 @@ def _reconcile_apply_close(trade, meta: dict, close_price: float, status: str,
     meta["close_reason"]  = reason
     meta["pnl_gross_pct"] = float(round(pnl_gross, 2))
     meta["fee_pct"]       = round(ROUND_TRIP * 100, 2)
+    meta["cost_slippage_pct"]   = round(_xc_pct, 4)     # PLAN_v16 F1
+    meta["cost_funding_dollar"] = round(_fund_d, 4)
     _append_trade_event(meta, "offline_reconcile", {
         "reason": reason, "close_price": close_price, "closed_ts": closed_ts,
     })
@@ -1660,7 +1781,8 @@ def _reconcile_apply_close(trade, meta: dict, close_price: float, status: str,
     trade.closed_at    = min(closed_ts, time.time())
     trade.pnl_pct      = float(round(pnl_net, 2))
     trade.pnl_dollar   = float(round(
-        Decimal(str(_partials)) + pnl_net / 100 * Decimal(str(_notional)) * _rem, 2
+        Decimal(str(_partials)) + pnl_net / 100 * Decimal(str(_notional)) * _rem
+        - Decimal(str(_fund_d)), 2      # PLAN_v16 F1: funding dibayar
     ))
 
 
@@ -1811,7 +1933,9 @@ async def _run_fast_loop() -> None:
                         _ep_d = _D(str(_ep))
                         pnl_gross = ((_cp_d - _ep_d) / _ep_d * 100 if _d == "LONG"
                                      else (_ep_d - _cp_d) / _ep_d * 100)
-                        pnl_net = pnl_gross - _D(str(ROUND_TRIP * 100))
+                        # PLAN_v16 F1: true-cost net (fast loop pakai formula sama)
+                        _xc_pct, _fund_d = _true_close_costs(meta, reason)
+                        pnl_net = pnl_gross - _D(str(ROUND_TRIP * 100)) - _D(str(_xc_pct))
                         _notional = t.position_size or futures_notional(meta.get("risk_pct") or 2.0)
                         # PLAN_v15 bugfix: banked partials (TP1 / accumulation mid / BM half)
                         # were dropped when the FAST loop closed the trade — the main loop
@@ -1829,9 +1953,12 @@ async def _run_fast_loop() -> None:
                         t.closed_at   = time.time()
                         t.pnl_pct     = float(round(pnl_net, 2))
                         t.pnl_dollar  = float(round(
-                            _D(str(_partials)) + pnl_net / 100 * _D(str(_notional)) * _rem, 2
+                            _D(str(_partials)) + pnl_net / 100 * _D(str(_notional)) * _rem
+                            - _D(str(_fund_d)), 2       # PLAN_v16 F1: funding dibayar
                         ))
                         meta["close_reason"] = reason
+                        meta["cost_slippage_pct"]   = round(_xc_pct, 4)
+                        meta["cost_funding_dollar"] = round(_fund_d, 4)
                         t.signals_json = json.dumps(meta, ensure_ascii=False)
 
                     # Max-loss gate (same as main loop P1.1)

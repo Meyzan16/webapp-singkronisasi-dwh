@@ -103,6 +103,9 @@ DEFAULTS: list[dict] = [
      "description": "P3d: max posisi futures terbuka dengan arah sama (LONG/SHORT)"},
     {"group": "futures", "key": "failfast_atr_mult", "default": 1.0, "category": "risk",
      "description": "P9: kelipatan ATR adverse (10-45 mnt pertama, tanpa progres) yang memicu fail-fast exit"},
+    # ── FUTURES — PLAN_v16 (true-cost profit engine) ─────────────────────────
+    {"group": "futures", "key": "min_tp1_cost_mult", "default": 3.0, "category": "threshold",
+     "description": "F2: TP1 minimum sebagai kelipatan cost_floor (fee+slippage+funding) sebelum posisi boleh dibuka"},
 
     # ── LEARNING ──────────────────────────────────────────────────────────────
     {"group": "learning", "key": "training_window_days", "default": 90, "category": "timing",

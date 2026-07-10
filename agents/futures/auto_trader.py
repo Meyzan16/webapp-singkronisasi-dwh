@@ -59,6 +59,16 @@ FUNDING_SOFT_SIZE_MULT = 0.5
 # Regimes where auto-open is fully disabled
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
 
+# ── PLAN_v16 F2/F5 — cost-floor gate & lane throttle ──────────────────────────
+MIN_TP1_COST_MULT = 3.0    # F2: TP1 wajib ≥ 3× total biaya round-trip (DB: min_tp1_cost_mult)
+# F2: estimasi hold per lane (jam) → estimasi funding windows utk cost floor
+_HOLD_EST_H: dict[str, float] = {
+    "momentum": 6.0, "bigmover": 3.0,
+    "pre_gainer": 24.0, "pre_move": 24.0, "accumulation": 48.0,
+}
+LANE_THROTTLE_WR      = 0.40   # F5: lane rolling WR di bawah ini (min 10 trade) → ½ size
+LANE_THROTTLE_MIN_N   = 10
+
 # ── PLAN_v15 P3/P8 — fade-day & profit-lock knobs ─────────────────────────────
 MAX_SAME_DIRECTION      = 4     # P3d: max open positions sharing one direction (of 6 slots)
 BIGMOVER_DAILY_BUDGET   = 6     # P3b: max BM entries per WIB day
@@ -168,6 +178,9 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         # PLAN_v15 P3b/P3d
         MAX_SAME_DIRECTION     = int(await cfg.get("futures", "max_same_direction", MAX_SAME_DIRECTION))
         BIGMOVER_DAILY_SL_STOP = int(await cfg.get("futures", "bigmover_daily_sl_stop", BIGMOVER_DAILY_SL_STOP))
+        # PLAN_v16 F2
+        global MIN_TP1_COST_MULT
+        MIN_TP1_COST_MULT      = await cfg.get("futures", "min_tp1_cost_mult", MIN_TP1_COST_MULT)
         # LANE_QUOTAS is a dict shared by reference with importers — mutate in
         # place so `from auto_trader import LANE_QUOTAS` bindings elsewhere stay in sync.
         LANE_QUOTAS["momentum"]     = int(await cfg.get("futures", "lane_quota_momentum", LANE_QUOTAS["momentum"]))
@@ -452,6 +465,24 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             risk_pct  = sig.get("risk_pct") or 2.0
             leverage  = sig.get("leverage", 5)
 
+            # ── PLAN_v16 F2: cost-floor gate — profit target harus mengalahkan
+            # SEMUA biaya round-trip SEBELUM posisi dibuka. cost_floor =
+            # fee RT + 2× slippage (entry+exit market) + estimasi funding per hold lane.
+            from app.services.slippage_sim import calculate_entry_slippage, get_session_label
+            from app.services.trading_costs import FUTURES_ROUND_TRIP_FEE_PCT
+            _slip_pct = sig.get("entry_slippage_pct") or calculate_entry_slippage(
+                sig.get("quote_vol_24h", 0)
+            )
+            _hold_h      = _HOLD_EST_H.get(setup, 12.0)
+            _funding_est = abs(scored_funding_pct) * (_hold_h / 8.0)   # % per 8h window
+            _cost_floor  = FUTURES_ROUND_TRIP_FEE_PCT + 2 * _slip_pct + _funding_est
+            _tp1_pct_sig = float(sig.get("tp1_pct") or 0.0)
+            if _tp1_pct_sig < MIN_TP1_COST_MULT * _cost_floor:
+                logger.info("auto_trade_cost_floor_skip", symbol=symbol, agent=agent,
+                            tp1_pct=_tp1_pct_sig, cost_floor=round(_cost_floor, 3),
+                            required=round(MIN_TP1_COST_MULT * _cost_floor, 3))
+                continue
+
             # BC3: validate symbol constraints from Binance exchangeInfo.
             # Round entry/SL/TP to tickSize; skip if notional < minNotional; cap leverage.
             from agents.futures.exchange_info import get_symbol_constraints, round_to_tick as _rtt
@@ -488,6 +519,17 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             # PLAN_v15 P8: profit-lock mode trades at half size (house-money rule)
             if _profit_lock_mode:
                 _size_mult *= PROFIT_LOCK_SIZE_MULT
+
+            # PLAN_v16 F5: lane expectancy throttle — lane yang rolling WR-nya buruk
+            # trade ½ size sampai membuktikan diri (komplemen WR-pause 35%; upsize
+            # A-grade sudah ada via conviction scaling di compute_futures_sizing).
+            if setup:
+                from agents.futures.risk_gate import get_lane_wr
+                _lwr, _ln = get_lane_wr(setup)
+                if _ln >= LANE_THROTTLE_MIN_N and _lwr < LANE_THROTTLE_WR:
+                    _size_mult *= 0.5
+                    logger.info("lane_throttle_half_size", setup=setup,
+                                wr=round(_lwr, 3), sample=_ln)
             if _size_mult < 1.0:
                 pos_size        = round(pos_size * _size_mult, 2)
                 risk_dollar_val = round(risk_dollar_val * _size_mult, 2)
@@ -500,11 +542,8 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                              symbol=symbol, pos_size=pos_size, min_notional=_min_not)
                 continue
 
-            # P1: compute entry slippage for meta (informational — does not adjust stored price)
-            from app.services.slippage_sim import calculate_entry_slippage, get_session_label
-            _slip_pct = sig.get("entry_slippage_pct") or calculate_entry_slippage(
-                sig.get("quote_vol_24h", 0)
-            )
+            # P1: entry slippage sudah dihitung di gate F2 di atas (_slip_pct) —
+            # PLAN_v16 F1 memakainya sungguhan di monitor (dipotong dari pnl saat close).
 
             meta = {
                 "signals":      sig.get("signals", []),
@@ -526,9 +565,12 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 "setup_type":   sig.get("setup_type", "pre_move"),   # P2: lane tag
                 "atr_pct":      sig.get("atr_pct", 0),   # PLAN_v15: G4 rugpull + P9 fail-fast read this
                 "auto_opened":  True,
-                # P1 / B4.1: slippage info for analytics (not applied to entry_price)
+                # P1 / B4.1 + PLAN_v16 F1: slippage dipotong dari pnl di monitor saat close
                 "entry_slippage_pct": round(_slip_pct, 4),
                 "entry_session":      get_session_label(),
+                # PLAN_v16 F2: total biaya round-trip (%) — dipakai monitor utk
+                # breakeven=entry±cost, bank-gate 3×, dan time-stop tighten.
+                "cost_floor_pct":     round(_cost_floor, 4),
             }
 
             trade = PaperTrade(
