@@ -5,8 +5,11 @@ PLAN_v16** (keempat file dihapus; sejarah lengkap ada di git). Satu dokumen hidu
 yang sudah ship diringkas satu tabel, yang tersisa diurutkan sebagai backlog tunggal
 dengan SATU kerangka validasi (dulu tersebar redundan di v6 P7, v15 §5, v16 F6).
 
-**Tujuan akhir:** 25 hari win : 5 hari loss per 30 hari, profit NET semua biaya
-(fee+slippage+funding), lolos gate → live trade dari wallet Binance nyata.
+**Tujuan akhir (update 2026-07-10):** 26–27 hari win : ≤3 hari loss per 30 hari
+(day-WR ≥ 87%), profit NET semua biaya (fee+slippage+funding), 4 lane berkontribusi
+dengan tugas masing-masing TANPA saling mengganggu, lolos gate → live trade dari
+wallet Binance nyata. (Gate keras hari-30 tetap 25:5 — 26-27:3 adalah target
+aspiratif setelah item H landing; lihat §2A.)
 
 ---
 
@@ -73,8 +76,9 @@ Semua angka NET true-cost. Cek mingguan, dua keputusan:
   auto-pause, TIDAK ikut live.
 - LOLOS → kerjakan item G (live rollout). GAGAL → diagnosa per lane, ulang 14 hari.
 
-**Gate 25:5 (hari ke-30, ≈ 2026-08-09):** ≥ 25 hari WIN dari 30 hari WIB ber-trade,
-hari loss ≤ 5. Proksi mingguan < 70% dua minggu berturut → review desain, jangan tunggu.
+**Gate hari ke-30 (≈ 2026-08-09):** keras ≥ 25 hari WIN : ≤ 5 loss dari 30 hari WIB
+ber-trade; **aspiratif 26–27 : ≤3** (tercapai bila churn <20% + ≥3 lane expectancy
+positif pasca item H). Proksi mingguan < 70% dua minggu berturut → review desain.
 
 ### B. Kalibrasi skor agent1/agent2 — v15 P6 · **due ~2026-07-13**
 Agent1 0 trade sepanjang sejarah (max skor ~51/190rb evaluasi). Data near-miss
@@ -111,6 +115,60 @@ BM SHORT-bias (LONG hanya force-open manual). Kandidat tuning: `BM_BE_ARM_ABS_PC
 - Badge `🎯 predicted T-Xh` di Top Gainers (endpoint `/predictive/pre_detection`).
 - Tambahan v16: tampilkan breakdown `cost_slippage_pct`/`cost_funding_dollar`/
   `cost_floor_pct` di history detail.
+
+### H. Scanner audit: bug cleanup + pemisahan tugas 4 lane · **kerjakan SEGERA
+(awal baseline — mengubah scoring, harus landing sebelum data validasi menumpuk)**
+
+Audit menyeluruh 2026-07-10 pada agent1 (pre-gainer), agent2 (accumulation),
+agent3 (momentum), agent_bigmover. Temuan:
+
+**H1 — Bug nyata (verified di kode):**
+1. **a1 D2.1 ATH-break bonus UNREACHABLE** (`agent1.py:452`): `ath_7d =
+   max(d4h.highs[-42:])` MENGIKUTKAN candle 4h yang sedang berjalan — high candle
+   itu ≥ harga sekarang, jadi `pct_from_ath >= 0.005` mustahil → reward +8 "fresh
+   leg up" mati total, sementara penalti −10 "near ATH" kena SETIAP koin yang
+   sedang mencetak high. D2.1 hanya menghukum, tak pernah memberi — kontributor
+   dormansi agent1 (0 trade). Fix: `max(d4h.highs[-42:-1])` (pola `_is_breakout`
+   a3 yang sudah benar).
+2. **a3 `change_1h` sebenarnya 3 JAM** (`agent3.py:163,379`): `closes[-1]` vs
+   `closes[-4]` = 3 candle 1h. Modifier chase/pullback (ambang ±2-3%) beroperasi
+   di move 3h — salah kalibrasi vs niat (BM & utils sudah benar pakai
+   `closes[-2]`). Fix: pakai `closes[-2]` ATAU rename `change_3h` + kalibrasi ambang.
+3. **BM funding gate menganulir two-zone P4c** (`agent_bigmover.py:399-402`):
+   scanner hard-reject LONG di fr > 0.12% SEBELUM auto_trader sempat menerapkan
+   zona lunak 0.12–0.25% (size ½). Fix: scanner hanya veto ≥ 0.25% (hard);
+   zona lunak diserahkan ke auto_trader.
+4. Dead code: a1 `if fr > 0.05/100: pass` (funding, sudah dipenalti di atas);
+   a2 branch dual-TF `phase4h==phase1h=="markup" and phase=="accumulation"`
+   (kontradiksi, tak pernah true).
+5. **rejection_log flood**: ~75rb baris/hari (semua skor di bawah min di-log).
+   Fix: log hanya skor ≥ 40 → tabel ramping, query kalibrasi P6 cepat.
+
+**H2 — Pemisahan tugas (no-interference):**
+1. **Batas keras universe per change_24h** — sekarang a3 masih memberi poin sampai
+   |chg| 50% (bracket legacy PLAN-SIGNAL-GAP, ditulis SEBELUM lane BM ada) →
+   overlap 15–50% dgn BM: dua lane rebutan koin yang sama dengan model SL/TP/lev
+   berbeda, dan "skor tertinggi menang" di auto_trader membandingkan skala skor
+   yang tidak sebanding. Fix: **a1/a2 |chg| ≤ 8% · a3 5–15% (return [] bila ≥15)
+   · BM ≥ 15%** — universe eksklusif, konflik hilang by construction.
+2. **a1 vs a2 fingerprint ~80% identik** (dua-duanya menilai BB squeeze, akumulasi
+   volume, funding netral, OI naik, RSI sweet, DAN near-resistance <3%) → rebutan
+   koin quiet yang sama. Pertegas identitas: **a2 BUANG poin near-resistance (T2)**,
+   fokus bounce-from-support + Wyckoff dual-TF (swing multi-hari); **a1 pegang
+   sisi pre-breakout** (dekat resistance = katalisnya).
+3. a1 bisa emit LONG+SHORT simultan utk simbol sama (kontradiksi) → terapkan
+   aturan D2.3 milik a2: keep skor tertinggi saja.
+
+**H3 — Peran kontribusi per lane (target 26-27:3):**
+| Lane | Tugas | Horizon |
+|---|---|---|
+| a3 momentum (5-15%) | penghasil harian utama — wave yang sudah terkonfirmasi | jam |
+| BM (≥15%) | specialist extreme mover, size kecil, guard ketat (SHORT-edge per R0c) | 1-3 jam |
+| a1 pre-gainer (≤8%) | sniper pre-breakout — entry sebelum move | 6-24 jam |
+| a2 accumulation (≤8%) | swing Wyckoff dari support | 1-3 hari |
+
+Jika setelah 14 hari hanya 2 lane ber-expectancy positif → matikan lane negatif
+(auto-pause permanen): 2 lane sehat > 4 lane saling ganggu.
 
 ### G. Live rollout — v16 F4+F6 · **hanya setelah Gate LIVE (A) lolos**
 1. Maker-first execution: entry post-only limit (0.02%) + chase 30-60 dtk; fallback
