@@ -10,11 +10,13 @@ from app.models.big_mover_log import BigMoverLog
 from app.models.balance_transaction import BalanceTransaction
 from app.models.force_open_log import ForceOpenLog
 from app.models.agent_config import AgentConfig
+from app.models.spot_decision_event import SpotDecisionEvent
+from app.models.spot_model_version import SpotModelVersion
 
 __all__ = [
     "PaperTrade", "PaperBalance",
     "AgentSignalWeight", "SignalWeightHistory",
     "HealthEvent", "RejectionLog", "PredictiveLog",
     "AppSettings", "BigMoverLog", "BalanceTransaction", "ForceOpenLog",
-    "AgentConfig",
+    "AgentConfig", "SpotDecisionEvent", "SpotModelVersion",
 ]

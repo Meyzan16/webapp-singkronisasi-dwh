@@ -41,6 +41,8 @@ import structlog
 
 from app.services.binance_urls import spot
 from app.services.trading_costs import EXECUTION_COST_PCT
+from agents.opportunity.learning_policy import apply_learning_policy
+from agents.opportunity.feature_engineering import extract_technical_features
 
 logger = structlog.get_logger(__name__)
 
@@ -690,6 +692,7 @@ def _score_breakout(
         "rsi_1h":              round(d1h_ref.rsi, 1) if d1h_ref else None,
         "weight_applied":      1.0,
         "banned_by_learning":  False,
+        "challenger_features": extract_technical_features(tf_data),
     }
 
 
@@ -867,6 +870,7 @@ def _score_bigmover_chase(
         "rsi_1h":              round(d1h.rsi, 1) if d1h else None,
         "weight_applied":      1.0,
         "banned_by_learning":  False,
+        "challenger_features": extract_technical_features(tf_data),
     }
 
 
@@ -1279,6 +1283,7 @@ def _score_symbol(
         "tfs_confirmed":       list(tf_data.keys()),
         "squeeze_tfs":         squeeze_tfs,
         "ema_bullish":         ema_bullish_at_entry,  # for monitor trend_reversal detection
+        "challenger_features": extract_technical_features(tf_data),
     }
 
 
@@ -1356,11 +1361,12 @@ async def scan_early_radar(tickers_all: list[dict], done_syms: set[str]) -> list
 
 # ── Main scan ──────────────────────────────────────────────────────────────────
 
-async def _load_alert_weights() -> tuple[dict[str, float], set[str]]:
+async def _load_learning_weights() -> tuple[dict[str, float], dict[str, float], dict[str, int], set[str], Optional[str]]:
     """
-    Load per-alert-type adaptive weights from DB.
-    Returns (weights, banned_types). banned (§14.7): weight < 0.8 dengan n ≥ 10
-    → tipe itu DILARANG auto-open sampai win rate pulih — learning yang punya gigi.
+    Load all SPOT alert/signal weights and blend persisted cross-agent evidence.
+
+    Returns (weights_by_full_key, banned_keys, error). A load failure is exposed
+    in the scan payload instead of silently pretending learning is healthy.
     """
     try:
         from app.database import AsyncSessionLocal, is_db_available
@@ -1368,26 +1374,74 @@ async def _load_alert_weights() -> tuple[dict[str, float], set[str]]:
         from sqlalchemy import select as _select
 
         if not is_db_available():
-            return {}, set()
+            return {}, {}, {}, set(), "database_unavailable"
 
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 _select(AgentSignalWeight).where(
-                    AgentSignalWeight.agent      == "opportunity_spot",
-                    AgentSignalWeight.signal_key.like("alert:%"),
+                    AgentSignalWeight.agent.in_(["opportunity_spot", "cross_agent"]),
+                    AgentSignalWeight.regime == "all",
                     AgentSignalWeight.total_count >= 3,
                 )
             )
-            rows    = list(result.scalars().all())
-            weights = {r.signal_key.replace("alert:", ""): r.weight for r in rows}
+            rows = list(result.scalars().all())
+
+            own = {r.signal_key: r for r in rows if r.agent == "opportunity_spot"}
+            cross = {r.signal_key: r for r in rows if r.agent == "cross_agent"}
+            weights: dict[str, float] = {}
+            probabilities: dict[str, float] = {}
+            sample_counts: dict[str, int] = {}
+            for key in set(own) | set(cross):
+                own_weight = float(own[key].weight) if key in own else 1.0
+                cross_weight = float(cross[key].weight) if key in cross else 1.0
+                weights[key] = round(own_weight * 0.70 + cross_weight * 0.30, 3)
+                own_probability = (
+                    (own[key].win_count + 1.0) / (own[key].total_count + 2.0)
+                    if key in own else 0.5
+                )
+                cross_probability = (
+                    (cross[key].win_count + 1.0) / (cross[key].total_count + 2.0)
+                    if key in cross else 0.5
+                )
+                probabilities[key] = round(
+                    own_probability * 0.70 + cross_probability * 0.30, 4,
+                )
+                sample_counts[key] = int(own[key].total_count if key in own else cross[key].total_count)
             banned  = {
-                r.signal_key.replace("alert:", "")
-                for r in rows
+                r.signal_key
+                for r in own.values()
                 if r.weight < 0.8 and r.total_count >= 10
             }
-            return weights, banned
-    except Exception:
-        return {}, set()
+            return weights, probabilities, sample_counts, banned, None
+    except Exception as exc:
+        error = str(exc)[:120]
+        logger.warning("spot_learning_weights_load_failed", error=error)
+        return {}, {}, {}, set(), error
+
+
+def _apply_lane_learning(
+    rows: list[dict],
+    weights: dict[str, float],
+    probabilities: dict[str, float],
+    sample_counts: dict[str, int],
+    banned_keys: set[str],
+    min_score: float,
+    auto_threshold: float,
+) -> list[dict]:
+    """Apply one learning contract to a complete SPOT lane."""
+    kept: list[dict] = []
+    for row in rows:
+        apply_learning_policy(
+            row, weights, banned_keys, auto_threshold,
+            probabilities=probabilities,
+            sample_counts=sample_counts,
+        )
+        if float(row.get("adaptive_score", 0.0)) < min_score:
+            continue
+        if row.get("risk_pct"):
+            row["ev_per_risk"] = _ev_per_risk(row)
+        kept.append(row)
+    return kept
 
 
 def _ev_per_risk(result: dict) -> float:
@@ -1395,7 +1449,8 @@ def _ev_per_risk(result: dict) -> float:
     Expected value per unit risk (§11.4) — SATU sumber ranking untuk
     scheduler DAN UI. p_win dari RAW pre-weight score (§7.4), reward = TP2 NET.
     """
-    p      = min(result.get("raw_score", result.get("opportunity_score", 0)), 99) / 100
+    p      = result.get("lower_confidence_probability")
+    p      = float(p) if p is not None else 0.5
     reward = result.get("tp2_net_pct", 0) or 0
     risk   = result.get("risk_pct", 0) or 2.0
     ev     = p * reward - (1 - p) * risk
@@ -1465,8 +1520,8 @@ async def run_opportunity_scan() -> dict:
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="spot_scanner", error=str(exc)[:120])
 
-    # Load adaptive weights (non-blocking — uses default 1.0 if DB unavailable)
-    alert_weights, banned_types = await _load_alert_weights()
+    # Load adaptive evidence once per scan. Failure is visible in the payload.
+    learning_weights, learning_probabilities, learning_sample_counts, banned_keys, learning_error = await _load_learning_weights()
 
     # 1. Get top-100 by quote volume (Spot)
     async with httpx.AsyncClient(timeout=15) as client:
@@ -1650,23 +1705,6 @@ async def run_opportunity_scan() -> dict:
         result = _score_symbol(symbol, tf_data, change_24h, change_1h, change_7d)
         if result is None:
             continue
-
-        # Bobot learning: HANYA mengubah skor display & ranking — keputusan
-        # auto_open dan conviction sizing tetap dari raw pre-weight score (§7.4)
-        alert_weight = alert_weights.get(result["alert_type"], 1.0)
-        if alert_weight != 1.0:
-            result["opportunity_score"] = round(
-                min(result["opportunity_score"] * alert_weight, 99), 1
-            )
-        result["weight_applied"] = alert_weight
-
-        # §14.7: tipe dengan track record busuk (weight<0.8, n≥10) dilarang auto-open
-        if result["alert_type"] in banned_types:
-            result["auto_open"]      = False
-            result["banned_by_learning"] = True
-
-        if result["opportunity_score"] < MIN_SCORE:
-            continue  # penalti bobot boleh menggugurkan kandidat marjinal
 
         levels = _calc_trade_levels(tf_data, result["current_price"])
         if levels is None:
@@ -1889,6 +1927,24 @@ async def run_opportunity_scan() -> dict:
         logger.warning("early_radar_scan_failed", error=str(e))
         early_radar_results = []
 
+    # F0: one adaptive policy for every SPOT lane. Learning is conservative at
+    # this stage: it can veto an existing auto-open but cannot promote a new one.
+    results = _apply_lane_learning(
+        results, learning_weights, learning_probabilities, learning_sample_counts, banned_keys, MIN_SCORE, AUTO_OPEN_SCORE,
+    )
+    breakout_results = _apply_lane_learning(
+        breakout_results, learning_weights, learning_probabilities, learning_sample_counts, banned_keys,
+        BREAKOUT_MIN_SCORE, BREAKOUT_AUTO_SCORE,
+    )
+    bigmover_results = _apply_lane_learning(
+        bigmover_results, learning_weights, learning_probabilities, learning_sample_counts, banned_keys,
+        BIGMOVER_MIN_SCORE, BIGMOVER_AUTO_SCORE,
+    )
+    early_radar_results = _apply_lane_learning(
+        early_radar_results, learning_weights, learning_probabilities, learning_sample_counts, banned_keys,
+        EARLY_RADAR_MIN_SCORE, EARLY_RADAR_AUTO_SCORE,
+    )
+
     # §12.5 + Phase 3 G3-regime: 3-state — CLOSED kills auto-open, REDUCED keeps
     # auto_open flag (scheduler enforces lower quota), OPEN normal.
     regime, regime_status = _btc_regime(btc_tf_data, btc_change_24h)
@@ -1914,6 +1970,33 @@ async def run_opportunity_scan() -> dict:
     breakout_results = breakout_results[:10]
 
     all_results = results + breakout_results + bigmover_results + early_radar_results
+    try:
+        from agents.opportunity.onchain_provider import enrich_candidates
+        await enrich_candidates(all_results)
+    except Exception as exc:
+        logger.warning("onchain_enrichment_failed", error=str(exc)[:120])
+    returned_symbols = {str(row.get("symbol") or "") for row in all_results}
+    rejected_candidates = []
+    for ticker in candidates:
+        symbol = str(ticker.get("symbol") or "")
+        if not symbol or symbol in returned_symbols:
+            continue
+        rejected_candidates.append({
+            "symbol": symbol,
+            "current_price": float(ticker.get("lastPrice", 0) or 0),
+            "raw_score": 0.0,
+            "adaptive_score": 0.0,
+            "opportunity_score": 0.0,
+            "auto_open": False,
+            "direction_confirmed": False,
+            "alert_type": "scanner_rejected",
+            "entry_mode": "candidate_rejected",
+            "signals": [],
+            "change_24h": float(ticker.get("priceChangePercent", 0) or 0),
+            "quote_vol_24h": float(ticker.get("quoteVolume", 0) or 0),
+            "decision_reason": "scoring_or_quality_gate",
+            "challenger_features": {},
+        })
 
     elapsed = round(time.time() - start, 1)
     logger.info("opportunity_scan_done",
@@ -1934,6 +2017,12 @@ async def run_opportunity_scan() -> dict:
         "btc_regime":         regime,
         "regime_status":      regime_status,    # Phase 3 G3-regime: OPEN | REDUCED | CLOSED
         "btc_change_24h":     round(btc_change_24h, 2),
+        "learning_status":    "degraded" if learning_error else "active",
+        "learning_error":     learning_error,
+        "learning_weight_count": len(learning_weights),
+        # Internal ledger payload. Scheduler removes private keys before caching
+        # the public API response, so full rejection evidence does not bloat UI.
+        "_decision_events": all_results + rejected_candidates,
         "generated_at":       int(time.time()),
         "elapsed_sec":        elapsed,
     }

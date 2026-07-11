@@ -3,15 +3,14 @@ Spot Signal Weight Updater — Adaptive Learning for opportunity_spot.
 
 Healthy-statistics version (§5.1, §5.2, §6.1b, §9.2, §9.4):
   - Training data: closed tp/sl trades from the last 90 days ONLY
-  - EXCLUDED from learning: close_reason in ("tp1_breakeven", "max_age_expired")
-    (±0 outcomes and timeouts are not signal-quality evidence) and manual closes
+  - Label truth: realized net pnl_pct; close_reason is diagnostic metadata only
   - Recency decay: each sample weighted by exp(-age / half-life), half-life 7 days
     — the market changes; last week's evidence beats last month's
   - Laplace smoothing: win_rate_adj = (wins + 1) / (total + 2) — 3 samples can
     no longer produce extreme weights
   - Confidence scaling: weight moves toward its target proportionally to
     min(1, n_effective / 10) — more evidence, more influence
-  - Step cap: a key's weight moves at most ±0.10 per run (anti-oscillation §5.2.7)
+  - Deterministic publication: identical evidence always yields identical weights
   - Zombie prune: keys absent from current data decay toward 1.0 and are deleted
     when stale > 30 days (§6.1b, §9.4)
 
@@ -20,8 +19,8 @@ Weight target dari win-rate (smoothed):
 Scanner additionally BANS auto-open for weight < 0.8 with n ≥ 10 (§14.7).
 """
 
+import asyncio
 import json
-import re
 import time
 from typing import Optional
 
@@ -31,6 +30,13 @@ from sqlalchemy import select
 from app.database import AsyncSessionLocal, is_db_available
 from app.models.paper_trade import PaperTrade
 from app.models.signal_weight import AgentSignalWeight
+from app.models.signal_weight_history import SignalWeightHistory
+from agents.opportunity.learning_policy import (
+    canonical_signal_key,
+    deterministic_weight,
+    is_profitable_outcome,
+    normalize_signal,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -38,13 +44,12 @@ AGENT_KEY          = "opportunity_spot"
 MIN_RUN_INTERVAL   = 30 * 60
 TRAINING_WINDOW_D  = 90
 DECAY_HALF_LIFE_D  = 7.0
-STEP_CAP           = 0.10
 STALE_KEY_MAX_D    = 30
-EXCLUDED_REASONS   = {"tp1_breakeven", "max_age_expired"}
 
 _last_run:   Optional[float] = None
 _last_error: Optional[str]   = None
 _last_count: int             = 0
+_update_lock = asyncio.Lock()
 
 
 def get_state() -> dict:
@@ -56,11 +61,8 @@ def get_state() -> dict:
 
 
 def _normalize_signal(raw: str) -> str:
-    """Convert signal string to a stable short key (strip emojis and numbers)."""
-    cleaned = re.sub(r"[^\w\s%+.\-]", "", raw)
-    cleaned = re.sub(r"\d+\.?\d*", "N", cleaned)
-    words   = cleaned.strip().split()[:4]
-    return "_".join(w.lower() for w in words if w)
+    """Backward-compatible alias for persisted signal keys."""
+    return normalize_signal(raw)
 
 
 def _target_weight(win_rate_adj: float) -> float:
@@ -82,8 +84,14 @@ def _decay_factor(closed_at: Optional[float], now: float) -> float:
 
 
 async def update_spot_weights() -> int:
+    """Serialize publications so scheduler/monitor cannot race the same rows."""
+    async with _update_lock:
+        return await _update_spot_weights_unlocked()
+
+
+async def _update_spot_weights_unlocked() -> int:
     """Recompute signal weights from recent closed trades. Returns rows touched."""
-    global _last_run, _last_error, _last_count, TRAINING_WINDOW_D, DECAY_HALF_LIFE_D, STEP_CAP
+    global _last_run, _last_error, _last_count, TRAINING_WINDOW_D, DECAY_HALF_LIFE_D
 
     if not is_db_available():
         return 0
@@ -95,7 +103,6 @@ async def update_spot_weights() -> int:
         from agents.shared.config_reader import cfg
         TRAINING_WINDOW_D = await cfg.get("learning", "training_window_days", TRAINING_WINDOW_D)
         DECAY_HALF_LIFE_D = await cfg.get("learning", "decay_half_life_days", DECAY_HALF_LIFE_D)
-        STEP_CAP          = await cfg.get("learning", "step_cap", STEP_CAP)
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="spot_weight_updater", error=str(exc)[:120])
 
@@ -116,12 +123,17 @@ async def update_spot_weights() -> int:
         # ── Accumulate decayed win/total per key ──────────────────────────────
         stats: dict[str, dict] = {}
 
-        def _add(key: str, is_win: bool, w: float) -> None:
-            s = stats.setdefault(key, {"wins": 0.0, "total": 0.0, "raw_n": 0})
+        def _add(key: str, is_win: bool, pnl_pct: float, w: float) -> None:
+            s = stats.setdefault(
+                key,
+                {"wins": 0.0, "total": 0.0, "pnl_sum": 0.0, "raw_n": 0, "raw_wins": 0},
+            )
             s["total"] += w
+            s["pnl_sum"] += pnl_pct * w
             s["raw_n"] += 1
             if is_win:
                 s["wins"] += w
+                s["raw_wins"] += 1
 
         for t in trades:
             meta = {}
@@ -132,22 +144,28 @@ async def update_spot_weights() -> int:
             except (json.JSONDecodeError, TypeError):
                 pass
 
-            # §5.1: exclude polluted labels from training
-            if meta.get("close_reason") in EXCLUDED_REASONS:
+            # Realized NET outcome is the source of truth. Close reason is kept
+            # for diagnostics only; profitable tp1_breakeven/max-age exits are
+            # valid evidence and must not be silently discarded.
+            if t.pnl_pct is None:
                 continue
 
-            is_win = (t.status == "tp") and (t.pnl_pct is not None and t.pnl_pct > 0)
+            is_win = is_profitable_outcome(t.pnl_pct)
             decay  = _decay_factor(t.closed_at, now)
 
             if t.alert_type:
-                _add(f"alert:{t.alert_type}", is_win, decay)
+                _add(f"alert:{t.alert_type}", is_win, float(t.pnl_pct), decay)
 
             signals = meta.get("signals", [])
             if isinstance(signals, list):
                 for s in signals[:5]:
-                    key = _normalize_signal(str(s))
+                    raw_signal = str(s)
+                    key = canonical_signal_key(raw_signal)
+                    if key is None:
+                        normalized = _normalize_signal(raw_signal)
+                        key = f"signal:{normalized}" if normalized else ""
                     if key:
-                        _add(f"signal:{key}", is_win, decay)
+                        _add(key, is_win, float(t.pnl_pct), decay)
 
         # ── Upsert + prune ────────────────────────────────────────────────────
         touched = 0
@@ -165,35 +183,57 @@ async def update_spot_weights() -> int:
             for key, s in stats.items():
                 n_eff    = s["total"]                       # decayed effective n
                 raw_n    = s["raw_n"]
+                raw_wins = s["raw_wins"]
                 win_rate = s["wins"] / n_eff if n_eff > 0 else 0.0
-                # §5.2: Laplace smoothing — no certainty from tiny samples
-                wr_adj   = (s["wins"] + 1.0) / (n_eff + 2.0)
-                target   = _target_weight(wr_adj)
-                # Confidence scaling: full influence only with ≥10 effective samples
-                confidence = min(1.0, n_eff / 10.0)
-                desired    = 1.0 + (target - 1.0) * confidence
+                avg_pnl  = s["pnl_sum"] / n_eff if n_eff > 0 else 0.0
+                desired  = deterministic_weight(s["wins"], n_eff)
 
                 row = existing_rows.get(key)
                 if row is None:
-                    initial = 1.0 + max(-STEP_CAP, min(STEP_CAP, desired - 1.0))
                     session.add(AgentSignalWeight(
                         agent       = AGENT_KEY,
                         signal_key  = key,
-                        weight      = round(initial, 3),
-                        win_count   = int(round(s["wins"])),
+                        weight      = desired,
+                        win_count   = raw_wins,
                         total_count = raw_n,
                         win_rate    = round(win_rate, 4),
+                        avg_pnl_pct = round(avg_pnl, 3),
+                        sample_count_raw = raw_n,
                         regime      = "all",
                         updated_at  = now,
                     ))
                 else:
-                    # §5.2.7: anti-oscillation — move at most ±STEP_CAP per run
-                    step = max(-STEP_CAP, min(STEP_CAP, desired - row.weight))
-                    row.weight      = round(row.weight + step, 3)
-                    row.win_count   = int(round(s["wins"]))
-                    row.total_count = raw_n
-                    row.win_rate    = round(win_rate, 4)
-                    row.updated_at  = now
+                    next_values = (
+                        desired,
+                        raw_wins,
+                        raw_n,
+                        round(win_rate, 4),
+                        round(avg_pnl, 3),
+                    )
+                    current_values = (
+                        round(row.weight, 3),
+                        row.win_count,
+                        row.total_count,
+                        round(row.win_rate, 4),
+                        round(row.avg_pnl_pct or 0.0, 3),
+                    )
+                    if next_values == current_values and row.sample_count_raw == raw_n:
+                        continue
+                    row.weight, row.win_count, row.total_count, row.win_rate, row.avg_pnl_pct = next_values
+                    row.sample_count_raw = raw_n
+                    row.updated_at = now
+                session.add(SignalWeightHistory(
+                    agent=AGENT_KEY,
+                    signal_key=key,
+                    regime="all",
+                    weight=desired,
+                    win_count=raw_wins,
+                    total_count=raw_n,
+                    win_rate=round(win_rate, 4),
+                    avg_pnl_pct=round(avg_pnl, 3),
+                    sample_count_raw=raw_n,
+                    snapshot_at=now,
+                ))
                 touched += 1
 
             # §6.1b + §9.4: zombie keys — decay toward neutral, delete when stale
@@ -204,13 +244,7 @@ async def update_spot_weights() -> int:
                 if stale_days > STALE_KEY_MAX_D:
                     await session.delete(row)
                     touched += 1
-                elif abs(row.weight - 1.0) > 0.01:
-                    if row.weight > 1.0:
-                        row.weight = round(max(1.0, row.weight - STEP_CAP), 3)
-                    else:
-                        row.weight = round(min(1.0, row.weight + STEP_CAP), 3)
-                    touched += 1
-                    # updated_at sengaja TIDAK disentuh — staleness terus berjalan
+                # Do not repeatedly move stale weights without new evidence.
 
             await session.commit()
 

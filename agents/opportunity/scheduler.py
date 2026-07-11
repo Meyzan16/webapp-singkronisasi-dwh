@@ -72,11 +72,40 @@ def _risk_adjusted_score(coin: dict) -> float:
     """
     if "ev_per_risk" in coin:
         return coin["ev_per_risk"]
-    p      = min(coin.get("raw_score", coin.get("opportunity_score", 0)), 99) / 100
+    p      = coin.get("lower_confidence_probability")
+    p      = float(p) if p is not None else 0.5
     reward = coin.get("tp2_net_pct", coin.get("tp2_pct", 0)) or 0
     risk   = coin.get("risk_pct", 0) or 2.0
     ev     = p * reward - (1 - p) * risk
     return ev / risk
+
+
+async def _lane_risk_multiplier(alert_type: str) -> float:
+    """Throttle a lane on negative expectancy or abrupt recent drift."""
+    from app.database import AsyncSessionLocal
+    from app.models.paper_trade import PaperTrade
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as session:
+        pnls = list((await session.execute(
+            select(PaperTrade.pnl_pct).where(
+                PaperTrade.style == "opportunity_spot",
+                PaperTrade.alert_type == alert_type,
+                PaperTrade.status.in_(["tp", "sl", "manual", "expired"]),
+                PaperTrade.pnl_pct.isnot(None),
+            ).order_by(PaperTrade.closed_at.desc()).limit(40)
+        )).scalars().all())
+    if len(pnls) < 10:
+        return 1.0
+    recent = pnls[:20]
+    multiplier = 0.5 if sum(recent) / len(recent) <= 0 else 1.0
+    if len(pnls) >= 30:
+        prior = pnls[20:40]
+        recent_wr = sum(value > 0 for value in recent) / len(recent)
+        prior_wr = sum(value > 0 for value in prior) / len(prior)
+        if prior_wr - recent_wr >= 0.20:
+            multiplier = min(multiplier, 0.5)
+    return multiplier
 
 
 async def _daily_loss_breaker_active() -> bool:
@@ -296,8 +325,25 @@ async def _auto_open_position(coin: dict) -> bool:
     # PLAN_v5 Group A: Early Radar sizing ½ normal (account_risk_pct=0.5%).
     _acct_risk_pct = coin.get("account_risk_pct")
     _risk_frac_override = (_acct_risk_pct / 100.0) if _acct_risk_pct else None
+    lower_p = coin.get("lower_confidence_probability")
+    kelly_fraction = None
+    lane_multiplier = await _lane_risk_multiplier(str(coin.get("alert_type") or "unknown"))
+    if lower_p is not None:
+        risk_pct = float(coin.get("risk_pct", 0) or 2.0)
+        reward_pct = float(coin.get("tp2_net_pct", coin.get("tp2_pct", 0)) or 0)
+        payoff = reward_pct / risk_pct if risk_pct > 0 else 0.0
+        kelly_fraction = max(0.0, float(lower_p) - (1.0 - float(lower_p)) / payoff) if payoff > 0 else 0.0
+        capped_kelly_risk = min(0.01, 0.25 * kelly_fraction) * lane_multiplier
+        _risk_frac_override = min(
+            _risk_frac_override if _risk_frac_override is not None else 0.01,
+            capped_kelly_risk,
+        )
+    raw_score = float(coin.get("raw_score", coin.get("opportunity_score", 0)) or 0)
+    adaptive_score = float(coin.get("adaptive_score", raw_score) or raw_score)
     sizing = await compute_spot_sizing(
-        score    = coin.get("raw_score", coin.get("opportunity_score", 0)),
+        # Adaptive learning may reduce risk now, but cannot increase sizing
+        # before the challenger passes walk-forward promotion gates.
+        score    = min(raw_score, adaptive_score),
         risk_pct = coin.get("risk_pct", 0),
         risk_fraction_override = _risk_frac_override,
     )
@@ -340,6 +386,12 @@ async def _auto_open_position(coin: dict) -> bool:
             # P1 / B4.1: slippage info for analytics
             "entry_slippage_pct": round(_slip_pct, 4),
             "entry_session":      _sess(),
+            "lower_confidence_probability": lower_p,
+            "kelly_fraction":     round(kelly_fraction, 5) if kelly_fraction is not None else None,
+            "lane_risk_multiplier": lane_multiplier,
+            "shadow_model_version": coin.get("shadow_model_version"),
+            "shadow_probability": coin.get("shadow_probability"),
+            "feature_schema_version": "spot_features_v1",
         }
 
         trade = PaperTrade(
@@ -408,7 +460,12 @@ async def run_opportunity_loop() -> None:
 
             opp_store.set_scanning(True)
             result = await opp_scanner.run_opportunity_scan()
-            opp_store.set_result(result)
+            try:
+                from agents.learning.spot_adaptive_model import score_shadow_candidates
+                await score_shadow_candidates(result)
+            except Exception as exc:
+                logger.warning("spot_shadow_scoring_failed", error=str(exc)[:120])
+            opp_store.set_result({key: value for key, value in result.items() if not key.startswith("_")})
             _last_scan_ts = time.time()
             _cycle_count += 1
             _last_error   = None
@@ -425,6 +482,7 @@ async def run_opportunity_loop() -> None:
             )
 
             opened = 0
+            opened_symbols: set[str] = set()
             # Phase 3 G3-regime: REDUCED → throttle quota to 1 open/cycle
             regime_status = result.get("regime_status", "OPEN")
             cycle_quota = (
@@ -455,11 +513,20 @@ async def run_opportunity_loop() -> None:
                         continue
                     if await _auto_open_position(coin):
                         opened += 1
+                        opened_symbols.add(str(coin.get("symbol") or ""))
                         _auto_opened += 1
                         if is_bm:
                             bm_open_now += 1
                         if is_er:
                             er_open_now += 1
+
+            # F1: persist point-in-time evidence for opened and non-opened
+            # candidates. Ledger failure is observable but never blocks trading.
+            try:
+                from agents.opportunity.decision_ledger import log_scan_decisions
+                await log_scan_decisions(result, opened_symbols)
+            except Exception as exc:
+                logger.warning("spot_decision_ledger_failed", error=str(exc)[:120])
 
             logger.info(
                 "opportunity_cycle_done",
@@ -473,8 +540,20 @@ async def run_opportunity_loop() -> None:
             try:
                 from agents.opportunity.weight_updater import update_spot_weights
                 from agents.shared.cross_agent_learning import update_cross_agent_weights
+                from agents.opportunity.outcome_tracker import update_decision_outcomes
+                from agents.opportunity.decision_ledger import backfill_closed_spot_trades
                 await update_spot_weights()
                 await update_cross_agent_weights()
+                await backfill_closed_spot_trades()
+                outcomes_updated = await update_decision_outcomes()
+                if outcomes_updated:
+                    from agents.learning.spot_adaptive_model import train_and_register, monitor_champion_drift
+                    training = await train_and_register()
+                    if training.get("status") == "registered":
+                        logger.info("spot_challenger_registered", version=training.get("version"))
+                    drift = await monitor_champion_drift()
+                    if drift.get("status") == "rolled_back":
+                        logger.warning("spot_model_auto_rollback", **drift)
             except Exception as exc:
                 logger.warning("post_scan_learning_error", error=str(exc)[:80])
 

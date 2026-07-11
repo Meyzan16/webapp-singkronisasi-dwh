@@ -13,11 +13,13 @@ import json
 import time
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import AsyncSessionLocal, require_db
 from app.models.paper_trade import PaperTrade
 from app.models.signal_weight import AgentSignalWeight
+from app.models.spot_decision_event import SpotDecisionEvent
+from app.models.spot_model_version import SpotModelVersion
 
 router = APIRouter(tags=["diagnostics"])
 
@@ -39,7 +41,7 @@ async def get_diagnostic_snapshot() -> dict:
     async with AsyncSessionLocal() as session:
         weights_result = await session.execute(
             select(AgentSignalWeight).where(
-                AgentSignalWeight.agent.in_(_FUTURES_STYLES),
+                AgentSignalWeight.agent.in_(_FUTURES_STYLES + ["opportunity_spot", "cross_agent"]),
                 AgentSignalWeight.regime == "all",
             ).order_by(AgentSignalWeight.agent, AgentSignalWeight.signal_key)
         )
@@ -54,6 +56,31 @@ async def get_diagnostic_snapshot() -> dict:
             }
             for w in weights_result.scalars().all()
         ]
+
+        decision_summary_result = await session.execute(
+            select(
+                SpotDecisionEvent.outcome_status,
+                func.count(SpotDecisionEvent.id),
+            ).group_by(SpotDecisionEvent.outcome_status)
+        )
+        decision_outcomes = {
+            status: count for status, count in decision_summary_result.all()
+        }
+        latest_decision_ts = await session.scalar(select(func.max(SpotDecisionEvent.scan_ts)))
+        total_decisions = await session.scalar(select(func.count(SpotDecisionEvent.id))) or 0
+        unique_decisions = await session.scalar(select(func.count(func.distinct(SpotDecisionEvent.decision_key)))) or 0
+        missing_snapshots = await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
+            (SpotDecisionEvent.feature_snapshot_json.is_(None)) | (SpotDecisionEvent.feature_snapshot_json == "")
+        )) or 0
+        future_events = await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
+            SpotDecisionEvent.scan_ts > now + 60
+        )) or 0
+        invalid_closes = await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
+            SpotDecisionEvent.closed_at.isnot(None), SpotDecisionEvent.closed_at < SpotDecisionEvent.scan_ts
+        )) or 0
+        model_rows = list((await session.execute(select(SpotModelVersion).order_by(
+            SpotModelVersion.trained_at.desc()
+        ))).scalars().all())
 
     # ── Last 100 closed trades ─────────────────────────────────────────────────
     async with AsyncSessionLocal() as session:
@@ -94,6 +121,12 @@ async def get_diagnostic_snapshot() -> dict:
     except Exception as e:
         cache_state["cross_agent"] = {"error": str(e)}
 
+    try:
+        from agents.opportunity.weight_updater import get_state as spot_cache
+        cache_state["spot_weights"] = spot_cache()
+    except Exception as e:
+        cache_state["spot_weights"] = {"error": str(e)}
+
     # ── Risk gate state ────────────────────────────────────────────────────────
     risk_gate = {}
     try:
@@ -117,4 +150,25 @@ async def get_diagnostic_snapshot() -> dict:
         "cache":          cache_state,
         "risk_gate":      risk_gate,
         "monitor":        monitor_state,
+        "spot_decision_ledger": {
+            "outcomes": decision_outcomes,
+            "latest_scan_ts": latest_decision_ts,
+            "quality": {
+                "total": total_decisions,
+                "unique_keys": unique_decisions,
+                "duplicate_keys": total_decisions - unique_decisions,
+                "missing_snapshots": missing_snapshots,
+                "future_events": future_events,
+                "invalid_closes": invalid_closes,
+            },
+        },
+        "spot_model_registry": {
+            "total": len(model_rows),
+            "by_status": {
+                status: sum(row.status == status for row in model_rows)
+                for status in sorted({row.status for row in model_rows})
+            },
+            "latest_version": model_rows[0].version if model_rows else None,
+            "latest_status": model_rows[0].status if model_rows else None,
+        },
     }

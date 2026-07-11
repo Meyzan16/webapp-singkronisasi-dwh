@@ -114,6 +114,14 @@ async def _migrate_columns(connection) -> None:
         "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS regime VARCHAR(30)",
         # PLAN_v2 P7.1 — rejection_log indexes (table created via Base.metadata.create_all)
         "CREATE INDEX IF NOT EXISTS ix_rl_symbol_ts ON rejection_log (symbol, rejected_at)",
+        # Adaptive SPOT decision ledger enrichment (safe for existing table).
+        "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS realized_pnl_pct FLOAT",
+        "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS realized_pnl_dollar FLOAT",
+        "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS close_reason VARCHAR(60)",
+        "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS closed_at FLOAT",
+        "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS outcome_attempts INTEGER DEFAULT 0",
+        "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS outcome_error VARCHAR(120)",
+        "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS review_json TEXT",
         # Safety-net: create tables that may be missing if backend started before these models were added.
         "CREATE TABLE IF NOT EXISTS app_settings ("
         "  key VARCHAR(100) PRIMARY KEY,"

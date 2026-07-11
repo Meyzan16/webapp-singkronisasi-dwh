@@ -52,6 +52,8 @@ from app.models.rejection_log import RejectionLog as _RL
 from app.models.predictive_log import PredictiveLog as _PL   # noqa: F401
 from app.models.app_settings import AppSettings as _AS       # noqa: F401
 from app.models.agent_config import AgentConfig as _AC       # noqa: F401
+from app.models.spot_decision_event import SpotDecisionEvent as _SDE  # noqa: F401
+from app.models.spot_model_version import SpotModelVersion as _SMV  # noqa: F401
 from app.config import get_settings
 from app.database import create_db_schema, dispose_engine, set_db_available
 from agents.opportunity.scheduler import run_opportunity_loop, run_bigmover_fastpass

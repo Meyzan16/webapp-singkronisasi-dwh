@@ -19,6 +19,7 @@ from sqlalchemy import select
 
 from app.services.binance_urls import spot as _spot_url
 from app.services.trading_costs import EXECUTION_COST_PCT
+from app.database import require_db
 
 router = APIRouter(tags=["opportunity"])
 logger = structlog.get_logger(__name__)
@@ -28,6 +29,54 @@ logger = structlog.get_logger(__name__)
 _scan_lock = asyncio.Lock()
 _last_force_scan: float = 0.0
 FORCE_SCAN_COOLDOWN_SEC = 60
+
+
+class CanaryMetrics(BaseModel):
+    n: int = Field(ge=0)
+    expectancy_pct: float
+    profit_factor: float = Field(ge=0)
+    max_drawdown_pct: float = Field(ge=0)
+
+
+class RollbackRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=160)
+
+
+@router.get("/opportunity/learning/walk-forward", dependencies=[Depends(require_db)])
+async def get_spot_walkforward() -> dict:
+    """Return the current purged chronological SPOT challenger evaluation."""
+    from agents.learning.spot_walkforward import run_spot_walkforward
+    return await run_spot_walkforward()
+
+
+@router.get("/opportunity/learning/portfolio-replay", dependencies=[Depends(require_db)])
+async def get_spot_portfolio_replay(limit: int = Query(100, ge=20, le=200)) -> dict:
+    from agents.learning.spot_portfolio_replay import run_historical_portfolio_replay
+    return await run_historical_portfolio_replay(limit)
+
+
+@router.post("/opportunity/learning/train", dependencies=[Depends(require_db)])
+async def train_spot_challenger() -> dict:
+    from agents.learning.spot_adaptive_model import train_and_register
+    return await train_and_register()
+
+
+@router.post("/opportunity/learning/canary/{version}", dependencies=[Depends(require_db)])
+async def start_spot_canary(version: str) -> dict:
+    from agents.learning.spot_adaptive_model import start_canary
+    return await start_canary(version)
+
+
+@router.post("/opportunity/learning/promote/{version}", dependencies=[Depends(require_db)])
+async def promote_spot_canary(version: str, metrics: CanaryMetrics) -> dict:
+    from agents.learning.spot_adaptive_model import finalize_canary
+    return await finalize_canary(version, metrics.model_dump())
+
+
+@router.post("/opportunity/learning/rollback", dependencies=[Depends(require_db)])
+async def rollback_spot_model(body: RollbackRequest) -> dict:
+    from agents.learning.spot_adaptive_model import rollback_champion
+    return await rollback_champion(body.reason)
 
 
 # ── Layer 1: Scanner cache ─────────────────────────────────────────────────────
