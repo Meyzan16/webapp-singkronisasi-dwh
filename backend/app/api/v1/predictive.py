@@ -87,6 +87,21 @@ async def get_hit_rate(
     }
 
 
+@router.get("/predictive/signal_review", dependencies=[Depends(require_db)])
+async def get_signal_review(
+    run: bool = Query(False, description="True = jalankan review sekarang (manual trigger)"),
+) -> dict:
+    """
+    PLAN_FUTURES item C (v4 P2.1/P2.2): hasil weekly signal review terakhir —
+    penyesuaian bobot per sinyal + report hit-rate per (agent, regime, direction).
+    ?run=true menjalankan review saat itu juga (dipakai review manual 20 Jul).
+    """
+    from agents.learning.weekly_signal_review import get_last_review, run_weekly_signal_review
+    if run:
+        return await run_weekly_signal_review(force=True)
+    return get_last_review()
+
+
 @router.get("/predictive/recent", dependencies=[Depends(require_db)])
 async def get_recent_predictions(
     limit: int = Query(50, ge=1, le=200),

@@ -719,6 +719,20 @@ async def run_futures_loop() -> None:
             except Exception as exc:
                 logger.warning("weekly_backtest_error", error=str(exc)[:80])
 
+            # PLAN_FUTURES item C (v4 P2.1): weekly signal review — Senin 00:10-00:15
+            # UTC. Guard dobel-run ada di dalam modul (MIN_RUN_GAP 20 jam).
+            try:
+                import datetime as _dtc
+                _now_c = _dtc.datetime.utcnow()
+                if _now_c.weekday() == 0 and _now_c.hour == 0 and 10 <= _now_c.minute < 15:
+                    from agents.learning.weekly_signal_review import run_weekly_signal_review
+                    _rev = await run_weekly_signal_review()
+                    if _rev.get("adjustments"):
+                        logger.info("weekly_signal_review_adjustments",
+                                    n=len(_rev["adjustments"]))
+            except Exception as exc:
+                logger.warning("weekly_signal_review_error", error=str(exc)[:120])
+
             # P7 D7.2: monthly threshold calibration — 1st of each month 00:00-00:10 UTC
             try:
                 import datetime as _dt2

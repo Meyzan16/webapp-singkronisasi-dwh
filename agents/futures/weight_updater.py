@@ -87,6 +87,19 @@ STEP_CAP          = 0.10   # max weight move per run
 STALE_KEY_MAX_D   = 45     # zombie pruning threshold
 MIN_SAMPLE_RAW    = 3      # raw trades required before weight moves from neutral
 
+# PLAN_FUTURES "era data baru": reset + scanner overhaul item H (10 Jul 22:42 WIB).
+# SEMUA kalibrasi berbasis skor (predictive/rejection) WAJIB filter ≥ epoch ini —
+# skor sebelum itu dihasilkan sistem lama. (Keputusan terkunci SCHEDULE_FUTURES.md)
+DATA_ERA_EPOCH = 1783698144.0
+
+# PLAN_FUTURES item C (v4 P2.3): blend predictive → cache. Dihitung ulang tiap
+# PRED_BLEND_TTL (parse JSON ribuan baris — jangan tiap cycle 2 menit).
+PRED_BLEND_TTL_SEC = 15 * 60
+PRED_MIN_N         = 20      # keputusan terkunci: gate sampel per sinyal
+PRED_TRADE_FRAC    = 0.85    # keputusan terkunci: 0.85×trade + 0.15×predictive
+_pred_blend_stats: dict[tuple, float] = {}   # {(agent, signal_key): pred_w}
+_pred_blend_at:    float = 0.0
+
 FUTURES_AGENTS = [
     "futures_agent1", "futures_agent2", "futures_agent3",
     "futures_agent_bigmover",   # Phase 2 BM1 — tracked but uses fixed threshold (no death spiral)
@@ -410,6 +423,73 @@ async def update_weights() -> int:
             new_regime_cache.setdefault(agent_name, {}).setdefault(regime_key, {})[signal_key] = weight
         _weight_cache.update(new_cache)
         _regime_weight_cache.update(new_regime_cache)
+
+        # ── PLAN_FUTURES item C — dua lapis pasca-trade-cache ─────────────────
+        # (1) Seed dari DB: cache dibangun HANYA dari trades, sehingga bobot hasil
+        #     weekly_signal_review untuk sinyal yang belum pernah di-trade (kasus
+        #     a1 dormant) tidak akan pernah sampai ke scoring. Baris regime='all'
+        #     yang key-nya tak ada di cache disemai dari DB. (Setelah purge 10 Jul,
+        #     semua baris DB adalah era baru — aman.)
+        try:
+            async with AsyncSessionLocal() as _seed_sess:
+                _db_rows = (await _seed_sess.execute(
+                    select(AgentSignalWeight).where(
+                        AgentSignalWeight.agent.in_(FUTURES_AGENTS),
+                        AgentSignalWeight.regime == "all",
+                    )
+                )).scalars().all()
+            for _row in _db_rows:
+                _agent_cache = _weight_cache.setdefault(_row.agent, {})
+                if _row.signal_key not in _agent_cache:
+                    _agent_cache[_row.signal_key] = _row.weight
+        except Exception as exc:
+            logger.warning("weight_cache_seed_failed", error=str(exc)[:80])
+
+        # (2) P2.3 predictive blend (soft, in-memory saja — baris DB tetap murni
+        #     trade-based): new_w = 0.85×cur + 0.15×pred, pred = 1+(hit4h−0.5)×0.05,
+        #     gate n≥20, era-H filter. Statistik di-refresh tiap 15 menit; hasil
+        #     blend diterapkan ulang tiap run karena cache dibangun ulang dari trades.
+        global _pred_blend_stats, _pred_blend_at
+        try:
+            if now - _pred_blend_at > PRED_BLEND_TTL_SEC:
+                from app.models.predictive_log import PredictiveLog
+                async with AsyncSessionLocal() as _psess:
+                    _prows = (await _psess.execute(
+                        select(PredictiveLog.agent, PredictiveLog.signals_json,
+                               PredictiveLog.hit_4h).where(
+                            PredictiveLog.agent.in_(FUTURES_AGENTS),
+                            PredictiveLog.resolved_at.is_not(None),
+                            PredictiveLog.scanned_at >= max(DATA_ERA_EPOCH,
+                                                            now - RECENCY_DAYS * 86400),
+                        )
+                    )).all()
+                _pstats: dict[tuple, list] = {}
+                for _pagent, _sjson, _hit in _prows:
+                    try:
+                        _sigs = json.loads(_sjson or "[]")
+                    except Exception:
+                        continue
+                    for _s in _sigs:
+                        if not isinstance(_s, str):
+                            continue
+                        _pk = (_pagent, normalize_signal_key(_s))
+                        _pd = _pstats.setdefault(_pk, [0, 0])
+                        _pd[1] += 1
+                        if _hit:
+                            _pd[0] += 1
+                _pred_blend_stats = {
+                    k: 1.0 + (h / n - 0.5) * 0.05
+                    for k, (h, n) in _pstats.items() if n >= PRED_MIN_N
+                }
+                _pred_blend_at = now
+            for (_pagent, _pkey), _pred_w in _pred_blend_stats.items():
+                _agent_cache = _weight_cache.setdefault(_pagent, {})
+                _cur = _agent_cache.get(_pkey, 1.0)
+                _agent_cache[_pkey] = round(
+                    max(0.70, min(1.50, PRED_TRADE_FRAC * _cur
+                                  + (1 - PRED_TRADE_FRAC) * _pred_w)), 3)
+        except Exception as exc:
+            logger.warning("predictive_blend_failed", error=str(exc)[:80])
 
         # ── Upsert to DB with step cap ────────────────────────────────────────
         upserted = 0
