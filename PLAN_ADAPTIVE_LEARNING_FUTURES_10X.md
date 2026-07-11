@@ -52,16 +52,15 @@ adaptive thresholds, cross-agent blend, weekly signal review + predictive blend
 
 ## 3. Fase implementasi
 
-### F0 — `agents/futures/learning_policy.py` (pure, no-DB) + tests
-- Registry `canonical_signal_key` untuk SEMUA copy sinyal a1/a2/a3/BM
-  (`tech.bb_squeeze`, `flow.oi_acceleration`, `fund.negative_funding`,
-  `mom.sweet_spot`, dst) + fallback `normalize_signal_key` lama supaya bobot
-  existing tetap terbaca (dual-read, tulis pakai key baru).
-- `deterministic_weight`, `wilson_lower_bound`, `apply_learning_policy` versi
-  futures: adaptive_score, estimated_win_probability, lower bound, ban-gating.
-  **Prinsip terkunci (sama dgn SPOT): learning boleh VETO auto-open, TIDAK boleh
-  mempromosikan kandidat yang ditolak strategi deterministik.**
-- `backend/tests/test_futures_learning_policy.py` (pola test_spot_learning_policy).
+### F0 — ✅ SELESAI 2026-07-11 — `agents/futures/learning_policy.py` + tests
+Registry 70+ rule canonical_signal_key (copy persis 4 agent pasca-H, first-match-wins,
+konflik urutan teruji: negatif-ekstrem/relaxed-overbought/dual-TF/Δ24h-vs-momentum/
+early-breakout-vs-OI/coiling-vs-bb) · dual-read fallback identik
+weight_updater.normalize_signal_key (teruji) · deterministic_weight + Wilson +
+apply_learning_policy veto-only (field `score` TIDAK ditimpa; learning_auto_veto/
+learning_auto_eligible terpisah — konsumsi diputuskan F2) ·
+`backend/tests/test_futures_learning_policy.py` 21 test lulus (suite spot 41 +
+TA 29 tetap hijau; nol file SPOT tersentuh).
 
 ### F1 — Decision ledger + outcome tracker
 - Model `FuturesDecisionEvent` (`futures_decision_events`) — mirror kolom
