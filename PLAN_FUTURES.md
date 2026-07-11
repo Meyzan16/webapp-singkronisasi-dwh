@@ -41,26 +41,12 @@ Reset `scope=futures` menghapus trade+balance, TAPI tidak semua turunannya. Audi
   `last_backfill_at > 1783600000` (baris lama endpoint-biased).
 - `rejection_log` pasca-reset (`rejected_at ≥ 1783698144`) — basis item B.
 
-**YATIM (turunan trade yang sudah dihapus) — PERLU PURGE, menunggu konfirmasi
-eksplisit owner (auto-mode menolak mass-delete tanpa penyebutan tabel):**
-- `agent_signal_weights` rows agent futures + `cross_agent` (70 baris) — bobot
-  hasil belajar dari trade lama. **BOCOR AKTIF**: `cross_agent_learning` membacanya
-  tiap cycle → `get_cross_weight()` menyuntik learning lama ke scoring baru.
-  Zombie-prune internal baru membersihkan setelah 45 hari — terlalu lambat.
-- `signal_weight_history` rows futures (4.471 baris) — trajectory chart tanpa induk.
-- `rejection_log` pre-reset (445rb baris) — mencerminkan bobot/threshold sistem
-  lama; auto-prune 7 hari akan menghapusnya sendiri ±17 Jul, purge hanya mempercepat.
-
-SQL purge (jalankan setelah dikonfirmasi):
-```sql
-DELETE FROM agent_signal_weights WHERE agent IN
-  ('futures_agent1','futures_agent2','futures_agent3','futures_agent_bigmover','cross_agent');
-DELETE FROM signal_weight_history WHERE agent IN
-  ('futures_agent1','futures_agent2','futures_agent3','futures_agent_bigmover');
-DELETE FROM rejection_log WHERE rejected_at < 1783698144;
-```
-(`cross_agent` aman dihapus: dibangun ulang otomatis tiap cycle dari tabel yang
-sudah bersih; baris spot tidak disentuh.)
+**YATIM — ✅ DIPURGE 2026-07-10 (konfirmasi eksplisit owner):**
+`agent_signal_weights` futures+cross_agent 72 baris (bocor aktif ke scoring via
+`get_cross_weight()` — tertutup), `signal_weight_history` futures 4.551 baris,
+`rejection_log` pre-reset 284rb baris (sisa sudah termakan auto-prune). Baris spot
+tak tersentuh; cross_agent dibangun ulang otomatis dari tabel bersih. Bobot baru
+pasca-reset mulai terbentuk dari trade baseline (terverifikasi: 4 baris BM baru).
 
 ---
 
