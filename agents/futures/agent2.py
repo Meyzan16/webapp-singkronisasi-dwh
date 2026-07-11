@@ -19,8 +19,9 @@ Pipeline (0-100 pts):
       └─ OI Confirmation      0-8  pts  OI rising during accumulation = institutions
   T1  Trend setup             0-15 pts  flat / recovering trend preferred (pre-move)
       └─ Funding Alignment    0-8  pts  neutral/negative = fuel not yet used
-  T2  S/R Breakout Zone       0-14 pts  entry just below resistance (pre-breakout)
-      └─ Volume at Zone       0-4  pts  volume active at S/R = level is real
+  T2  Support Bounce          0-14 pts  entry dekat support (PLAN_FUTURES H2.2 —
+      └─ Volume at Zone       0-4  pts  poin near-resistance dipindah ke a1: itu
+                                        identitas pre-breakout, bukan akumulasi)
   T3  Compression Signals     0-18 pts  BB Squeeze primary, vol accumulation, coil
   T4  Early Trigger           0-13 pts  RSI 40-55 sweet spot + buying pressure
 
@@ -200,8 +201,8 @@ def _score_accumulation(
             signals.append("🔵 Wyckoff Accumulation 4H+1H konfirmasi — dual-TF pre-markup conviction")
         elif phase4h == "accumulation" and phase1h in ("markup", "neutral"):
             score += 3   # 4h accumulation starting to mark up on 1h
-        elif phase4h == phase1h == "markup" and phase == "accumulation":
-            pass   # already gave markup pts above, avoid double-counting
+        # PLAN_FUTURES H1.4: cabang phase4h==phase1h=="markup" and phase=="accumulation"
+        # dihapus — kontradiksi (phase dihitung dari 1h, tak bisa beda dgn phase1h).
 
     # ── T0 on-chain: OI Confirmation (0-8 pts) + Acceleration (0-6 pts) ────────
     # OI rising during accumulation = institutions entering quietly
@@ -272,47 +273,23 @@ def _score_accumulation(
         # Longs already crowded = headwind
         score -= 6
 
-    # ── T2: S/R Breakout Zone (0-14 pts) ─────────────────────────────────────
-    # Price near resistance = breakout catalyst within reach
+    # ── T2: Support Bounce (0-14 pts) ─────────────────────────────────────────
+    # PLAN_FUTURES H2.2: poin near-resistance DIBUANG dari a2 — fingerprint-nya
+    # ~80% sama dengan a1 sehingga dua lane rebutan koin yang sama. Identitas a2 =
+    # akumulasi/bounce dari support (swing multi-hari); pre-breakout milik a1.
+    # Bobot bounce dinaikkan 8→14 mengisi budget T2 yang kosong.
     sr_found = False
-    _res_near_price = None
     for tf_key in ["4h", "1h", "15m"]:
         d = tf_map.get(tf_key)
-        if not d or not d.lows or not d.highs:
+        if not d or not d.lows:
             continue
-        s_lows  = _swing_lows(d.lows,  lookback=5)
-        s_highs = _swing_highs(d.highs, lookback=5)
-
-        # Near resistance (< 3% away) = about to break out
-        near_res = [r for r in s_highs if 0 < (r - price) / price < 0.03]
-        if near_res:
-            dist = (near_res[0] - price) / price * 100
-            score    += 14
-            signals.append(f"🎯 {dist:.1f}% ke resistance {tf_key} — breakout trigger zone")
-            sr_found = True
-            _res_near_price = near_res[0]
-            break
-
-        # Also check: price bouncing off support (entry near support = safe LONG)
+        s_lows = _swing_lows(d.lows, lookback=5)
         near_sup = [s for s in s_lows if 0 < (price - s) / price < 0.02]
-        if near_sup and not sr_found:
-            score    += 8
-            signals.append(f"📍 Bouncing dari support {tf_key} — entry aman dengan SL jelas")
+        if near_sup:
+            score    += 14
+            signals.append(f"📍 Bouncing dari support {tf_key} — entry akumulasi dengan SL jelas")
             sr_found = True
             break
-
-    # D3.4 (PLAN_v3): resistance test count bonus — level tested multiple times = proven.
-    # Count 1h candles whose high touched within 1% of the resistance level.
-    if _res_near_price and d1h and len(d1h.highs) >= 20:
-        _test_count = sum(
-            1 for h in d1h.highs[-50:]
-            if abs(h - _res_near_price) / _res_near_price < 0.01
-        )
-        if _test_count >= 5:
-            score += 4
-            signals.append(f"🏋 Resistance diuji {_test_count}× (1h) — level solid, breakout makin dekat")
-        elif _test_count >= 3:
-            score += 2
 
     # ── T2 on-chain: Volume at S/R zone (0-4 pts) ────────────────────────────
     if sr_found and ref.volumes:
@@ -414,18 +391,13 @@ def _score_accumulation(
         score += 1
 
     # ── Penalties: already big mover ─────────────────────────────────────────
-    # If the coin already moved big, we're late — this is NOT pre-gainer anymore.
-    # PLAN_v6 P4b: health-scaled at healthy_frac=0.5 — accumulation keeps its
-    # quiet-coin identity, but stops blindly punishing a move that new money
-    # (OI up, volume live, sane funding) is still actively supporting.
+    # PLAN_FUTURES H2.1: universe kini hard-gated |Δ24h| ≤ 8% di scan_symbol —
+    # cabang >12 dan <−15 unreachable, dihapus. Sisa zona 7-8% tetap dipenalti
+    # health-scaled (accumulation = identitas koin quiet).
     from agents.futures.utils import momentum_health, health_scaled_penalty
-    _mh2 = momentum_health(tf_map, "LONG")
-    if change_24h > 12:
-        score -= health_scaled_penalty(20, _mh2, healthy_frac=0.5)   # −10 healthy/neutral, −20 exhausted
-    elif change_24h > 7:
+    if change_24h > 7:
+        _mh2 = momentum_health(tf_map, "LONG")
         score -= health_scaled_penalty(10, _mh2, healthy_frac=0.5)
-    elif change_24h < -15:
-        score -= 8    # dumping = wrong direction for LONG pre-gainer (not momentum-related)
 
     return score, signals[:5]
 
@@ -574,17 +546,9 @@ def _score_distribution(
             score += 3
 
     # ── Penalties ─────────────────────────────────────────────────────────────
-    # Already dumped too much = short covered, don't chase
-    if change_24h < -12:
-        score -= 20
-    elif change_24h < -6:
-        score -= 10
-
-    # Strong uptrend = don't fight the trend without very high conviction
-    if change_24h > 20:
-        score -= 15
-    elif change_24h > 10:
-        score -= 8
+    # PLAN_FUTURES H2.1: cabang <−12 / >20 / >10 dihapus — unreachable (universe ≤8%).
+    if change_24h < -6:
+        score -= 10   # sudah turun = sebagian move SHORT terlewat
 
     return score, signals[:5]
 
@@ -617,6 +581,11 @@ def scan_symbol(
     ref   = tf_map.get("1h") or tf_map.get("4h") or next(iter(tf_map.values()))
     price = ref.closes[-1] if ref.closes else 0.0
     if price <= 0:
+        return []
+
+    # PLAN_FUTURES H2.1: universe accumulation = koin QUIET (|Δ24h| ≤ 8%) —
+    # koin yang sudah bergerak = wilayah a3 (5-15%) / BM (≥15%).
+    if abs(change_24h) > 8.0:
         return []
 
     # F68/F69/F72: load in-memory caches (synchronous — no await needed)

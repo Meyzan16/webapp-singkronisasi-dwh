@@ -156,11 +156,10 @@ def _score_momentum_long(
     if not ref:
         return 0.0, []
 
-    # PLAN-SIGNAL-GAP P2: 1h change — distinguishes "still chasing" from "pullback after
-    # a big 24h move" for coins that already moved a lot (change_24h alone can't tell).
-    change_1h = 0.0
-    if d1h and len(d1h.closes) >= 5 and d1h.closes[-4] > 0:
-        change_1h = (d1h.closes[-1] - d1h.closes[-4]) / d1h.closes[-4] * 100
+    # PLAN_FUTURES H1.2/H2.1: change_1h dihapus — satu-satunya konsumennya adalah
+    # modifier chase >25% yang kini unreachable (universe < 15%); perhitungannya
+    # pun dulu salah (closes[-4] = 3 jam, bukan 1 jam). Chase-protection di zona
+    # 5-15% ditangani entry_timing_ok (exhaustion wick) + gate volume breakout.
 
     # D2.5 (PLAN_v3): per-TF volume ratios used for breakout volume gate
     _tf_vol_ratios: dict[str, float] = {}
@@ -171,44 +170,18 @@ def _score_momentum_long(
     _early_breakout_confirmed = False  # D2.4: set True if 3-7% + breakout + vol + OI
 
     # ── 1. 24h move in sweet spot (0-20 pts) ─────────────────────────────────
-    # PLAN-SIGNAL-GAP P1: ceiling extended to 50% — coins like ZRO +30%, EVAA +114%
-    # previously got ZERO positive points here (bracket stopped at 25%), making them
-    # mathematically unable to reach MIN_SCORE even with perfect other signals.
+    # PLAN_FUTURES H2.1: universe a3 kini 5-15% (hard gate di scan_symbol) —
+    # bracket 18-50% + modifier chase >25% (legacy PLAN-SIGNAL-GAP, ditulis SEBELUM
+    # lane BM ada) DIHAPUS: ≥15% adalah wilayah BigMover.
     if 8 <= change_24h <= 12:
         score += 20
         signals.append(f"🚀 Momentum +{change_24h:.1f}% — sweet spot entry: terbangun tapi belum exhausted")
     elif 5 <= change_24h < 8:
         score += 12
         signals.append(f"Momentum early +{change_24h:.1f}% — awal terbentuk, masih ada room")
-    elif 12 < change_24h <= 18:
+    elif 12 < change_24h < 15:
         score += 15
         signals.append(f"⚡ Momentum kuat +{change_24h:.1f}% — wave sudah jelas, SL sadar-leverage")
-    elif 18 < change_24h <= 25:
-        score += 8
-        signals.append(f"Momentum tinggi +{change_24h:.1f}% — waspadai exhaustion candle")
-    elif 25 < change_24h <= 35:
-        score += 5
-        signals.append(f"Momentum extended +{change_24h:.1f}% — masih ada room tapi risk lebih tinggi")
-    elif 35 < change_24h <= 50:
-        score += 2
-        signals.append(f"Momentum sangat extended +{change_24h:.1f}% — high-risk, butuh konfirmasi kuat dari sinyal lain")
-
-    # PLAN-SIGNAL-GAP P2: pullback vs still-chasing modifier for extended moves.
-    if change_24h > 25:
-        if change_1h < -2:
-            score += 8
-            signals.append(f"📉 Pullback {change_1h:.1f}% (1h) setelah momentum +{change_24h:.1f}% — entry lebih aman dari chase")
-        elif change_1h > 3:
-            score -= 5
-            signals.append(f"⚠️ Masih naik kencang +{change_1h:.1f}% (1h) — risk chase tinggi")
-
-    # PLAN-SIGNAL-GAP P3: pullback-to-momentum — big 24h move + 15m retracement = ideal
-    # re-entry zone (safer than chasing a coin that's still running).
-    if d15 and len(d15.closes) >= 5 and d15.closes[-3] > 0:
-        last_3_change = (d15.closes[-1] - d15.closes[-3]) / d15.closes[-3] * 100
-        if change_24h > 25 and -8 <= last_3_change <= -2:
-            score += 10
-            signals.append(f"📉 Pullback {last_3_change:.1f}% (15m) setelah momentum +{change_24h:.1f}% — re-entry zone")
 
     # ── 2. Volume surge confirming direction (0-25 pts) ───────────────────────
     best_vol = 0
@@ -301,36 +274,11 @@ def _score_momentum_long(
             break
 
     # ── Penalties ─────────────────────────────────────────────────────────────
-    # PLAN-SIGNAL-GAP P1: non-stacking (was 3 separate `if`s — a coin >35% got BOTH
-    # the -15 "overextended" AND -25 "parabolic" penalty = -40 total before any other
-    # signal, making it mathematically impossible to reach MIN_SCORE).
-    # D2.4 (PLAN_v3): skip -15 for early breakout confirmed (3-7% with vol+OI+breakout).
-    # PLAN_v6 P4b: extended-move penalties are now HEALTH-SCALED — a big move backed
-    # by rising OI + live volume + sane funding is this lane's REASON TO EXIST, not a
-    # defect. Full penalty only fires on actual exhaustion evidence.
-    from agents.futures.utils import momentum_health, health_scaled_penalty
-    _mh = momentum_health(tf_map, "LONG")
+    # PLAN_FUTURES H2.1: cabang >50/>35/>25 + P4.7 (20-25) DIHAPUS — unreachable
+    # dengan universe hard-gate < 15% (wilayah BM). D2.4 tetap: 3-7% dengan
+    # konfirmasi breakout+vol+OI bebas penalti.
     if change_24h < 5.0 and not _early_breakout_confirmed:
         score -= 15   # not enough momentum — pre-gainers better handles this
-    elif change_24h < 5.0 and _early_breakout_confirmed:
-        pass          # early breakout path — skip penalty, already given +10 bonus
-    elif change_24h > 50.0:
-        score -= health_scaled_penalty(20, _mh)   # parabolic: 0 healthy / 10 neutral / 20 exhausted
-    elif change_24h > 35.0:
-        score -= health_scaled_penalty(8, _mh)
-    elif change_24h > 25.0:
-        score -= health_scaled_penalty(5, _mh)
-
-    # P4.7: late momentum penalty for the 20-25% gap not covered by bracket above.
-    # PLAN_v6 P4b: also health-scaled.
-    if 20.0 < change_24h < 25.0:
-        _pen47 = health_scaled_penalty(10, _mh)
-        score -= _pen47
-        if _pen47 > 0:
-            signals.append(f"⚠ Late momentum +{change_24h:.1f}% — sudah jauh dari base (−{_pen47:.0f}, health={_mh})")
-        else:
-            signals.append(f"✅ Momentum +{change_24h:.1f}% sehat — OI naik, volume kuat, tanpa penalti late-entry")
-
 
     if rsi_val > 80:
         score -= 15   # overbought
@@ -372,14 +320,12 @@ def _score_momentum_short(
     if not ref:
         return 0.0, []
 
-    # PLAN-SIGNAL-GAP P2: 1h change — distinguishes "still dumping hard" from "bounce
-    # after a big 24h drop" for coins that already moved a lot.
-    change_1h = 0.0
-    if d1h and len(d1h.closes) >= 5 and d1h.closes[-4] > 0:
-        change_1h = (d1h.closes[-1] - d1h.closes[-4]) / d1h.closes[-4] * 100
+    # PLAN_FUTURES H1.2/H2.1: change_1h dihapus (mirror LONG — konsumennya
+    # modifier >25% yang unreachable; dulu pun salah hitung 3 jam).
 
     # ── 1. 24h drop in sweet spot (0-20 pts) ─────────────────────────────────
-    # PLAN-SIGNAL-GAP P1: ceiling extended to 50% (mirror of LONG side).
+    # PLAN_FUTURES H2.1: mirror LONG — bracket 18-50% + modifier bounce >25%
+    # dihapus, dump ≥15% adalah wilayah BigMover (SHORT-edge per R0c).
     drop = -change_24h  # positive value = how much it dropped
     if 8 <= drop <= 12:
         score += 20
@@ -387,35 +333,9 @@ def _score_momentum_short(
     elif 5 <= drop < 8:
         score += 12
         signals.append(f"Dump early {change_24h:.1f}% — awal turun, momentum SHORT terbentuk")
-    elif 12 < drop <= 18:
+    elif 12 < drop < 15:
         score += 15
         signals.append(f"⚡ Dump kuat {change_24h:.1f}% — wave turun jelas, short SL sadar-leverage")
-    elif 18 < drop <= 25:
-        score += 8
-        signals.append(f"Dump besar {change_24h:.1f}% — waspadai bouncing oversold")
-    elif 25 < drop <= 35:
-        score += 5
-        signals.append(f"Dump extended {change_24h:.1f}% — masih ada room turun tapi risk lebih tinggi")
-    elif 35 < drop <= 50:
-        score += 2
-        signals.append(f"Dump sangat extended {change_24h:.1f}% — high-risk, butuh konfirmasi kuat dari sinyal lain")
-
-    # PLAN-SIGNAL-GAP P2: bounce vs still-dumping modifier for extended drops.
-    if drop > 25:
-        if change_1h > 2:
-            score += 8
-            signals.append(f"📈 Bounce +{change_1h:.1f}% (1h) setelah dump {change_24h:.1f}% — entry short lebih aman dari chase")
-        elif change_1h < -3:
-            score -= 5
-            signals.append(f"⚠️ Masih turun kencang {change_1h:.1f}% (1h) — risk chase tinggi")
-
-    # PLAN-SIGNAL-GAP P3: pullback-to-momentum mirror — big drop + 15m bounce = ideal
-    # short re-entry zone (safer than chasing a coin still in free-fall).
-    if d15 and len(d15.closes) >= 5 and d15.closes[-3] > 0:
-        last_3_change = (d15.closes[-1] - d15.closes[-3]) / d15.closes[-3] * 100
-        if drop > 25 and 2 <= last_3_change <= 8:
-            score += 10
-            signals.append(f"📈 Bounce {last_3_change:.1f}% (15m) setelah dump {change_24h:.1f}% — re-entry short zone")
 
     # ── 2. Volume surge on the drop (0-25 pts) ────────────────────────────────
     best_vol = 0
@@ -497,26 +417,10 @@ def _score_momentum_short(
             break
 
     # ── Penalties ─────────────────────────────────────────────────────────────
-    # PLAN-SIGNAL-GAP P1: non-stacking (mirror of LONG side fix).
-    # PLAN_v6 P4b: health-scaled (mirror of LONG) — a dump with OI still building
-    # and live volume is valid short momentum, not automatically "already bottomed".
-    from agents.futures.utils import momentum_health, health_scaled_penalty
-    _mh_s = momentum_health(tf_map, "SHORT")
+    # PLAN_FUTURES H2.1: cabang >50/>35/>25 + P4.7 (>20) dihapus — unreachable
+    # dengan universe hard-gate drop < 15% (wilayah BM).
     if drop < 5.0:
         score -= 15   # not enough downward momentum
-    elif drop > 50.0:
-        score -= health_scaled_penalty(20, _mh_s)   # capitulation risk unless move is healthy
-    elif drop > 35.0:
-        score -= health_scaled_penalty(8, _mh_s)
-    elif drop > 25.0:
-        score -= health_scaled_penalty(5, _mh_s)
-
-    # P4.7: late momentum penalty — PLAN_v6 P4b: health-scaled.
-    if drop > 20.0:
-        _pen47s = health_scaled_penalty(10, _mh_s)
-        score -= _pen47s
-        if _pen47s > 0:
-            signals.append(f"⚠ Late dump {change_24h:.1f}% — short risiko bounce (−{_pen47s:.0f}, health={_mh_s})")
 
     if rsi_val < 22:
         score -= 15   # extreme oversold = reversal imminent
@@ -670,6 +574,13 @@ def scan_symbol(
     ref   = tf_map.get("1h") or tf_map.get("4h") or next(iter(tf_map.values()))
     price = ref.closes[-1] if ref.closes else 0.0
     if price <= 0:
+        return []
+
+    # PLAN_FUTURES H2.1: universe momentum = 5-15%. |Δ24h| ≥ 15% adalah wilayah
+    # BigMover (MIN_CHANGE_24H=15) — dulu a3 masih memberi poin sampai 50% (legacy
+    # PLAN-SIGNAL-GAP, sebelum lane BM ada) sehingga dua lane rebutan koin yang
+    # sama dengan model SL/TP/leverage berbeda dan skala skor tak sebanding.
+    if abs(change_24h) >= 15.0:
         return []
 
     from agents.futures import weight_updater

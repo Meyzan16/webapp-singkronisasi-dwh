@@ -400,43 +400,16 @@ def _score_pregainer(
 
     # ── Penalties ─────────────────────────────────────────────────────────────
 
-    # D2.2 (PLAN_v3): gradual 24h penalty conditioned on 1h pullback
-    # If coin is up big 24h BUT pulled back 1h, it may be coiling for continuation
-    _d1h = tf_map.get("1h")
-    _change_1h = 0.0
-    if _d1h and len(_d1h.closes) >= 2:
-        _change_1h = (_d1h.closes[-1] - _d1h.closes[-2]) / _d1h.closes[-2] * 100 if _d1h.closes[-2] > 0 else 0.0
-
-    # PLAN_v6 P4b: health-scaled with healthy_frac=0.5 — pre-gainer KEEPS its
-    # flat-coin identity (a moved coin is genuinely less "pre"-anything), but a
-    # move backed by rising OI + live volume no longer gets the full blind −25.
-    from agents.futures.utils import momentum_health, health_scaled_penalty
-    _mh1 = momentum_health(tf_map, "LONG")
-    if change_24h > 15:
-        if _change_1h < -2.0:   # pulled back 1h after big 24h move = potential continuation
-            score -= 5
-            signals.append(f"⚠ Up {change_24h:.1f}% but 1h pullback {_change_1h:.1f}% — possible re-entry zone")
-        else:
-            score -= health_scaled_penalty(25, _mh1, healthy_frac=0.5)   # −12.5 healthy/neutral, −25 exhausted
-    elif change_24h > 8:
-        if _change_1h < -1.0:   # mild pullback
-            score -= 6
-        else:
-            score -= health_scaled_penalty(12, _mh1, healthy_frac=0.5)
-
-    # Dumping coin = wrong direction for LONG
-    if change_24h < -15:
-        score -= 10
+    # PLAN_FUTURES H2.1: blok penalti gradual D2.2/P4b utk change_24h > 8 DIHAPUS —
+    # universe a1 kini hard-gated |Δ24h| ≤ 8% di scan_symbol (koin yang sudah
+    # bergerak = wilayah a3/BM), jadi seluruh cabang itu unreachable.
+    _d1h = tf_map.get("1h")   # dipakai D2.1 ATH volume-confirm di bawah
 
     # Overbought = late entry risk (F106: reuse rsi_val, no second _rsi() call)
     if rsi_val > 72:
         score -= 10
     elif rsi_val > 65:
         score -= 5
-
-    # High positive funding = longs already crowded
-    if fr > 0.05 / 100:
-        pass   # already penalized above
 
     # BUG-L14: liquidation feed is a directional PROXY (L/S-ratio shift), NOT real USDT.
     # Keep only a small directional nudge; no fake $ magnitude in score or labels.
@@ -448,8 +421,12 @@ def _score_pregainer(
 
     # D2.1 (PLAN_v3): differentiate ATH cases — breaking ATH with volume = fresh leg up,
     # not late entry. Near ATH but coiling = still cautious.
+    # PLAN_FUTURES H1.1: exclude candle 4h yang sedang berjalan — high-nya selalu ≥
+    # harga sekarang, jadi max([-42:]) membuat pct_from_ath ≥ 0.005 MUSTAHIL: bonus
+    # +8 "fresh leg" mati total dan penalti −10 kena setiap koin yang cetak high
+    # (kontributor dormansi a1). Pola sama dengan _is_breakout a3 ([-31:-1]).
     if d4h and len(d4h.highs) >= 42:
-        ath_7d = max(d4h.highs[-42:])
+        ath_7d = max(d4h.highs[-42:-1])
         if ath_7d > 0:
             pct_from_ath = (price - ath_7d) / ath_7d
             # Volume confirmation for breakout
@@ -634,15 +611,9 @@ def _score_predump(
 
     # ── Penalties ─────────────────────────────────────────────────────────────
 
-    # Already dumped big = missed the move down
-    if change_24h < -12:
-        score -= 20
-    elif change_24h < -6:
-        score -= 10
-
-    # Already pumping hard = momentum too strong for SHORT
-    if change_24h > 15:
-        score -= 12
+    # PLAN_FUTURES H2.1: cabang <−12 / >15 dihapus — unreachable (universe |Δ24h| ≤ 8%).
+    if change_24h < -6:
+        score -= 10   # sudah turun lumayan = sebagian move SHORT terlewat
 
     # BUG-L14: liquidation feed is a directional PROXY, not real USDT — small nudge only.
     if ref.liq_long_usdt > 100_000:
@@ -790,6 +761,12 @@ def scan_symbol(
     if price <= 0:
         return []
 
+    # PLAN_FUTURES H2.1: universe pre-gainer = koin QUIET. |Δ24h| > 8% adalah
+    # wilayah a3 (5-15%) / BM (≥15%) — gate keras menggantikan penalti gradual
+    # lama supaya lane tidak rebutan koin yang sama.
+    if abs(change_24h) > 8.0:
+        return []
+
     # F68/F69/F72: load in-memory caches (synchronous — no await needed)
     from agents.futures import weight_updater
     from agents.futures.regime import detect_coin_regime
@@ -876,4 +853,10 @@ def scan_symbol(
             "atr_pct":      atr_pct,        # PLAN_v15: monitor needs it (G4 rugpull + P9 fail-fast)
             **levels,
         })
+
+    # PLAN_FUTURES H2.3: LONG+SHORT simultan pada koin yang sama = kontradiksi
+    # (squeeze memang bisa pecah dua arah, tapi untuk TRADING pilih tesis terkuat).
+    # Aturan D2.3 milik a2: keep skor tertinggi saja.
+    if len(results) == 2:
+        results = [max(results, key=lambda x: x["score"])]
     return results

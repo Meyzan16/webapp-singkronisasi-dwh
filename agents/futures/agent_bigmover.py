@@ -9,7 +9,7 @@ Paradigma berbeda dari A1-A3:
   - Direction INFERRED dari change_24h sign — momentum ITSELF adalah arah
   - Threshold FIXED 60 (TIDAK adaptive — A2 death-spiral safe)
   - Cooldown 30 min + reset jika score naik +10 (B2.2)
-  - Funding hard-gate: LONG ≤ +0.12%, SHORT ≥ −0.12%
+  - Funding hard-gate: LONG ≤ +0.25%, SHORT ≥ −0.25% (zona 0.12-0.25 = ½ size di auto_trader)
   - SL ATR×1.5 (floor 2.5%, ceiling 8%, fallback fixed 4% kalau ATR<0.5%)
   - TP1 ATR×2 | TP2 ATR×4 | TP3 ATR×6 — R:R ≥ 1:2
   - Leverage FIXED 3x (anti-blowup pada coin volatil)
@@ -62,9 +62,12 @@ SL_FALLBACK_PCT  = 4.0         # if ATR < 0.5% — coin too quiet, use fixed
 FIXED_LEVERAGE   = 3
 RISK_PCT_DEFAULT = 0.5         # 0.5% wallet — separuh main lanes
 
-# Funding hard gate
-MAX_LONG_FUNDING_PCT  = 0.12   # >0.12% LONG bayar mahal
-MIN_SHORT_FUNDING_PCT = -0.12  # < -0.12% SHORT bayar mahal
+# Funding hard gate — PLAN_FUTURES H1.3: dinaikkan 0.12 → 0.25. Veto scanner di
+# 0.12 menganulir desain two-zone PLAN_v6 P4c: zona 0.12-0.25 seharusnya tetap
+# lolos scan lalu di-trade ½ size oleh auto_trader (FUNDING_SOFT_SIZE_MULT);
+# hanya funding yang benar-benar unsustainable (>0.25%) yang diveto di sini.
+MAX_LONG_FUNDING_PCT  = 0.25   # >0.25% LONG bayar mahal — veto
+MIN_SHORT_FUNDING_PCT = -0.25  # < -0.25% SHORT bayar mahal — veto
 
 # G18 — entry-trap threshold: 30-min move > 15% same direction = puncak
 ENTRY_TRAP_30M_PCT = 15.0

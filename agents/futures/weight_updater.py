@@ -53,6 +53,11 @@ def log_rejection(
     reason:       str = "score_below_threshold",
 ) -> None:
     """P7.1: Queue a signal rejection for later DB flush. Synchronous — safe to call from scoring."""
+    # PLAN_FUTURES H1.5: skor sangat rendah tidak informatif untuk kalibrasi —
+    # logging semuanya membanjiri tabel ~75rb baris/hari. Reason lain (mis.
+    # below_auto_threshold untuk near-miss R0d) tidak difilter.
+    if reason == "score_below_threshold" and score < 40.0:
+        return
     if len(_rejection_queue) >= _REJECTION_QUEUE_MAX:
         return
     import json as _json
