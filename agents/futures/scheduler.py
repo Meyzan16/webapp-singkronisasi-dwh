@@ -657,6 +657,17 @@ async def run_futures_loop() -> None:
                 if total_auto:
                     logger.info("auto_positions_opened", opened=total_auto,
                                 pool=len(all_candidates))
+
+                # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F1: ledger keputusan —
+                # SETELAH auto_open (peta keputusan auto_trader sudah final).
+                try:
+                    from agents.futures.decision_ledger import log_scan_decisions
+                    await log_scan_decisions(
+                        all_candidates,
+                        scan_ts=result["agent1"].get("generated_at"),
+                    )
+                except Exception as exc:
+                    logger.warning("futures_decision_ledger_failed", error=str(exc)[:200])
             except Exception as exc:
                 # PLAN_v6 P5: was [:80] which hid the failing column — widen so a
                 # DB insert failure (blocking ALL futures opens) is diagnosable.
@@ -698,6 +709,24 @@ async def run_futures_loop() -> None:
                                 await _rsess2.commit()
             except Exception as exc:
                 logger.warning("rejection_log_flush_failed", error=str(exc)[:80])
+
+            # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F1: outcome pass tiap ~10 cycle
+            # (offset +5 dari backfill big_mover supaya beban API tidak menumpuk).
+            if _cycle_count % 10 == 5:
+                try:
+                    from agents.futures.outcome_tracker import (
+                        update_decision_outcomes, backfill_closed_futures_trades,
+                        prune_old_events,
+                    )
+                    _n_lbl = await update_decision_outcomes()
+                    _n_lnk = await backfill_closed_futures_trades()
+                    if _cycle_count % 100 == 5:
+                        await prune_old_events()
+                    if _n_lbl or _n_lnk:
+                        logger.info("futures_outcome_pass",
+                                    price_labels=_n_lbl, trade_links=_n_lnk)
+                except Exception as exc:
+                    logger.warning("futures_outcome_tracker_failed", error=str(exc)[:200])
 
             # Phase 1 T4: backfill forward-pnl on big_mover_log every 10 cycles (~20 min)
             if _cycle_count % 10 == 0:

@@ -82,6 +82,22 @@ BREADTH_MIN_SAMPLE      = 5     # P3a: need ≥5 gainers in sample before the ga
 # Default: False (one-way mode, one position per symbol across all lanes).
 HEDGE_MODE: bool = os.getenv("HEDGE_MODE", "false").lower() == "true"
 
+# ── PLAN_ADAPTIVE_LEARNING_FUTURES_10X F1 — peta keputusan per cycle ──────────
+# Tiap titik skip/open mencatat SATU alasan per (symbol, agent, direction);
+# alasan PERTAMA yang menang (titik keputusan paling awal = penyebab nyata).
+# decision_ledger membacanya setelah auto_open_positions selesai.
+_cycle_decisions: dict[tuple, str] = {}
+
+
+def _dec(symbol: str, agent: str, direction: str, reason: str) -> None:
+    _cycle_decisions.setdefault((symbol, agent, direction), reason)
+
+
+def get_cycle_decisions() -> dict[tuple, str]:
+    """Snapshot keputusan cycle terakhir — dikonsumsi decision_ledger (F1)."""
+    return dict(_cycle_decisions)
+
+
 # Global toggle — can be changed via API at runtime
 _auto_enabled = True
 
@@ -165,6 +181,13 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     if not _auto_enabled or not is_db_available():
         return 0
 
+    # F1: mulai cycle keputusan baru (ledger membaca peta ini setelah selesai)
+    _cycle_decisions.clear()
+
+    def _dec_all(reason: str) -> None:
+        for _c in candidates:
+            _dec(_c.get("symbol", ""), _c.get("agent", ""), _c.get("direction", "LONG"), reason)
+
     # PLAN_v5 Group C: pull DB overrides once per cycle — see scanner.py
     # run_opportunity_scan for the `global` rationale (resolved at call time).
     global MAX_AUTO_POSITIONS, MAX_BIGMOVER_POSITIONS, FUTURES_COOLDOWN_HOURS, \
@@ -208,6 +231,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             logger.info("auto_trade_rar_probe", reason=gate_reason)
         else:
             logger.info("auto_trade_gate_blocked", reason=gate_reason)
+            _dec_all("risk_gate_blocked")   # F1
             return 0
 
     # PLAN_v15 P1/P2/P8 — daily gates (stateless from DB, TTL-cached 60s)
@@ -215,9 +239,11 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     if _dg["loss_breaker"] or _dg["giveback_stop"]:
         logger.info("auto_trade_daily_gate_blocked", reason=_dg["reason"],
                     day_pnl=_dg["day_pnl"], day_peak=_dg["day_peak_pnl"])
+        _dec_all("daily_gate_blocked")   # F1
         return 0
     if _dg["global_pause_until"] > time.time():
         logger.info("auto_trade_consec_sl_global_pause", reason=_dg["reason"])
+        _dec_all("consec_sl_global_pause")   # F1
         return 0
     # P8: profit lock — only A-grade at ½ size (checked per candidate below)
     _profit_lock_mode = bool(_dg["profit_lock"])
@@ -263,14 +289,23 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                                   regime=coin_regime, reason="below_auto_threshold")
                 except Exception:
                     pass
+            _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"),
+                 "below_auto_threshold")   # F1
             continue
         # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
         if coin_regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":
+            _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"),
+                 "volatile_regime_skip")   # F1
             continue
         _dedup_key = (symbol, r.get("direction", "LONG")) if HEDGE_MODE else symbol
         cur = best_by_symbol.get(_dedup_key)
         if cur is None or r.get("score", 0) > cur.get("score", 0):
+            if cur is not None:   # F1: kandidat lama kalah dedup
+                _dec(cur.get("symbol", ""), cur.get("agent", ""),
+                     cur.get("direction", "LONG"), "dedup_lost")
             best_by_symbol[_dedup_key] = r
+        else:
+            _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"), "dedup_lost")   # F1
 
     ranked = sorted(best_by_symbol.values(), key=lambda x: x.get("score", 0), reverse=True)
     if not ranked:
@@ -373,30 +408,36 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             # BC2: dedup check uses (symbol, direction) in hedge mode, symbol alone otherwise
             _open_key = (symbol, direction) if HEDGE_MODE else symbol
             if not symbol or _open_key in existing_syms:
+                _dec(symbol, agent, direction, "already_open")   # F1
                 continue   # BUG-L1: already open in some lane → skip (cross-margin = one position)
             if symbol in sl_cooldown_syms:
                 logger.debug("auto_trade_cooldown_skip", symbol=symbol)
+                _dec(symbol, agent, direction, "sl_cooldown")   # F1
                 continue
 
             # PLAN_v15 P8: profit lock — A-grade only (score ≥ 80), ½ size applied below
             if _profit_lock_mode and sig.get("score", 0) < PROFIT_LOCK_MIN_SCORE:
                 logger.debug("auto_trade_profit_lock_skip", symbol=symbol,
                              score=sig.get("score", 0))
+                _dec(symbol, agent, direction, "profit_lock_skip")   # F1
                 continue
 
             # PLAN_v15 P3d: direction concentration cap — 4 Juli was 21/22 LONG at once.
             if dir_open_counts.get(direction, 0) >= MAX_SAME_DIRECTION:
                 logger.info("auto_trade_direction_cap_skip", symbol=symbol,
                             direction=direction, cap=MAX_SAME_DIRECTION)
+                _dec(symbol, agent, direction, "direction_cap")   # F1
                 continue
 
             if agent == "futures_agent_bigmover":
                 # PLAN_v15 P3b: BM daily budget + daily real-SL stop
                 if bm_opened_today >= BIGMOVER_DAILY_BUDGET:
                     logger.info("bigmover_daily_budget_reached", opened=bm_opened_today)
+                    _dec(symbol, agent, direction, "bm_daily_budget")   # F1
                     continue
                 if _dg.get("bm_real_sl_today", 0) >= BIGMOVER_DAILY_SL_STOP:
                     logger.info("bigmover_daily_sl_stop", sl_today=_dg.get("bm_real_sl_today"))
+                    _dec(symbol, agent, direction, "bm_daily_sl_stop")   # F1
                     continue
                 # PLAN_v15 P3a: fade-day breadth gate — chasing pumps LONG on a day
                 # where most top gainers are already fading 1h = buying exit liquidity.
@@ -404,6 +445,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                     logger.info("bigmover_fade_day_skip", symbol=symbol,
                                 fade_frac=_breadth.get("fade_frac"),
                                 gainers=_breadth.get("gainers"))
+                    _dec(symbol, agent, direction, "breadth_fade_skip")   # F1
                     continue
 
             # Phase 3 G3-funding + PLAN_v6 P4c: two-zone funding gate (all lanes).
@@ -416,6 +458,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 if scored_funding_pct > HARD_LONG_FUNDING_PCT:
                     logger.debug("auto_trade_funding_skip", symbol=symbol, agent=agent,
                                  direction=direction, funding_pct=scored_funding_pct)
+                    _dec(symbol, agent, direction, "funding_hard_skip")   # F1
                     continue
                 if scored_funding_pct > MAX_LONG_FUNDING_PCT:
                     funding_mult = FUNDING_SOFT_SIZE_MULT
@@ -423,6 +466,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 if scored_funding_pct < HARD_SHORT_FUNDING_PCT:
                     logger.debug("auto_trade_funding_skip", symbol=symbol, agent=agent,
                                  direction=direction, funding_pct=scored_funding_pct)
+                    _dec(symbol, agent, direction, "funding_hard_skip")   # F1
                     continue
                 if scored_funding_pct < MIN_SHORT_FUNDING_PCT:
                     funding_mult = FUNDING_SOFT_SIZE_MULT
@@ -433,6 +477,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             if agent == "futures_agent_bigmover":
                 if bm_open_count >= MAX_BIGMOVER_POSITIONS:
                     logger.debug("bigmover_lane_full")
+                    _dec(symbol, agent, direction, "bm_lane_full")   # F1
                     continue
 
             # P4.3: per-lane quota — prevent momentum from taking all 6 slots
@@ -444,6 +489,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                     logger.debug("lane_quota_full", setup=setup,
                                  db=lane_db_count, cycle=lane_cycle_count,
                                  quota=LANE_QUOTAS[setup])
+                    _dec(symbol, agent, direction, "lane_quota_full")   # F1
                     continue
 
             # P6.4: per-lane WR auto-pause
@@ -453,12 +499,14 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 if _lane_paused:
                     logger.info("auto_trade_lane_paused", setup=setup,
                                 reason=_lane_pause_reason)
+                    _dec(symbol, agent, direction, "lane_paused")   # F1
                     continue
 
             # B3.1: revalidate funding LIVE (scan cache up to 2 min old) for ALL lanes.
             # Fail-open on API errors so transient network blips don't block trades.
             if not await _revalidate_funding(symbol, direction):
                 logger.info("auto_trade_funding_flip", symbol=symbol, agent=agent)
+                _dec(symbol, agent, direction, "funding_flip")   # F1
                 continue
 
             # F13: ensure risk_pct is never None/0 — use 2.0 as safe fallback
@@ -477,10 +525,12 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             _funding_est = abs(scored_funding_pct) * (_hold_h / 8.0)   # % per 8h window
             _cost_floor  = FUTURES_ROUND_TRIP_FEE_PCT + 2 * _slip_pct + _funding_est
             _tp1_pct_sig = float(sig.get("tp1_pct") or 0.0)
+            sig["cost_floor_pct"] = round(_cost_floor, 4)   # F1: ledger snapshot membacanya
             if _tp1_pct_sig < MIN_TP1_COST_MULT * _cost_floor:
                 logger.info("auto_trade_cost_floor_skip", symbol=symbol, agent=agent,
                             tp1_pct=_tp1_pct_sig, cost_floor=round(_cost_floor, 3),
                             required=round(MIN_TP1_COST_MULT * _cost_floor, 3))
+                _dec(symbol, agent, direction, "cost_floor_skip")   # F1
                 continue
 
             # BC3: validate symbol constraints from Binance exchangeInfo.
@@ -503,6 +553,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             sizing = await compute_futures_sizing(sig.get("score", 0), risk_pct, leverage)
             if not sizing["can_open"]:
                 logger.info("auto_trade_sizing_blocked", symbol=symbol, reason=sizing["reason"])
+                _dec(symbol, agent, direction, "sizing_blocked")   # F1
                 break   # wallet limit reached (heat / concurrency / margin) — stop this cycle
             pos_size        = sizing["position_size"]
             risk_dollar_val = sizing["risk_dollar"]
@@ -540,6 +591,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             if pos_size < _min_not:
                 logger.debug("auto_trade_min_notional_skip",
                              symbol=symbol, pos_size=pos_size, min_notional=_min_not)
+                _dec(symbol, agent, direction, "min_notional_skip")   # F1
                 continue
 
             # P1: entry slippage sudah dihitung di gate F2 di atas (_slip_pct) —
@@ -603,6 +655,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             await session.commit()
             existing_syms.add(_open_key)  # BC2: add (symbol, direction) or symbol
             opened += 1
+            _dec(symbol, agent, direction, "opened")   # F1
             # PLAN_v15 P3b/P3d: keep in-cycle counters honest for the next candidate
             dir_open_counts[direction] = dir_open_counts.get(direction, 0) + 1
             if agent == "futures_agent_bigmover":

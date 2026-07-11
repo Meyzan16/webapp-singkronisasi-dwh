@@ -62,20 +62,20 @@ learning_auto_eligible terpisah — konsumsi diputuskan F2) ·
 `backend/tests/test_futures_learning_policy.py` 21 test lulus (suite spot 41 +
 TA 29 tetap hijau; nol file SPOT tersentuh).
 
-### F1 — Decision ledger + outcome tracker
-- Model `FuturesDecisionEvent` (`futures_decision_events`) — mirror kolom
-  SpotDecisionEvent + `agent`, `direction`, `lane`, `leverage`, `cost_floor_pct`;
-  horizon pnl_30m/1h/4h/24h; UniqueConstraint decision_key.
-- `agents/futures/decision_ledger.py`: build rows deterministik dari hasil scan +
-  keputusan auto_trader (reason codes nyata: `opened`, `cost_floor_skip`,
-  `direction_cap`, `lane_quota`, `funding_skip`, `profit_lock_skip`,
-  `breadth_fade_skip`, `bm_daily_stop`, `below_auto_threshold`, `sizing_blocked`,
-  `daily_gate_blocked`); feature_snapshot_json numerik.
-- `agents/futures/outcome_tracker.py`: isi harga horizon dari klines (pola
-  backfill R0a yang sudah exact-horizon) + link outcome trade nyata
-  (`backfill_closed_futures_trades`).
-- Wiring scheduler futures (pola scheduler spot baris 526/543): log tiap cycle,
-  outcome pass tiap ~10 cycle. Prune ledger > 45 hari.
+### F1 — ✅ SELESAI 2026-07-11 — Decision ledger + outcome tracker
+Model `FuturesDecisionEvent` (horizon 30m/1h/4h/24h, uq decision_key, kolom
+realized NET) · `decision_ledger.py` (rows deterministik retry-safe, dedup 15 mnt
+kecuali `opened` selalu ditulis, snapshot numerik + breadth) · auto_trader
+di-instrumentasi 22 titik keputusan (`_dec()` → reason codes nyata: opened /
+below_auto_threshold / dedup_lost / volatile_regime_skip / already_open /
+sl_cooldown / profit_lock_skip / direction_cap / bm_daily_budget /
+bm_daily_sl_stop / breadth_fade_skip / funding_hard_skip / bm_lane_full /
+lane_quota_full / lane_paused / funding_flip / cost_floor_skip / sizing_blocked /
+min_notional_skip / risk_gate_blocked / daily_gate_blocked /
+consec_sl_global_pause) · `outcome_tracker.py` (label forward exact-horizon
+pola R0a + `backfill_closed_futures_trades` realized NET + prune 45 hari) ·
+wiring scheduler (ledger tiap cycle pasca-auto_open; outcome pass %10==5,
+offset dari backfill BM) · 8 test pure lulus (total suite futures 29).
 
 ### F2 — Integrasi policy ke scan & auto_trader
 - Keempat `scan_symbol`: `apply_learning_policy` menempelkan adaptive_score +
