@@ -91,13 +91,17 @@ Catatan cakupan didokumentasikan di learning_loader.py (bobot legacy hanya
 ter-apply ke sinyal non-canonical sampai ada sumber weight canonical-keyed).
 - **Sizing**: Wilson lower bound → input sizing HANYA setelah gate F5 (belum).
 
-### F3 — Challenger model + registry
-- `agents/learning/futures_adaptive_model.py` (pola spot_adaptive_model):
-  logistic dependency-light + Platt + ablation; label utama = profitable-net di
-  horizon 4h (trade nyata diprioritaskan, counterfactual sebagai augmentasi
-  TERPISAH — jangan campur tanpa flag).
-- Model `FuturesModelVersion` (`futures_model_versions`) — champion/shadow/
-  last-known-good. Training gate: ≥60 mature era-H, ≥20 OOS kronologis.
+### F3 — ✅ SELESAI 2026-07-11 — Challenger model + registry
+`agents/learning/futures_adaptive_model.py` (mirror spot_adaptive_model, dependency-
+light logistic + Platt + ablation): label = profitable-NET horizon 4h (pnl_4h −
+cost_floor per-sampel true-cost); fitur = snapshot F1 minus field turunan learning
+& biaya (anti-bocor); self-gate ≥60 sampel 4h + step +50 evidence baru; model baru
+selalu `shadow`. Model `FuturesModelVersion` (`futures_model_versions`,
+shadow/canary/champion/retired). Endpoint F6 + scheduler (train %100==50) di-wire.
+**Live-verified**: dilatih pada 352 sampel nyata → shadow, brier 0.39 > baseline
+0.27 → `promotion_eligible=False` (gate offline BENAR menolak model awal yang belum
+bagus; tetap shadow, tak menyentuh keputusan). UI Model Registry render. 5 test
+pure (gate data, belajar sinyal + ablation, kalibrasi bounds, kronologis) → suite 60.
 
 ### F4 — Walk-forward + cost stress
 - `agents/learning/futures_walkforward.py`: replay ledger kronologis; portfolio

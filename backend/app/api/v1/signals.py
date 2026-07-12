@@ -186,10 +186,15 @@ async def get_adaptive_engine_futures() -> dict:
     kosong dan gate promosi/canary belum aktif; itu memang status sebenarnya.
     """
     from app.models.futures_decision_event import FuturesDecisionEvent
+    from app.models.futures_model_version import FuturesModelVersion
 
     now = time.time()
-    required = 60   # gate F3/§4 — sinkron dengan learning_loader.MATURE_ACTIVE_THRESHOLD
+    required = 60   # gate training model F3 (horizon 4h). Catatan: learning_loader
+    # pakai 24h utk aktivasi soft-veto runtime — sengaja lebih konservatif.
     async with AsyncSessionLocal() as session:
+        fmodels = list((await session.execute(
+            select(FuturesModelVersion).order_by(FuturesModelVersion.trained_at.desc())
+        )).scalars().all())
         total_decisions = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))) or 0)
         unique_keys = int(await session.scalar(
             select(func.count(func.distinct(FuturesDecisionEvent.decision_key)))) or 0)
@@ -207,9 +212,10 @@ async def get_adaptive_engine_futures() -> dict:
         )).all())
         opened_total = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
             .where(FuturesDecisionEvent.opened.is_(True))) or 0)
-        # mature = punya outcome forward 24h (basis training F3)
+        # mature = punya outcome forward 4h (horizon label utama model F3 —
+        # posisi futures hidup jam-an, bukan hari-an; jangan pakai 24h di sini)
         mature_samples = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
-            .where(FuturesDecisionEvent.pnl_24h_pct.isnot(None))) or 0)
+            .where(FuturesDecisionEvent.pnl_4h_pct.isnot(None))) or 0)
         realized_linked = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
             .where(FuturesDecisionEvent.realized_pnl_pct.isnot(None))) or 0)
         due_24h = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
@@ -239,6 +245,23 @@ async def get_adaptive_engine_futures() -> dict:
     except Exception:
         runtime_status = "warming"
 
+    # F3: model registry futures
+    model_payload = []
+    for m in fmodels[:10]:
+        try:
+            mm = json.loads(m.metrics_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            mm = {}
+        model_payload.append({
+            "version": m.version, "status": m.status,
+            "trained_at": m.trained_at, "promoted_at": m.promoted_at,
+            "training_n": mm.get("training_n", 0),
+            "promotion_eligible": bool(mm.get("promotion_eligible")),
+            "label_horizon": mm.get("label_horizon", "4h"),
+            "test": mm.get("test") or {},
+        })
+    latest_model = model_payload[0] if model_payload else None
+
     quality = {
         "duplicate_keys": total_decisions - unique_keys,
         "missing_snapshots": missing_snapshots,
@@ -250,17 +273,21 @@ async def get_adaptive_engine_futures() -> dict:
         "training_data": mature_samples >= required,        # ≥60 mature (F3)
         "outcome_completeness": outcome_completeness >= 99.0,
         "data_quality": all(v == 0 for v in quality.values()),
-        "model_trained": False,     # F3 belum
-        "canary_passed": False,     # F5 belum
+        "model_trained": bool(model_payload),                        # F3
+        "promotion_eligible": bool(latest_model and latest_model["promotion_eligible"]),
+        "champion_exists": any(m.status == "champion" for m in fmodels),
+        "canary_passed": any(m.status == "champion" for m in fmodels),  # F5 belum
     }
     engine_status = (
         "degraded" if not gates["data_quality"]
         else "collecting" if not gates["training_data"]
+        else "champion" if gates["champion_exists"]
+        else "shadow" if gates["model_trained"]
         else "ready_to_train"
     )
     return {
         "market": "futures",
-        "engine_status": engine_status,          # collecting | ready_to_train | degraded
+        "engine_status": engine_status,          # collecting|ready_to_train|shadow|champion|degraded
         "learning_status": runtime_status,       # warming | active | degraded (runtime scan)
         "decision_ledger": {
             "total": total_decisions,
@@ -281,10 +308,10 @@ async def get_adaptive_engine_futures() -> dict:
             "required_samples": required,
             "progress_pct": round(min(100.0, mature_samples / required * 100), 1),
         },
-        "models": [],               # F3 model registry belum dibangun
+        "models": model_payload,     # F3 model registry
         "phases": {
             "F0_policy": True, "F1_ledger": True, "F2_integration": True,
-            "F3_model": False, "F4_walkforward": False, "F5_canary": False,
+            "F3_model": True, "F4_walkforward": False, "F5_canary": False,
         },
         "gates": gates,
         "updated_at": now,

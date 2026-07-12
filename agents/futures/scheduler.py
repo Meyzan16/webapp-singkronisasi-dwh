@@ -749,6 +749,22 @@ async def run_futures_loop() -> None:
                 except Exception as exc:
                     logger.warning("futures_outcome_tracker_failed", error=str(exc)[:200])
 
+            # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F3: coba latih challenger tiap ~100
+            # cycle (~3-4 jam). Self-gating: no-op sampai ≥60 sampel 4h-matang &
+            # +50 evidence baru. Model baru selalu 'shadow' — tak memengaruhi keputusan.
+            if _cycle_count % 100 == 50:
+                try:
+                    from agents.learning.futures_adaptive_model import train_and_register
+                    _mres = await train_and_register()
+                    if _mres.get("status") == "registered":
+                        logger.info("futures_challenger_registered",
+                                    version=_mres["version"],
+                                    n=_mres["metrics"].get("training_n"))
+                    elif _mres.get("status") not in ("insufficient_data", "no_new_evidence"):
+                        logger.info("futures_challenger_train", status=_mres.get("status"))
+                except Exception as exc:
+                    logger.warning("futures_challenger_train_failed", error=str(exc)[:200])
+
             # Phase 1 T4: backfill forward-pnl on big_mover_log every 10 cycles (~20 min)
             if _cycle_count % 10 == 0:
                 try:

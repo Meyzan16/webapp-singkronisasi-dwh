@@ -149,7 +149,7 @@ interface AdaptiveEngineData {
 // PLAN_ADAPTIVE_LEARNING_FUTURES_10X F6 — panel engine futures (paralel SPOT)
 interface FuturesAdaptiveEngineData {
   market: "futures";
-  engine_status: "degraded" | "collecting" | "ready_to_train";
+  engine_status: "degraded" | "collecting" | "ready_to_train" | "shadow" | "champion";
   learning_status: "warming" | "active" | "degraded";
   decision_ledger: {
     total: number; opened: number;
@@ -163,7 +163,11 @@ interface FuturesAdaptiveEngineData {
     oldest_scan_ts: number | null; latest_scan_ts: number | null;
   };
   training: { mature_feature_samples: number; required_samples: number; progress_pct: number };
-  models: unknown[];
+  models: Array<{
+    version: string; status: string; trained_at: number; training_n: number;
+    promotion_eligible: boolean; label_horizon: string;
+    test?: { n?: number; brier?: number; selected_expectancy_pct?: number; selected_profit_factor?: number };
+  }>;
   phases: Record<string, boolean>;
   gates: Record<string, boolean>;
   updated_at: number;
@@ -504,11 +508,14 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
     return <div className="bg-white border border-neutral-200 rounded-2xl p-5 text-sm text-neutral-400">Futures Adaptive Engine belum tersedia.</div>;
   }
   const statusMap = {
-    degraded:      { label: "Degraded",       cls: "bg-red-100 text-red-700 border-red-200",     dot: "bg-red-500" },
-    collecting:    { label: "Collecting",     cls: "bg-blue-100 text-blue-700 border-blue-200",   dot: "bg-blue-500" },
-    ready_to_train:{ label: "Ready to Train", cls: "bg-teal-100 text-teal-700 border-teal-200",   dot: "bg-teal-500" },
+    degraded:      { label: "Degraded",       cls: "bg-red-100 text-red-700 border-red-200",       dot: "bg-red-500" },
+    collecting:    { label: "Collecting",     cls: "bg-blue-100 text-blue-700 border-blue-200",     dot: "bg-blue-500" },
+    ready_to_train:{ label: "Ready to Train", cls: "bg-teal-100 text-teal-700 border-teal-200",     dot: "bg-teal-500" },
+    shadow:        { label: "Shadow",         cls: "bg-purple-100 text-purple-700 border-purple-200", dot: "bg-purple-500" },
+    champion:      { label: "Champion",       cls: "bg-green-100 text-green-700 border-green-200",   dot: "bg-green-500" },
   } as const;
   const status = statusMap[data.engine_status] ?? statusMap.degraded;
+  const latestModel = data.models[0];
   const learnMap: Record<string, string> = {
     warming: "text-amber-600", active: "text-green-600", degraded: "text-red-600",
   };
@@ -604,6 +611,23 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
                 ))}
               </div>
             ) : <p className="text-[11px] text-neutral-400">Belum ada keputusan tercatat.</p>}
+          </div>
+        </div>
+      )}
+
+      {!compact && latestModel && (
+        <div className="p-4 pt-0">
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Model Registry (challenger — shadow, tak memengaruhi keputusan)</p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-[11px]">
+              <div><span className="text-neutral-500">Versi</span><p className="font-mono text-neutral-800 truncate" title={latestModel.version}>{latestModel.version}</p></div>
+              <div><span className="text-neutral-500">Status</span><p className="capitalize font-bold text-neutral-800">{latestModel.status} · {latestModel.label_horizon}</p></div>
+              <div><span className="text-neutral-500">Training n</span><p className="font-bold text-neutral-800 tabular-nums">{latestModel.training_n}</p></div>
+              <div><span className="text-neutral-500">OOS Brier</span><p className="font-bold text-neutral-800 tabular-nums">{latestModel.test?.brier?.toFixed(4) ?? "—"}</p></div>
+            </div>
+            <p className={`mt-2 text-[11px] font-bold ${latestModel.promotion_eligible ? "text-green-600" : "text-amber-600"}`}>
+              {latestModel.promotion_eligible ? "Eligible for canary (F5)" : "Promotion blocked — belum lolos gate offline"}
+            </p>
           </div>
         </div>
       )}
