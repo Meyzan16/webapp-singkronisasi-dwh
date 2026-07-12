@@ -103,9 +103,17 @@ shadow/canary/champion/retired). Endpoint F6 + scheduler (train %100==50) di-wir
 bagus; tetap shadow, tak menyentuh keputusan). UI Model Registry render. 5 test
 pure (gate data, belajar sinyal + ablation, kalibrasi bounds, kronologis) → suite 60.
 
-### F4 — Walk-forward + cost stress
-- `agents/learning/futures_walkforward.py`: replay ledger kronologis; portfolio
-  replay net; **cost stress 1.5× WAJIB mencakup funding**, bukan hanya fee+slip.
+### F4 — ✅ SELESAI 2026-07-11 — Walk-forward + cost stress
+`agents/learning/futures_walkforward.py` (mirror spot_walkforward): purged
+chronological (boundary 60%, embargo 4h = horizon), tune threshold di train,
+lapor OOS + **cost-stress 1.5×**. Biaya per-sampel true-cost (fee+2×slip+funding
+via cost_floor) → 1.5× otomatis men-scale funding. promotion_eligible menuntut
+OOS PF≥1.5 DAN tetap expectancy>0 & PF≥1.5 pada biaya 1.5×. Endpoint F6 (+gate
+walkforward_passed, phase F4=true) + scheduler (jalan setelah train) + panel UI
+(best threshold / OOS exp·PF / stress-exp / verdict). **Live**: pada ledger 4h
+nyata → best_thr 55, OOS exp −9.18%, stress −9.34%, promotion_eligible=False
+(gate BENAR menolak; data awal negatif). 5 test (biaya per-sampel, stress
+mengurangi exp, gate data, embargo split, stress membunuh kelayakan) → suite 44.
 
 ### F5 — Shadow → canary → rollback
 - Shadow: model menempelkan probability ke kandidat tanpa memengaruhi keputusan.

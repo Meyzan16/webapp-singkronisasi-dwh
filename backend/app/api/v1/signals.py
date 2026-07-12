@@ -245,6 +245,13 @@ async def get_adaptive_engine_futures() -> dict:
     except Exception:
         runtime_status = "warming"
 
+    # F4: walk-forward + cost-stress 1.5× (diagnostik counterfactual)
+    try:
+        from agents.learning.futures_walkforward import run_futures_walkforward
+        walkforward = await run_futures_walkforward()
+    except Exception as exc:
+        walkforward = {"status": "error", "error": str(exc)[:120], "promotion_eligible": False}
+
     # F3: model registry futures
     model_payload = []
     for m in fmodels[:10]:
@@ -275,6 +282,7 @@ async def get_adaptive_engine_futures() -> dict:
         "data_quality": all(v == 0 for v in quality.values()),
         "model_trained": bool(model_payload),                        # F3
         "promotion_eligible": bool(latest_model and latest_model["promotion_eligible"]),
+        "walkforward_passed": bool(walkforward.get("promotion_eligible")),  # F4 (+1.5× stress)
         "champion_exists": any(m.status == "champion" for m in fmodels),
         "canary_passed": any(m.status == "champion" for m in fmodels),  # F5 belum
     }
@@ -309,9 +317,10 @@ async def get_adaptive_engine_futures() -> dict:
             "progress_pct": round(min(100.0, mature_samples / required * 100), 1),
         },
         "models": model_payload,     # F3 model registry
+        "walkforward": walkforward,  # F4 (termasuk test_stressed_1_5x)
         "phases": {
             "F0_policy": True, "F1_ledger": True, "F2_integration": True,
-            "F3_model": True, "F4_walkforward": False, "F5_canary": False,
+            "F3_model": True, "F4_walkforward": True, "F5_canary": False,
         },
         "gates": gates,
         "updated_at": now,

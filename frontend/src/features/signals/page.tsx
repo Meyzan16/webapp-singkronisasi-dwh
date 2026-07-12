@@ -168,6 +168,11 @@ interface FuturesAdaptiveEngineData {
     promotion_eligible: boolean; label_horizon: string;
     test?: { n?: number; brier?: number; selected_expectancy_pct?: number; selected_profit_factor?: number };
   }>;
+  walkforward?: {
+    status: string; best_threshold?: number; promotion_eligible?: boolean;
+    test?: { n?: number; expectancy_pct?: number; profit_factor?: number; max_drawdown_pct?: number };
+    test_stressed_1_5x?: { n?: number; expectancy_pct?: number; profit_factor?: number };
+  };
   phases: Record<string, boolean>;
   gates: Record<string, boolean>;
   updated_at: number;
@@ -611,6 +616,23 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
                 ))}
               </div>
             ) : <p className="text-[11px] text-neutral-400">Belum ada keputusan tercatat.</p>}
+          </div>
+        </div>
+      )}
+
+      {!compact && data.walkforward && data.walkforward.status === "ok" && (
+        <div className="p-4 pt-0">
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Walk-forward + cost-stress 1.5× (F4 — diagnostik)</p>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-[11px]">
+              <div><span className="text-neutral-500">Best threshold</span><p className="font-bold text-neutral-800 tabular-nums">{data.walkforward.best_threshold ?? "—"}</p></div>
+              <div><span className="text-neutral-500">OOS expectancy</span><p className="font-bold text-neutral-800 tabular-nums">{data.walkforward.test?.expectancy_pct?.toFixed(3) ?? "—"}%</p></div>
+              <div><span className="text-neutral-500">OOS PF</span><p className="font-bold text-neutral-800 tabular-nums">{data.walkforward.test?.profit_factor ?? "—"}</p></div>
+              <div><span className="text-neutral-500">Stress 1.5× exp</span><p className={`font-bold tabular-nums ${(data.walkforward.test_stressed_1_5x?.expectancy_pct ?? -1) > 0 ? "text-green-700" : "text-red-600"}`}>{data.walkforward.test_stressed_1_5x?.expectancy_pct?.toFixed(3) ?? "—"}%</p></div>
+            </div>
+            <p className={`mt-2 text-[11px] font-bold ${data.walkforward.promotion_eligible ? "text-green-600" : "text-amber-600"}`}>
+              {data.walkforward.promotion_eligible ? "Walk-forward lolos (tahan cost-stress 1.5×)" : "Walk-forward belum lolos gate (incl. cost-stress)"}
+            </p>
           </div>
         </div>
       )}

@@ -762,6 +762,15 @@ async def run_futures_loop() -> None:
                                     n=_mres["metrics"].get("training_n"))
                     elif _mres.get("status") not in ("insufficient_data", "no_new_evidence"):
                         logger.info("futures_challenger_train", status=_mres.get("status"))
+                    # F4: walk-forward + cost-stress 1.5× (diagnostik; catat kelayakan)
+                    from agents.learning.futures_walkforward import run_futures_walkforward
+                    _wf = await run_futures_walkforward()
+                    if _wf.get("status") == "ok":
+                        logger.info("futures_walkforward",
+                                    best_threshold=_wf.get("best_threshold"),
+                                    test_exp=(_wf.get("test") or {}).get("expectancy_pct"),
+                                    stressed_exp=(_wf.get("test_stressed_1_5x") or {}).get("expectancy_pct"),
+                                    promotion_eligible=_wf.get("promotion_eligible"))
                 except Exception as exc:
                     logger.warning("futures_challenger_train_failed", error=str(exc)[:200])
 
