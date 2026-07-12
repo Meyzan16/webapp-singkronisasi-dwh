@@ -181,6 +181,45 @@ interface FuturesAdaptiveEngineData {
 type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "regime" | "formulas" | "rejections" | "predictive";
 type SortBy = "win_rate" | "avg_pnl_pct" | "total_count" | "weight";
 
+// ── Navigasi 2-level: 4 seksi ber-scope (refactor UX — dulu 9 tab flat) ────────
+type Section = "overview" | "engine" | "signals" | "analysis";
+
+const SECTION_OF: Record<SubTab, Section> = {
+  overview: "overview",
+  adaptive: "engine",
+  spot: "signals", futures: "signals", cross: "signals",
+  regime: "analysis", formulas: "analysis", rejections: "analysis", predictive: "analysis",
+};
+
+// Tab default saat sebuah seksi dibuka
+const SECTION_DEFAULT: Record<Section, SubTab> = {
+  overview: "overview", engine: "adaptive", signals: "spot", analysis: "regime",
+};
+
+const SECTIONS: { key: Section; icon: string; label: string; desc: string }[] = [
+  { key: "overview", icon: "📊", label: "Overview",  desc: "Ringkasan cepat: kesehatan agen & mesin" },
+  { key: "engine",   icon: "🧠", label: "Engine",    desc: "Mesin belajar adaptif SPOT & Futures" },
+  { key: "signals",  icon: "🎯", label: "Signals",   desc: "Bobot sinyal yang dipelajari per market" },
+  { key: "analysis", icon: "🔬", label: "Analysis",  desc: "Regime, rumus, rejections, prediksi" },
+];
+
+// Sub-tab per seksi (hanya Signals & Analysis punya inner nav)
+const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
+  overview: [],
+  engine:   [],
+  signals:  [
+    { key: "spot",    label: "🎯 SPOT" },
+    { key: "futures", label: "⚡ Futures" },
+    { key: "cross",   label: "🔗 Cross-Agent" },
+  ],
+  analysis: [
+    { key: "regime",     label: "🌡 Regime" },
+    { key: "formulas",   label: "🔬 Formulas" },
+    { key: "rejections", label: "🚫 Rejections" },
+    { key: "predictive", label: "🔮 Predictive" },
+  ],
+};
+
 const AGENT_TABS = [
   { key: "opportunity_spot", label: "SPOT",          color: "text-teal-700",   bg: "bg-teal-100 border-teal-200" },
   { key: "futures_agent1",   label: "Pre-Gainer",    color: "text-blue-700",   bg: "bg-blue-100 border-blue-200" },
@@ -1181,22 +1220,18 @@ function AdaptiveLearningTutorial({
             </div>
           )}
 
-          {/* Tabs guide */}
+          {/* Panduan 4 seksi (selaras navigasi baru) */}
           <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
-            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-3">Panduan Tab</p>
-            <div className="grid grid-cols-2 gap-2">
+            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-3">Panduan 4 Seksi</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
-                { tab: "📊 Overview",    desc: "Status live: gate, lane WR, learning loop" },
-                { tab: "🎯 SPOT",        desc: "Sinyal yang dipelajari agen SPOT scanner"   },
-                { tab: "⚡ Futures",     desc: "Sinyal futures (Pre-Gainer, Accum, Momentum)" },
-                { tab: "🔗 Cross-Agent", desc: "Sinyal yang muncul di ≥2 agen — lebih reliable" },
-                { tab: "🌡 Regime",      desc: "Weight per market regime (trending/ranging)" },
-                { tab: "🔬 Formulas",    desc: "Detail rumus & kategori setiap sinyal"       },
-                { tab: "🚫 Rejections",  desc: "Kandidat yang tidak lolos threshold kemarin"  },
-                { tab: "🔮 Predictive",  desc: "Akurasi prediksi 4h & 24h per agen"          },
+                { tab: "📊 Overview", desc: "Ringkasan cepat: kesehatan agen, mesin, sinyal teratas" },
+                { tab: "🧠 Engine",   desc: "Mesin belajar adaptif SPOT & Futures — ledger, model, gate" },
+                { tab: "🎯 Signals",  desc: "Bobot sinyal per market → SPOT · Futures · Cross-Agent" },
+                { tab: "🔬 Analysis", desc: "Diagnostik → Regime · Formulas · Rejections · Predictive" },
               ].map(item => (
                 <div key={item.tab} className="flex gap-2">
-                  <span className="text-[10px] font-bold text-neutral-700 shrink-0 w-24">{item.tab}</span>
+                  <span className="text-[10px] font-bold text-neutral-700 shrink-0 w-20">{item.tab}</span>
                   <span className="text-[10px] text-neutral-500">{item.desc}</span>
                 </div>
               ))}
@@ -1338,27 +1373,40 @@ export default function SignalsPage() {
   const topFutures = useMemo(() => futSignals.slice(0, 3), [futSignals]);
   const topCross   = useMemo(() => crossSignals.filter(s => s.reliability === "high").slice(0, 3), [crossSignals]);
 
-  const subTabBar = (
-    <div className="flex flex-wrap gap-1 bg-neutral-100 p-1 rounded-xl w-fit">
-      <button onClick={() => setSubTab("adaptive")}
-        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${subTab === "adaptive" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}>
-        🧠 Adaptive Engine
-      </button>
-      {([
-        { key: "overview",    label: "📊 Overview"    },
-        { key: "spot",        label: "🎯 SPOT"        },
-        { key: "futures",     label: "⚡ Futures"     },
-        { key: "cross",       label: "🔗 Cross-Agent" },
-        { key: "regime",      label: "🌡 Regime"      },
-        { key: "formulas",    label: "🔬 Formulas"    },
-        { key: "rejections",  label: "🚫 Rejections"  },
-        { key: "predictive",  label: "🔮 Predictive"  },
-      ] as { key: SubTab; label: string }[]).map(t => (
-        <button key={t.key} onClick={() => setSubTab(t.key)}
-          className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${subTab === t.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}>
-          {t.label}
-        </button>
-      ))}
+  const activeSection = SECTION_OF[subTab];
+  const innerTabs = SUBTABS_OF[activeSection];
+  const activeSectionMeta = SECTIONS.find(s => s.key === activeSection);
+  const nav = (
+    <div className="space-y-3">
+      {/* Level 1 — seksi utama (kartu ber-ikon + deskripsi) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {SECTIONS.map(s => {
+          const active = s.key === activeSection;
+          return (
+            <button key={s.key} onClick={() => setSubTab(SECTION_DEFAULT[s.key])}
+              className={`text-left rounded-xl border p-3 transition-all ${active
+                ? "bg-neutral-900 border-neutral-900 text-white shadow-md"
+                : "bg-white border-neutral-200 text-neutral-700 hover:border-neutral-300 hover:shadow-sm"}`}>
+              <p className="text-sm font-black flex items-center gap-1.5">
+                <span>{s.icon}</span>{s.label}
+              </p>
+              <p className={`text-[10px] mt-0.5 leading-tight ${active ? "text-neutral-300" : "text-neutral-400"}`}>{s.desc}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Level 2 — sub-tab dalam seksi (hanya Signals & Analysis) */}
+      {innerTabs.length > 0 && (
+        <div className="flex flex-wrap gap-1 bg-neutral-100 p-1 rounded-xl w-fit">
+          {innerTabs.map(t => (
+            <button key={t.key} onClick={() => setSubTab(t.key)}
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${subTab === t.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -1396,7 +1444,14 @@ export default function SignalsPage() {
         </div>
       </div>
 
-      {subTabBar}
+      {nav}
+
+      {activeSectionMeta && (
+        <div className="flex items-baseline gap-2 px-1">
+          <h2 className="text-lg font-black text-neutral-800">{activeSectionMeta.icon} {activeSectionMeta.label}</h2>
+          <span className="text-xs text-neutral-400">{activeSectionMeta.desc}</span>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-16 text-neutral-400 gap-2">
