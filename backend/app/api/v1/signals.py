@@ -177,6 +177,120 @@ async def get_adaptive_engine() -> dict:
     }
 
 
+@router.get("/signals/adaptive-engine/futures", dependencies=[Depends(require_db)])
+async def get_adaptive_engine_futures() -> dict:
+    """FUTURES Adaptive Learning Engine state (PLAN_ADAPTIVE_LEARNING_FUTURES_10X F6).
+
+    Panel paralel dari versi SPOT — sumber tabel futures_decision_events. Model
+    registry belum ada (F3 menunggu 60 mature samples), jadi bagian `models`
+    kosong dan gate promosi/canary belum aktif; itu memang status sebenarnya.
+    """
+    from app.models.futures_decision_event import FuturesDecisionEvent
+
+    now = time.time()
+    required = 60   # gate F3/§4 — sinkron dengan learning_loader.MATURE_ACTIVE_THRESHOLD
+    async with AsyncSessionLocal() as session:
+        total_decisions = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))) or 0)
+        unique_keys = int(await session.scalar(
+            select(func.count(func.distinct(FuturesDecisionEvent.decision_key)))) or 0)
+        action_counts = dict((await session.execute(
+            select(FuturesDecisionEvent.action, func.count(FuturesDecisionEvent.id))
+            .group_by(FuturesDecisionEvent.action)
+        )).all())
+        outcome_counts = dict((await session.execute(
+            select(FuturesDecisionEvent.outcome_status, func.count(FuturesDecisionEvent.id))
+            .group_by(FuturesDecisionEvent.outcome_status)
+        )).all())
+        reason_counts = dict((await session.execute(
+            select(FuturesDecisionEvent.reason_code, func.count(FuturesDecisionEvent.id))
+            .group_by(FuturesDecisionEvent.reason_code)
+        )).all())
+        opened_total = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
+            .where(FuturesDecisionEvent.opened.is_(True))) or 0)
+        # mature = punya outcome forward 24h (basis training F3)
+        mature_samples = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
+            .where(FuturesDecisionEvent.pnl_24h_pct.isnot(None))) or 0)
+        realized_linked = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
+            .where(FuturesDecisionEvent.realized_pnl_pct.isnot(None))) or 0)
+        due_24h = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
+            .where(FuturesDecisionEvent.scan_ts <= now - 24 * 3600)) or 0)
+        labelled_24h = int(await session.scalar(select(func.count(FuturesDecisionEvent.id)).where(
+            FuturesDecisionEvent.scan_ts <= now - 24 * 3600,
+            FuturesDecisionEvent.pnl_24h_pct.isnot(None),
+        )) or 0)
+        # data-quality diagnostics (mirror SPOT)
+        missing_snapshots = int(await session.scalar(select(func.count(FuturesDecisionEvent.id)).where(
+            (FuturesDecisionEvent.feature_snapshot_json.is_(None)) |
+            (FuturesDecisionEvent.feature_snapshot_json == "")
+        )) or 0)
+        future_events = int(await session.scalar(select(func.count(FuturesDecisionEvent.id))
+            .where(FuturesDecisionEvent.scan_ts > now + 60)) or 0)
+        invalid_closes = int(await session.scalar(select(func.count(FuturesDecisionEvent.id)).where(
+            FuturesDecisionEvent.closed_at.isnot(None),
+            FuturesDecisionEvent.closed_at < FuturesDecisionEvent.scan_ts,
+        )) or 0)
+        oldest_ts = await session.scalar(select(func.min(FuturesDecisionEvent.scan_ts)))
+        latest_ts = await session.scalar(select(func.max(FuturesDecisionEvent.scan_ts)))
+
+    # Status engine langsung dari runtime scanner (single source of truth)
+    try:
+        from agents.futures import store as futures_store
+        runtime_status = futures_store.get_learning_status()
+    except Exception:
+        runtime_status = "warming"
+
+    quality = {
+        "duplicate_keys": total_decisions - unique_keys,
+        "missing_snapshots": missing_snapshots,
+        "future_events": future_events,
+        "invalid_closes": invalid_closes,
+    }
+    outcome_completeness = round(labelled_24h / due_24h * 100, 1) if due_24h else 100.0
+    gates = {
+        "training_data": mature_samples >= required,        # ≥60 mature (F3)
+        "outcome_completeness": outcome_completeness >= 99.0,
+        "data_quality": all(v == 0 for v in quality.values()),
+        "model_trained": False,     # F3 belum
+        "canary_passed": False,     # F5 belum
+    }
+    engine_status = (
+        "degraded" if not gates["data_quality"]
+        else "collecting" if not gates["training_data"]
+        else "ready_to_train"
+    )
+    return {
+        "market": "futures",
+        "engine_status": engine_status,          # collecting | ready_to_train | degraded
+        "learning_status": runtime_status,       # warming | active | degraded (runtime scan)
+        "decision_ledger": {
+            "total": total_decisions,
+            "opened": opened_total,
+            "actions": action_counts,
+            "outcomes": outcome_counts,
+            "reasons": reason_counts,
+            "realized_linked": realized_linked,
+            "due_24h": due_24h,
+            "labelled_24h": labelled_24h,
+            "outcome_completeness_pct": outcome_completeness,
+            "quality": quality,
+            "oldest_scan_ts": oldest_ts,
+            "latest_scan_ts": latest_ts,
+        },
+        "training": {
+            "mature_feature_samples": mature_samples,
+            "required_samples": required,
+            "progress_pct": round(min(100.0, mature_samples / required * 100), 1),
+        },
+        "models": [],               # F3 model registry belum dibangun
+        "phases": {
+            "F0_policy": True, "F1_ledger": True, "F2_integration": True,
+            "F3_model": False, "F4_walkforward": False, "F5_canary": False,
+        },
+        "gates": gates,
+        "updated_at": now,
+    }
+
+
 # ── GET /signals/performance ──────────────────────────────────────────────────
 
 @router.get("/signals/performance", dependencies=[Depends(require_db)])

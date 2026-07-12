@@ -108,22 +108,19 @@ ter-apply ke sinyal non-canonical sampai ada sumber weight canonical-keyed).
 - Canary: ≥20 outcome pick-model vs baseline; PF ≥ 1.5, DD ≤ 10%; drift monitor
   auto-rollback ke last-known-good.
 
-### F6 — UI Signal Performance (permintaan eksplisit user)
-Konsep per subtab (page.tsx — lihat §5 koordinasi):
-- **Adaptive**: DUA panel engine sejajar — SPOT (endpoint existing, read-only)
-  dan FUTURES (endpoint BARU `/signals/adaptive-engine/futures`): status
-  warming/active, progres acceptance gates (bar per gate), ledger stats
-  (decisions/outcomes/completeness), model registry, tombol lihat ablation.
-- **Overview**: diagram alur singkat "Keputusan → Ledger → Outcome → Bobot/Model
-  → Gate → Sizing" + scorecard ringkas kedua market (day-WR, expectancy net,
-  churn) — supaya konsepnya terbaca dalam 10 detik.
-- **Spot**: tidak diubah strukturnya (milik engine SPOT) — hanya dirapikan
-  konsisten dgn layout baru.
-- **Futures**: tabel bobot existing + panel baru: sumber bobot per sinyal
-  (trade / weekly-review / predictive-blend / model-shadow), near-miss era-H,
-  hasil weekly signal review terakhir (endpoint `/predictive/signal_review`).
-- API: HANYA menambah endpoint baru di signals.py — endpoint SPOT existing tidak
-  disentuh.
+### F6 — ✅ SELESAI 2026-07-11 — UI Signal Performance
+Basis SPOT UI (endpoint + subtabs) di-commit sendiri dulu (`646a216`) atas
+persetujuan owner, lalu F6 futures ditambah additive (commit terpisah):
+- Endpoint BARU `/signals/adaptive-engine/futures` (signals.py, endpoint SPOT
+  tak disentuh): engine_status collecting/ready_to_train/degraded +
+  learning_status runtime warming/active, ledger stats (total/opened/actions/
+  outcomes/reasons/realized_linked/completeness/quality), progres training /60,
+  phases F0-F5, acceptance gates. Live: 457 keputusan, 8 opened, quality clean.
+- `FuturesAdaptiveEnginePanel` (page.tsx): kartu stat, chip progres fase F0-F5,
+  bar training evidence, acceptance gates, "kenapa tidak dibuka (top reasons)".
+  Dirender di: **Adaptive** (sejajar bawah panel SPOT), **Overview** (dua panel
+  compact berdampingan — konsep pipeline dua market), **Futures** (di atas tabel
+  bobot). Verifikasi live: render benar dgn data nyata, 0 console error, tsc bersih.
 
 ## 4. Acceptance gates (identik pola SPOT — model tak boleh memengaruhi sizing sebelum lolos)
 

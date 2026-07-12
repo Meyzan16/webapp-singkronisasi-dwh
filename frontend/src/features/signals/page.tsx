@@ -146,6 +146,29 @@ interface AdaptiveEngineData {
   updated_at: number;
 }
 
+// PLAN_ADAPTIVE_LEARNING_FUTURES_10X F6 — panel engine futures (paralel SPOT)
+interface FuturesAdaptiveEngineData {
+  market: "futures";
+  engine_status: "degraded" | "collecting" | "ready_to_train";
+  learning_status: "warming" | "active" | "degraded";
+  decision_ledger: {
+    total: number; opened: number;
+    actions: Record<string, number>;
+    outcomes: Record<string, number>;
+    reasons: Record<string, number>;
+    realized_linked: number;
+    due_24h: number; labelled_24h: number;
+    outcome_completeness_pct: number;
+    quality: { duplicate_keys: number; missing_snapshots: number; future_events: number; invalid_closes: number };
+    oldest_scan_ts: number | null; latest_scan_ts: number | null;
+  };
+  training: { mature_feature_samples: number; required_samples: number; progress_pct: number };
+  models: unknown[];
+  phases: Record<string, boolean>;
+  gates: Record<string, boolean>;
+  updated_at: number;
+}
+
 type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "regime" | "formulas" | "rejections" | "predictive";
 type SortBy = "win_rate" | "avg_pnl_pct" | "total_count" | "weight";
 
@@ -467,6 +490,120 @@ function AdaptiveEnginePanel({ data, compact = false }: { data: AdaptiveEngineDa
               <p>On-chain <strong className="text-neutral-800">{data.onchain.mode ?? "unavailable"}</strong> · {data.onchain.cache_entries ?? 0} cached</p>
               <p className="font-mono text-[9px] text-neutral-400">{data.onchain.mapping_version ?? "no mapping"}</p>
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── FuturesAdaptiveEnginePanel (F6) ────────────────────────────────────────────
+
+function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAdaptiveEngineData | null; compact?: boolean }) {
+  if (!data) {
+    return <div className="bg-white border border-neutral-200 rounded-2xl p-5 text-sm text-neutral-400">Futures Adaptive Engine belum tersedia.</div>;
+  }
+  const statusMap = {
+    degraded:      { label: "Degraded",       cls: "bg-red-100 text-red-700 border-red-200",     dot: "bg-red-500" },
+    collecting:    { label: "Collecting",     cls: "bg-blue-100 text-blue-700 border-blue-200",   dot: "bg-blue-500" },
+    ready_to_train:{ label: "Ready to Train", cls: "bg-teal-100 text-teal-700 border-teal-200",   dot: "bg-teal-500" },
+  } as const;
+  const status = statusMap[data.engine_status] ?? statusMap.degraded;
+  const learnMap: Record<string, string> = {
+    warming: "text-amber-600", active: "text-green-600", degraded: "text-red-600",
+  };
+  const qualityIssues = Object.values(data.decision_ledger.quality).reduce((s, v) => s + v, 0);
+  const phaseLabels: Record<string, string> = {
+    F0_policy: "F0 Policy", F1_ledger: "F1 Ledger", F2_integration: "F2 Integrasi",
+    F3_model: "F3 Model", F4_walkforward: "F4 Walk-fwd", F5_canary: "F5 Canary",
+  };
+  const gateLabels: Record<string, string> = {
+    training_data: "60 mature samples", outcome_completeness: "Outcome ≥99%",
+    data_quality: "Data quality", model_trained: "Model trained", canary_passed: "Canary passed",
+  };
+  // Reason codes teratas (selain opened/recommendation) — kenapa kandidat tidak dibuka
+  const topReasons = Object.entries(data.decision_ledger.reasons)
+    .filter(([r]) => r !== "opened" && r !== "not_evaluated")
+    .sort((a, b) => b[1] - a[1]).slice(0, 6);
+  return (
+    <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
+      <div className="p-4 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Adaptive Learning Engine · FUTURES</p>
+          <p className="text-[11px] text-neutral-400 mt-0.5">Decision ledger → outcomes (NET true-cost) → challenger → canary · veto-only</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-[11px] font-bold ${learnMap[data.learning_status] ?? "text-neutral-500"}`}>
+            learning: {data.learning_status}
+          </span>
+          <span className={`inline-flex items-center gap-2 text-xs font-bold border rounded-full px-3 py-1 ${status.cls}`}>
+            <span className={`w-2 h-2 rounded-full ${status.dot}`} />{status.label}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-100">
+        {[
+          { label: "Decision Events", value: data.decision_ledger.total.toLocaleString("id-ID"), sub: `${data.decision_ledger.opened} opened · ${data.decision_ledger.actions.rejected ?? 0} rejected` },
+          { label: "Mature Features", value: `${data.training.mature_feature_samples}/${data.training.required_samples}`, sub: `${data.training.progress_pct.toFixed(1)}% menuju training F3` },
+          { label: "Outcome 24h", value: `${data.decision_ledger.outcome_completeness_pct.toFixed(1)}%`, sub: `${data.decision_ledger.labelled_24h}/${data.decision_ledger.due_24h} due · ${data.decision_ledger.realized_linked} trade linked` },
+          { label: "Data Quality", value: qualityIssues === 0 ? "Clean" : `${qualityIssues} issue`, sub: qualityIssues === 0 ? "No leakage / duplicate" : "Perlu investigasi" },
+        ].map(card => (
+          <div key={card.label} className="bg-white p-4">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-neutral-400">{card.label}</p>
+            <p className="text-2xl font-black text-neutral-800 mt-1 tabular-nums">{card.value}</p>
+            <p className="text-[10px] text-neutral-400 mt-0.5">{card.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Progres fase F0-F5 */}
+      <div className="p-4 border-b border-neutral-100">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Progres Engine</p>
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(data.phases).map(([key, done]) => (
+            <span key={key} className={`text-[10px] font-bold rounded-md px-2 py-1 border ${done ? "bg-green-50 text-green-700 border-green-200" : "bg-neutral-50 text-neutral-400 border-neutral-200"}`}>
+              {done ? "✓ " : "○ "}{phaseLabels[key] ?? key}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="flex items-center justify-between text-[10px] mb-1.5">
+          <span className="font-bold text-neutral-500">Training evidence (ledger matang → F3 model)</span>
+          <span className="font-mono text-neutral-400">{data.training.progress_pct.toFixed(1)}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-neutral-100 overflow-hidden">
+          <div className="h-full rounded-full bg-gradient-to-r from-teal-500 to-blue-500" style={{ width: `${Math.max(1, data.training.progress_pct)}%` }} />
+        </div>
+      </div>
+
+      {!compact && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 pt-0">
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Acceptance Gates</p>
+            <div className="space-y-1.5">
+              {Object.entries(data.gates).map(([key, passed]) => (
+                <div key={key} className="flex items-center justify-between text-[11px]">
+                  <span className="text-neutral-600">{gateLabels[key] ?? key}</span>
+                  <span className={`font-bold ${passed ? "text-green-600" : "text-neutral-400"}`}>{passed ? "PASS" : "WAIT"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Kenapa tidak dibuka (top reasons)</p>
+            {topReasons.length ? (
+              <div className="space-y-1 text-[11px]">
+                {topReasons.map(([reason, n]) => (
+                  <div key={reason} className="flex items-center justify-between">
+                    <span className="text-neutral-600 font-mono text-[10px]">{reason}</span>
+                    <span className="font-bold text-neutral-800 tabular-nums">{n.toLocaleString("id-ID")}</span>
+                  </div>
+                ))}
+              </div>
+            ) : <p className="text-[11px] text-neutral-400">Belum ada keputusan tercatat.</p>}
           </div>
         </div>
       )}
@@ -1060,6 +1197,7 @@ export default function SignalsPage() {
   const [predictiveData, setPredictiveData] = useState<PredictiveHitRow[] | null>(null);
   const [agentHealth,    setAgentHealth]    = useState<AgentHealthData | null>(null);
   const [adaptiveEngine, setAdaptiveEngine] = useState<AdaptiveEngineData | null>(null);
+  const [futuresEngine,  setFuturesEngine]  = useState<FuturesAdaptiveEngineData | null>(null);
   const [loading,        setLoading]        = useState(true);
   const [forceMsg,       setForceMsg]       = useState<string | null>(null);
   const [showTutorial,   setShowTutorial]   = useState(false);
@@ -1074,13 +1212,14 @@ export default function SignalsPage() {
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [perfRes, crossRes, stateRes, catalogRes, healthRes, adaptiveRes] = await Promise.all([
+      const [perfRes, crossRes, stateRes, catalogRes, healthRes, adaptiveRes, futuresRes] = await Promise.all([
         fetch(`/api/v1/signals/performance?agent=all&regime=all&min_trades=${minTrades}&sort_by=${sortBy}&sort_dir=${sortDir}&limit=50`),
         fetch(`/api/v1/signals/cross_agent?min_trades=5`),
         fetch("/api/v1/signals/updater/state"),
         fetch("/api/v1/signals/catalog"),
         fetch("/api/v1/signals/agent_health"),
         fetch("/api/v1/signals/adaptive-engine"),
+        fetch("/api/v1/signals/adaptive-engine/futures"),
       ]);
       if (perfRes.ok)    setPerfData(await perfRes.json() as PerformanceResponse);
       if (crossRes.ok)   setCrossData(await crossRes.json() as CrossResponse);
@@ -1088,6 +1227,7 @@ export default function SignalsPage() {
       if (catalogRes.ok) setCatalogData(await catalogRes.json() as CatalogResponse);
       if (healthRes.ok)  setAgentHealth(await healthRes.json() as AgentHealthData);
       if (adaptiveRes.ok) setAdaptiveEngine(await adaptiveRes.json() as AdaptiveEngineData);
+      if (futuresRes.ok) setFuturesEngine(await futuresRes.json() as FuturesAdaptiveEngineData);
     } catch { /* stale */ }
     finally { if (!silent) setLoading(false); }
   }, [minTrades, sortBy, sortDir]);
@@ -1224,7 +1364,11 @@ export default function SignalsPage() {
               {/* Agent health cards */}
               <AgentHealthCards health={agentHealth} />
 
-              <AdaptiveEnginePanel data={adaptiveEngine} compact />
+              {/* F6: dua engine sejajar — konsep pipeline yang sama, dua market */}
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <AdaptiveEnginePanel data={adaptiveEngine} compact />
+                <FuturesAdaptiveEnginePanel data={futuresEngine} compact />
+              </div>
 
               {/* Summary strip */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1305,6 +1449,8 @@ export default function SignalsPage() {
                 </p>
               </div>
               <AdaptiveEnginePanel data={adaptiveEngine} />
+              {/* F6: engine FUTURES sejajar — pola sama, biaya NET true-cost + veto-only */}
+              <FuturesAdaptiveEnginePanel data={futuresEngine} />
               <LearningLoopStatus state={updaterState} onForce={handleForce} />
             </div>
           )}
@@ -1332,6 +1478,8 @@ export default function SignalsPage() {
           {/* ── FUTURES ──────────────────────────────────────────────────── */}
           {subTab === "futures" && (
             <div className="space-y-4">
+              {/* F6: engine futures di atas tabel bobot — konteks sebelum detail */}
+              <FuturesAdaptiveEnginePanel data={futuresEngine} />
               <div className="flex flex-wrap gap-2 items-center">
                 <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
                   {AGENT_TABS.map(a => (
