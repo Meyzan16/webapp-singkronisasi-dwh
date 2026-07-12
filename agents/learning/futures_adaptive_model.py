@@ -34,6 +34,7 @@ _EXCLUDE_FEATURES = {
     "adaptive_score", "weight_applied",
     "estimated_win_probability", "lower_confidence_probability",
     "cost_floor_pct", "entry_slippage_pct",
+    "shadow_probability",   # F5: prediksi shadow tersimpan di snapshot — bukan fitur
 }
 _DEFAULT_COST_PCT = 0.20   # fallback net-cost bila cost_floor_pct absen di snapshot
 MIN_TRAIN_SAMPLES = 60     # gate data §4
@@ -208,3 +209,241 @@ async def train_and_register() -> dict:
         ).on_conflict_do_nothing(index_elements=["version"]))
         await session.commit()
     return {"status": "registered", "version": version, "metrics": metrics}
+
+
+# ── F5: shadow scoring → canary → champion + rollback + drift ──────────────────
+
+CANARY_MIN_OUTCOMES = 20      # gate §4: ≥20 canary outcomes
+CANARY_MIN_PF = 1.5
+CANARY_MAX_DD_PCT = 10.0
+DRIFT_BRIER_MAX = 0.30
+DRIFT_WINDOW = 200
+SELECT_PROB = 0.55
+
+
+def _features_for_predict(snapshot_or_candidate: dict) -> dict:
+    return {k: v for k, v in snapshot_or_candidate.items()
+            if k not in _EXCLUDE_FEATURES and isinstance(v, (int, float)) and not isinstance(v, bool)}
+
+
+async def _active_model_row():
+    """Model shadow/canary/champion terbaru (yang menempelkan prediksi shadow)."""
+    async with AsyncSessionLocal() as session:
+        return (await session.execute(
+            select(FuturesModelVersion).where(
+                FuturesModelVersion.status.in_(["champion", "canary", "shadow"])
+            ).order_by(FuturesModelVersion.trained_at.desc()).limit(1)
+        )).scalar_one_or_none()
+
+
+async def score_shadow_candidates(candidates: list[dict]) -> None:
+    """Tempelkan shadow_probability ke tiap kandidat TANPA memengaruhi keputusan.
+    Dipanggil di scan sebelum decision_ledger supaya prob tersimpan di snapshot."""
+    if not is_db_available() or not candidates:
+        return
+    row = await _active_model_row()
+    if row is None:
+        return
+    try:
+        model = json.loads(row.model_json)
+    except (TypeError, json.JSONDecodeError):
+        return
+    for c in candidates:
+        feats = _features_for_predict(c)
+        if feats:
+            c["shadow_probability"] = predict(model, feats)
+            c["shadow_model_version"] = row.version
+
+
+async def start_canary(version: str, require_walkforward: bool = True) -> dict:
+    """Naikkan shadow→canary hanya bila lolos gate OFFLINE (F3) + WALK-FORWARD (F4)."""
+    from agents.learning.futures_walkforward import run_futures_walkforward
+    async with AsyncSessionLocal() as session:
+        row = (await session.execute(select(FuturesModelVersion).where(
+            FuturesModelVersion.version == version))).scalar_one_or_none()
+        if row is None:
+            return {"status": "not_found"}
+        if row.status != "shadow":
+            return {"status": "not_shadow", "current": row.status}
+        try:
+            metrics = json.loads(row.metrics_json)
+        except (TypeError, json.JSONDecodeError):
+            metrics = {}
+        if not metrics.get("promotion_eligible"):
+            return {"status": "blocked", "reason": "offline_gate_failed"}
+    if require_walkforward:
+        wf = await run_futures_walkforward()
+        if not wf.get("promotion_eligible"):
+            return {"status": "blocked", "reason": "walkforward_gate_failed",
+                    "walkforward": wf.get("status")}
+    async with AsyncSessionLocal() as session:
+        row = (await session.execute(select(FuturesModelVersion).where(
+            FuturesModelVersion.version == version, FuturesModelVersion.status == "shadow"
+        ))).scalar_one_or_none()
+        if row is None:
+            return {"status": "not_shadow"}
+        row.status = "canary"
+        await session.commit()
+    return {"status": "canary", "version": version}
+
+
+async def evaluate_canary(version: str) -> dict:
+    """Hitung metrik canary dari decision events yang di-skor versi ini (shadow_prob
+    ≥ 0.55 = 'dipilih model'), pakai outcome NET 4h. Auto-finalize bila lolos."""
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+    async with AsyncSessionLocal() as session:
+        events = list((await session.execute(
+            select(FuturesDecisionEvent).where(
+                FuturesDecisionEvent.pnl_4h_pct.isnot(None)
+            ).order_by(FuturesDecisionEvent.scan_ts.desc()).limit(1000)
+        )).scalars().all())
+    selected_net: list[float] = []
+    for ev in events:
+        try:
+            snap = json.loads(ev.feature_snapshot_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if snap.get("shadow_model_version") != version:
+            continue
+        prob = snap.get("shadow_probability")
+        if prob is None or float(prob) < SELECT_PROB:
+            continue
+        cost = float(snap.get("cost_floor_pct") or _DEFAULT_COST_PCT)
+        selected_net.append(float(ev.pnl_4h_pct) - cost)
+    n = len(selected_net)
+    if n < CANARY_MIN_OUTCOMES:
+        return {"status": "collecting", "n": n, "required": CANARY_MIN_OUTCOMES}
+    gross_win = sum(p for p in selected_net if p > 0)
+    gross_loss = abs(sum(p for p in selected_net if p < 0))
+    equity = peak = max_dd = 0.0
+    for p in selected_net:
+        equity += p
+        peak = max(peak, equity)
+        max_dd = max(max_dd, peak - equity)
+    observed = {
+        "n": n,
+        "expectancy_pct": round(sum(selected_net) / n, 4),
+        "profit_factor": round(gross_win / gross_loss, 3) if gross_loss > 0 else None,
+        "max_drawdown_pct": round(max_dd, 4),
+    }
+    return await finalize_canary(version, observed)
+
+
+async def finalize_canary(version: str, observed: dict) -> dict:
+    """Promosikan canary→champion hanya bila SEMUA gate canary lolos."""
+    eligible = bool(
+        int(observed.get("n", 0)) >= CANARY_MIN_OUTCOMES
+        and float(observed.get("expectancy_pct", 0)) > 0
+        and float(observed.get("profit_factor", 0) or 0) >= CANARY_MIN_PF
+        and float(observed.get("max_drawdown_pct", 999)) <= CANARY_MAX_DD_PCT
+    )
+    if not eligible:
+        return {"status": "blocked", "reason": "canary_gate_failed", "observed": observed}
+    now = time.time()
+    async with AsyncSessionLocal() as session:
+        candidate = (await session.execute(select(FuturesModelVersion).where(
+            FuturesModelVersion.version == version, FuturesModelVersion.status == "canary"
+        ))).scalar_one_or_none()
+        if candidate is None:
+            return {"status": "not_found_or_not_canary"}
+        for champ in list((await session.execute(select(FuturesModelVersion).where(
+            FuturesModelVersion.status == "champion"))).scalars().all()):
+            champ.status = "retired"
+            champ.retired_at = now
+        candidate.status = "champion"
+        candidate.promoted_at = now
+        try:
+            m = json.loads(candidate.metrics_json)
+        except (TypeError, json.JSONDecodeError):
+            m = {}
+        m["canary"] = observed
+        candidate.metrics_json = json.dumps(m)
+        await session.commit()
+    return {"status": "champion", "version": version, "observed": observed}
+
+
+async def rollback_champion(reason: str) -> dict:
+    """Rollback ke last-known-good (champion retired terakhir)."""
+    now = time.time()
+    async with AsyncSessionLocal() as session:
+        champion = (await session.execute(select(FuturesModelVersion).where(
+            FuturesModelVersion.status == "champion"
+        ).order_by(FuturesModelVersion.promoted_at.desc()).limit(1))).scalar_one_or_none()
+        previous = (await session.execute(select(FuturesModelVersion).where(
+            FuturesModelVersion.status == "retired"
+        ).order_by(FuturesModelVersion.retired_at.desc()).limit(1))).scalar_one_or_none()
+        if champion is None or previous is None:
+            return {"status": "blocked", "reason": "no_rollback_pair"}
+        champion.status = "rolled_back"
+        champion.retired_at = now
+        champion.rollback_reason = reason[:160]
+        previous.status = "champion"
+        previous.promoted_at = now
+        await session.commit()
+    return {"status": "rolled_back", "from": champion.version, "to": previous.version}
+
+
+async def advance_lifecycle() -> dict:
+    """Orchestrator self-gating (dipanggil scheduler): shadow eligible → canary →
+    (bila cukup outcome & lolos) → champion. No-op bila belum ada yang layak."""
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+    async with AsyncSessionLocal() as session:
+        canary = (await session.execute(select(FuturesModelVersion).where(
+            FuturesModelVersion.status == "canary"
+        ).order_by(FuturesModelVersion.trained_at.desc()).limit(1))).scalar_one_or_none()
+        shadow = None
+        if canary is None:
+            shadow = (await session.execute(select(FuturesModelVersion).where(
+                FuturesModelVersion.status == "shadow"
+            ).order_by(FuturesModelVersion.trained_at.desc()).limit(1))).scalar_one_or_none()
+        shadow_ver = shadow.version if shadow else None
+        canary_ver = canary.version if canary else None
+    # Canary aktif → coba finalize; belum cukup outcome = collecting
+    if canary_ver:
+        return await evaluate_canary(canary_ver)
+    # Belum ada canary → coba naikkan shadow yang lolos gate offline+walkforward
+    if shadow_ver:
+        res = await start_canary(shadow_ver)
+        if res.get("status") == "canary":
+            return {"status": "promoted_to_canary", "version": shadow_ver}
+        return {"status": "noop", "shadow_gate": res.get("reason", res.get("status"))}
+    return {"status": "noop"}
+
+
+async def monitor_champion_drift() -> dict:
+    """Auto-rollback champion bila kalibrasi/outcome memburuk (brier tinggi / exp≤0)."""
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+    async with AsyncSessionLocal() as session:
+        champion = (await session.execute(select(FuturesModelVersion).where(
+            FuturesModelVersion.status == "champion"
+        ).order_by(FuturesModelVersion.promoted_at.desc()).limit(1))).scalar_one_or_none()
+        if champion is None:
+            return {"status": "no_champion"}
+        events = list((await session.execute(select(FuturesDecisionEvent).where(
+            FuturesDecisionEvent.pnl_4h_pct.isnot(None)
+        ).order_by(FuturesDecisionEvent.scan_ts.desc()).limit(DRIFT_WINDOW))).scalars().all())
+    obs: list[tuple[float, float]] = []
+    for ev in events:
+        try:
+            snap = json.loads(ev.feature_snapshot_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if snap.get("shadow_model_version") != champion.version:
+            continue
+        prob = snap.get("shadow_probability")
+        if prob is not None:
+            cost = float(snap.get("cost_floor_pct") or _DEFAULT_COST_PCT)
+            obs.append((float(prob), float(ev.pnl_4h_pct) - cost))
+        if len(obs) >= 50:
+            break
+    if len(obs) < CANARY_MIN_OUTCOMES:
+        return {"status": "insufficient_data", "n": len(obs)}
+    brier = sum((p - int(net > 0)) ** 2 for p, net in obs) / len(obs)
+    selected = [net for p, net in obs if p >= SELECT_PROB]
+    expectancy = sum(selected) / len(selected) if selected else -1.0
+    if brier > DRIFT_BRIER_MAX or expectancy <= 0:
+        return await rollback_champion(f"auto drift: brier={brier:.3f}, exp={expectancy:.3f}")
+    return {"status": "healthy", "brier": round(brier, 4), "expectancy_pct": round(expectancy, 4)}

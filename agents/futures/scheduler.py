@@ -679,10 +679,14 @@ async def run_futures_loop() -> None:
                     logger.info("auto_positions_opened", opened=total_auto,
                                 pool=len(all_candidates))
 
-                # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F1: ledger keputusan —
-                # SETELAH auto_open (peta keputusan auto_trader sudah final).
+                # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F1+F5: ledger keputusan —
+                # SETELAH auto_open (peta keputusan final). F5: tempelkan prediksi
+                # shadow ke kandidat SEBELUM log supaya tersimpan di snapshot
+                # (tak memengaruhi keputusan — murni observasi utk canary/drift).
                 try:
                     from agents.futures.decision_ledger import log_scan_decisions
+                    from agents.learning.futures_adaptive_model import score_shadow_candidates
+                    await score_shadow_candidates(all_candidates)
                     await log_scan_decisions(
                         all_candidates,
                         scan_ts=result["agent1"].get("generated_at"),
@@ -771,6 +775,17 @@ async def run_futures_loop() -> None:
                                     test_exp=(_wf.get("test") or {}).get("expectancy_pct"),
                                     stressed_exp=(_wf.get("test_stressed_1_5x") or {}).get("expectancy_pct"),
                                     promotion_eligible=_wf.get("promotion_eligible"))
+                    # F5: lifecycle otomatis (semua self-gating — no-op sampai model
+                    # lolos gate offline+walkforward, lalu canary butuh ≥20 outcome).
+                    from agents.learning.futures_adaptive_model import (
+                        advance_lifecycle, monitor_champion_drift,
+                    )
+                    _lc = await advance_lifecycle()
+                    if _lc.get("status") not in ("noop", "collecting", None):
+                        logger.info("futures_model_lifecycle", **_lc)
+                    _drift = await monitor_champion_drift()
+                    if _drift.get("status") == "rolled_back":
+                        logger.warning("futures_model_auto_rollback", **_drift)
                 except Exception as exc:
                     logger.warning("futures_challenger_train_failed", error=str(exc)[:200])
 

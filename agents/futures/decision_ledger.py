@@ -97,6 +97,13 @@ def build_event_rows(
             bv = breadth.get(bk)
             if isinstance(bv, (int, float)) and not isinstance(bv, bool):
                 feats[fk] = float(bv)
+        # F5: simpan prediksi shadow (bila model shadow/canary/champion aktif) —
+        # dipakai evaluate_canary & monitor_champion_drift. Bukan fitur training
+        # (di-exclude di futures_adaptive_model._EXCLUDE_FEATURES).
+        if isinstance(c.get("shadow_probability"), (int, float)):
+            feats["shadow_probability"] = float(c["shadow_probability"])
+        if c.get("shadow_model_version"):
+            feats["shadow_model_version"] = str(c["shadow_model_version"])
 
         key_material = f"{scan_ts:.0f}|{sym}|{agent}|{direction}"
         est_prob = c.get("estimated_win_probability")

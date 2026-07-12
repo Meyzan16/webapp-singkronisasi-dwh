@@ -1,9 +1,14 @@
 # PLAN — Adaptive Learning Engine FUTURES 10X
 
-Tanggal: 2026-07-11 · Status: **DRAFT — analisa selesai, implementasi belum**
+Tanggal: 2026-07-11 · Status: **SEMUA FASE KODE (F0–F6) SELESAI + LIVE** — tersisa
+acceptance gates (self-gating: menunggu ledger matang; model shadow otomatis
+promosi hanya bila lolos, TANPA menyentuh keputusan sampai champion).
 Pola: MIRROR dari SPOT engine (PLAN_ADAPTIVE_SIGNAL_WEIGHTING_SPOT_10X) yang sudah
 diimplementasi. **Guardrail keras: TIDAK menyentuh satu pun file engine SPOT** —
-futures mendapat modul & tabel paralel sendiri.
+futures mendapat modul & tabel paralel sendiri (terverifikasi: suite SPOT tetap hijau).
+
+Commit F0 ad389e8 · F1 56b159c · F2 3411478 · F3 dd1a072 · F4 ac7babc ·
+F6 d89a6c4 (+ basis SPOT UI 646a216) · F5 di commit ini.
 
 Terkait: SCHEDULE_FUTURES.md (jadwal gate live — engine ini adalah mesin
 pertumbuhannya, bukan pengganti jadwal).
@@ -115,10 +120,21 @@ nyata → best_thr 55, OOS exp −9.18%, stress −9.34%, promotion_eligible=Fal
 (gate BENAR menolak; data awal negatif). 5 test (biaya per-sampel, stress
 mengurangi exp, gate data, embargo split, stress membunuh kelayakan) → suite 44.
 
-### F5 — Shadow → canary → rollback
-- Shadow: model menempelkan probability ke kandidat tanpa memengaruhi keputusan.
-- Canary: ≥20 outcome pick-model vs baseline; PF ≥ 1.5, DD ≤ 10%; drift monitor
-  auto-rollback ke last-known-good.
+### F5 — ✅ SELESAI 2026-07-11 — Shadow → canary → champion + rollback + drift
+Lifecycle lengkap di `futures_adaptive_model.py` (mirror SPOT): `score_shadow_
+candidates` (tempel shadow_probability ke kandidat di scan, disimpan di snapshot,
+TANPA memengaruhi keputusan — shadow_probability di-exclude dari fitur training),
+`start_canary` (shadow→canary hanya bila lolos gate OFFLINE F3 + WALK-FORWARD F4),
+`evaluate_canary` (metrik dari event ber-shadow_prob≥0.55 + outcome NET 4h),
+`finalize_canary` (≥20 outcome, exp>0, PF≥1.5, DD≤10% → champion; champion lama
+retired), `rollback_champion` (→ last-known-good), `monitor_champion_drift`
+(brier>0.30 / exp≤0 → auto-rollback), `advance_lifecycle` orchestrator self-gating.
+Wiring: scheduler (shadow-score sebelum ledger; advance+drift setelah train),
+endpoint (gate canary_active/champion_exists, engine_status canary/champion, phase
+F5=true), panel (badge Canary). **Live**: shadow model eligible=False →
+start_canary BLOCKED offline_gate_failed, advance noop, drift no_champion,
+shadow_probability tertempel (rantai keamanan lengkap: shadow amati → gate tolak →
+nol efek keputusan). 6 test lifecycle → suite 71 lulus, tsc bersih.
 
 ### F6 — ✅ SELESAI 2026-07-11 — UI Signal Performance
 Basis SPOT UI (endpoint + subtabs) di-commit sendiri dulu (`646a216`) atas

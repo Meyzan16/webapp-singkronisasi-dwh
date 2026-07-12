@@ -149,7 +149,7 @@ interface AdaptiveEngineData {
 // PLAN_ADAPTIVE_LEARNING_FUTURES_10X F6 — panel engine futures (paralel SPOT)
 interface FuturesAdaptiveEngineData {
   market: "futures";
-  engine_status: "degraded" | "collecting" | "ready_to_train" | "shadow" | "champion";
+  engine_status: "degraded" | "collecting" | "ready_to_train" | "shadow" | "canary" | "champion";
   learning_status: "warming" | "active" | "degraded";
   decision_ledger: {
     total: number; opened: number;
@@ -517,6 +517,7 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
     collecting:    { label: "Collecting",     cls: "bg-blue-100 text-blue-700 border-blue-200",     dot: "bg-blue-500" },
     ready_to_train:{ label: "Ready to Train", cls: "bg-teal-100 text-teal-700 border-teal-200",     dot: "bg-teal-500" },
     shadow:        { label: "Shadow",         cls: "bg-purple-100 text-purple-700 border-purple-200", dot: "bg-purple-500" },
+    canary:        { label: "Canary",         cls: "bg-amber-100 text-amber-700 border-amber-200",   dot: "bg-amber-500" },
     champion:      { label: "Champion",       cls: "bg-green-100 text-green-700 border-green-200",   dot: "bg-green-500" },
   } as const;
   const status = statusMap[data.engine_status] ?? statusMap.degraded;

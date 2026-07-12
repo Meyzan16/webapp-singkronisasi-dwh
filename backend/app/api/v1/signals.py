@@ -283,13 +283,14 @@ async def get_adaptive_engine_futures() -> dict:
         "model_trained": bool(model_payload),                        # F3
         "promotion_eligible": bool(latest_model and latest_model["promotion_eligible"]),
         "walkforward_passed": bool(walkforward.get("promotion_eligible")),  # F4 (+1.5× stress)
-        "champion_exists": any(m.status == "champion" for m in fmodels),
-        "canary_passed": any(m.status == "champion" for m in fmodels),  # F5 belum
+        "canary_active": any(m.status == "canary" for m in fmodels),        # F5
+        "champion_exists": any(m.status == "champion" for m in fmodels),    # F5
     }
     engine_status = (
         "degraded" if not gates["data_quality"]
         else "collecting" if not gates["training_data"]
         else "champion" if gates["champion_exists"]
+        else "canary" if gates["canary_active"]
         else "shadow" if gates["model_trained"]
         else "ready_to_train"
     )
@@ -320,7 +321,7 @@ async def get_adaptive_engine_futures() -> dict:
         "walkforward": walkforward,  # F4 (termasuk test_stressed_1_5x)
         "phases": {
             "F0_policy": True, "F1_ledger": True, "F2_integration": True,
-            "F3_model": True, "F4_walkforward": True, "F5_canary": False,
+            "F3_model": True, "F4_walkforward": True, "F5_canary": True,
         },
         "gates": gates,
         "updated_at": now,
