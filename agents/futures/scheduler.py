@@ -276,6 +276,25 @@ async def _run_scan() -> dict:
     a3_results = a3_results[:TOP_N]
     bm_results = bm_results[:TOP_N]
 
+    # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F2: terapkan learning policy per-lane —
+    # menempelkan adaptive_score/probability/ban ke tiap kandidat (dict yang sama
+    # mengalir ke auto_open + ledger + UI). TIDAK mengubah field `score` dasar.
+    learning_status = "warming"
+    try:
+        from agents.futures.learning_loader import load_futures_learning, apply_lane_learning
+        from agents.futures.weight_updater import get_adaptive_thresholds
+        _lw, _lp, _lsc, _lban, learning_status, _lerr = await load_futures_learning()
+        for _res, _agent in (
+            (a1_results, "futures_agent1"), (a2_results, "futures_agent2"),
+            (a3_results, "futures_agent3"), (bm_results, "futures_agent_bigmover"),
+        ):
+            _thr = get_adaptive_thresholds(_agent).get("auto_threshold", 72)
+            apply_lane_learning(_res, _lw, _lp, _lsc, _lban, _thr, learning_status)
+        if _lerr:
+            logger.warning("futures_learning_apply_degraded", error=_lerr)
+    except Exception as exc:
+        logger.warning("futures_learning_apply_failed", error=str(exc)[:160])
+
     # PLAN-SIGNAL-GAP P4: Big Movers — every scanned coin with |change_24h| >= threshold,
     # tagged with whether it qualified for any lane (and at what score) or not.
     # Lets the frontend show WHY a 50%+ gainer didn't open a position, instead of nothing.
@@ -328,6 +347,7 @@ async def _run_scan() -> dict:
             "elapsed_sec":  elapsed,
         },
         "big_movers": big_movers,   # PLAN-SIGNAL-GAP P4
+        "learning_status": learning_status,   # F2: warming | active | degraded
     }
 
     logger.info(
@@ -602,6 +622,7 @@ async def run_futures_loop() -> None:
             futures_store.set_result("agent3", result["agent3"])   # Phase 11
             futures_store.set_result("agent_bigmover", result["agent_bigmover"])   # Phase 2 BM1
             futures_store.set_big_movers(result["big_movers"])     # PLAN-SIGNAL-GAP P4
+            futures_store.set_learning_status(result.get("learning_status", "warming"))  # F2
             futures_store.set_scanning(False)
 
             # Phase 1 T4b: persist big movers to DB for ground-truth analytics

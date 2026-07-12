@@ -49,10 +49,12 @@ _RECOMMEND_REASONS = {"below_auto_threshold", "not_evaluated"}
 
 
 def classify_action(reason: str, opened: bool) -> str:
-    """Map reason code → action kelas (pola SPOT: opened/blocked/rejected/recommendation)."""
+    """Map reason code → action kelas (pola SPOT: opened/blocked/rejected/recommendation).
+    `learning_ban`/`learning_veto` (F2) masuk kelas "blocked" — di-veto engine, bukan
+    ditolak strategi dasar — supaya bisa dibedakan di analitik dari reject biasa."""
     if opened or reason == "opened":
         return "opened"
-    if reason in _GLOBAL_BLOCK_REASONS:
+    if reason in _GLOBAL_BLOCK_REASONS or reason in ("learning_ban", "learning_veto"):
         return "blocked"
     if reason in _RECOMMEND_REASONS:
         return "recommendation"
@@ -98,6 +100,7 @@ def build_event_rows(
 
         key_material = f"{scan_ts:.0f}|{sym}|{agent}|{direction}"
         est_prob = c.get("estimated_win_probability")
+        row_status = str(c.get("learning_status") or learning_status)
         rows.append({
             "decision_key":   hashlib.sha256(key_material.encode("utf-8")).hexdigest()[:64],
             "scan_ts":        float(scan_ts),
@@ -119,7 +122,7 @@ def build_event_rows(
             "leverage":       int(c.get("leverage") or 0),
             "cost_floor_pct": float(c["cost_floor_pct"]) if isinstance(c.get("cost_floor_pct"), (int, float)) else None,
             "regime":         (str(c.get("regime")) if c.get("regime") else None),
-            "learning_status": learning_status,
+            "learning_status": row_status,
             "model_version":   MODEL_VERSION,
             "feature_schema_version": FEATURE_SCHEMA_VERSION,
             "feature_snapshot_json":  json.dumps(feats, ensure_ascii=False),

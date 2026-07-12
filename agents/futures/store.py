@@ -28,6 +28,9 @@ _big_movers_ts: float     = 0.0
 _market_breadth:    dict  = {}
 _market_breadth_ts: float = 0.0
 
+# PLAN_ADAPTIVE_LEARNING_FUTURES_10X F2: status engine terakhir (warming|active|degraded)
+_learning_status: str = "warming"
+
 
 # ── Write ──────────────────────────────────────────────────────────────────────
 
@@ -99,6 +102,17 @@ def get_market_breadth() -> dict:
     if time.time() - _market_breadth_ts > STALE_SEC:
         return {}
     return _market_breadth
+
+
+def set_learning_status(status: str) -> None:
+    """F2: dipanggil scheduler tiap cycle."""
+    global _learning_status
+    _learning_status = status
+
+
+def get_learning_status() -> str:
+    """F2: status engine adaptive futures terakhir."""
+    return _learning_status
 
 
 def is_scanning() -> bool:

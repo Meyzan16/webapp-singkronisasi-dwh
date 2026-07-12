@@ -297,6 +297,19 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"),
                  "volatile_regime_skip")   # F1
             continue
+        # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F2: learning veto (veto-only — TIDAK
+        # bisa mempromosikan). Hard-ban (butuh ≥10 sampel) selalu berlaku; veto
+        # lunak (adaptive_score < ambang padahal skor ≥ ambang) hanya saat learning
+        # sudah "active" (≥60 outcome matang), supaya fase warming tak menahan trade.
+        if r.get("banned_by_learning"):
+            _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"), "learning_ban")
+            continue
+        if (r.get("learning_status") == "active"
+                and r.get("adaptive_score") is not None
+                and float(r.get("adaptive_score", 0)) < threshold):
+            _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"), "learning_veto")
+            continue
+
         _dedup_key = (symbol, r.get("direction", "LONG")) if HEDGE_MODE else symbol
         cur = best_by_symbol.get(_dedup_key)
         if cur is None or r.get("score", 0) > cur.get("score", 0):

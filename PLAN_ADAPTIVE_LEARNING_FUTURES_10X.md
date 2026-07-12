@@ -77,14 +77,19 @@ pola R0a + `backfill_closed_futures_trades` realized NET + prune 45 hari) ·
 wiring scheduler (ledger tiap cycle pasca-auto_open; outcome pass %10==5,
 offset dari backfill BM) · 8 test pure lulus (total suite futures 29).
 
-### F2 — Integrasi policy ke scan & auto_trader
-- Keempat `scan_symbol`: `apply_learning_policy` menempelkan adaptive_score +
-  probability + lower bound + learning_keys (pakai weight cache existing — TIDAK
-  mengubah rumus skor dasar).
-- `auto_trader`: veto `banned_by_learning`; `learning_status`
-  (warming/active) di store + scan result.
-- Setelah gates F5 lolos (BUKAN sebelumnya): Wilson lower bound boleh menjadi
-  input sizing (naikkan/turunkan dalam batas cap yang ada).
+### F2 — ✅ SELESAI 2026-07-11 — Integrasi policy ke scan & auto_trader
+`learning_loader.py` (mirror `_load_learning_weights`/`_apply_lane_learning` SPOT):
+baca `agent_signal_weights` (4 agent + cross, blend 0.70/0.30), ekspos di bawah
+`signal:` fallback ns, ban weight<0.8 & n≥10, status warming/active/degraded dari
+kematangan ledger (≥60 pnl_24h). Diterapkan per-lane di `_run_scan` SETELAH top-N
+(dict sama mengalir ke auto_open + ledger + UI) — field `score` dasar TIDAK diubah.
+auto_trader: veto `learning_ban` (hard, selalu) + `learning_veto` (lunak,
+adaptive<ambang, HANYA saat status active — warming tak menahan trade). Status ke
+store (`set/get_learning_status`) + scan result + ledger row. Live-verified: loader
+memuat 28 bobot nyata, status warming, 0 error. 5 test loader → suite 84 lulus.
+Catatan cakupan didokumentasikan di learning_loader.py (bobot legacy hanya
+ter-apply ke sinyal non-canonical sampai ada sumber weight canonical-keyed).
+- **Sizing**: Wilson lower bound → input sizing HANYA setelah gate F5 (belum).
 
 ### F3 — Challenger model + registry
 - `agents/learning/futures_adaptive_model.py` (pola spot_adaptive_model):
