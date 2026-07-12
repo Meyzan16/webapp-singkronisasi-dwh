@@ -119,7 +119,34 @@ interface AgentHealthData {
   };
 }
 
-type SubTab = "overview" | "spot" | "futures" | "cross" | "regime" | "formulas" | "rejections" | "predictive";
+interface AdaptiveEngineData {
+  engine_status: "degraded" | "collecting" | "shadow" | "canary" | "champion";
+  decision_ledger: {
+    total: number;
+    actions: Record<string, number>;
+    outcomes: Record<string, number>;
+    due_24h: number;
+    labelled_24h: number;
+    outcome_completeness_pct: number;
+    quality: { duplicate_keys: number; missing_snapshots: number; future_events: number; invalid_closes: number };
+  };
+  training: { mature_feature_samples: number; required_samples: number; progress_pct: number };
+  models: Array<{
+    version: string; status: string; trained_at: number; promoted_at?: number;
+    training_n: number; promotion_eligible: boolean;
+    test?: { n?: number; brier?: number; selected_expectancy_pct?: number; selected_profit_factor?: number };
+  }>;
+  walkforward: {
+    status: string; n?: number; best_threshold?: number; promotion_eligible?: boolean;
+    test?: { n?: number; expectancy_pct?: number; profit_factor?: number; max_drawdown_pct?: number };
+  };
+  onchain: { mode?: string; configured?: boolean; cache_entries?: number; mapping_version?: string; mapped_assets?: number; error?: string };
+  weights: { last_run?: number; last_error?: string; last_count?: number };
+  gates: Record<string, boolean>;
+  updated_at: number;
+}
+
+type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "regime" | "formulas" | "rejections" | "predictive";
 type SortBy = "win_rate" | "avg_pnl_pct" | "total_count" | "weight";
 
 const AGENT_TABS = [
@@ -345,6 +372,104 @@ function LearningLoopStatus({ state, onForce }: { state: UpdaterState | null; on
       <p className="text-[10px] text-neutral-400 mt-3">
         Bobot naik/turun otomatis setiap siklus scan. Cross-agent blending aktif jika sinyal muncul di ≥2 agen.
       </p>
+    </div>
+  );
+}
+
+function AdaptiveEnginePanel({ data, compact = false }: { data: AdaptiveEngineData | null; compact?: boolean }) {
+  if (!data) {
+    return <div className="bg-white border border-neutral-200 rounded-2xl p-5 text-sm text-neutral-400">Adaptive Engine belum tersedia.</div>;
+  }
+  const statusMap = {
+    degraded:  { label: "Degraded",  cls: "bg-red-100 text-red-700 border-red-200", dot: "bg-red-500" },
+    collecting: { label: "Collecting", cls: "bg-blue-100 text-blue-700 border-blue-200", dot: "bg-blue-500" },
+    shadow:    { label: "Shadow",    cls: "bg-purple-100 text-purple-700 border-purple-200", dot: "bg-purple-500" },
+    canary:    { label: "Canary",    cls: "bg-amber-100 text-amber-700 border-amber-200", dot: "bg-amber-500" },
+    champion:  { label: "Champion",  cls: "bg-green-100 text-green-700 border-green-200", dot: "bg-green-500" },
+  } as const;
+  const status = statusMap[data.engine_status] ?? statusMap.degraded;
+  const qualityIssues = Object.values(data.decision_ledger.quality).reduce((sum, value) => sum + value, 0);
+  const latestModel = data.models[0];
+  const gateLabels: Record<string, string> = {
+    training_data: "60 mature samples", test_samples: "20 OOS samples",
+    promotion_eligible: "Promotion eligible", outcome_completeness: "Outcome ≥99%",
+    data_quality: "Data quality", champion_exists: "Champion active", rollback_ready: "Rollback ready",
+  };
+  return (
+    <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
+      <div className="p-4 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Adaptive Learning Engine · SPOT</p>
+          <p className="text-[11px] text-neutral-400 mt-0.5">Decision ledger → outcomes → calibrated challenger → shadow → canary → champion</p>
+        </div>
+        <span className={`inline-flex items-center gap-2 text-xs font-bold border rounded-full px-3 py-1 ${status.cls}`}>
+          <span className={`w-2 h-2 rounded-full ${status.dot}`} />{status.label}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-100">
+        {[
+          { label: "Decision Events", value: data.decision_ledger.total.toLocaleString("id-ID"), sub: `${data.decision_ledger.actions.rejected ?? 0} hard rejected` },
+          { label: "Mature Features", value: `${data.training.mature_feature_samples}/${data.training.required_samples}`, sub: `${data.training.progress_pct.toFixed(1)}% menuju training` },
+          { label: "Outcome 24h", value: `${data.decision_ledger.outcome_completeness_pct.toFixed(1)}%`, sub: `${data.decision_ledger.labelled_24h}/${data.decision_ledger.due_24h} due events` },
+          { label: "Data Quality", value: qualityIssues === 0 ? "Clean" : `${qualityIssues} issue`, sub: qualityIssues === 0 ? "No leakage / duplicate" : "Perlu investigasi" },
+        ].map(card => (
+          <div key={card.label} className="bg-white p-4">
+            <p className="text-[10px] uppercase tracking-wider font-bold text-neutral-400">{card.label}</p>
+            <p className="text-2xl font-black text-neutral-800 mt-1 tabular-nums">{card.value}</p>
+            <p className="text-[10px] text-neutral-400 mt-0.5">{card.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="p-4">
+        <div className="flex items-center justify-between text-[10px] mb-1.5">
+          <span className="font-bold text-neutral-500">Training evidence</span>
+          <span className="font-mono text-neutral-400">{data.training.progress_pct.toFixed(1)}%</span>
+        </div>
+        <div className="h-2 rounded-full bg-neutral-100 overflow-hidden">
+          <div className="h-full rounded-full bg-gradient-to-r from-teal-500 to-blue-500" style={{ width: `${Math.max(1, data.training.progress_pct)}%` }} />
+        </div>
+      </div>
+
+      {!compact && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4 pt-0">
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Promotion Gates</p>
+            <div className="space-y-1.5">
+              {Object.entries(data.gates).map(([key, passed]) => (
+                <div key={key} className="flex items-center justify-between text-[11px]">
+                  <span className="text-neutral-600">{gateLabels[key] ?? key}</span>
+                  <span className={`font-bold ${passed ? "text-green-600" : "text-neutral-400"}`}>{passed ? "PASS" : "WAIT"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Model Registry</p>
+            {latestModel ? (
+              <div className="space-y-1.5 text-[11px]">
+                <p className="font-mono text-neutral-700 truncate" title={latestModel.version}>{latestModel.version}</p>
+                <p className="text-neutral-500">Status <strong className="capitalize text-neutral-800">{latestModel.status}</strong></p>
+                <p className="text-neutral-500">Training n <strong className="text-neutral-800">{latestModel.training_n}</strong></p>
+                <p className={latestModel.promotion_eligible ? "text-green-600 font-bold" : "text-amber-600 font-bold"}>
+                  {latestModel.promotion_eligible ? "Eligible for canary" : "Promotion blocked"}
+                </p>
+              </div>
+            ) : <p className="text-[11px] text-neutral-400">Belum ada model—menunggu evidence matang.</p>}
+          </div>
+          <div className="rounded-xl border border-neutral-200 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Walk-forward & On-chain</p>
+            <div className="space-y-1.5 text-[11px] text-neutral-500">
+              <p>Walk-forward <strong className="text-neutral-800">{data.walkforward.status}</strong> · n={data.walkforward.n ?? 0}</p>
+              <p>Best threshold <strong className="text-neutral-800">{data.walkforward.best_threshold ?? "—"}</strong></p>
+              <p>OOS expectancy <strong className="text-neutral-800">{data.walkforward.test?.expectancy_pct?.toFixed(2) ?? "—"}%</strong></p>
+              <p>On-chain <strong className="text-neutral-800">{data.onchain.mode ?? "unavailable"}</strong> · {data.onchain.cache_entries ?? 0} cached</p>
+              <p className="font-mono text-[9px] text-neutral-400">{data.onchain.mapping_version ?? "no mapping"}</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -731,10 +856,12 @@ function AdaptiveLearningTutorial({
   onClose,
   health,
   predictive,
+  adaptive,
 }: {
   onClose: () => void;
   health:     AgentHealthData | null;
   predictive: PredictiveHitRow[] | null;
+  adaptive:   AdaptiveEngineData | null;
 }) {
   const [dontShow, setDontShow] = useState(false);
 
@@ -788,6 +915,16 @@ function AdaptiveLearningTutorial({
     },
   ];
 
+  const currentSteps = [
+    { icon: "🧾", title: "Decision Ledger", desc: "Semua kandidat, hard rejection, snapshot fitur, config, dan model version dicatat secara point-in-time.", color: "border-blue-200 bg-blue-50", text: "text-blue-700" },
+    { icon: "⏱️", title: "Outcome Labels", desc: "Worker mengisi PnL 1h/4h/24h/3d/7d, MAE, dan MFE hanya dari candle yang sudah close—tanpa future leakage.", color: "border-teal-200 bg-teal-50", text: "text-teal-700" },
+    { icon: "⚖️", title: "Safe Decision", desc: "Weight canonical + cross-agent menghasilkan probabilitas Laplace dan Wilson lower bound untuk EV serta capped Kelly sizing.", color: "border-orange-200 bg-orange-50", text: "text-orange-700" },
+    { icon: "🧪", title: "Challenger", desc: "Model logistic terkalibrasi dilatih chronological, diuji walk-forward, dan dianalisis dengan ablation sebelum masuk shadow.", color: "border-purple-200 bg-purple-50", text: "text-purple-700" },
+    { icon: "🛡️", title: "Deploy & Rollback", desc: "Lifecycle shadow → canary → champion dijaga promotion gates, drift monitor, dan rollback ke last-known-good.", color: "border-green-200 bg-green-50", text: "text-green-700" },
+  ];
+
+  const tutorialSteps = adaptive ? currentSteps : steps;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -809,20 +946,20 @@ function AdaptiveLearningTutorial({
         <div className="p-5 space-y-5">
           {/* Loop diagram */}
           <div className="flex flex-wrap items-center justify-center gap-1.5 py-2">
-            {steps.map((step, i) => (
+            {tutorialSteps.map((step, i) => (
               <div key={step.title} className="flex items-center gap-1.5">
                 <div className={`flex flex-col items-center rounded-xl border px-3 py-2.5 ${step.color} min-w-[90px]`}>
                   <span className="text-xl mb-1">{step.icon}</span>
                   <span className={`text-[10px] font-black uppercase tracking-wide ${step.text}`}>{step.title}</span>
                 </div>
-                {i < steps.length - 1 && <span className="text-neutral-300 font-bold">→</span>}
+                {i < tutorialSteps.length - 1 && <span className="text-neutral-300 font-bold">→</span>}
               </div>
             ))}
           </div>
 
           {/* Step descriptions */}
           <div className="grid grid-cols-1 gap-2">
-            {steps.map(step => (
+            {tutorialSteps.map(step => (
               <div key={step.title} className={`flex gap-3 rounded-xl border p-3 ${step.color}`}>
                 <span className="text-base shrink-0 mt-0.5">{step.icon}</span>
                 <div>
@@ -922,6 +1059,7 @@ export default function SignalsPage() {
   const [rejectionsData, setRejectionsData] = useState<RejectionRow[] | null>(null);
   const [predictiveData, setPredictiveData] = useState<PredictiveHitRow[] | null>(null);
   const [agentHealth,    setAgentHealth]    = useState<AgentHealthData | null>(null);
+  const [adaptiveEngine, setAdaptiveEngine] = useState<AdaptiveEngineData | null>(null);
   const [loading,        setLoading]        = useState(true);
   const [forceMsg,       setForceMsg]       = useState<string | null>(null);
   const [showTutorial,   setShowTutorial]   = useState(false);
@@ -936,18 +1074,20 @@ export default function SignalsPage() {
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [perfRes, crossRes, stateRes, catalogRes, healthRes] = await Promise.all([
+      const [perfRes, crossRes, stateRes, catalogRes, healthRes, adaptiveRes] = await Promise.all([
         fetch(`/api/v1/signals/performance?agent=all&regime=all&min_trades=${minTrades}&sort_by=${sortBy}&sort_dir=${sortDir}&limit=50`),
         fetch(`/api/v1/signals/cross_agent?min_trades=5`),
         fetch("/api/v1/signals/updater/state"),
         fetch("/api/v1/signals/catalog"),
         fetch("/api/v1/signals/agent_health"),
+        fetch("/api/v1/signals/adaptive-engine"),
       ]);
       if (perfRes.ok)    setPerfData(await perfRes.json() as PerformanceResponse);
       if (crossRes.ok)   setCrossData(await crossRes.json() as CrossResponse);
       if (stateRes.ok)   setUpdaterState(await stateRes.json() as UpdaterState);
       if (catalogRes.ok) setCatalogData(await catalogRes.json() as CatalogResponse);
       if (healthRes.ok)  setAgentHealth(await healthRes.json() as AgentHealthData);
+      if (adaptiveRes.ok) setAdaptiveEngine(await adaptiveRes.json() as AdaptiveEngineData);
     } catch { /* stale */ }
     finally { if (!silent) setLoading(false); }
   }, [minTrades, sortBy, sortDir]);
@@ -1000,12 +1140,12 @@ export default function SignalsPage() {
     setTimeout(() => setForceMsg(null), 5000);
   };
 
-  const allSignals   = perfData?.signals ?? [];
+  const allSignals   = useMemo(() => perfData?.signals ?? [], [perfData?.signals]);
   const spotSignals  = useMemo(() => allSignals.filter(s => s.agents["opportunity_spot"]), [allSignals]);
   const futSignals   = useMemo(() => allSignals.filter(s =>
     s.agents["futures_agent1"] || s.agents["futures_agent2"] || s.agents["futures_agent3"]
   ), [allSignals]);
-  const crossSignals = crossData?.signals ?? [];
+  const crossSignals = useMemo(() => crossData?.signals ?? [], [crossData?.signals]);
 
   const topSpot    = useMemo(() => spotSignals.slice(0, 3), [spotSignals]);
   const topFutures = useMemo(() => futSignals.slice(0, 3), [futSignals]);
@@ -1013,6 +1153,10 @@ export default function SignalsPage() {
 
   const subTabBar = (
     <div className="flex flex-wrap gap-1 bg-neutral-100 p-1 rounded-xl w-fit">
+      <button onClick={() => setSubTab("adaptive")}
+        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${subTab === "adaptive" ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}>
+        🧠 Adaptive Engine
+      </button>
       {([
         { key: "overview",    label: "📊 Overview"    },
         { key: "spot",        label: "🎯 SPOT"        },
@@ -1038,6 +1182,7 @@ export default function SignalsPage() {
           onClose={() => setShowTutorial(false)}
           health={agentHealth}
           predictive={predictiveData}
+          adaptive={adaptiveEngine}
         />
       )}
 
@@ -1078,6 +1223,8 @@ export default function SignalsPage() {
             <div className="space-y-5">
               {/* Agent health cards */}
               <AgentHealthCards health={agentHealth} />
+
+              <AdaptiveEnginePanel data={adaptiveEngine} compact />
 
               {/* Summary strip */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1143,6 +1290,21 @@ export default function SignalsPage() {
               </div>
 
               {/* Learning loop status */}
+              <LearningLoopStatus state={updaterState} onForce={handleForce} />
+            </div>
+          )}
+
+          {subTab === "adaptive" && (
+            <div className="space-y-4">
+              <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4">
+                <p className="font-bold text-teal-800 mb-1">Adaptive Learning Engine — kondisi live</p>
+                <p className="text-xs text-teal-700">
+                  Engine memakai realized net outcome, canonical signal IDs, cross-agent evidence,
+                  Wilson lower-confidence probability, capped Kelly sizing, dan calibrated challenger.
+                  Model hanya naik dari shadow → canary → champion setelah seluruh gate lulus.
+                </p>
+              </div>
+              <AdaptiveEnginePanel data={adaptiveEngine} />
               <LearningLoopStatus state={updaterState} onForce={handleForce} />
             </div>
           )}

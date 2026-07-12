@@ -11,14 +11,17 @@ GET /api/v1/signals/updater/state         — state of weight updaters
 POST /api/v1/signals/updater/run          — force-run all weight updaters
 """
 
+import json
 import time
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import AsyncSessionLocal, require_db
 from app.models.signal_weight import AgentSignalWeight
 from app.models.signal_weight_history import SignalWeightHistory
+from app.models.spot_decision_event import SpotDecisionEvent
+from app.models.spot_model_version import SpotModelVersion
 
 router = APIRouter(tags=["signals"])
 
@@ -37,6 +40,141 @@ AGENT_LABELS = {
     "futures_agent3":   "Momentum",
     "cross_agent":      "Cross-Agent",
 }
+
+
+@router.get("/signals/adaptive-engine", dependencies=[Depends(require_db)])
+async def get_adaptive_engine() -> dict:
+    """Current SPOT Adaptive Learning Engine state for Signal Performance UI."""
+    now = time.time()
+    async with AsyncSessionLocal() as session:
+        models = list((await session.execute(
+            select(SpotModelVersion).order_by(SpotModelVersion.trained_at.desc())
+        )).scalars().all())
+        total_decisions = int(await session.scalar(select(func.count(SpotDecisionEvent.id))) or 0)
+        unique_keys = int(await session.scalar(select(func.count(func.distinct(SpotDecisionEvent.decision_key)))) or 0)
+        action_counts = dict((await session.execute(
+            select(SpotDecisionEvent.action, func.count(SpotDecisionEvent.id)).group_by(SpotDecisionEvent.action)
+        )).all())
+        outcome_counts = dict((await session.execute(
+            select(SpotDecisionEvent.outcome_status, func.count(SpotDecisionEvent.id)).group_by(SpotDecisionEvent.outcome_status)
+        )).all())
+        due_24h = int(await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
+            SpotDecisionEvent.scan_ts <= now - 24 * 3600
+        )) or 0)
+        labelled_24h = int(await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
+            SpotDecisionEvent.scan_ts <= now - 24 * 3600,
+            SpotDecisionEvent.pnl_24h_pct.isnot(None),
+        )) or 0)
+        mature_snapshots = list((await session.execute(
+            select(SpotDecisionEvent.feature_snapshot_json).where(
+                SpotDecisionEvent.pnl_24h_pct.isnot(None)
+            )
+        )).scalars().all())
+        missing_snapshots = int(await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
+            (SpotDecisionEvent.feature_snapshot_json.is_(None)) |
+            (SpotDecisionEvent.feature_snapshot_json == "")
+        )) or 0)
+        future_events = int(await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
+            SpotDecisionEvent.scan_ts > now + 60
+        )) or 0)
+        invalid_closes = int(await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
+            SpotDecisionEvent.closed_at.isnot(None),
+            SpotDecisionEvent.closed_at < SpotDecisionEvent.scan_ts,
+        )) or 0)
+
+    mature_feature_samples = 0
+    for raw_snapshot in mature_snapshots:
+        if raw_snapshot:
+            try:
+                snapshot = json.loads(raw_snapshot)
+            except (TypeError, json.JSONDecodeError):
+                snapshot = {}
+            if snapshot.get("challenger_features"):
+                mature_feature_samples += 1
+
+    model_payload = []
+    for model in models[:10]:
+        try:
+            metrics = json.loads(model.metrics_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            metrics = {}
+        model_payload.append({
+            "version": model.version,
+            "status": model.status,
+            "trained_at": model.trained_at,
+            "promoted_at": model.promoted_at,
+            "training_n": metrics.get("training_n", 0),
+            "promotion_eligible": bool(metrics.get("promotion_eligible")),
+            "test": metrics.get("test", {}),
+            "canary": metrics.get("canary"),
+        })
+
+    try:
+        from agents.learning.spot_walkforward import run_spot_walkforward
+        walkforward = await run_spot_walkforward()
+    except Exception as exc:
+        walkforward = {"status": "error", "error": str(exc)[:120]}
+
+    try:
+        from agents.opportunity.onchain_provider import get_state as onchain_state
+        onchain = onchain_state()
+    except Exception as exc:
+        onchain = {"configured": False, "error": str(exc)[:120]}
+
+    try:
+        from agents.opportunity.weight_updater import get_state as spot_weight_state
+        weight_state = spot_weight_state()
+    except Exception as exc:
+        weight_state = {"last_error": str(exc)[:120]}
+
+    quality = {
+        "duplicate_keys": total_decisions - unique_keys,
+        "missing_snapshots": missing_snapshots,
+        "future_events": future_events,
+        "invalid_closes": invalid_closes,
+    }
+    outcome_completeness = round(labelled_24h / due_24h * 100, 1) if due_24h else 100.0
+    latest_model = model_payload[0] if model_payload else None
+    gates = {
+        "training_data": mature_feature_samples >= 60,
+        "test_samples": bool(
+            latest_model and int((latest_model.get("test") or {}).get("n", 0)) >= 20
+        ),
+        "promotion_eligible": bool(latest_model and latest_model.get("promotion_eligible")),
+        "outcome_completeness": outcome_completeness >= 99.0,
+        "data_quality": all(value == 0 for value in quality.values()),
+        "champion_exists": any(model.status == "champion" for model in models),
+        "rollback_ready": any(model.status == "retired" for model in models),
+    }
+    return {
+        "engine_status": (
+            "degraded" if weight_state.get("last_error") or not gates["data_quality"]
+            else "collecting" if not gates["training_data"]
+            else "shadow" if not gates["promotion_eligible"]
+            else "canary" if not gates["champion_exists"]
+            else "champion"
+        ),
+        "decision_ledger": {
+            "total": total_decisions,
+            "actions": action_counts,
+            "outcomes": outcome_counts,
+            "due_24h": due_24h,
+            "labelled_24h": labelled_24h,
+            "outcome_completeness_pct": outcome_completeness,
+            "quality": quality,
+        },
+        "training": {
+            "mature_feature_samples": mature_feature_samples,
+            "required_samples": 60,
+            "progress_pct": round(min(100.0, mature_feature_samples / 60 * 100), 1),
+        },
+        "models": model_payload,
+        "walkforward": walkforward,
+        "onchain": onchain,
+        "weights": weight_state,
+        "gates": gates,
+        "updated_at": now,
+    }
 
 
 # ── GET /signals/performance ──────────────────────────────────────────────────

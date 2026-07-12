@@ -35,6 +35,20 @@ _semaphore = asyncio.Semaphore(5)
 _chain_cache: tuple[float, list[dict]] | None = None
 
 
+def get_state() -> dict:
+    """Return provider/cache health for diagnostics and Signal Performance UI."""
+    return {
+        "mode": "custom" if PROVIDER_URL else "defillama_fallback",
+        "configured": bool(PROVIDER_URL) or True,
+        "custom_provider": bool(PROVIDER_URL),
+        "cache_entries": len(_cache),
+        "chain_cache_loaded": _chain_cache is not None,
+        "mapping_version": MAPPING_VERSION,
+        "mapped_assets": len(ASSET_CHAIN_MAP),
+        "max_age_sec": MAX_AGE_SEC,
+    }
+
+
 def _base_symbol(symbol: str) -> str:
     return symbol[:-4] if symbol.endswith("USDT") else symbol
 
