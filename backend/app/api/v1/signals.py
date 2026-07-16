@@ -798,3 +798,269 @@ async def get_rejections(
         "hours": hours,
         "filters": {"symbol": symbol, "agent": agent},
     }
+
+
+# ── GET /signals/recommendations ──────────────────────────────────────────────
+
+_RECO_CATEGORIES = [
+    # (agent_key, label, lane_key or None, market)
+    ("opportunity_spot",       "SPOT",         None,           "spot"),
+    ("futures_agent1",         "Pre-Gainer",   "pre_gainer",   "futures"),
+    ("futures_agent2",         "Accumulation", "accumulation", "futures"),
+    ("futures_agent3",         "Momentum",     "momentum",     "futures"),
+    ("futures_agent_bigmover", "BigMover",     "bigmover",     "futures"),
+]
+
+
+@router.get("/signals/recommendations", dependencies=[Depends(require_db)])
+async def get_recommendations() -> dict:
+    """
+    Saran perbaikan per kategori (SPOT + 4 lane futures), dihasilkan rule-based
+    dari data engine: trade 7 hari, near-miss rejection 48 jam, akurasi
+    predictive 7 hari, bobot sinyal yang dipelajari, dan status pause lane.
+    Read-only — tidak mengubah apa pun; tujuannya agar scanner terus bertumbuh.
+    """
+    from sqlalchemy import case
+
+    from agents.futures import risk_gate
+    from app.models.paper_trade import PaperTrade
+    from app.models.predictive_log import PredictiveLog
+    from app.models.rejection_log import RejectionLog
+
+    now = time.time()
+    cutoff_7d = now - 7 * 86400
+    cutoff_48h = now - 48 * 3600
+    agent_keys = [c[0] for c in _RECO_CATEGORIES]
+
+    async with AsyncSessionLocal() as session:
+        # Trade tertutup 7 hari per style
+        tr = await session.execute(
+            select(
+                PaperTrade.style,
+                func.count().label("n"),
+                func.sum(case((PaperTrade.status == "tp", 1), else_=0)).label("wins"),
+                func.avg(PaperTrade.pnl_pct).label("avg_pnl"),
+            )
+            .where(PaperTrade.style.in_(agent_keys))
+            .where(PaperTrade.status.in_(["tp", "sl"]))
+            .where(PaperTrade.closed_at >= cutoff_7d)
+            .group_by(PaperTrade.style)
+        )
+        trades = {
+            r.style: {"n": r.n, "wins": r.wins or 0, "avg_pnl": float(r.avg_pnl or 0)}
+            for r in tr
+        }
+
+        # Near-miss 48 jam per agent (gap <= 8 poin dari ambang)
+        nm = await session.execute(
+            select(
+                RejectionLog.agent,
+                func.count().label("n"),
+                func.avg(RejectionLog.threshold - RejectionLog.score).label("avg_gap"),
+            )
+            .where(RejectionLog.rejected_at >= cutoff_48h)
+            .where((RejectionLog.threshold - RejectionLog.score) <= 8)
+            .group_by(RejectionLog.agent)
+        )
+        nearmiss = {r.agent: {"n": r.n, "avg_gap": float(r.avg_gap or 0)} for r in nm}
+
+        # Akurasi predictive 7 hari per (agent, direction)
+        pr = await session.execute(
+            select(
+                PredictiveLog.agent,
+                PredictiveLog.direction,
+                func.count().label("n"),
+                func.sum(case((PredictiveLog.hit_4h.is_(True), 1), else_=0)).label("hits4"),
+            )
+            .where(PredictiveLog.resolved_at.isnot(None))
+            .where(PredictiveLog.scanned_at >= cutoff_7d)
+            .group_by(PredictiveLog.agent, PredictiveLog.direction)
+        )
+        predictive: dict[str, list] = {}
+        for r in pr:
+            predictive.setdefault(r.agent, []).append({
+                "direction": r.direction,
+                "n": r.n,
+                "hit4": round(100 * (r.hits4 or 0) / r.n, 1) if r.n else 0.0,
+            })
+
+        # Bobot sinyal yang dipelajari (regime all, sampel cukup)
+        wrows = await session.execute(
+            select(AgentSignalWeight)
+            .where(AgentSignalWeight.agent.in_(agent_keys))
+            .where(AgentSignalWeight.regime == "all")
+            .where(AgentSignalWeight.total_count >= 10)
+        )
+        weights: dict[str, list] = {}
+        for w in wrows.scalars().all():
+            weights.setdefault(w.agent, []).append(w)
+
+    gate_state = risk_gate.get_gate_state()
+    lane_pauses = gate_state.get("lane_pauses", {})
+    lane_wr = gate_state.get("lane_wr", {})
+
+    def _wr_pct(v: float) -> float:
+        """win_rate tersimpan kadang 0-1, kadang 0-100 — normalisasi ke persen."""
+        return v * 100 if v <= 1 else v
+
+    categories = []
+    for agent_key, label, lane_key, market in _RECO_CATEGORIES:
+        sugg: list[dict] = []
+        t = trades.get(agent_key)
+        n_ = nearmiss.get(agent_key)
+        pd = predictive.get(agent_key, [])
+        ws = weights.get(agent_key, [])
+
+        # 1) Lane dijeda (futures)
+        paused = bool(lane_key and lane_pauses.get(lane_key, {}).get("paused"))
+        if paused:
+            until = lane_pauses.get(lane_key, {}).get("pause_until")
+            until_s = time.strftime("%H:%M", time.localtime(until)) if until else "?"
+            wrinfo = lane_wr.get(lane_key, {})
+            sugg.append({
+                "severity": "action", "source": "lane",
+                "title": "Lane sedang dijeda otomatis",
+                "detail": (
+                    f"Win rate rolling {wrinfo.get('wr', 0) * 100:.0f}% dari "
+                    f"{wrinfo.get('total', 0)} trade di bawah ambang - sistem menahan "
+                    f"trade baru sampai {until_s}. Jangan tambah eksposur; tunggu "
+                    "evaluasi otomatis."
+                ),
+            })
+
+        # 2) Hasil trade 7 hari
+        if t and t["n"] >= 10:
+            wr = 100 * t["wins"] / t["n"]
+            if wr < 40:
+                sugg.append({
+                    "severity": "action", "source": "trades",
+                    "title": f"Win rate 7 hari rendah: {wr:.0f}% ({t['wins']}/{t['n']})",
+                    "detail": (
+                        f"Rata-rata PnL {t['avg_pnl']:+.2f}%. Bobot sinyal yang rugi "
+                        "sudah diturunkan otomatis - cek daftar bobot turun/veto di tab "
+                        "Perbaikan; bila berlanjut, lane akan dijeda otomatis."
+                    ),
+                })
+            elif wr >= 55:
+                sugg.append({
+                    "severity": "good", "source": "trades",
+                    "title": f"Win rate 7 hari sehat: {wr:.0f}% ({t['wins']}/{t['n']})",
+                    "detail": (
+                        f"Rata-rata PnL {t['avg_pnl']:+.2f}%. Pertahankan - jangan ubah "
+                        "ambang saat sedang menang."
+                    ),
+                })
+        elif (t is None or t["n"] < 5) and not paused:
+            nm_txt = ""
+            if n_ and n_["n"] >= 10:
+                nm_txt = (
+                    f" Padahal ada {n_['n']} kandidat nyaris lolos dalam 48 jam "
+                    f"(rata-rata kurang {n_['avg_gap']:.1f} poin) - kalibrasi bobot "
+                    "sinyal inti agar setup bagus realistis mencapai ambang, JANGAN "
+                    "menurunkan ambang."
+                )
+            sugg.append({
+                "severity": "action" if nm_txt else "watch", "source": "nearmiss",
+                "title": f"Lane sepi: {t['n'] if t else 0} trade tertutup dalam 7 hari",
+                "detail": "Belum cukup data untuk menilai kualitas lane." + nm_txt,
+            })
+
+        # 3) Near-miss menumpuk meski lane aktif
+        if n_ and n_["n"] >= 30 and t and t["n"] >= 5:
+            sugg.append({
+                "severity": "watch", "source": "nearmiss",
+                "title": f"{n_['n']} kandidat nyaris lolos (48 jam)",
+                "detail": (
+                    f"Rata-rata hanya kurang {n_['avg_gap']:.1f} poin dari ambang. "
+                    "Banyak peluang tertahan di depan pintu - pantau tab Rejections; "
+                    "bila kandidat yang tertolak ternyata bergerak bagus (cek "
+                    "Predictive), bobot sinyal intinya layak dinaikkan."
+                ),
+            })
+
+        # 4) Akurasi predictive per arah
+        for p in sorted(pd, key=lambda x: x["hit4"]):
+            if p["n"] < 30:
+                continue
+            if p["hit4"] < 40:
+                sugg.append({
+                    "severity": "action", "source": "predictive",
+                    "title": (
+                        f"Akurasi arah {p['direction']} lemah: "
+                        f"{p['hit4']:.0f}% dari {p['n']} prediksi"
+                    ),
+                    "detail": (
+                        f"Kurang dari 40% prediksi {p['direction']} benar dalam 4 jam. "
+                        "Sinyal masuk arah ini perlu direview - pertimbangkan perketat "
+                        "syarat atau bias ke arah sebaliknya."
+                    ),
+                })
+            elif p["hit4"] >= 55:
+                sugg.append({
+                    "severity": "good", "source": "predictive",
+                    "title": (
+                        f"Akurasi arah {p['direction']} bagus: "
+                        f"{p['hit4']:.0f}% dari {p['n']} prediksi"
+                    ),
+                    "detail": (
+                        "Di atas 55% - arah ini sumber pertumbuhan; biarkan bobot "
+                        "sinyal pendukungnya naik."
+                    ),
+                })
+
+        # 5) Bobot sinyal ekstrem
+        bad = sorted([w for w in ws if w.weight < 0.9], key=lambda w: w.weight)
+        good = sorted([w for w in ws if w.weight >= 1.2], key=lambda w: -w.weight)
+        if bad:
+            worst = bad[0]
+            sugg.append({
+                "severity": "watch", "source": "weights",
+                "title": f"{len(bad)} sinyal berkinerja buruk sudah diturunkan otomatis",
+                "detail": (
+                    f"Terlemah: '{worst.signal_key}' x{worst.weight:.2f} "
+                    f"(WR {_wr_pct(worst.win_rate):.0f}%, {worst.total_count} trades). "
+                    "Engine terus menekan pengaruhnya; di bawah x0.80 akan diveto."
+                ),
+            })
+        if good:
+            best = good[0]
+            sugg.append({
+                "severity": "good", "source": "weights",
+                "title": f"{len(good)} sinyal andalan (bobot >= x1.20)",
+                "detail": (
+                    f"Terkuat: '{best.signal_key}' x{best.weight:.2f} "
+                    f"(WR {_wr_pct(best.win_rate):.0f}%, {best.total_count} trades). "
+                    "Sinyal seperti ini yang membuat skor kandidat naik."
+                ),
+            })
+
+        if not sugg:
+            sugg.append({
+                "severity": "good", "source": "none",
+                "title": "Tidak ada perbaikan mendesak",
+                "detail": (
+                    "Lane berjalan normal - data terus dikumpulkan dan bobot "
+                    "diperbarui otomatis tiap trade selesai."
+                ),
+            })
+
+        order = {"action": 0, "watch": 1, "good": 2}
+        sugg.sort(key=lambda s: order.get(s["severity"], 3))
+
+        wr7 = round(100 * t["wins"] / t["n"], 1) if t and t["n"] else None
+        categories.append({
+            "agent": agent_key,
+            "label": label,
+            "market": market,
+            "paused": paused,
+            "stats": {
+                "closed_7d": t["n"] if t else 0,
+                "wr_7d": wr7,
+                "avg_pnl_7d": round(t["avg_pnl"], 2) if t else None,
+                "near_miss_48h": n_["n"] if n_ else 0,
+                "predictive_n": sum(p["n"] for p in pd),
+            },
+            "suggestions": sugg,
+        })
+
+    return {"categories": categories, "generated_at": now}

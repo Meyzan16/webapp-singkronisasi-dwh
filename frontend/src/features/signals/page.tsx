@@ -189,7 +189,34 @@ interface ReviewData {
   adjustments: ReviewAdjustment[];
 }
 
-type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "improvements" | "regime" | "formulas" | "rejections" | "predictive";
+interface RecoSuggestion {
+  severity: "action" | "watch" | "good";
+  source:   string;
+  title:    string;
+  detail:   string;
+}
+
+interface RecoCategory {
+  agent:  string;
+  label:  string;
+  market: "spot" | "futures";
+  paused: boolean;
+  stats: {
+    closed_7d:     number;
+    wr_7d:         number | null;
+    avg_pnl_7d:    number | null;
+    near_miss_48h: number;
+    predictive_n:  number;
+  };
+  suggestions: RecoSuggestion[];
+}
+
+interface RecoResponse {
+  categories:   RecoCategory[];
+  generated_at: number;
+}
+
+type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "improvements" | "suggestions" | "regime" | "formulas" | "rejections" | "predictive";
 type SortBy = "win_rate" | "avg_pnl_pct" | "total_count" | "weight";
 
 // ── Navigasi 2-level: 4 seksi ber-scope (refactor UX — dulu 9 tab flat) ────────
@@ -199,7 +226,7 @@ const SECTION_OF: Record<SubTab, Section> = {
   overview: "overview",
   adaptive: "engine",
   spot: "signals", futures: "signals", cross: "signals",
-  improvements: "analysis",
+  improvements: "analysis", suggestions: "analysis",
   regime: "analysis", formulas: "analysis", rejections: "analysis", predictive: "analysis",
 };
 
@@ -226,6 +253,7 @@ const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
   ],
   analysis: [
     { key: "improvements", label: "🔧 Perbaikan" },
+    { key: "suggestions",  label: "💡 Saran Engine" },
     { key: "regime",     label: "🌡 Regime" },
     { key: "formulas",   label: "🔬 Formulas" },
     { key: "rejections", label: "🚫 Rejections" },
@@ -607,6 +635,94 @@ function ImprovementsTab({ weightPerf, health, futures, review, catalog }: {
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── SuggestionsTab — saran perbaikan dari engine, per kategori lane ───────────
+
+const SEVERITY_META: Record<RecoSuggestion["severity"], { label: string; chip: string; border: string }> = {
+  action: { label: "Perlu tindakan", chip: "bg-red-100 text-red-700 border-red-200",       border: "border-red-200 bg-red-50" },
+  watch:  { label: "Pantau",         chip: "bg-yellow-100 text-yellow-700 border-yellow-200", border: "border-yellow-200 bg-yellow-50" },
+  good:   { label: "Baik",           chip: "bg-green-100 text-green-700 border-green-200",  border: "border-green-200 bg-green-50" },
+};
+
+const RECO_ICONS: Record<string, string> = {
+  opportunity_spot: "🎯", futures_agent1: "🎯", futures_agent2: "🪣",
+  futures_agent3: "⚡", futures_agent_bigmover: "🚀",
+};
+
+function SuggestionsTab({ data }: { data: RecoResponse | null }) {
+  if (!data) {
+    return (
+      <div className="flex items-center justify-center py-16 text-neutral-400 gap-2">
+        <div className="w-4 h-4 border-2 border-teal-400 border-t-transparent rounded-full animate-spin" />
+        Menganalisis data engine...
+      </div>
+    );
+  }
+
+  const spotCats = data.categories.filter(c => c.market === "spot");
+  const futCats  = data.categories.filter(c => c.market === "futures");
+
+  const renderCard = (c: RecoCategory) => {
+    const actions = c.suggestions.filter(s => s.severity === "action").length;
+    return (
+      <div key={c.agent} className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
+        <div className="p-3.5 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-base">{RECO_ICONS[c.agent] ?? "📊"}</span>
+            <p className="text-sm font-black text-neutral-800">{c.label}</p>
+            {c.paused && (
+              <span className="text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-200 rounded-full px-2 py-0.5">PAUSED</span>
+            )}
+            {actions > 0 ? (
+              <span className="text-[9px] font-bold bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5">
+                {actions} perlu tindakan
+              </span>
+            ) : (
+              <span className="text-[9px] font-bold bg-green-100 text-green-700 border border-green-200 rounded-full px-2 py-0.5">sehat</span>
+            )}
+          </div>
+          <p className="text-[10px] text-neutral-400">
+            7 hari: {c.stats.closed_7d} trade{c.stats.wr_7d != null ? ` · WR ${c.stats.wr_7d.toFixed(0)}%` : ""}
+            {c.stats.near_miss_48h > 0 ? ` · ${c.stats.near_miss_48h} near-miss` : ""}
+            {c.stats.predictive_n > 0 ? ` · ${c.stats.predictive_n} prediksi` : ""}
+          </p>
+        </div>
+        <div className="p-3 space-y-2">
+          {c.suggestions.map((s, i) => {
+            const meta = SEVERITY_META[s.severity];
+            return (
+              <div key={i} className={`rounded-xl border p-3 ${meta.border}`}>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`text-[9px] font-bold border rounded-full px-2 py-0.5 ${meta.chip}`}>{meta.label}</span>
+                  <p className="text-[11px] font-bold text-neutral-800">{s.title}</p>
+                </div>
+                <p className="text-[11px] text-neutral-600 leading-relaxed">{s.detail}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-sm font-black text-neutral-800 mb-2">🎯 SPOT</p>
+        <div className="space-y-3">{spotCats.map(renderCard)}</div>
+      </div>
+      <div>
+        <p className="text-sm font-black text-neutral-800 mb-2">⚡ FUTURES — 4 lane</p>
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">{futCats.map(renderCard)}</div>
+      </div>
+      <p className="text-[10px] text-neutral-400 px-1">
+        Saran dihitung ulang dari data live setiap kali tab ini dibuka
+        (trade 7 hari · near-miss 48 jam · akurasi prediksi 7 hari · bobot sinyal · status lane).
+        Terakhir dianalisis {new Date(data.generated_at * 1000).toLocaleTimeString("id-ID")}.
+      </p>
     </div>
   );
 }
@@ -1682,6 +1798,7 @@ export default function SignalsPage() {
   const [futuresEngine,  setFuturesEngine]  = useState<FuturesAdaptiveEngineData | null>(null);
   const [weightPerf,     setWeightPerf]     = useState<PerformanceResponse | null>(null);
   const [reviewData,     setReviewData]     = useState<ReviewData | null>(null);
+  const [recoData,       setRecoData]       = useState<RecoResponse | null>(null);
   const [loading,        setLoading]        = useState(true);
   const [forceMsg,       setForceMsg]       = useState<string | null>(null);
   const [showTutorial,   setShowTutorial]   = useState(false);
@@ -1744,6 +1861,13 @@ export default function SignalsPage() {
     } catch { /* stale */ }
   }, []);
 
+  const fetchReco = useCallback(async () => {
+    try {
+      const r = await fetch("/api/v1/signals/recommendations");
+      if (r.ok) setRecoData(await r.json() as RecoResponse);
+    } catch { /* stale */ }
+  }, []);
+
   const fetchPredictive = useCallback(async () => {
     try {
       const r = await fetch("/api/v1/predictive/hit_rate?hours=168");
@@ -1759,7 +1883,8 @@ export default function SignalsPage() {
     if (subTab === "rejections"   && !rejectionsData) void fetchRejections();
     if (subTab === "predictive"   && !predictiveData) void fetchPredictive();
     if (subTab === "improvements" && !weightPerf)     void fetchImprovements();
-  }, [subTab, regimeData, rejectionsData, predictiveData, weightPerf, fetchRegime, fetchRejections, fetchPredictive, fetchImprovements]);
+    if (subTab === "suggestions") void fetchReco();   // selalu segar — saran dihitung dari data live
+  }, [subTab, regimeData, rejectionsData, predictiveData, weightPerf, fetchRegime, fetchRejections, fetchPredictive, fetchImprovements, fetchReco]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
@@ -2078,6 +2203,22 @@ export default function SignalsPage() {
               </div>
               <ImprovementsTab weightPerf={weightPerf} health={agentHealth}
                 futures={futuresEngine} review={reviewData} catalog={catalogData} />
+            </div>
+          )}
+
+          {/* ── SARAN ENGINE ──────────────────────────────────────────────── */}
+          {subTab === "suggestions" && (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
+                <p className="font-bold text-amber-800 mb-1">💡 Saran Engine — rekomendasi agar scanner terus bertumbuh</p>
+                <p className="text-xs text-amber-700">
+                  <strong>Untuk apa?</strong> Engine menganalisis datanya sendiri dan memberi saran perbaikan
+                  per kategori: SPOT dan 4 lane futures (Pre-Gainer, Accumulation, Momentum, BigMover).
+                  🔴 Perlu tindakan = ada masalah nyata; 🟡 Pantau = belum genting; 🟢 Baik = pertahankan.
+                  Sebagian perbaikan sudah dijalankan otomatis oleh sistem — saran di sini untuk keputusan yang butuh manusia.
+                </p>
+              </div>
+              <SuggestionsTab data={recoData} />
             </div>
           )}
 

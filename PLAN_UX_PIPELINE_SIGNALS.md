@@ -29,3 +29,14 @@ Tanggal: 2026-07-16 · Status: SELESAI (terverifikasi live di browser) · Lanjut
       (/predictive/signal_review) bila sudah jalan.
 - [x] **P5 — Verifikasi browser**: tsc+lint bersih, semua seksi live, 0 console
       error.
+
+## Tambahan (permintaan lanjutan owner, 16 Jul)
+
+- [x] **P6 — Tab Analysis → 💡 Saran Engine**: rekomendasi perbaikan yang
+      dihasilkan engine dari datanya sendiri, terkategori SPOT + 4 lane futures
+      (Pre-Gainer, Accumulation, Momentum, BigMover) supaya scanner terus
+      bertumbuh. Backend baru `GET /signals/recommendations` (read-only,
+      rule-based): trade 7 hari (WR/PnL), near-miss rejection 48 jam, akurasi
+      predictive per arah 7 hari, bobot sinyal ekstrem, status pause lane.
+      Severity: action / watch / good. Frontend: subtab + kartu per kategori,
+      selalu di-fetch segar saat tab dibuka.
