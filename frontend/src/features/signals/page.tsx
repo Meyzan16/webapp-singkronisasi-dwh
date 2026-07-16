@@ -178,7 +178,18 @@ interface FuturesAdaptiveEngineData {
   updated_at: number;
 }
 
-type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "regime" | "formulas" | "rejections" | "predictive";
+interface ReviewAdjustment {
+  agent: string; signal_key: string; n: number;
+  hit_rate_4h: number; old_weight: number; new_weight: number;
+}
+
+interface ReviewData {
+  ran_at: number | null;
+  resolved_rows: number;
+  adjustments: ReviewAdjustment[];
+}
+
+type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "improvements" | "regime" | "formulas" | "rejections" | "predictive";
 type SortBy = "win_rate" | "avg_pnl_pct" | "total_count" | "weight";
 
 // ── Navigasi 2-level: 4 seksi ber-scope (refactor UX — dulu 9 tab flat) ────────
@@ -188,19 +199,20 @@ const SECTION_OF: Record<SubTab, Section> = {
   overview: "overview",
   adaptive: "engine",
   spot: "signals", futures: "signals", cross: "signals",
+  improvements: "analysis",
   regime: "analysis", formulas: "analysis", rejections: "analysis", predictive: "analysis",
 };
 
 // Tab default saat sebuah seksi dibuka
 const SECTION_DEFAULT: Record<Section, SubTab> = {
-  overview: "overview", engine: "adaptive", signals: "spot", analysis: "regime",
+  overview: "overview", engine: "adaptive", signals: "spot", analysis: "improvements",
 };
 
 const SECTIONS: { key: Section; icon: string; label: string; desc: string }[] = [
   { key: "overview", icon: "📊", label: "Overview",  desc: "Ringkasan cepat: kesehatan agen & mesin" },
   { key: "engine",   icon: "🧠", label: "Engine",    desc: "Mesin belajar adaptif SPOT & Futures" },
   { key: "signals",  icon: "🎯", label: "Signals",   desc: "Bobot sinyal yang dipelajari per market" },
-  { key: "analysis", icon: "🔬", label: "Analysis",  desc: "Regime, rumus, rejections, prediksi" },
+  { key: "analysis", icon: "🔬", label: "Analysis",  desc: "Perbaikan live, regime, rumus, rejections, prediksi" },
 ];
 
 // Sub-tab per seksi (hanya Signals & Analysis punya inner nav)
@@ -213,6 +225,7 @@ const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
     { key: "cross",   label: "🔗 Cross-Agent" },
   ],
   analysis: [
+    { key: "improvements", label: "🔧 Perbaikan" },
     { key: "regime",     label: "🌡 Regime" },
     { key: "formulas",   label: "🔬 Formulas" },
     { key: "rejections", label: "🚫 Rejections" },
@@ -338,6 +351,262 @@ function PlainSummaryBanner({ health, futures }: {
           <p className="text-[11px] leading-relaxed text-neutral-600">{c.a}</p>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ── PipelineLive (P1) — alur kerja SPOT & FUTURES tahap demi tahap, live ──────
+
+type StageState = "live" | "current" | "wait";
+
+interface PipelineStageDef {
+  icon: string;
+  label: string;
+  sub: string;
+  state: StageState;
+}
+
+const STAGE_CLS: Record<StageState, string> = {
+  live:    "bg-green-50 border-green-200 text-green-700",
+  current: "bg-blue-50 border-blue-400 text-blue-700 ring-2 ring-blue-200",
+  wait:    "bg-neutral-50 border-neutral-200 text-neutral-400",
+};
+
+function PipelineRow({ title, badge, stages }: { title: string; badge: string; stages: PipelineStageDef[] }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <p className="text-xs font-black text-neutral-700">{title}</p>
+        <span className="text-[9px] font-bold bg-neutral-100 text-neutral-500 border border-neutral-200 rounded-full px-2 py-0.5 capitalize">{badge}</span>
+      </div>
+      <div className="flex flex-wrap items-stretch gap-1">
+        {stages.map((s, i) => (
+          <div key={s.label} className="flex items-center gap-1">
+            <div className={`rounded-lg border px-2 py-1.5 min-w-[86px] ${STAGE_CLS[s.state]}`}>
+              <p className="text-[10px] font-black leading-tight">
+                {s.state === "live" ? "✓" : s.state === "current" ? "●" : "○"} {s.icon} {s.label}
+              </p>
+              <p className="text-[9px] mt-0.5 leading-tight opacity-80">{s.sub}</p>
+            </div>
+            {i < stages.length - 1 && <span className="text-neutral-300 text-xs font-bold">→</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PipelineLive({ spot, futures, health, updater }: {
+  spot:    AdaptiveEngineData | null;
+  futures: FuturesAdaptiveEngineData | null;
+  health:  AgentHealthData | null;
+  updater: UpdaterState | null;
+}) {
+  const fmtT = (ts?: number | null) => ts ? new Date(ts * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "—";
+  // Posisi model dalam lifecycle: sebelum shadow = belum ada model jalan
+  const lifeIdx = (st?: string) => st === "shadow" ? 0 : st === "canary" ? 1 : st === "champion" ? 2 : -1;
+
+  const lifecycleStages = (st: string | undefined): PipelineStageDef[] => {
+    const cur = lifeIdx(st);
+    return [
+      { icon: "👁", label: "Shadow",   sub: "model mengamati saja" },
+      { icon: "🐤", label: "Canary",   sub: "uji coba terbatas" },
+      { icon: "🏆", label: "Champion", sub: "dipakai sungguhan" },
+    ].map((s, i) => ({ ...s, state: (i === cur ? "current" : i < cur ? "live" : "wait") as StageState }));
+  };
+
+  const spotStages: PipelineStageDef[] = spot ? [
+    { icon: "🔍", label: "Scan",           sub: "pasar spot, rutin",                                                        state: "live" },
+    { icon: "🧾", label: "Catat Keputusan", sub: `${spot.decision_ledger.total.toLocaleString("id-ID")} keputusan`,          state: spot.decision_ledger.total > 0 ? "live" : "wait" },
+    { icon: "⏱", label: "Cek Hasil",       sub: `${spot.decision_ledger.outcome_completeness_pct.toFixed(0)}% terlabel`,    state: spot.decision_ledger.labelled_24h > 0 ? "live" : "wait" },
+    { icon: "⚖️", label: "Belajar Bobot",   sub: updater?.spot?.last_count != null ? `${updater.spot.last_count} keys · ${fmtT(updater.spot.last_run)}` : "menunggu", state: updater?.spot?.last_run ? "live" : "wait" },
+    { icon: "🤖", label: "Latih Model",     sub: spot.models.length ? `${spot.models[0].training_n} sampel` : `${spot.training.progress_pct.toFixed(0)}% data`, state: spot.models.length ? "live" : "wait" },
+    ...lifecycleStages(spot.engine_status),
+  ] : [];
+
+  const futStages: PipelineStageDef[] = futures ? [
+    { icon: "🔍", label: "Scan",           sub: health ? `tiap ${health.scan.interval_minutes} mnt · #${health.scan.cycle_count}` : "—", state: health?.scan.running ? "live" : "wait" },
+    { icon: "🧾", label: "Catat Keputusan", sub: `${futures.decision_ledger.total.toLocaleString("id-ID")} · ${futures.decision_ledger.opened} dibuka`, state: futures.decision_ledger.total > 0 ? "live" : "wait" },
+    { icon: "⏱", label: "Cek Hasil",       sub: `${futures.decision_ledger.outcome_completeness_pct.toFixed(0)}% terlabel (NET biaya)`, state: futures.decision_ledger.labelled_24h > 0 ? "live" : "wait" },
+    { icon: "⚖️", label: "Belajar Bobot",   sub: `${health?.learning.cached_keys ?? 0} sinyal · ${futures.learning_status}`, state: futures.learning_status === "active" ? "live" : futures.learning_status === "warming" ? "current" : "wait" },
+    { icon: "🤖", label: "Latih Model",     sub: futures.models.length ? `${futures.models[0].training_n} sampel` : `${futures.training.progress_pct.toFixed(0)}% data`, state: futures.models.length ? "live" : "wait" },
+    ...lifecycleStages(futures.engine_status),
+  ] : [];
+
+  return (
+    <div className="bg-white border border-neutral-200 rounded-2xl p-4 space-y-4">
+      <div>
+        <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">🔄 Pipeline Live — cara sistem bekerja, tahap demi tahap</p>
+        <p className="text-[10px] text-neutral-400 mt-0.5">
+          ✓ hijau = tahap berjalan terus-menerus · ● biru = posisi saat ini · ○ abu = belum sampai.
+          Model AI hanya boleh maju satu tahap setelah lulus uji.
+        </p>
+      </div>
+      {spotStages.length > 0
+        ? <PipelineRow title="🎯 SPOT" badge={spot?.engine_status ?? "—"} stages={spotStages} />
+        : <p className="text-[11px] text-neutral-400">Pipeline SPOT belum tersedia.</p>}
+      {futStages.length > 0
+        ? <PipelineRow title="⚡ FUTURES" badge={futures?.engine_status ?? "—"} stages={futStages} />
+        : <p className="text-[11px] text-neutral-400">Pipeline FUTURES belum tersedia.</p>}
+    </div>
+  );
+}
+
+// ── ImprovementsTab (P4) — apa yang sedang diperbaiki sistem, live ────────────
+
+interface MoverRow {
+  signal_key: string;
+  agentLabel: string;
+  stat: AgentStat;
+}
+
+const AGENT_LABEL: Record<string, string> = {
+  opportunity_spot: "SPOT", futures_agent1: "Pre-Gainer",
+  futures_agent2: "Accumulation", futures_agent3: "Momentum",
+  futures_agent_bigmover: "BigMover",
+};
+
+function MoverList({ title, rows, tone, emptyText, catalog }: {
+  title: string;
+  rows: MoverRow[];
+  tone: "up" | "down" | "veto";
+  emptyText: string;
+  catalog: CatalogResponse | null;
+}) {
+  const toneCls = tone === "up" ? "text-green-700" : tone === "down" ? "text-amber-700" : "text-red-700";
+  return (
+    <div className="rounded-xl border border-neutral-200 p-3">
+      <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${toneCls}`}>{title}</p>
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-neutral-400">{emptyText}</p>
+      ) : (
+        <div className="space-y-1.5">
+          {rows.map(r => (
+            <div key={`${r.signal_key}-${r.agentLabel}`} className="flex items-center justify-between gap-2 text-[11px]">
+              <div className="min-w-0">
+                <p className="font-semibold text-neutral-700 truncate">
+                  {catalog?.catalog?.[r.signal_key]?.label ?? r.signal_key.replace(/_/g, " ")}
+                </p>
+                <p className="text-[9px] text-neutral-400">{r.agentLabel} · WR {r.stat.win_rate.toFixed(0)}% · {r.stat.total} trades</p>
+              </div>
+              <span className={`font-black tabular-nums shrink-0 ${toneCls}`}>×{r.stat.weight.toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImprovementsTab({ weightPerf, health, futures, review, catalog }: {
+  weightPerf: PerformanceResponse | null;
+  health:     AgentHealthData | null;
+  futures:    FuturesAdaptiveEngineData | null;
+  review:     ReviewData | null;
+  catalog:    CatalogResponse | null;
+}) {
+  const { spotUp, spotDown, futUp, futDown, futVeto } = useMemo(() => {
+    const spot: MoverRow[] = [];
+    const fut:  MoverRow[] = [];
+    for (const s of weightPerf?.signals ?? []) {
+      for (const [agentKey, stat] of Object.entries(s.agents)) {
+        const row = { signal_key: s.signal_key, agentLabel: AGENT_LABEL[agentKey] ?? agentKey, stat: { ...stat, label: agentKey } };
+        // cross_agent bukan market — tampil di Signals→Cross-Agent, bukan di sini
+        if (agentKey === "opportunity_spot") spot.push(row);
+        else if (agentKey.startsWith("futures_")) fut.push(row);
+      }
+    }
+    const byW  = (dir: 1 | -1) => (a: MoverRow, b: MoverRow) => dir * (b.stat.weight - a.stat.weight);
+    return {
+      spotUp:   spot.filter(r => r.stat.weight >= 1.05).sort(byW(1)).slice(0, 6),
+      spotDown: spot.filter(r => r.stat.weight <= 0.95).sort(byW(-1)).slice(0, 6),
+      futUp:    fut.filter(r => r.stat.weight >= 1.05).sort(byW(1)).slice(0, 6),
+      futDown:  fut.filter(r => r.stat.weight <= 0.95 && r.stat.weight >= 0.8).sort(byW(-1)).slice(0, 6),
+      futVeto:  fut.filter(r => r.stat.weight < 0.8 && r.stat.total >= 10).sort(byW(-1)).slice(0, 6),
+    };
+  }, [weightPerf]);
+
+  if (!weightPerf) {
+    return (
+      <div className="flex items-center justify-center py-16 text-neutral-400 gap-2">
+        <div className="w-4 h-4 border-2 border-teal-400 border-t-transparent rounded-full animate-spin" />
+        Memuat data perbaikan...
+      </div>
+    );
+  }
+
+  const vetoActive = futures?.learning_status === "active";
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* SPOT column */}
+        <div className="space-y-3">
+          <p className="text-sm font-black text-neutral-800">🎯 SPOT</p>
+          <MoverList title="⬆ Bobot dinaikkan — sinyal terbukti profit, pengaruhnya diperbesar"
+            rows={spotUp} tone="up" emptyText="Belum ada sinyal yang naik bobot." catalog={catalog} />
+          <MoverList title="⬇ Bobot diturunkan — sering rugi, pengaruhnya dikurangi"
+            rows={spotDown} tone="down" emptyText="Belum ada sinyal yang turun bobot." catalog={catalog} />
+        </div>
+
+        {/* FUTURES column */}
+        <div className="space-y-3">
+          <p className="text-sm font-black text-neutral-800">⚡ FUTURES</p>
+          <MoverList title="⬆ Bobot dinaikkan — sinyal terbukti profit, pengaruhnya diperbesar"
+            rows={futUp} tone="up" emptyText="Belum ada sinyal yang naik bobot." catalog={catalog} />
+          <MoverList title="⬇ Bobot diturunkan — sering rugi, pengaruhnya dikurangi"
+            rows={futDown} tone="down" emptyText="Belum ada sinyal yang turun bobot." catalog={catalog} />
+          <MoverList
+            title={`⛔ Kandidat veto (bobot <0.8, ≥10 trades) — ${vetoActive ? "trade dengan sinyal ini otomatis DITOLAK" : "veto belum aktif (masih pemanasan)"}`}
+            rows={futVeto} tone="veto" emptyText="Tidak ada sinyal yang cukup buruk untuk diveto." catalog={catalog} />
+
+          {/* Blacklist + lane pause dari health */}
+          {health && (health.learning.blacklisted_coins.length > 0 || health.lanes.some(l => l.paused)) && (
+            <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-orange-700">🚧 Pengamanan aktif sekarang</p>
+              {health.learning.blacklisted_coins.length > 0 && (
+                <p className="text-[11px] text-neutral-600">
+                  Koin di-blacklist 24 jam (3× stop-loss beruntun):{" "}
+                  <span className="font-bold text-orange-700">{health.learning.blacklisted_coins.map(c => c.replace("USDT", "")).join(", ")}</span>
+                </p>
+              )}
+              {health.lanes.filter(l => l.paused).map(l => (
+                <p key={l.lane} className="text-[11px] text-neutral-600">
+                  Lane <span className="font-bold text-orange-700">{l.label}</span> dijeda sementara karena performa buruk
+                  {l.pause_until ? ` (lanjut ${new Date(l.pause_until * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })})` : ""}.
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Review mingguan */}
+      <div className="rounded-xl border border-neutral-200 bg-white p-4">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">📅 Review Mingguan Otomatis (Senin 00:10 UTC)</p>
+        {review?.ran_at ? (
+          <div className="space-y-1.5">
+            <p className="text-[11px] text-neutral-500">
+              Terakhir jalan {new Date(review.ran_at * 1000).toLocaleString("id-ID")} · {review.resolved_rows} prediksi dianalisis ·{" "}
+              {review.adjustments.length} bobot disesuaikan:
+            </p>
+            {review.adjustments.slice(0, 10).map(a => (
+              <div key={`${a.agent}-${a.signal_key}`} className="flex items-center justify-between text-[11px]">
+                <span className="text-neutral-600 truncate">{a.signal_key.replace(/_/g, " ")} <span className="text-neutral-400">({AGENT_LABEL[a.agent] ?? a.agent} · hit {a.hit_rate_4h}% · n={a.n})</span></span>
+                <span className={`font-bold tabular-nums shrink-0 ${a.new_weight > a.old_weight ? "text-green-600" : "text-amber-600"}`}>
+                  ×{a.old_weight.toFixed(2)} → ×{a.new_weight.toFixed(2)}
+                </span>
+              </div>
+            ))}
+            {review.adjustments.length === 0 && <p className="text-[11px] text-neutral-400">Tidak ada bobot yang perlu disesuaikan minggu ini.</p>}
+          </div>
+        ) : (
+          <p className="text-[11px] text-neutral-400">
+            Belum pernah jalan — review pertama otomatis Senin depan. Selain review mingguan ini,
+            bobot di atas tetap diperbarui otomatis setiap ada trade yang selesai.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1396,7 +1665,7 @@ function AdaptiveLearningTutorial({
 
 export default function SignalsPage() {
   const [subTab,      setSubTab]      = useState<SubTab>("overview");
-  const [agentFilter, setAgentFilter] = useState("opportunity_spot");
+  const [agentFilter, setAgentFilter] = useState("futures_agent1");
   const [sortBy,      setSortBy]      = useState<SortBy>("win_rate");
   const [sortDir,     setSortDir]     = useState<"desc" | "asc">("desc");
   const [minTrades,   setMinTrades]   = useState(3);
@@ -1411,6 +1680,8 @@ export default function SignalsPage() {
   const [agentHealth,    setAgentHealth]    = useState<AgentHealthData | null>(null);
   const [adaptiveEngine, setAdaptiveEngine] = useState<AdaptiveEngineData | null>(null);
   const [futuresEngine,  setFuturesEngine]  = useState<FuturesAdaptiveEngineData | null>(null);
+  const [weightPerf,     setWeightPerf]     = useState<PerformanceResponse | null>(null);
+  const [reviewData,     setReviewData]     = useState<ReviewData | null>(null);
   const [loading,        setLoading]        = useState(true);
   const [forceMsg,       setForceMsg]       = useState<string | null>(null);
   const [showTutorial,   setShowTutorial]   = useState(false);
@@ -1462,6 +1733,17 @@ export default function SignalsPage() {
     } catch { /* stale */ }
   }, []);
 
+  const fetchImprovements = useCallback(async () => {
+    try {
+      const [wRes, rRes] = await Promise.all([
+        fetch("/api/v1/signals/performance?agent=all&regime=all&min_trades=3&sort_by=weight&sort_dir=desc&limit=100"),
+        fetch("/api/v1/predictive/signal_review"),
+      ]);
+      if (wRes.ok) setWeightPerf(await wRes.json() as PerformanceResponse);
+      if (rRes.ok) setReviewData(await rRes.json() as ReviewData);
+    } catch { /* stale */ }
+  }, []);
+
   const fetchPredictive = useCallback(async () => {
     try {
       const r = await fetch("/api/v1/predictive/hit_rate?hours=168");
@@ -1473,10 +1755,11 @@ export default function SignalsPage() {
   }, []);
 
   useEffect(() => {
-    if (subTab === "regime"     && !regimeData)     void fetchRegime();
-    if (subTab === "rejections" && !rejectionsData) void fetchRejections();
-    if (subTab === "predictive" && !predictiveData) void fetchPredictive();
-  }, [subTab, regimeData, rejectionsData, predictiveData, fetchRegime, fetchRejections, fetchPredictive]);
+    if (subTab === "regime"       && !regimeData)     void fetchRegime();
+    if (subTab === "rejections"   && !rejectionsData) void fetchRejections();
+    if (subTab === "predictive"   && !predictiveData) void fetchPredictive();
+    if (subTab === "improvements" && !weightPerf)     void fetchImprovements();
+  }, [subTab, regimeData, rejectionsData, predictiveData, weightPerf, fetchRegime, fetchRejections, fetchPredictive, fetchImprovements]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
@@ -1684,6 +1967,8 @@ export default function SignalsPage() {
                   Model hanya naik dari shadow → canary → champion setelah seluruh gate lulus.
                 </p>
               </div>
+              {/* P1 — pipeline live per market */}
+              <PipelineLive spot={adaptiveEngine} futures={futuresEngine} health={agentHealth} updater={updaterState} />
               <AdaptiveEnginePanel data={adaptiveEngine} />
               {/* F6: engine FUTURES sejajar — pola sama, biaya NET true-cost + veto-only */}
               <FuturesAdaptiveEnginePanel data={futuresEngine} />
@@ -1696,6 +1981,14 @@ export default function SignalsPage() {
           {/* ── SPOT ─────────────────────────────────────────────────────── */}
           {subTab === "spot" && (
             <div className="space-y-4">
+              <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4">
+                <p className="font-bold text-teal-800 mb-1">🎯 Bobot Sinyal SPOT</p>
+                <p className="text-xs text-teal-600">
+                  <strong>Untuk apa?</strong> Melihat sinyal mana yang dipercaya sistem di market SPOT.
+                  Weight ×&gt;1.00 = terbukti profit, pengaruhnya diperbesar; ×&lt;1.00 = sering rugi, dikurangi.
+                  Bobot diperbarui otomatis setiap trade selesai. Win Rate = persen trade menang; Avg PnL% = rata-rata untung/rugi.
+                </p>
+              </div>
               <div className="flex flex-wrap gap-2 items-center">
                 <span className="text-xs text-neutral-500">{spotSignals.length} sinyal · min {minTrades} trades</span>
                 <div className="flex bg-neutral-100 rounded-xl p-1 gap-0.5 ml-auto">
@@ -1716,11 +2009,18 @@ export default function SignalsPage() {
           {/* ── FUTURES ──────────────────────────────────────────────────── */}
           {subTab === "futures" && (
             <div className="space-y-4">
-              {/* F6: engine futures di atas tabel bobot — konteks sebelum detail */}
-              <FuturesAdaptiveEnginePanel data={futuresEngine} />
+              <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                <p className="font-bold text-blue-800 mb-1">⚡ Bobot Sinyal FUTURES</p>
+                <p className="text-xs text-blue-600">
+                  <strong>Untuk apa?</strong> Sama seperti SPOT, tapi per agen futures — pilih agen di bawah
+                  untuk melihat bobot sinyalnya masing-masing (tiap agen berburu tipe peluang berbeda).
+                  Weight ×&gt;1.00 = dipercaya, ×&lt;1.00 = dikurangi; di bawah ×0.80 dengan ≥10 trades sinyal otomatis DIVETO saat learning aktif.
+                  Detail mesin belajarnya ada di seksi Engine.
+                </p>
+              </div>
               <div className="flex flex-wrap gap-2 items-center">
                 <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
-                  {AGENT_TABS.map(a => (
+                  {AGENT_TABS.filter(a => a.key !== "opportunity_spot").map(a => (
                     <button key={a.key} onClick={() => setAgentFilter(a.key)}
                       className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${agentFilter === a.key ? `bg-white shadow-sm ${a.color}` : "text-neutral-500 hover:text-neutral-700"}`}>
                       {a.label}
@@ -1749,15 +2049,35 @@ export default function SignalsPage() {
           {subTab === "cross" && (
             <div className="space-y-4">
               <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4 text-sm text-purple-800">
-                <p className="font-bold mb-1">🔗 Cross-Agent Learning</p>
+                <p className="font-bold mb-1">🔗 Bobot Sinyal Cross-Agent</p>
                 <p className="text-xs text-purple-600">
-                  Sinyal di bawah terbukti menghasilkan profit di <strong>lebih dari satu agen</strong>.
-                  Weight cross-agent (30%) dicampur dengan weight agen sendiri (70%) untuk
-                  meningkatkan scoring secara konsisten.
-                  Hanya aktif jika total ≥ 10 trades gabungan.
+                  <strong>Untuk apa?</strong> Melihat sinyal yang terbukti profit di <strong>lebih dari satu agen</strong> —
+                  bukti terkuat bahwa sinyal itu benar-benar bagus, bukan kebetulan.
+                  Weight gabungan ini dicampur 30% ke bobot tiap agen (70% bobot agen sendiri).
+                  Hanya muncul jika total ≥ 10 trades gabungan.
                 </p>
               </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-xs text-neutral-500">{crossSignals.length} sinyal · gabungan ≥ 10 trades</span>
+              </div>
               <CrossAgentTable signals={crossSignals} />
+            </div>
+          )}
+
+          {/* ── PERBAIKAN LIVE (P4) ───────────────────────────────────────── */}
+          {subTab === "improvements" && (
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-100 rounded-2xl p-4">
+                <p className="font-bold text-green-800 mb-1">🔧 Perbaikan Live — apa yang sedang diperbaiki sistem sekarang</p>
+                <p className="text-xs text-green-700">
+                  <strong>Untuk apa?</strong> Melihat langsung hasil belajar sistem untuk SPOT dan FUTURES:
+                  sinyal mana yang bobotnya sedang DINAIKKAN (terbukti profit), mana yang DITURUNKAN atau
+                  DIVETO (sering rugi), plus pengaman yang sedang aktif (koin blacklist, lane dijeda).
+                  Semua otomatis — tidak ada yang diubah manual.
+                </p>
+              </div>
+              <ImprovementsTab weightPerf={weightPerf} health={agentHealth}
+                futures={futuresEngine} review={reviewData} catalog={catalogData} />
             </div>
           )}
 
@@ -1765,12 +2085,12 @@ export default function SignalsPage() {
           {subTab === "regime" && (
             <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4">
-                <p className="font-bold text-blue-800 mb-1">🌡 Regime-Conditional Weights</p>
+                <p className="font-bold text-blue-800 mb-1">🌡 Regime — sinyal mana yang cocok di kondisi pasar apa</p>
                 <p className="text-xs text-blue-600">
-                  Setiap sinyal ditrack terpisah per market regime (trending_up, trending_down, ranging, volatile).
-                  Agent membaca weight per-regime saat scoring — sinyal bagus di <em>trending_up</em>
-                  tapi buruk di <em>volatile</em> akan di-downweight otomatis saat market volatile.
-                  Data muncul setelah ≥3 trade per regime ter-close.
+                  <strong>Untuk apa?</strong> Sinyal yang sama bisa bagus saat pasar naik tapi buruk saat pasar bergejolak.
+                  Tabel ini melacak bobot tiap sinyal per kondisi pasar (naik / turun / datar / bergejolak) —
+                  sistem otomatis mengecilkan pengaruh sinyal yang buruk di kondisi pasar SAAT INI.
+                  Hijau = bagus di kondisi itu, merah = buruk. Data muncul setelah ≥3 trade per kondisi selesai.
                 </p>
               </div>
               <RegimeHeatmap regimeData={regimeData} />
@@ -1781,10 +2101,11 @@ export default function SignalsPage() {
           {subTab === "formulas" && (
             <div className="space-y-4">
               <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4">
-                <p className="font-bold text-teal-800 mb-1">🔬 Signal Formula Catalog</p>
+                <p className="font-bold text-teal-800 mb-1">🔬 Formulas — kamus semua sinyal teknikal</p>
                 <p className="text-xs text-teal-600">
-                  Setiap sinyal dipetakan ke agent, file, dan fungsi yang menggunakannya.
-                  Impact simulator: weight ×1.5 pada sinyal dengan max_pts=35 → +2.45 pts (formula: (w−1.0)×7).
+                  <strong>Untuk apa?</strong> Kalau di tab lain Anda menemukan nama sinyal yang tidak dimengerti,
+                  cari artinya di sini: apa yang diukur sinyal itu, agen mana yang memakainya, dan berapa
+                  poin maksimal sumbangannya ke skor. Ini referensi, bukan data live.
                 </p>
               </div>
               <FormulasTab catalog={catalogData} />
@@ -1795,11 +2116,11 @@ export default function SignalsPage() {
           {subTab === "rejections" && (
             <div className="space-y-4">
               <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
-                <p className="font-bold text-red-800 mb-1">🚫 Rejection Log (24h)</p>
+                <p className="font-bold text-red-800 mb-1">🚫 Rejections — koin yang HAMPIR dibuka (24 jam terakhir)</p>
                 <p className="text-xs text-red-600">
-                  Koin yang discan tapi tidak lolos threshold. Kolom &quot;Gap&quot; = selisih score vs threshold —
-                  makin kecil gapnya, makin dekat koin itu dengan entry.
-                  Weak signals = sinyal dengan weight terendah yang menghambat skor.
+                  <strong>Untuk apa?</strong> Melihat kandidat yang skornya tidak cukup untuk dibuka.
+                  Kolom &quot;Gap&quot; = kurang berapa poin lagi — makin kecil, makin nyaris.
+                  Kalau banyak koin bagus yang nyaris terus, itu tanda ambang skor mungkin terlalu ketat.
                 </p>
               </div>
               {!rejectionsData ? (
@@ -1851,11 +2172,12 @@ export default function SignalsPage() {
           {subTab === "predictive" && (
             <div className="space-y-4">
               <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
-                <p className="font-bold text-indigo-800 mb-1">🔮 Predictive Accuracy (7 hari)</p>
+                <p className="font-bold text-indigo-800 mb-1">🔮 Predictive — rapor akurasi tebakan agen (7 hari)</p>
                 <p className="text-xs text-indigo-600">
-                  Setiap kandidat entry dicatat saat scan. 4h dan 24h kemudian sistem mengecek apakah harga bergerak
-                  ke arah yang diprediksi (hit 4h = ≥1.5%, hit 24h = ≥3.0%). Data ini mengukur apakah agen
-                  semakin pintar dalam memprediksi pergerakan harga, terlepas dari apakah trade dibuka atau tidak.
+                  <strong>Untuk apa?</strong> Mengukur apakah agen benar-benar pintar menebak arah harga.
+                  Setiap kandidat dicatat saat scan, lalu 4 jam & 24 jam kemudian dicek: apakah harga
+                  benar bergerak sesuai prediksi (minimal 1.5% dalam 4 jam / 3% dalam 24 jam)?
+                  Ini menilai SEMUA prediksi — termasuk yang tidak jadi dibuka sebagai trade.
                 </p>
               </div>
               <PredictivePanel data={predictiveData} />
