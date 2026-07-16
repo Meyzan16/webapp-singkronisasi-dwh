@@ -227,6 +227,121 @@ const AGENT_TABS = [
   { key: "futures_agent3",   label: "Momentum",      color: "text-orange-700", bg: "bg-orange-100 border-orange-200" },
 ];
 
+// ── Lapisan awam (PLAN_UX_AWAM_SIGNAL_PERFORMANCE) ────────────────────────────
+// Terjemahan Bahasa Indonesia polos di atas data live — info teknis tetap ada.
+
+const REASON_LABELS: Record<string, string> = {
+  below_auto_threshold:   "Skor di bawah ambang minimal",
+  dedup_lost:             "Kalah prioritas dari kandidat lain",
+  volatile_regime_skip:   "Market terlalu bergejolak",
+  already_open:           "Posisi coin ini sudah terbuka",
+  sl_cooldown:            "Jeda setelah kena stop-loss",
+  profit_lock_skip:       "Profit harian sudah dikunci",
+  direction_cap:          "Batas posisi searah sudah penuh",
+  bm_daily_budget:        "Budget harian BigMover habis",
+  bm_daily_sl_stop:       "BigMover berhenti (SL harian)",
+  breadth_fade_skip:      "Kondisi pasar sedang melemah",
+  funding_hard_skip:      "Biaya funding terlalu mahal",
+  bm_lane_full:           "Slot BigMover penuh",
+  lane_quota_full:        "Kuota lane penuh",
+  lane_paused:            "Lane sedang dijeda",
+  funding_flip:           "Arah biaya funding berbalik",
+  cost_floor_skip:        "Potensi profit tak menutup biaya",
+  sizing_blocked:         "Ukuran posisi tak memenuhi syarat",
+  min_notional_skip:      "Nilai order di bawah minimum exchange",
+  risk_gate_blocked:      "Gerbang risiko sedang aktif",
+  daily_gate_blocked:     "Batas kerugian harian tercapai",
+  consec_sl_global_pause: "Pause global (SL beruntun)",
+};
+
+const ENGINE_STATUS_PLAIN: Record<string, string> = {
+  degraded:       "Ada masalah pada data/mesin — perlu dicek. Trading tetap memakai aturan lama yang aman.",
+  collecting:     "Mesin sedang mengumpulkan data keputusan. Model AI belum dilatih — tahap awal yang normal.",
+  ready_to_train: "Data sudah cukup — model AI akan dilatih otomatis pada siklus berikutnya.",
+  shadow:         "Model AI sudah dilatih dan sedang MENGAMATI saja: ia membuat prediksi diam-diam, tapi TIDAK memengaruhi keputusan trading sampai lulus semua uji.",
+  canary:         "Model AI sedang uji coba terbatas (canary). Kalau hasilnya buruk, otomatis dibatalkan dan kembali ke aturan lama.",
+  champion:       "Model AI sudah lulus semua uji dan kini aktif membantu keputusan trading.",
+};
+
+const LEARNING_STATUS_PLAIN: Record<string, string> = {
+  warming:  "pembelajaran masih pemanasan — belum ikut memveto trade",
+  active:   "pembelajaran aktif — sinyal yang terbukti jelek otomatis diveto",
+  degraded: "pembelajaran bermasalah — veto dimatikan sementara",
+};
+
+const GLOSSARY: { term: string; plain: string }[] = [
+  { term: "Shadow → Canary → Champion", plain: "Tahapan hidup model AI: mengamati saja → uji coba terbatas → dipakai sungguhan. Model tidak boleh loncat tahap." },
+  { term: "Mature samples",             plain: "Jumlah keputusan yang hasil akhirnya sudah diketahui — ini bahan belajar model. Minimal 60 sebelum training." },
+  { term: "Brier score",                plain: "Ukuran akurasi prediksi: 0 = sempurna, makin kecil makin baik." },
+  { term: "Expectancy",                 plain: "Rata-rata untung/rugi per trade setelah SEMUA biaya (fee, slippage, funding). Harus positif." },
+  { term: "Profit Factor (PF)",         plain: "Total untung dibagi total rugi. Di atas 1.5 dianggap sehat." },
+  { term: "OOS (out-of-sample)",        plain: "Model diuji pada data yang belum pernah ia lihat — mencegah nilai bagus palsu karena hafalan." },
+  { term: "Veto-only",                  plain: "Pembelajaran hanya boleh MENCEGAH trade yang terbukti jelek — tidak pernah memaksa membuka trade." },
+  { term: "Decision ledger",            plain: "Buku catatan permanen: setiap kandidat trade dicatat lengkap dengan alasan dibuka/ditolak dan hasil akhirnya." },
+];
+
+function GlossaryBox() {
+  return (
+    <div className="bg-white border border-neutral-200 rounded-2xl p-4">
+      <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider mb-3">📖 Kamus Istilah (untuk non-teknis)</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
+        {GLOSSARY.map(g => (
+          <div key={g.term} className="text-[11px] leading-relaxed">
+            <span className="font-bold text-neutral-700">{g.term}</span>
+            <span className="text-neutral-500"> — {g.plain}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlainSummaryBanner({ health, futures }: {
+  health:  AgentHealthData | null;
+  futures: FuturesAdaptiveEngineData | null;
+}) {
+  const running     = health?.scan.running ?? false;
+  const lastScan    = health?.scan.last_scan_ts;
+  const lastScanStr = lastScan ? new Date(lastScan * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "—";
+  const learnedKeys = health?.learning.cached_keys ?? 0;
+  const decisions   = futures?.decision_ledger.total ?? 0;
+  const opened      = futures?.decision_ledger.opened ?? 0;
+  const learnPlain  = futures ? (LEARNING_STATUS_PLAIN[futures.learning_status] ?? futures.learning_status) : "belum ada data";
+
+  const cards = [
+    {
+      q: "Apakah sistem bekerja?",
+      ok: running,
+      a: running
+        ? `Ya. Scanner memeriksa pasar setiap ${health?.scan.interval_minutes ?? "—"} menit tanpa henti (sudah ${health?.scan.cycle_count ?? "—"} putaran, terakhir ${lastScanStr}).`
+        : "Tidak — scanner sedang berhenti. Backend perlu dicek.",
+    },
+    {
+      q: "Apa yang sudah dipelajari?",
+      ok: learnedKeys > 0,
+      a: `Sistem sudah menilai ${learnedKeys} jenis sinyal dari hasil trade nyata dan mencatat ${decisions.toLocaleString("id-ID")} keputusan futures lengkap dengan alasannya. Saat ini ${learnPlain}.`,
+    },
+    {
+      q: "Apa output-nya?",
+      ok: opened > 0,
+      a: `Sinyal entry lengkap (harga masuk, stop-loss, target profit) yang otomatis jadi paper trade — ${opened} dibuka dari catatan terakhir. Hasil menang/kalahnya bisa dilihat di halaman History.`,
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {cards.map(c => (
+        <div key={c.q} className={`rounded-2xl border p-4 ${c.ok ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200"}`}>
+          <p className={`text-xs font-black mb-1.5 ${c.ok ? "text-green-800" : "text-amber-800"}`}>
+            {c.ok ? "✅" : "⏳"} {c.q}
+          </p>
+          <p className="text-[11px] leading-relaxed text-neutral-600">{c.a}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Small components ──────────────────────────────────────────────────────────
 
 function WeightBar({ weight }: { weight: number }) {
@@ -478,6 +593,11 @@ function AdaptiveEnginePanel({ data, compact = false }: { data: AdaptiveEngineDa
         </span>
       </div>
 
+      {/* Baris awam — apa arti status ini (U2) */}
+      <div className="px-4 py-2.5 bg-neutral-50 border-b border-neutral-100 text-[11px] leading-relaxed text-neutral-600">
+        💡 <strong>Artinya:</strong> {ENGINE_STATUS_PLAIN[data.engine_status] ?? "Status tidak dikenal."}
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-100">
         {[
           { label: "Decision Events", value: data.decision_ledger.total.toLocaleString("id-ID"), sub: `${data.decision_ledger.actions.rejected ?? 0} hard rejected` },
@@ -572,6 +692,8 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
   const gateLabels: Record<string, string> = {
     training_data: "60 mature samples", outcome_completeness: "Outcome ≥99%",
     data_quality: "Data quality", model_trained: "Model trained", canary_passed: "Canary passed",
+    promotion_eligible: "Model lolos uji offline", walkforward_passed: "Lolos walk-forward + stress",
+    canary_active: "Uji coba canary berjalan", champion_exists: "Model champion aktif",
   };
   // Reason codes teratas (selain opened/recommendation) — kenapa kandidat tidak dibuka
   const topReasons = Object.entries(data.decision_ledger.reasons)
@@ -592,6 +714,12 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
             <span className={`w-2 h-2 rounded-full ${status.dot}`} />{status.label}
           </span>
         </div>
+      </div>
+
+      {/* Baris awam — apa arti status ini (U2) */}
+      <div className="px-4 py-2.5 bg-neutral-50 border-b border-neutral-100 text-[11px] leading-relaxed text-neutral-600">
+        💡 <strong>Artinya:</strong> {ENGINE_STATUS_PLAIN[data.engine_status] ?? "Status tidak dikenal."}{" "}
+        Saat ini {LEARNING_STATUS_PLAIN[data.learning_status] ?? data.learning_status}.
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-100">
@@ -649,9 +777,12 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
             {topReasons.length ? (
               <div className="space-y-1 text-[11px]">
                 {topReasons.map(([reason, n]) => (
-                  <div key={reason} className="flex items-center justify-between">
-                    <span className="text-neutral-600 font-mono text-[10px]">{reason}</span>
-                    <span className="font-bold text-neutral-800 tabular-nums">{n.toLocaleString("id-ID")}</span>
+                  <div key={reason} className="flex items-center justify-between gap-2">
+                    <span className="text-neutral-600 min-w-0" title={reason}>
+                      {REASON_LABELS[reason] ?? reason}
+                      <span className="block font-mono text-[9px] text-neutral-400 truncate">{reason}</span>
+                    </span>
+                    <span className="font-bold text-neutral-800 tabular-nums shrink-0">{n.toLocaleString("id-ID")}</span>
                   </div>
                 ))}
               </div>
@@ -1463,6 +1594,9 @@ export default function SignalsPage() {
           {/* ── OVERVIEW ─────────────────────────────────────────────────── */}
           {subTab === "overview" && (
             <div className="space-y-5">
+              {/* U1 — Ringkasan awam: 3 pertanyaan kunci dijawab langsung */}
+              <PlainSummaryBanner health={agentHealth} futures={futuresEngine} />
+
               {/* Agent health cards */}
               <AgentHealthCards health={agentHealth} />
 
@@ -1553,6 +1687,8 @@ export default function SignalsPage() {
               <AdaptiveEnginePanel data={adaptiveEngine} />
               {/* F6: engine FUTURES sejajar — pola sama, biaya NET true-cost + veto-only */}
               <FuturesAdaptiveEnginePanel data={futuresEngine} />
+              {/* U4 — kamus istilah untuk pembaca non-teknis */}
+              <GlossaryBox />
               <LearningLoopStatus state={updaterState} onForce={handleForce} />
             </div>
           )}
