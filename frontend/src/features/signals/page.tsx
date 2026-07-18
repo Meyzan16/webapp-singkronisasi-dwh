@@ -523,53 +523,16 @@ function PipelineLive({ spot, futures, health, updater }: {
 
 // ── ImprovementsTab (P4) — apa yang sedang diperbaiki sistem, live ────────────
 
-interface MoverRow {
-  signal_key: string;
-  agentLabel: string;
-  stat: AgentStat;
-}
-
 const AGENT_LABEL: Record<string, string> = {
   opportunity_spot: "SPOT", futures_agent1: "Pre-Gainer",
   futures_agent2: "Accumulation", futures_agent3: "Momentum",
   futures_agent_bigmover: "BigMover",
 };
 
-function MoverList({ title, rows, tone, emptyText, catalog }: {
-  title: string;
-  rows: MoverRow[];
-  tone: "up" | "down" | "veto";
-  emptyText: string;
-  catalog: CatalogResponse | null;
-}) {
-  const toneCls = tone === "up" ? "text-green-700" : tone === "down" ? "text-amber-700" : "text-red-700";
-  return (
-    <div className="rounded-xl border border-neutral-200 p-3">
-      <p className={`text-[10px] font-bold uppercase tracking-wider mb-2 ${toneCls}`}>{title}</p>
-      {rows.length === 0 ? (
-        <p className="text-[11px] text-neutral-400">{emptyText}</p>
-      ) : (
-        <div className="space-y-1.5">
-          {rows.map(r => (
-            <div key={`${r.signal_key}-${r.agentLabel}`} className="flex items-center justify-between gap-2 text-[11px]">
-              <div className="min-w-0">
-                <p className="font-semibold text-neutral-700 truncate">
-                  {catalog?.catalog?.[r.signal_key]?.label ?? r.signal_key.replace(/_/g, " ")}
-                </p>
-                <p className="text-[9px] text-neutral-400">{r.agentLabel} · WR {r.stat.win_rate.toFixed(0)}% · {r.stat.total} trades</p>
-              </div>
-              <span className={`font-black tabular-nums shrink-0 ${toneCls}`}>×{r.stat.weight.toFixed(2)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // PLAN_PERFORMANCE_INTEGRATION — per-agent live scorecard (menggantikan movers table
 // yang duplikat dengan Signals→Cross-Agent). Data source: repairs API.
-function ImprovementsTab({ data, spotData, health, futures, review, catalog, onAgentClick }: {
+function ImprovementsTab({ data, spotData, health, futures, review, catalog, onAgentClick,
+                          agentFilter, onClearAgentFilter }: {
   data:     RepairsResponse | null;
   spotData: RepairsResponse | null;
   health:   AgentHealthData | null;
@@ -577,6 +540,10 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
   review:   ReviewData | null;
   catalog:  CatalogResponse | null;
   onAgentClick?: (agent: string) => void;
+  // B2: sebelumnya filter agent di-set oleh Saran Engine tapi tab ini tidak
+  // menerimanya sama sekali → tombol "Lihat aktivitas agent ini" tidak berefek.
+  agentFilter?: string | null;
+  onClearAgentFilter?: () => void;
 }) {
   const agentCards = useMemo(() => {
     type AgentStat = {
@@ -591,29 +558,35 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
       recent: RepairAction[];
       last_at: number | null;
     };
-    const now = Date.now() / 1000;
+    // B3: acuan "sekarang" diambil dari timestamp server (updated_at), bukan
+    // Date.now() yang impure di dalam render — sekaligus kebal clock-skew browser.
+    const nowTs = Math.max(data?.updated_at ?? 0, spotData?.updated_at ?? 0);
+    // B4: agregasi tanpa memutasi nilai turunan props (rules-of-react).
+    const tagged: { a: RepairAction; scope: "spot" | "futures" }[] = [
+      ...(spotData?.actions ?? []).map(a => ({ a, scope: "spot" as const })),
+      ...(data?.actions ?? []).map(a => ({ a, scope: "futures" as const })),
+    ];
     const map = new Map<string, AgentStat>();
-    const push = (a: RepairAction, scope: "spot" | "futures") => {
+    for (const { a, scope } of tagged) {
       const key = `${scope}::${a.agent || "unknown"}`;
-      let s = map.get(key);
-      if (!s) {
-        s = { agent: a.agent || "unknown", scope, actions_24h: 0, applied: 0,
-              verified_improved: 0, verified_no_change: 0, reverted: 0,
-              pending_verify: 0, recent: [], last_at: null };
-        map.set(key, s);
-      }
-      if (a.detected_at && (now - a.detected_at) <= 86400) s.actions_24h += 1;
-      if (a.applied) s.applied += 1;
-      if (a.status === "verified_improved") s.verified_improved += 1;
-      else if (a.status === "verified_no_change") s.verified_no_change += 1;
-      else if (a.status === "reverted" || a.status === "reversed") s.reverted += 1;
-      else if (a.status === "applied") s.pending_verify += 1;
-      if (s.recent.length < 3) s.recent.push(a);
-      s.last_at = Math.max(s.last_at ?? 0, a.applied_at ?? a.detected_at ?? 0);
-    };
-    for (const a of spotData?.actions ?? []) push(a, "spot");
-    for (const a of data?.actions ?? [])     push(a, "futures");
-    return Array.from(map.values()).sort((a, b) => (b.last_at ?? 0) - (a.last_at ?? 0));
+      const prev: AgentStat = map.get(key) ?? {
+        agent: a.agent || "unknown", scope, actions_24h: 0, applied: 0,
+        verified_improved: 0, verified_no_change: 0, reverted: 0,
+        pending_verify: 0, recent: [], last_at: null,
+      };
+      map.set(key, {
+        ...prev,
+        actions_24h:        prev.actions_24h + (a.detected_at && (nowTs - a.detected_at) <= 86400 ? 1 : 0),
+        applied:            prev.applied + (a.applied ? 1 : 0),
+        verified_improved:  prev.verified_improved + (a.status === "verified_improved" ? 1 : 0),
+        verified_no_change: prev.verified_no_change + (a.status === "verified_no_change" ? 1 : 0),
+        reverted:           prev.reverted + (a.status === "reverted" || a.status === "reversed" ? 1 : 0),
+        pending_verify:     prev.pending_verify + (a.status === "applied" ? 1 : 0),
+        recent:             prev.recent.length < 3 ? [...prev.recent, a] : prev.recent,
+        last_at:            Math.max(prev.last_at ?? 0, a.applied_at ?? a.detected_at ?? 0),
+      });
+    }
+    return Array.from(map.values()).sort((x, y) => (y.last_at ?? 0) - (x.last_at ?? 0));
   }, [data, spotData]);
 
   if (!data && !spotData) {
@@ -625,8 +598,10 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
     );
   }
   const vetoActive = futures?.learning_status === "active";
-  const spotCards = agentCards.filter(c => c.scope === "spot");
-  const futCards  = agentCards.filter(c => c.scope === "futures");
+  // B2: hormati filter agent yang dikirim dari Saran Engine.
+  const visibleCards = agentFilter ? agentCards.filter(c => c.agent === agentFilter) : agentCards;
+  const spotCards = visibleCards.filter(c => c.scope === "spot");
+  const futCards  = visibleCards.filter(c => c.scope === "futures");
 
   const renderCard = (c: typeof agentCards[number]) => {
     const total = c.applied + c.pending_verify;
@@ -705,8 +680,19 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
         <p className="text-[11px] text-teal-700">
           Setiap agent scanner (SPOT · FUTURES) punya masalah spesifiknya. Kartu di bawah ini menampilkan
           <strong> aktivitas perbaikan nyata </strong> yang sedang berjalan untuk tiap agent — data live dari ledger repair.
-          Klik "Lihat semua aksi" untuk pindah ke tab Progress dengan filter agent tersebut.
+          Klik &quot;Lihat semua aksi&quot; untuk pindah ke tab Progress dengan filter agent tersebut.
         </p>
+        {/* B2: filter agent kini terlihat & bisa dibatalkan */}
+        {agentFilter && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full border border-teal-300 bg-white text-teal-700 flex items-center gap-1">
+              Hanya agent: {_agentShort(agentFilter)}
+              <button onClick={() => onClearAgentFilter?.()}
+                className="ml-1 text-teal-600 hover:text-teal-900 font-black">×</button>
+            </span>
+            <span className="text-[10px] text-teal-600">Tampilkan semua agent dengan menutup filter ini.</span>
+          </div>
+        )}
       </div>
 
       {/* SPOT & FUTURES per-agent */}
@@ -804,11 +790,11 @@ function _shortKey(target: string): string {
   return key.replace("signal_id:", "").replace("signal:", "");
 }
 
+// B7: SATU sumber label agent untuk seluruh halaman (AGENT_LABEL). Sebelumnya
+// helper ini punya peta sendiri yang tidak mengenal `opportunity_spot`, sehingga
+// tab repair menampilkan ID mentah sementara tab lain menulis "SPOT".
 function _agentShort(agent: string): string {
-  return agent.replace("futures_agent_bigmover", "BigMover")
-    .replace("futures_agent1", "Pre-Gainer")
-    .replace("futures_agent2", "Accumulation")
-    .replace("futures_agent3", "Momentum");
+  return AGENT_LABEL[agent] ?? agent;
 }
 
 function ProgressTab({ data, spotData, agentFilter, onClearAgentFilter }: {
@@ -1029,16 +1015,18 @@ function SuggestionsTab({ data, onApply, applyMsg, spotReco, repairs, spotRepair
   // Peta agent → jumlah aksi 24h dari ledger repair
   const activity24h = useMemo(() => {
     const m = new Map<string, { count: number; last_at: number | null }>();
-    const now = Date.now() / 1000;
-    const add = (a: RepairAction) => {
-      if (!a.agent) return;
-      const cur = m.get(a.agent) ?? { count: 0, last_at: null };
-      if ((now - a.detected_at) <= 86400) cur.count += 1;
-      cur.last_at = Math.max(cur.last_at ?? 0, a.applied_at ?? a.detected_at ?? 0);
-      m.set(a.agent, cur);
-    };
-    for (const a of spotRepairs?.actions ?? []) add(a);
-    for (const a of repairs?.actions ?? [])     add(a);
+    // B3: acuan waktu dari server, bukan Date.now() (impure di dalam render).
+    const nowTs = Math.max(repairs?.updated_at ?? 0, spotRepairs?.updated_at ?? 0);
+    // B4: bangun objek baru, jangan mutasi nilai turunan props.
+    const all = [...(spotRepairs?.actions ?? []), ...(repairs?.actions ?? [])];
+    for (const a of all) {
+      if (!a.agent) continue;
+      const prev = m.get(a.agent) ?? { count: 0, last_at: null };
+      m.set(a.agent, {
+        count:   prev.count + ((nowTs - a.detected_at) <= 86400 ? 1 : 0),
+        last_at: Math.max(prev.last_at ?? 0, a.applied_at ?? a.detected_at ?? 0),
+      });
+    }
     return m;
   }, [repairs, spotRepairs]);
 
@@ -1172,7 +1160,7 @@ function SuggestionsTab({ data, onApply, applyMsg, spotReco, repairs, spotRepair
                       ×{r.current_weight.toFixed(2)} → ×{r.new_weight.toFixed(2)}
                     </span>
                     <span className="text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-2 py-0.5">
-                      🎯 opportunity_spot
+                      🎯 {AGENT_LABEL.opportunity_spot}
                     </span>
                   </div>
                   <p className="text-[11px] text-neutral-600">{r.reason}</p>
@@ -1183,7 +1171,7 @@ function SuggestionsTab({ data, onApply, applyMsg, spotReco, repairs, spotRepair
                       ⚡ Terapkan sekarang
                     </button>
                     <p className="text-[10px] text-neutral-500">
-                      → muncul di <span className="font-bold text-teal-700">Progress</span> sebagai "Menunggu verifikasi"
+                      → muncul di <span className="font-bold text-teal-700">Progress</span> sebagai &quot;Menunggu verifikasi&quot;
                     </p>
                   </div>
                 </div>
@@ -2277,7 +2265,6 @@ export default function SignalsPage() {
   const [agentHealth,    setAgentHealth]    = useState<AgentHealthData | null>(null);
   const [adaptiveEngine, setAdaptiveEngine] = useState<AdaptiveEngineData | null>(null);
   const [futuresEngine,  setFuturesEngine]  = useState<FuturesAdaptiveEngineData | null>(null);
-  const [weightPerf,     setWeightPerf]     = useState<PerformanceResponse | null>(null);
   const [reviewData,     setReviewData]     = useState<ReviewData | null>(null);
   const [recoData,       setRecoData]       = useState<RecoResponse | null>(null);
   const [repairsData,    setRepairsData]    = useState<RepairsResponse | null>(null);
@@ -2336,14 +2323,13 @@ export default function SignalsPage() {
     } catch { /* stale */ }
   }, []);
 
+  // B1: query /signals/performance?limit=100 dibuang — hasilnya tidak pernah
+  // dirender sejak ImprovementsTab beralih ke kartu per-agent berbasis ledger
+  // repair. Yang benar-benar dipakai tab ini hanya review mingguan.
   const fetchImprovements = useCallback(async () => {
     try {
-      const [wRes, rRes] = await Promise.all([
-        fetch("/api/v1/signals/performance?agent=all&regime=all&min_trades=3&sort_by=weight&sort_dir=desc&limit=100"),
-        fetch("/api/v1/predictive/signal_review"),
-      ]);
-      if (wRes.ok) setWeightPerf(await wRes.json() as PerformanceResponse);
-      if (rRes.ok) setReviewData(await rRes.json() as ReviewData);
+      const r = await fetch("/api/v1/predictive/signal_review");
+      if (r.ok) setReviewData(await r.json() as ReviewData);
     } catch { /* stale */ }
   }, []);
 
@@ -2412,20 +2398,21 @@ export default function SignalsPage() {
     } catch { /* stale */ }
   }, []);
 
+  // B8: ambil data SEKALI tiap kali sub-tab dibuka. Deps sengaja hanya `subTab`
+  // + callback yang identitasnya stabil (semua useCallback([])).
+  //
+  // Sebelumnya `repairsData`/`spotRepairsData` ikut jadi deps sementara cabang
+  // progress/suggestions memanggil fetchRepairs() tanpa syarat → tiap fetch
+  // meng-set state baru → deps berubah → effect jalan lagi → LOOP FETCH tak
+  // terbatas yang menggempur backend selama tab itu terbuka.
   useEffect(() => {
-    if (subTab === "regime"       && !regimeData)     void fetchRegime();
-    if (subTab === "rejections"   && !rejectionsData) void fetchRejections();
-    if (subTab === "predictive"   && !predictiveData) void fetchPredictive();
-    if (subTab === "improvements" && (!weightPerf || !repairsData || !spotRepairsData)) {
-      void fetchImprovements();
-      void fetchRepairs(); // PLAN_PERFORMANCE_INTEGRATION — improvements sekarang butuh repairs data
-    }
-    // PLAN_PERFORMANCE_INTEGRATION — saran tab fetch semua (reco + spotReco + repairs untuk activity)
-    if (subTab === "suggestions") { void fetchReco(); void fetchSpotReco(); void fetchRepairs(); }
-    if (subTab === "progress")    void fetchRepairs();
-  }, [subTab, regimeData, rejectionsData, predictiveData, weightPerf,
-      repairsData, spotRepairsData,
-      fetchRegime, fetchRejections, fetchPredictive, fetchImprovements,
+    if (subTab === "regime")       void fetchRegime();
+    if (subTab === "rejections")   void fetchRejections();
+    if (subTab === "predictive")   void fetchPredictive();
+    if (subTab === "improvements") { void fetchImprovements(); void fetchRepairs(); }
+    if (subTab === "suggestions")  { void fetchReco(); void fetchSpotReco(); void fetchRepairs(); }
+    if (subTab === "progress")     void fetchRepairs();
+  }, [subTab, fetchRegime, fetchRejections, fetchPredictive, fetchImprovements,
       fetchReco, fetchSpotReco, fetchRepairs]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
@@ -2464,7 +2451,12 @@ export default function SignalsPage() {
         {SECTIONS.map(s => {
           const active = s.key === activeSection;
           return (
-            <button key={s.key} onClick={() => setSubTab(SECTION_DEFAULT[s.key])}
+            <button key={s.key}
+              onClick={() => {
+                // B2: filter agent tidak boleh bocor ke seksi lain
+                setProgressAgentFilter(null);
+                setSubTab(SECTION_DEFAULT[s.key]);
+              }}
               className={`text-left rounded-xl border p-3 transition-all ${active
                 ? "bg-neutral-900 border-neutral-900 text-white shadow-md"
                 : "bg-white border-neutral-200 text-neutral-700 hover:border-neutral-300 hover:shadow-sm"}`}>
@@ -2766,6 +2758,8 @@ export default function SignalsPage() {
               </div>
               <ImprovementsTab data={repairsData} spotData={spotRepairsData} health={agentHealth}
                 futures={futuresEngine} review={reviewData} catalog={catalogData}
+                agentFilter={progressAgentFilter}
+                onClearAgentFilter={() => setProgressAgentFilter(null)}
                 onAgentClick={(agent) => { setProgressAgentFilter(agent); setSubTab("progress"); }} />
             </div>
           )}
