@@ -159,6 +159,12 @@ async def _migrate_columns(connection) -> None:
         "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS move_4h_pct FLOAT",
         "ALTER TABLE predictive_log ADD COLUMN IF NOT EXISTS move_24h_pct FLOAT",
         "CREATE INDEX IF NOT EXISTS ix_pl_scanned_at ON predictive_log (scanned_at)",
+        # PLAN_PERFORMANCE_INTEGRATION — verifier fields untuk spot_repair_actions
+        "ALTER TABLE spot_repair_actions ADD COLUMN IF NOT EXISTS before_metric FLOAT",
+        "ALTER TABLE spot_repair_actions ADD COLUMN IF NOT EXISTS after_metric FLOAT",
+        "ALTER TABLE spot_repair_actions ADD COLUMN IF NOT EXISTS verified_at FLOAT",
+        # Widen status kolom untuk vocab baru (verified_improved / verified_no_change / reverted).
+        "ALTER TABLE spot_repair_actions ALTER COLUMN status TYPE VARCHAR(28)",
     ]
     for sql in migrations:
         try:

@@ -14,6 +14,8 @@ from app.models.spot_decision_event import SpotDecisionEvent
 from app.models.spot_model_version import SpotModelVersion
 from app.models.futures_decision_event import FuturesDecisionEvent
 from app.models.futures_model_version import FuturesModelVersion
+from app.models.futures_repair_action import FuturesRepairAction
+from app.models.spot_repair_action import SpotRepairAction
 
 __all__ = [
     "PaperTrade", "PaperBalance",
@@ -21,5 +23,6 @@ __all__ = [
     "HealthEvent", "RejectionLog", "PredictiveLog",
     "AppSettings", "BigMoverLog", "BalanceTransaction", "ForceOpenLog",
     "AgentConfig", "SpotDecisionEvent", "SpotModelVersion",
-    "FuturesDecisionEvent", "FuturesModelVersion",
+    "FuturesDecisionEvent", "FuturesModelVersion", "FuturesRepairAction",
+    "SpotRepairAction",
 ]

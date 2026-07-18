@@ -152,6 +152,28 @@ async def run_weekly_signal_review(force: bool = False) -> dict:
         if adjustments:
             await session.commit()
 
+    # PLAN_SIGNAL_REPAIR_LIVE R1: setiap penyesuaian mingguan tercatat di repair
+    # ledger (aksi material senyap = bug). Fail-open — kegagalan mencatat tidak
+    # membatalkan penyesuaian yang sudah di-commit.
+    try:
+        from agents.futures.repair_log import record_action
+        for adj in adjustments:
+            _delta = round(adj["new_weight"] - adj["old_weight"], 3)
+            await record_action(
+                source="weekly_review",
+                target_key=f"{adj['agent']}:{adj['signal_key']}",
+                agent=adj["agent"],
+                issue="hit_rate_low" if _delta < 0 else "hit_rate_high",
+                action="weight_down" if _delta < 0 else "weight_up",
+                evidence={"n": adj["n"], "hit_rate_4h": adj["hit_rate_4h"],
+                          "before_weight": adj["old_weight"],
+                          "after_weight": adj["new_weight"]},
+                delta=_delta,
+                before_metric=round(adj["hit_rate_4h"] / 100, 4),
+            )
+    except Exception as exc:
+        logger.warning("weekly_review_repair_log_failed", error=str(exc)[:120])
+
     # ── P2.2: report per (agent, regime, direction) ───────────────────────────
     agent_tot: dict[str, list] = {}
     for (agent, _, _), d in reg_stats.items():

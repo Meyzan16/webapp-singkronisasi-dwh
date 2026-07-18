@@ -41,6 +41,7 @@ from app.api.v1.diagnostics       import router as diagnostics_router
 from app.api.v1.predictive        import router as predictive_router
 from app.api.v1.agent_config      import router as agent_config_router
 from app.api.v1.exchange_settings import router as exchange_router
+from app.api.v1.spot_repair       import router as spot_repair_router
 from app.models.paper_trade import PaperTrade as _PaperTrade          # noqa: F401
 from app.models.paper_balance import PaperBalance as _PaperBalance    # noqa: F401
 from app.models.balance_transaction import BalanceTransaction as _BalTxn  # noqa: F401
@@ -54,6 +55,7 @@ from app.models.app_settings import AppSettings as _AS       # noqa: F401
 from app.models.agent_config import AgentConfig as _AC       # noqa: F401
 from app.models.spot_decision_event import SpotDecisionEvent as _SDE  # noqa: F401
 from app.models.spot_model_version import SpotModelVersion as _SMV  # noqa: F401
+from app.models.spot_repair_action import SpotRepairAction as _SRA  # noqa: F401
 from app.config import get_settings
 from app.database import create_db_schema, dispose_engine, set_db_available
 from agents.opportunity.scheduler import run_opportunity_loop, run_bigmover_fastpass
@@ -117,13 +119,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # G17: delisting risk monitor (poll every 6h)
     delisting_task = asyncio.create_task(run_delisting_monitor())
 
+    # SPOT Adaptive Repair Agent + Verifier — guarded env, default off untuk safety launch
+    _spot_repair_enabled = os.getenv("SPOT_REPAIR_ENABLED", "false").lower() == "true"
+    spot_repair_task: asyncio.Task | None = None
+    spot_verifier_task: asyncio.Task | None = None
+    if _spot_repair_enabled:
+        from agents.learning.spot_repair_agent import run_spot_repair_loop
+        from agents.learning.spot_repair_verifier import run_spot_verifier_loop
+        spot_repair_task = asyncio.create_task(run_spot_repair_loop())
+        spot_verifier_task = asyncio.create_task(run_spot_verifier_loop())
+        logger.info("spot_repair_agent_wired", enabled=True, verifier=True)
+    else:
+        logger.info("spot_repair_agent_wired", enabled=False,
+                    hint="set SPOT_REPAIR_ENABLED=true untuk aktifkan loop background")
+
     yield  # ← app is running
 
     # ── Shutdown ───────────────────────────────────────────────────────────────
-    for task in [
+    _shutdown_tasks = [
         opportunity_task, monitor_task, futures_task, futures_monitor_task,
         bigmover_fastpass_task, ws_big_mover_task, delisting_task,
-    ]:
+    ]
+    if spot_repair_task is not None:
+        _shutdown_tasks.append(spot_repair_task)
+    if spot_verifier_task is not None:
+        _shutdown_tasks.append(spot_verifier_task)
+    for task in _shutdown_tasks:
         task.cancel()
         try:
             await task
@@ -154,6 +175,7 @@ app.include_router(diagnostics_router,      prefix=settings.api_v1_prefix)
 app.include_router(predictive_router,       prefix=settings.api_v1_prefix)
 app.include_router(agent_config_router,     prefix=settings.api_v1_prefix)
 app.include_router(exchange_router,         prefix=settings.api_v1_prefix)
+app.include_router(spot_repair_router,      prefix=settings.api_v1_prefix)
 
 
 @app.websocket("/ws/opportunity")

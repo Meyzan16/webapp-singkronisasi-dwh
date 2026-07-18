@@ -31,6 +31,10 @@ logger = structlog.get_logger(__name__)
 _FUTURES_AGENTS = (
     "futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover",
 )
+
+# PLAN_SIGNAL_REPAIR_LIVE R1: deteksi transisi ban/unban antar-load supaya
+# perubahan status ban tercatat di repair ledger (bukan senyap).
+_prev_banned: set | None = None
 # Ambang kematangan ledger sebelum learning naik dari "warming" → "active"
 # (identik gate F3/§4: 60 mature samples). Selama warming, HANYA hard-ban yang
 # boleh mem-veto; veto lunak (adaptive_score turun) menunggu active.
@@ -95,6 +99,29 @@ async def load_futures_learning() -> tuple[dict, dict, dict, set, str, Optional[
             ) or 0)
 
         status = "active" if mature >= MATURE_ACTIVE_THRESHOLD else "warming"
+
+        # R1: catat transisi ban/unban (sekali per transisi, bukan per load)
+        global _prev_banned
+        if _prev_banned is not None and banned != _prev_banned:
+            try:
+                from agents.futures.repair_log import record_action
+                for key in sorted(banned - _prev_banned):
+                    await record_action(
+                        source="learning_ban", target_key=key, issue="weight_ban",
+                        action="ban", evidence={"threshold": BAN_WEIGHT_BELOW,
+                                                "min_samples": BAN_MIN_SAMPLES},
+                        note="weight<0.8 n≥10 → veto auto-open",
+                    )
+                for key in sorted(_prev_banned - banned):
+                    await record_action(
+                        source="learning_ban", target_key=key, issue="weight_unban",
+                        action="unban", evidence={},
+                        note="bobot pulih ≥0.8 → veto dicabut",
+                    )
+            except Exception as exc:
+                logger.warning("ban_transition_log_failed", error=str(exc)[:120])
+        _prev_banned = set(banned)
+
         return weights, probabilities, sample_counts, banned, status, None
     except Exception as exc:
         error = str(exc)[:120]

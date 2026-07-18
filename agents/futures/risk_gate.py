@@ -222,6 +222,23 @@ async def evaluate_daily_gates(force: bool = False) -> dict:
         in_window = [t for t in rows if (t.closed_at or 0) >= now - CONSEC_SL_WINDOW_H * 3600]
         lane_until, global_until = _consec_pauses(in_window)
 
+        # PLAN_SIGNAL_REPAIR_LIVE R1: catat pause lane BARU ke repair ledger
+        # (transisi saja — pause yang sama tidak dicatat ulang tiap evaluasi).
+        _prev_pauses = _daily_gates.get("lane_pause_until") or {}
+        for _lane, _until in lane_until.items():
+            if abs(_prev_pauses.get(_lane, 0.0) - _until) > 1.0:
+                try:
+                    from agents.futures.repair_log import record_action
+                    await record_action(
+                        source="lane_pause", target_key=f"lane:{_lane}",
+                        issue="lane_consec_sl", action="pause",
+                        evidence={"until": _until, "limit": CONSEC_SL_LANE_LIMIT,
+                                  "window_h": CONSEC_SL_WINDOW_H},
+                        note=f"pause {CONSEC_SL_LANE_PAUSE_H:.0f} jam",
+                    )
+                except Exception as exc:
+                    logger.warning("lane_pause_repair_log_failed", error=str(exc)[:100])
+
         if loss_breaker:
             reason = (f"Daily loss breaker: realized {day_pnl:+.2f} USD hari ini (WIB) "
                       f"melewati batas −{DAILY_LOSS_LIMIT_PCT}% dari balance {balance:.0f}. "

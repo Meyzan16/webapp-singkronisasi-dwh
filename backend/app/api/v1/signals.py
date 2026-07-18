@@ -14,7 +14,8 @@ POST /api/v1/signals/updater/run          — force-run all weight updaters
 import json
 import time
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from app.database import AsyncSessionLocal, require_db
@@ -1013,7 +1014,7 @@ async def get_recommendations() -> dict:
         good = sorted([w for w in ws if w.weight >= 1.2], key=lambda w: -w.weight)
         if bad:
             worst = bad[0]
-            sugg.append({
+            _item = {
                 "severity": "watch", "source": "weights",
                 "title": f"{len(bad)} sinyal berkinerja buruk sudah diturunkan otomatis",
                 "detail": (
@@ -1021,7 +1022,16 @@ async def get_recommendations() -> dict:
                     f"(WR {_wr_pct(worst.win_rate):.0f}%, {worst.total_count} trades). "
                     "Engine terus menekan pengaruhnya; di bawah x0.80 akan diveto."
                 ),
-            })
+            }
+            # PLAN_SIGNAL_REPAIR_LIVE R4: saran yang AMAN di-otomasi membawa payload
+            # apply (futures only; bounded −0.10, floor 0.70, cooldown 24h di endpoint).
+            if agent_key.startswith("futures") and worst.weight > 0.70 + 1e-9:
+                _item["apply"] = {
+                    "type": "weight", "agent": agent_key,
+                    "signal_key": worst.signal_key, "delta": -0.10,
+                    "label": f"Turunkan bobot '{worst.signal_key}' −0.10",
+                }
+            sugg.append(_item)
         if good:
             best = good[0]
             sugg.append({
@@ -1064,3 +1074,124 @@ async def get_recommendations() -> dict:
         })
 
     return {"categories": categories, "generated_at": now}
+
+
+# ── PLAN_SIGNAL_REPAIR_LIVE R4 — repair log + apply saran ─────────────────────
+
+@router.get("/signals/repairs", dependencies=[Depends(require_db)])
+async def get_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
+    """Progress perbaikan sinyal futures: funnel deteksi→aksi→verifikasi, log aksi
+    (before→after), dan status agen perbaikan + verifier."""
+    from app.models.futures_repair_action import FuturesRepairAction
+
+    now = time.time()
+    async with AsyncSessionLocal() as session:
+        rows = list((await session.execute(
+            select(FuturesRepairAction).order_by(
+                FuturesRepairAction.detected_at.desc()).limit(limit)
+        )).scalars().all())
+        status_counts = dict((await session.execute(
+            select(FuturesRepairAction.status, func.count(FuturesRepairAction.id))
+            .group_by(FuturesRepairAction.status)
+        )).all())
+        actions_24h = int(await session.scalar(
+            select(func.count(FuturesRepairAction.id)).where(
+                FuturesRepairAction.applied.is_(True),
+                FuturesRepairAction.applied_at >= now - 86400,
+            )) or 0)
+        total = int(await session.scalar(select(func.count(FuturesRepairAction.id))) or 0)
+
+    try:
+        from agents.learning.predictive_repair import get_repair_agent_status
+        agent_status = get_repair_agent_status()
+    except Exception:
+        agent_status = {}
+    try:
+        from agents.learning.repair_verifier import get_verifier_status
+        verifier_status = get_verifier_status()
+    except Exception:
+        verifier_status = {}
+
+    def _row(r) -> dict:
+        try:
+            evidence = json.loads(r.evidence_json or "{}")
+        except (TypeError, json.JSONDecodeError):
+            evidence = {}
+        return {
+            "id": r.id, "detected_at": r.detected_at, "source": r.source,
+            "target_key": r.target_key, "agent": r.agent, "issue": r.issue,
+            "action": r.action, "delta": r.delta, "applied": r.applied,
+            "applied_at": r.applied_at, "evidence": evidence,
+            "before_metric": r.before_metric, "after_metric": r.after_metric,
+            "status": r.status, "verified_at": r.verified_at,
+            "revert_of": r.revert_of, "note": r.note,
+        }
+
+    verified_total = (status_counts.get("verified_improved", 0)
+                      + status_counts.get("verified_no_change", 0)
+                      + status_counts.get("reverted", 0))
+    return {
+        "funnel": {
+            "total": total,
+            "applied": status_counts.get("applied", 0),
+            "verified": verified_total,
+            "improved": status_counts.get("verified_improved", 0),
+            "no_change": status_counts.get("verified_no_change", 0),
+            "reverted": status_counts.get("reverted", 0),
+            "suggested": status_counts.get("suggested", 0),
+            "actions_24h": actions_24h,
+        },
+        "agent": agent_status,
+        "verifier": verifier_status,
+        "actions": [_row(r) for r in rows],
+        "updated_at": now,
+    }
+
+
+class ApplySuggestionBody(BaseModel):
+    type: str = Field(..., description="'weight' — aksi bobot bounded (satu-satunya yang auto-applicable)")
+    agent: str = Field(..., max_length=40)
+    signal_key: str = Field(..., max_length=100)
+    delta: float = Field(..., description="±0.10 saja")
+    label: str = Field(default="", max_length=160)
+
+
+_FUTURES_AGENT_SET = {
+    "futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover",
+}
+
+
+@router.post("/signals/recommendations/apply", dependencies=[Depends(require_db)])
+async def apply_recommendation(body: ApplySuggestionBody) -> dict:
+    """Terapkan saran yang AMAN di-otomasi (R4): hanya aksi bobot bounded pada
+    agent FUTURES. Bounds & cooldown ditegakkan di sini; aksi tercatat di repair
+    ledger source='suggestion'. Saran level kode TIDAK pernah bisa lewat sini."""
+    if body.type != "weight":
+        raise HTTPException(status_code=400, detail="Hanya type 'weight' yang auto-applicable")
+    if body.agent not in _FUTURES_AGENT_SET:
+        raise HTTPException(status_code=400, detail="Hanya agent futures (SPOT read-only)")
+    if abs(abs(body.delta) - 0.10) > 1e-9:
+        raise HTTPException(status_code=400, detail="Delta wajib ±0.10 (step-cap terkunci)")
+
+    from agents.futures.repair_log import has_recent_action, record_action
+    from agents.learning.predictive_repair import _apply_weight_step
+
+    target = f"{body.agent}:{body.signal_key}"
+    if await has_recent_action(target):
+        raise HTTPException(status_code=429,
+                            detail="Cooldown: sudah ada aksi bobot untuk sinyal ini dalam 24 jam")
+    applied = await _apply_weight_step(body.agent, body.signal_key, body.delta, time.time())
+    if applied is None:
+        raise HTTPException(status_code=409, detail="Bobot sudah di floor/cap — tidak ada perubahan")
+    old_w, new_w = applied
+    rid = await record_action(
+        source="suggestion", target_key=target, agent=body.agent,
+        issue="suggestion_applied",
+        action="weight_down" if body.delta < 0 else "weight_up",
+        evidence={"before_weight": old_w, "after_weight": new_w,
+                  "label": body.label[:160]},
+        delta=body.delta,
+        note=(body.label[:200] or None),
+    )
+    return {"ok": True, "id": rid, "target": target,
+            "weight": {"before": old_w, "after": new_w}}

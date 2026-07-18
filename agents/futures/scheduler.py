@@ -789,6 +789,28 @@ async def run_futures_loop() -> None:
                 except Exception as exc:
                     logger.warning("futures_challenger_train_failed", error=str(exc)[:200])
 
+            # PLAN_SIGNAL_REPAIR_LIVE R2: Predictive Repair Agent — refleks cepat
+            # (~30 mnt); guard internal 20 mnt mencegah dobel. Semua aksi bounded
+            # + cooldown 24h/target + tercatat di futures_repair_actions.
+            if _cycle_count % 15 == 7:
+                try:
+                    from agents.learning.predictive_repair import run_predictive_repair
+                    _rep = await run_predictive_repair()
+                    if _rep.get("actions"):
+                        logger.info("predictive_repair_pass",
+                                    actions=len(_rep["actions"]), checked=_rep.get("checked"))
+                except Exception as exc:
+                    logger.warning("predictive_repair_failed", error=str(exc)[:160])
+
+            # PLAN_SIGNAL_REPAIR_LIVE R3: verifier progress (~6 jam) — before/after
+            # + auto-revert bila aksi terbukti salah.
+            if _cycle_count % 180 == 20:
+                try:
+                    from agents.learning.repair_verifier import verify_repairs
+                    await verify_repairs()
+                except Exception as exc:
+                    logger.warning("repair_verifier_failed", error=str(exc)[:160])
+
             # Phase 1 T4: backfill forward-pnl on big_mover_log every 10 cycles (~20 min)
             if _cycle_count % 10 == 0:
                 try:

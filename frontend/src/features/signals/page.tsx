@@ -194,6 +194,10 @@ interface RecoSuggestion {
   source:   string;
   title:    string;
   detail:   string;
+  // R4: saran yang AMAN di-otomasi membawa payload apply (futures weight ±0.10)
+  // PLAN_PERFORMANCE_INTEGRATION — endpoint optional untuk SPOT (routing di applySuggestion)
+  apply?: { type: string; agent: string; signal_key: string; delta: number; label: string;
+            endpoint?: string; regime?: string };
 }
 
 interface RecoCategory {
@@ -216,33 +220,67 @@ interface RecoResponse {
   generated_at: number;
 }
 
-type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "improvements" | "suggestions" | "regime" | "formulas" | "rejections" | "predictive";
+type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "progress" | "improvements" | "suggestions" | "regime" | "formulas" | "rejections" | "predictive";
+
+// PLAN_SIGNAL_REPAIR_LIVE R4/R5 — kontrak GET /signals/repairs
+interface RepairAction {
+  id: number; detected_at: number; source: string; target_key: string;
+  agent: string; issue: string; action: string; delta: number | null;
+  applied: boolean; applied_at: number | null;
+  evidence: Record<string, number | string>;
+  before_metric: number | null; after_metric: number | null;
+  status: string; verified_at: number | null; revert_of: number | null;
+  note: string | null;
+}
+interface RepairsResponse {
+  funnel: { total: number; applied: number; verified: number; improved: number;
+            no_change: number; reverted: number; suggested: number; actions_24h: number };
+  agent: { last_run?: number | null; checked?: number; actions_last_run?: number; actions_total?: number };
+  verifier: { last_run?: number | null; verified_last_run?: number; reverted_total?: number };
+  actions: RepairAction[];
+  updated_at: number;
+  scope?: "spot" | "futures";
+}
+// PLAN_PERFORMANCE_INTEGRATION — SPOT repairs (mirror shape futures)
+interface SpotRecommendation {
+  agent: string; signal_key: string; regime: string;
+  current_weight: number; new_weight: number; delta: number;
+  wr: number; n: number; action: "weight_up" | "weight_down"; reason: string;
+  apply: { type: string; agent: string; signal_key: string; delta: number; label: string;
+           endpoint: string; regime: string };
+}
+interface SpotRecoResponse {
+  scope: "spot"; count: number; recommendations: SpotRecommendation[]; updated_at: number;
+}
 type SortBy = "win_rate" | "avg_pnl_pct" | "total_count" | "weight";
 
-// ── Navigasi 2-level: 4 seksi ber-scope (refactor UX — dulu 9 tab flat) ────────
-type Section = "overview" | "engine" | "signals" | "analysis";
+// ── Navigasi 2-level: 5 seksi ber-scope (PLAN_SIGNAL_REPAIR_LIVE R5:
+// Perbaikan + Saran diangkat dari Analysis menjadi seksi Improve sendiri) ──────
+type Section = "overview" | "engine" | "signals" | "analysis" | "improve";
 
 const SECTION_OF: Record<SubTab, Section> = {
   overview: "overview",
   adaptive: "engine",
   spot: "signals", futures: "signals", cross: "signals",
-  improvements: "analysis", suggestions: "analysis",
   regime: "analysis", formulas: "analysis", rejections: "analysis", predictive: "analysis",
+  progress: "improve", improvements: "improve", suggestions: "improve",
 };
 
 // Tab default saat sebuah seksi dibuka
 const SECTION_DEFAULT: Record<Section, SubTab> = {
-  overview: "overview", engine: "adaptive", signals: "spot", analysis: "improvements",
+  overview: "overview", engine: "adaptive", signals: "spot",
+  analysis: "regime", improve: "progress",
 };
 
 const SECTIONS: { key: Section; icon: string; label: string; desc: string }[] = [
   { key: "overview", icon: "📊", label: "Overview",  desc: "Ringkasan cepat: kesehatan agen & mesin" },
   { key: "engine",   icon: "🧠", label: "Engine",    desc: "Mesin belajar adaptif SPOT & Futures" },
   { key: "signals",  icon: "🎯", label: "Signals",   desc: "Bobot sinyal yang dipelajari per market" },
-  { key: "analysis", icon: "🔬", label: "Analysis",  desc: "Perbaikan live, regime, rumus, rejections, prediksi" },
+  { key: "analysis", icon: "🔬", label: "Analysis",  desc: "Diagnostik: regime, rumus, rejections, prediksi" },
+  { key: "improve",  icon: "🔧", label: "Improve",   desc: "Agen perbaikan live: progress, aksi, saran" },
 ];
 
-// Sub-tab per seksi (hanya Signals & Analysis punya inner nav)
+// Sub-tab per seksi
 const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
   overview: [],
   engine:   [],
@@ -252,12 +290,15 @@ const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
     { key: "cross",   label: "🔗 Cross-Agent" },
   ],
   analysis: [
-    { key: "improvements", label: "🔧 Perbaikan" },
-    { key: "suggestions",  label: "💡 Saran Engine" },
     { key: "regime",     label: "🌡 Regime" },
     { key: "formulas",   label: "🔬 Formulas" },
     { key: "rejections", label: "🚫 Rejections" },
     { key: "predictive", label: "🔮 Predictive" },
+  ],
+  improve: [
+    { key: "progress",     label: "📈 Progress" },
+    { key: "improvements", label: "🔧 Perbaikan Live" },
+    { key: "suggestions",  label: "💡 Saran Engine" },
   ],
 };
 
@@ -526,69 +567,163 @@ function MoverList({ title, rows, tone, emptyText, catalog }: {
   );
 }
 
-function ImprovementsTab({ weightPerf, health, futures, review, catalog }: {
-  weightPerf: PerformanceResponse | null;
-  health:     AgentHealthData | null;
-  futures:    FuturesAdaptiveEngineData | null;
-  review:     ReviewData | null;
-  catalog:    CatalogResponse | null;
+// PLAN_PERFORMANCE_INTEGRATION — per-agent live scorecard (menggantikan movers table
+// yang duplikat dengan Signals→Cross-Agent). Data source: repairs API.
+function ImprovementsTab({ data, spotData, health, futures, review, catalog, onAgentClick }: {
+  data:     RepairsResponse | null;
+  spotData: RepairsResponse | null;
+  health:   AgentHealthData | null;
+  futures:  FuturesAdaptiveEngineData | null;
+  review:   ReviewData | null;
+  catalog:  CatalogResponse | null;
+  onAgentClick?: (agent: string) => void;
 }) {
-  const { spotUp, spotDown, futUp, futDown, futVeto } = useMemo(() => {
-    const spot: MoverRow[] = [];
-    const fut:  MoverRow[] = [];
-    for (const s of weightPerf?.signals ?? []) {
-      for (const [agentKey, stat] of Object.entries(s.agents)) {
-        const row = { signal_key: s.signal_key, agentLabel: AGENT_LABEL[agentKey] ?? agentKey, stat: { ...stat, label: agentKey } };
-        // cross_agent bukan market — tampil di Signals→Cross-Agent, bukan di sini
-        if (agentKey === "opportunity_spot") spot.push(row);
-        else if (agentKey.startsWith("futures_")) fut.push(row);
-      }
-    }
-    const byW  = (dir: 1 | -1) => (a: MoverRow, b: MoverRow) => dir * (b.stat.weight - a.stat.weight);
-    return {
-      spotUp:   spot.filter(r => r.stat.weight >= 1.05).sort(byW(1)).slice(0, 6),
-      spotDown: spot.filter(r => r.stat.weight <= 0.95).sort(byW(-1)).slice(0, 6),
-      futUp:    fut.filter(r => r.stat.weight >= 1.05).sort(byW(1)).slice(0, 6),
-      futDown:  fut.filter(r => r.stat.weight <= 0.95 && r.stat.weight >= 0.8).sort(byW(-1)).slice(0, 6),
-      futVeto:  fut.filter(r => r.stat.weight < 0.8 && r.stat.total >= 10).sort(byW(-1)).slice(0, 6),
+  const agentCards = useMemo(() => {
+    type AgentStat = {
+      agent: string;
+      scope: "spot" | "futures";
+      actions_24h: number;
+      applied: number;
+      verified_improved: number;
+      verified_no_change: number;
+      reverted: number;
+      pending_verify: number;
+      recent: RepairAction[];
+      last_at: number | null;
     };
-  }, [weightPerf]);
+    const now = Date.now() / 1000;
+    const map = new Map<string, AgentStat>();
+    const push = (a: RepairAction, scope: "spot" | "futures") => {
+      const key = `${scope}::${a.agent || "unknown"}`;
+      let s = map.get(key);
+      if (!s) {
+        s = { agent: a.agent || "unknown", scope, actions_24h: 0, applied: 0,
+              verified_improved: 0, verified_no_change: 0, reverted: 0,
+              pending_verify: 0, recent: [], last_at: null };
+        map.set(key, s);
+      }
+      if (a.detected_at && (now - a.detected_at) <= 86400) s.actions_24h += 1;
+      if (a.applied) s.applied += 1;
+      if (a.status === "verified_improved") s.verified_improved += 1;
+      else if (a.status === "verified_no_change") s.verified_no_change += 1;
+      else if (a.status === "reverted" || a.status === "reversed") s.reverted += 1;
+      else if (a.status === "applied") s.pending_verify += 1;
+      if (s.recent.length < 3) s.recent.push(a);
+      s.last_at = Math.max(s.last_at ?? 0, a.applied_at ?? a.detected_at ?? 0);
+    };
+    for (const a of spotData?.actions ?? []) push(a, "spot");
+    for (const a of data?.actions ?? [])     push(a, "futures");
+    return Array.from(map.values()).sort((a, b) => (b.last_at ?? 0) - (a.last_at ?? 0));
+  }, [data, spotData]);
 
-  if (!weightPerf) {
+  if (!data && !spotData) {
     return (
       <div className="flex items-center justify-center py-16 text-neutral-400 gap-2">
         <div className="w-4 h-4 border-2 border-teal-400 border-t-transparent rounded-full animate-spin" />
-        Memuat data perbaikan...
+        Memuat data perbaikan per agent...
       </div>
     );
   }
-
   const vetoActive = futures?.learning_status === "active";
+  const spotCards = agentCards.filter(c => c.scope === "spot");
+  const futCards  = agentCards.filter(c => c.scope === "futures");
+
+  const renderCard = (c: typeof agentCards[number]) => {
+    const total = c.applied + c.pending_verify;
+    return (
+      <div key={`${c.scope}-${c.agent}`}
+           className={`bg-white border rounded-2xl p-4 ${
+             c.reverted > 0 ? "border-red-200"
+             : c.verified_improved > 0 ? "border-green-200"
+             : c.applied > 0 ? "border-blue-200"
+             : "border-neutral-200"
+           }`}>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">Agent</p>
+            <p className="text-sm font-black text-neutral-800 font-mono">{_agentShort(c.agent)}</p>
+          </div>
+          <p className="text-[10px] text-neutral-400 text-right">
+            {c.actions_24h} aksi (24j)<br/>
+            {c.last_at ? `terakhir ${new Date(c.last_at * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}` : "belum ada aksi"}
+          </p>
+        </div>
+
+        {/* Pipeline bar — pipeline nyata: terapkan → menunggu → hasil verifikasi */}
+        <div className="mb-3">
+          <div className="flex items-center gap-1 mb-1.5 text-[9px] font-bold uppercase tracking-wider text-neutral-500">
+            <span>Terapkan</span><span className="text-neutral-300">→</span>
+            <span>Menunggu</span><span className="text-neutral-300">→</span>
+            <span>Hasil verifikasi</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] font-mono tabular-nums">
+            <span className="px-2 py-1 rounded bg-blue-50 text-blue-700 font-bold">{total}</span>
+            <span className="text-neutral-300">→</span>
+            <span className="px-2 py-1 rounded bg-neutral-100 text-neutral-600 font-bold">{c.pending_verify}</span>
+            <span className="text-neutral-300">→</span>
+            <span className="px-2 py-1 rounded bg-green-50 text-green-700 font-bold" title="Terbukti membaik">✓ {c.verified_improved}</span>
+            <span className="px-2 py-1 rounded bg-neutral-50 text-neutral-500 font-bold" title="Tak berubah">− {c.verified_no_change}</span>
+            <span className="px-2 py-1 rounded bg-red-50 text-red-700 font-bold" title="Di-revert">↩ {c.reverted}</span>
+          </div>
+        </div>
+
+        {/* Aksi terbaru */}
+        {c.recent.length > 0 ? (
+          <div className="space-y-1 border-t border-neutral-100 pt-2">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-neutral-400 mb-1">Aksi terbaru</p>
+            {c.recent.map((a, i) => (
+              <div key={i} className="flex items-center gap-2 text-[10px]">
+                <span className="text-neutral-400 tabular-nums shrink-0">
+                  {a.applied_at ? new Date(a.applied_at * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "—"}
+                </span>
+                <span className="font-mono font-bold text-neutral-700 shrink-0">{a.action}</span>
+                <span className="text-neutral-500 truncate">{_shortKey(a.target_key)}</span>
+                <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                  REPAIR_STATUS_BADGE[a.status]?.cls ?? "bg-neutral-100 text-neutral-500"
+                }`}>{REPAIR_STATUS_BADGE[a.status]?.label ?? a.status}</span>
+              </div>
+            ))}
+            {onAgentClick && (
+              <button onClick={() => onAgentClick(c.agent)}
+                className="mt-1 text-[10px] font-bold text-teal-700 hover:text-teal-900">
+                Lihat semua aksi agent ini di Progress →
+              </button>
+            )}
+          </div>
+        ) : (
+          <p className="text-[10px] text-neutral-400 border-t border-neutral-100 pt-2">Belum ada aksi tercatat.</p>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
+      {/* Intro */}
+      <div className="bg-teal-50 border border-teal-100 rounded-2xl p-3.5">
+        <p className="text-sm font-bold text-teal-800 mb-0.5">🔧 Perbaikan Live per Agent</p>
+        <p className="text-[11px] text-teal-700">
+          Setiap agent scanner (SPOT · FUTURES) punya masalah spesifiknya. Kartu di bawah ini menampilkan
+          <strong> aktivitas perbaikan nyata </strong> yang sedang berjalan untuk tiap agent — data live dari ledger repair.
+          Klik "Lihat semua aksi" untuk pindah ke tab Progress dengan filter agent tersebut.
+        </p>
+      </div>
+
+      {/* SPOT & FUTURES per-agent */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* SPOT column */}
         <div className="space-y-3">
           <p className="text-sm font-black text-neutral-800">🎯 SPOT</p>
-          <MoverList title="⬆ Bobot dinaikkan — sinyal terbukti profit, pengaruhnya diperbesar"
-            rows={spotUp} tone="up" emptyText="Belum ada sinyal yang naik bobot." catalog={catalog} />
-          <MoverList title="⬇ Bobot diturunkan — sering rugi, pengaruhnya dikurangi"
-            rows={spotDown} tone="down" emptyText="Belum ada sinyal yang turun bobot." catalog={catalog} />
+          {spotCards.length > 0
+            ? spotCards.map(renderCard)
+            : <div className="bg-white border border-neutral-200 rounded-2xl p-4 text-[11px] text-neutral-400">Belum ada agent SPOT yang mengeluarkan aksi.</div>}
         </div>
-
-        {/* FUTURES column */}
         <div className="space-y-3">
           <p className="text-sm font-black text-neutral-800">⚡ FUTURES</p>
-          <MoverList title="⬆ Bobot dinaikkan — sinyal terbukti profit, pengaruhnya diperbesar"
-            rows={futUp} tone="up" emptyText="Belum ada sinyal yang naik bobot." catalog={catalog} />
-          <MoverList title="⬇ Bobot diturunkan — sering rugi, pengaruhnya dikurangi"
-            rows={futDown} tone="down" emptyText="Belum ada sinyal yang turun bobot." catalog={catalog} />
-          <MoverList
-            title={`⛔ Kandidat veto (bobot <0.8, ≥10 trades) — ${vetoActive ? "trade dengan sinyal ini otomatis DITOLAK" : "veto belum aktif (masih pemanasan)"}`}
-            rows={futVeto} tone="veto" emptyText="Tidak ada sinyal yang cukup buruk untuk diveto." catalog={catalog} />
+          {futCards.length > 0
+            ? futCards.map(renderCard)
+            : <div className="bg-white border border-neutral-200 rounded-2xl p-4 text-[11px] text-neutral-400">Belum ada agent FUTURES yang mengeluarkan aksi.</div>}
 
-          {/* Blacklist + lane pause dari health */}
+          {/* Blacklist + lane pause — tetap dipertahankan, ini info unik dari health */}
           {health && (health.learning.blacklisted_coins.length > 0 || health.lanes.some(l => l.paused)) && (
             <div className="rounded-xl border border-orange-200 bg-orange-50 p-3 space-y-2">
               <p className="text-[10px] font-bold uppercase tracking-wider text-orange-700">🚧 Pengamanan aktif sekarang</p>
@@ -604,12 +739,13 @@ function ImprovementsTab({ weightPerf, health, futures, review, catalog }: {
                   {l.pause_until ? ` (lanjut ${new Date(l.pause_until * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })})` : ""}.
                 </p>
               ))}
+              {vetoActive && <p className="text-[10px] text-orange-600">Veto learning aktif — trade dengan sinyal ber-bobot &lt;0.8 (≥10 sampel) otomatis ditolak.</p>}
             </div>
           )}
         </div>
       </div>
 
-      {/* Review mingguan */}
+      {/* Review mingguan — tetap dipertahankan, ini adaptasi bobot resmi mingguan */}
       <div className="rounded-xl border border-neutral-200 bg-white p-4">
         <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">📅 Review Mingguan Otomatis (Senin 00:10 UTC)</p>
         {review?.ran_at ? (
@@ -631,12 +767,241 @@ function ImprovementsTab({ weightPerf, health, futures, review, catalog }: {
         ) : (
           <p className="text-[11px] text-neutral-400">
             Belum pernah jalan — review pertama otomatis Senin depan. Selain review mingguan ini,
-            bobot di atas tetap diperbarui otomatis setiap ada trade yang selesai.
+            bobot juga diperbarui otomatis setiap ada trade yang selesai.
           </p>
         )}
       </div>
+
+      {/* Catalog reference (kalau ada) */}
+      {catalog && <span className="hidden">{catalog.total}</span>}
     </div>
   );
+}
+
+
+// ── ProgressTab — progress perbaikan sinyal (PLAN_SIGNAL_REPAIR_LIVE R5) ──────
+
+const REPAIR_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  applied:            { label: "Menunggu verifikasi", cls: "bg-blue-100 text-blue-700" },
+  suggested:          { label: "Saran",               cls: "bg-neutral-100 text-neutral-600" },
+  verified_improved:  { label: "✓ Terbukti membaik",  cls: "bg-green-100 text-green-700" },
+  verified_no_change: { label: "− Tak berubah",       cls: "bg-neutral-100 text-neutral-600" },
+  reverted:           { label: "↩ Di-revert",          cls: "bg-red-100 text-red-700" },
+  dismissed:          { label: "Diabaikan",            cls: "bg-neutral-100 text-neutral-500" },
+};
+
+const REPAIR_SOURCE_LABEL: Record<string, string> = {
+  predictive_agent: "🤖 Agen Predictive",
+  weekly_review:    "📅 Review Mingguan",
+  learning_ban:     "🚫 Learning Ban",
+  lane_pause:       "⏸ Pause Lane",
+  suggestion:       "💡 Saran (manual)",
+  verifier:         "🔍 Verifier",
+};
+
+function _shortKey(target: string): string {
+  const key = target.includes(":") ? target.split(":").slice(1).join(":") : target;
+  return key.replace("signal_id:", "").replace("signal:", "");
+}
+
+function _agentShort(agent: string): string {
+  return agent.replace("futures_agent_bigmover", "BigMover")
+    .replace("futures_agent1", "Pre-Gainer")
+    .replace("futures_agent2", "Accumulation")
+    .replace("futures_agent3", "Momentum");
+}
+
+function ProgressTab({ data, spotData, agentFilter, onClearAgentFilter }: {
+  data: RepairsResponse | null;
+  spotData?: RepairsResponse | null;
+  agentFilter?: string | null;
+  onClearAgentFilter?: () => void;
+}) {
+  // PLAN_PERFORMANCE_INTEGRATION — dua funnel bersanding + log gabungan + filter agent
+  // Semua hooks HARUS di atas early return
+  const [scope, setScope] = useState<"all" | "spot" | "futures">("all");
+  const combinedRaw: (RepairAction & { _scope: "spot" | "futures" })[] = useMemoActionMerge(data, spotData, scope);
+  const combined = useMemo(
+    () => agentFilter ? combinedRaw.filter(a => a.agent === agentFilter) : combinedRaw,
+    [combinedRaw, agentFilter]
+  );
+  if (!data && !spotData) {
+    return <div className="bg-white border border-neutral-200 rounded-2xl p-5 text-sm text-neutral-400">Memuat progress perbaikan...</div>;
+  }
+  const scopes: { key: "spot" | "futures"; label: string; icon: string; d: RepairsResponse | null | undefined }[] = [
+    { key: "spot",    label: "SPOT",    icon: "🎯", d: spotData },
+    { key: "futures", label: "FUTURES", icon: "⚡", d: data },
+  ];
+  return (
+    <div className="space-y-4">
+      {/* Penjelasan status */}
+      <p className="text-[11px] text-neutral-500 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2">
+        <strong>Menunggu verifikasi</strong> = aksi &lt; 24 jam, verifier belum punya cukup sampel sesudah untuk memvonis.
+        Setelah 24 jam verifier ukur ulang → <span className="text-green-700">Terbukti membaik</span> · <span className="text-neutral-600">Tak berubah</span> · <span className="text-red-700">Di-revert</span>.
+      </p>
+
+      {/* Funnel per scope */}
+      <div className="space-y-3">
+        {scopes.map(s => {
+          const f = s.d?.funnel;
+          const agentLast = s.d?.agent?.last_run;
+          return (
+            <div key={s.key} className="bg-white border border-neutral-200 rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-black text-neutral-800">{s.icon} {s.label}</p>
+                <p className="text-[10px] text-neutral-400">
+                  Agen: {agentLast
+                    ? `run terakhir ${new Date(agentLast * 1000).toLocaleTimeString("id-ID")}`
+                    : "menunggu run pertama"}
+                  {" · "}Verifier: {s.d?.verifier?.last_run
+                    ? `${s.d.verifier.verified_last_run ?? 0} diverifikasi (pass ${new Date(s.d.verifier.last_run * 1000).toLocaleTimeString("id-ID")})`
+                    : "belum ada aksi berumur ≥24h"}
+                </p>
+              </div>
+              {f ? (
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                  {[
+                    { label: "Total Aksi",       val: f.total,      sub: `${f.actions_24h} dalam 24 jam`, color: "text-neutral-800" },
+                    { label: "Menunggu Verif.",  val: f.applied,    sub: "diukur ulang ≥24 jam",          color: "text-blue-600" },
+                    { label: "Terbukti Membaik", val: f.improved,   sub: "keputusan benar",               color: "text-green-600" },
+                    { label: "Tak Berubah",      val: f.no_change,  sub: "netral",                        color: "text-neutral-500" },
+                    { label: "Di-revert",        val: f.reverted,   sub: "aksi salah → dikembalikan",     color: "text-red-600" },
+                  ].map(c => (
+                    <div key={c.label} className="bg-neutral-50 rounded-xl p-3 text-center">
+                      <p className={`text-2xl font-black tabular-nums ${c.color}`}>{c.val}</p>
+                      <p className="text-[10px] font-bold uppercase text-neutral-400 mt-1">{c.label}</p>
+                      <p className="text-[10px] text-neutral-400">{c.sub}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-neutral-400">Data belum tersedia untuk scope ini.</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Filter chip scope untuk log */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] font-bold uppercase text-neutral-500">Log:</span>
+        {(["all", "spot", "futures"] as const).map(k => (
+          <button
+            key={k}
+            onClick={() => setScope(k)}
+            className={`text-[10px] font-bold px-2.5 py-1 rounded-full border ${
+              scope === k
+                ? "bg-neutral-900 text-white border-neutral-900"
+                : "bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400"
+            }`}>
+            {k === "all" ? "Semua" : k.toUpperCase()}
+          </button>
+        ))}
+        {agentFilter && (
+          <span className="ml-2 text-[10px] font-bold px-2.5 py-1 rounded-full border border-teal-300 bg-teal-50 text-teal-700 flex items-center gap-1">
+            Agent: {_agentShort(agentFilter)}
+            <button onClick={() => onClearAgentFilter?.()}
+              className="ml-1 text-teal-600 hover:text-teal-900 font-black">×</button>
+          </span>
+        )}
+      </div>
+
+      {/* Log aksi gabungan */}
+      <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="border-b border-neutral-100 text-left text-[10px] uppercase tracking-wider text-neutral-400">
+                <th className="px-3 py-2">Waktu</th>
+                <th className="px-3 py-2">Scope</th>
+                <th className="px-3 py-2">Sumber</th>
+                <th className="px-3 py-2">Target</th>
+                <th className="px-3 py-2">Aksi</th>
+                <th className="px-3 py-2">Bukti</th>
+                <th className="px-3 py-2">Sebelum → Sesudah</th>
+                <th className="px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {combined.length === 0 && (
+                <tr><td colSpan={8} className="px-3 py-6 text-center text-neutral-400">
+                  Belum ada aksi perbaikan pada scope ini.
+                </td></tr>
+              )}
+              {combined.map(a => {
+                const badge = REPAIR_STATUS_BADGE[a.status] ?? { label: a.status, cls: "bg-neutral-100 text-neutral-600" };
+                const hitBefore = typeof a.before_metric === "number" ? formatMetric(a.before_metric, a.action) : "—";
+                const hitAfter = typeof a.after_metric === "number" ? formatMetric(a.after_metric, a.action) : "—";
+                const evAny = a.evidence as Record<string, unknown> | undefined;
+                const n = (evAny?.n as number | undefined) ?? (evAny?.n_after as number | undefined);
+                return (
+                  <tr key={`${a._scope}-${a.id}`} className="border-b border-neutral-50 hover:bg-neutral-50/60">
+                    <td className="px-3 py-2 whitespace-nowrap text-neutral-500">
+                      {new Date(a.detected_at * 1000).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`text-[9px] font-bold rounded-full px-2 py-0.5 ${
+                        a._scope === "spot"
+                          ? "bg-teal-100 text-teal-700 border border-teal-200"
+                          : "bg-blue-100 text-blue-700 border border-blue-200"
+                      }`}>{a._scope === "spot" ? "🎯 SPOT" : "⚡ FUT"}</span>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{REPAIR_SOURCE_LABEL[a.source] ?? a.source}</td>
+                    <td className="px-3 py-2">
+                      <p className="font-mono text-[10px] text-neutral-700">{_shortKey(a.target_key)}</p>
+                      <p className="text-[9px] text-neutral-400">{_agentShort(a.agent || a.target_key.split(":")[0] || "")}</p>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap font-bold">
+                      {a.action === "weight_down" ? <span className="text-red-600">bobot −{Math.abs(a.delta ?? 0.1).toFixed(2)}</span>
+                        : a.action === "weight_up" ? <span className="text-green-600">bobot +{Math.abs(a.delta ?? 0.1).toFixed(2)}</span>
+                        : a.action === "threshold_down" ? <span className="text-amber-600">threshold −{Math.abs(a.delta ?? 1).toFixed(1)}</span>
+                        : a.action === "threshold_up" ? <span className="text-purple-600">threshold +{Math.abs(a.delta ?? 1).toFixed(1)}</span>
+                        : a.action}
+                    </td>
+                    <td className="px-3 py-2 text-neutral-500 whitespace-nowrap">
+                      {n ? `n=${n}` : ""}{evAny?.hit_rate_4h !== undefined ? ` · hit ${(Number(evAny.hit_rate_4h) * 100).toFixed(0)}%` : ""}
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap tabular-nums text-neutral-600">{hitBefore} → {hitAfter}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${badge.cls}`}>{badge.label}</span>
+                      {a.revert_of ? <span className="ml-1 text-[9px] text-neutral-400">revert #{a.revert_of}</span> : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// PLAN_PERFORMANCE_INTEGRATION — merge helpers dipanggil di dalam ProgressTab
+function useMemoActionMerge(
+  fut: RepairsResponse | null,
+  spot: RepairsResponse | null | undefined,
+  scope: "all" | "spot" | "futures",
+) {
+  return useMemo(() => {
+    const rows: (RepairAction & { _scope: "spot" | "futures" })[] = [];
+    if (scope !== "spot" && fut) {
+      for (const a of fut.actions) rows.push({ ...a, _scope: "futures" });
+    }
+    if (scope !== "futures" && spot) {
+      for (const a of spot.actions) rows.push({ ...a, _scope: "spot" });
+    }
+    rows.sort((a, b) => b.detected_at - a.detected_at);
+    return rows.slice(0, 120);
+  }, [fut, spot, scope]);
+}
+
+function formatMetric(v: number, action: string): string {
+  if (action === "backfill") return `${v.toFixed(1)}%`;
+  if (action === "threshold_up" || action === "threshold_down") {
+    return v > 1 ? v.toFixed(0) : `${(v * 100).toFixed(0)}%`;
+  }
+  return `${(v * 100).toFixed(0)}%`;
 }
 
 // ── SuggestionsTab — saran perbaikan dari engine, per kategori lane ───────────
@@ -652,7 +1017,31 @@ const RECO_ICONS: Record<string, string> = {
   futures_agent3: "⚡", futures_agent_bigmover: "🚀",
 };
 
-function SuggestionsTab({ data }: { data: RecoResponse | null }) {
+function SuggestionsTab({ data, onApply, applyMsg, spotReco, repairs, spotRepairs, onNavigate }: {
+  data: RecoResponse | null;
+  onApply?: (apply: NonNullable<RecoSuggestion["apply"]>) => void;
+  applyMsg?: string | null;
+  spotReco?: SpotRecoResponse | null; // PLAN_PERFORMANCE_INTEGRATION
+  repairs?: RepairsResponse | null;     // PLAN_PERFORMANCE_INTEGRATION — activity per agent
+  spotRepairs?: RepairsResponse | null; // PLAN_PERFORMANCE_INTEGRATION
+  onNavigate?: (agent: string) => void; // PLAN_PERFORMANCE_INTEGRATION — jump to Perbaikan Live filtered
+}) {
+  // Peta agent → jumlah aksi 24h dari ledger repair
+  const activity24h = useMemo(() => {
+    const m = new Map<string, { count: number; last_at: number | null }>();
+    const now = Date.now() / 1000;
+    const add = (a: RepairAction) => {
+      if (!a.agent) return;
+      const cur = m.get(a.agent) ?? { count: 0, last_at: null };
+      if ((now - a.detected_at) <= 86400) cur.count += 1;
+      cur.last_at = Math.max(cur.last_at ?? 0, a.applied_at ?? a.detected_at ?? 0);
+      m.set(a.agent, cur);
+    };
+    for (const a of spotRepairs?.actions ?? []) add(a);
+    for (const a of repairs?.actions ?? [])     add(a);
+    return m;
+  }, [repairs, spotRepairs]);
+
   if (!data) {
     return (
       <div className="flex items-center justify-center py-16 text-neutral-400 gap-2">
@@ -667,10 +1056,11 @@ function SuggestionsTab({ data }: { data: RecoResponse | null }) {
 
   const renderCard = (c: RecoCategory) => {
     const actions = c.suggestions.filter(s => s.severity === "action").length;
+    const act = activity24h.get(c.agent);
     return (
       <div key={c.agent} className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
         <div className="p-3.5 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-base">{RECO_ICONS[c.agent] ?? "📊"}</span>
             <p className="text-sm font-black text-neutral-800">{c.label}</p>
             {c.paused && (
@@ -682,6 +1072,12 @@ function SuggestionsTab({ data }: { data: RecoResponse | null }) {
               </span>
             ) : (
               <span className="text-[9px] font-bold bg-green-100 text-green-700 border border-green-200 rounded-full px-2 py-0.5">sehat</span>
+            )}
+            {/* PLAN_PERFORMANCE_INTEGRATION — badge aktivitas repair 24h */}
+            {act && act.count > 0 && (
+              <span className="text-[9px] font-bold bg-blue-100 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5">
+                🔧 {act.count} perbaikan 24j
+              </span>
             )}
           </div>
           <p className="text-[10px] text-neutral-400">
@@ -700,6 +1096,22 @@ function SuggestionsTab({ data }: { data: RecoResponse | null }) {
                   <p className="text-[11px] font-bold text-neutral-800">{s.title}</p>
                 </div>
                 <p className="text-[11px] text-neutral-600 leading-relaxed">{s.detail}</p>
+                {/* Actionable path — saran punya apply payload */}
+                {s.apply && onApply && (
+                  <button
+                    onClick={() => onApply(s.apply!)}
+                    className="mt-2 text-[10px] font-bold bg-neutral-900 text-white rounded-lg px-3 py-1.5 hover:bg-neutral-700 transition-colors">
+                    ⚡ {s.apply.label} — Terapkan (tercatat di Progress)
+                  </button>
+                )}
+                {/* PLAN_PERFORMANCE_INTEGRATION — info-only path: link ke Perbaikan Live agent card */}
+                {!s.apply && onNavigate && s.severity !== "good" && (
+                  <button
+                    onClick={() => onNavigate(c.agent)}
+                    className="mt-2 text-[10px] font-bold text-teal-700 hover:text-teal-900 border border-teal-200 hover:border-teal-400 bg-teal-50 rounded-lg px-3 py-1.5 transition-colors">
+                    🔧 Lihat aktivitas perbaikan agent ini →
+                  </button>
+                )}
               </div>
             );
           })}
@@ -711,12 +1123,78 @@ function SuggestionsTab({ data }: { data: RecoResponse | null }) {
   return (
     <div className="space-y-4">
       <div>
+        {applyMsg && (
+          <p className="text-[11px] font-semibold bg-neutral-900 text-white rounded-xl px-3 py-2 mb-3">{applyMsg}</p>
+        )}
         <p className="text-sm font-black text-neutral-800 mb-2">🎯 SPOT</p>
         <div className="space-y-3">{spotCats.map(renderCard)}</div>
+        {/* PLAN_PERFORMANCE_INTEGRATION — saran SPOT auto-applicable dari /spot-repair/recommendations */}
+        {spotReco && spotReco.count > 0 && onApply && (
+          <div className="mt-3 bg-white border border-teal-200 rounded-2xl overflow-hidden">
+            <div className="p-3.5 border-b border-teal-100 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-base">⚡</span>
+                <p className="text-sm font-black text-teal-800">Saran Bobot SPOT — bisa langsung diterapkan</p>
+                <span className="text-[9px] font-bold bg-teal-100 text-teal-700 border border-teal-200 rounded-full px-2 py-0.5">
+                  {spotReco.count} saran
+                </span>
+              </div>
+              <p className="text-[10px] text-neutral-400">Sumber: spot_repair agent · {new Date(spotReco.updated_at * 1000).toLocaleTimeString("id-ID")}</p>
+            </div>
+            {/* Flow indicator — jelaskan keterkaitan Saran ↔ Progress ↔ Verifier */}
+            <div className="px-3.5 py-2 border-b border-teal-50 bg-teal-50/50">
+              <p className="text-[10px] text-teal-700 flex items-center gap-1.5 flex-wrap">
+                <span className="font-bold">Alur:</span>
+                <span className="px-1.5 py-0.5 bg-white border border-teal-200 rounded">Terapkan</span>
+                <span>→</span>
+                <span className="px-1.5 py-0.5 bg-white border border-teal-200 rounded">Tercatat di Progress</span>
+                <span>→</span>
+                <span className="px-1.5 py-0.5 bg-white border border-teal-200 rounded">Verifier cek dalam 24 jam</span>
+                <span>→</span>
+                <span className="px-1.5 py-0.5 bg-white border border-teal-200 rounded">Bila memburuk, auto-revert</span>
+              </p>
+            </div>
+            <div className="p-3 space-y-2">
+              {spotReco.recommendations.map((r, i) => (
+                <div key={i} className={`rounded-xl border p-3 ${
+                  r.action === "weight_up"
+                    ? "border-green-200 bg-green-50"
+                    : "border-amber-200 bg-amber-50"
+                }`}>
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    <span className={`text-[9px] font-bold border rounded-full px-2 py-0.5 ${
+                      r.action === "weight_up"
+                        ? "bg-green-100 text-green-700 border-green-200"
+                        : "bg-amber-100 text-amber-700 border-amber-200"
+                    }`}>{r.action === "weight_up" ? "boost" : "trim"}</span>
+                    <p className="text-[11px] font-bold text-neutral-800 font-mono">{r.signal_key}</p>
+                    <span className="text-[10px] text-neutral-500">
+                      ×{r.current_weight.toFixed(2)} → ×{r.new_weight.toFixed(2)}
+                    </span>
+                    <span className="text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-200 rounded-full px-2 py-0.5">
+                      🎯 opportunity_spot
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-600">{r.reason}</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={() => onApply(r.apply)}
+                      className="text-[10px] font-bold bg-neutral-900 text-white rounded-lg px-3 py-1.5 hover:bg-neutral-700 transition-colors">
+                      ⚡ Terapkan sekarang
+                    </button>
+                    <p className="text-[10px] text-neutral-500">
+                      → muncul di <span className="font-bold text-teal-700">Progress</span> sebagai "Menunggu verifikasi"
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div>
-        <p className="text-sm font-black text-neutral-800 mb-2">⚡ FUTURES — 4 lane</p>
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">{futCats.map(renderCard)}</div>
+        <p className="text-sm font-black text-neutral-800 mb-2">⚡ FUTURES</p>
+        <div className="space-y-3">{futCats.map(renderCard)}</div>
       </div>
       <p className="text-[10px] text-neutral-400 px-1">
         Saran dihitung ulang dari data live setiap kali tab ini dibuka
@@ -1736,15 +2214,16 @@ function AdaptiveLearningTutorial({
             </div>
           )}
 
-          {/* Panduan 4 seksi (selaras navigasi baru) */}
+          {/* Panduan 5 seksi (selaras navigasi baru) */}
           <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
-            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-3">Panduan 4 Seksi</p>
+            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-3">Panduan 5 Seksi</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
                 { tab: "📊 Overview", desc: "Ringkasan cepat: kesehatan agen, mesin, sinyal teratas" },
                 { tab: "🧠 Engine",   desc: "Mesin belajar adaptif SPOT & Futures — ledger, model, gate" },
                 { tab: "🎯 Signals",  desc: "Bobot sinyal per market → SPOT · Futures · Cross-Agent" },
                 { tab: "🔬 Analysis", desc: "Diagnostik → Regime · Formulas · Rejections · Predictive" },
+                { tab: "🔧 Improve",  desc: "Agen perbaikan live → Progress · Perbaikan · Saran Engine" },
               ].map(item => (
                 <div key={item.tab} className="flex gap-2">
                   <span className="text-[10px] font-bold text-neutral-700 shrink-0 w-20">{item.tab}</span>
@@ -1780,6 +2259,8 @@ function AdaptiveLearningTutorial({
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SignalsPage() {
+  // PLAN_PERFORMANCE_INTEGRATION — filter agent yg dipilih dari Improvements tab
+  const [progressAgentFilter, setProgressAgentFilter] = useState<string | null>(null);
   const [subTab,      setSubTab]      = useState<SubTab>("overview");
   const [agentFilter, setAgentFilter] = useState("futures_agent1");
   const [sortBy,      setSortBy]      = useState<SortBy>("win_rate");
@@ -1799,6 +2280,11 @@ export default function SignalsPage() {
   const [weightPerf,     setWeightPerf]     = useState<PerformanceResponse | null>(null);
   const [reviewData,     setReviewData]     = useState<ReviewData | null>(null);
   const [recoData,       setRecoData]       = useState<RecoResponse | null>(null);
+  const [repairsData,    setRepairsData]    = useState<RepairsResponse | null>(null);
+  // PLAN_PERFORMANCE_INTEGRATION — SPOT parallel to FUTURES /signals/repairs
+  const [spotRepairsData, setSpotRepairsData] = useState<RepairsResponse | null>(null);
+  const [spotRecoData,   setSpotRecoData]   = useState<SpotRecoResponse | null>(null);
+  const [applyMsg,       setApplyMsg]       = useState<string | null>(null);
   const [loading,        setLoading]        = useState(true);
   const [forceMsg,       setForceMsg]       = useState<string | null>(null);
   const [showTutorial,   setShowTutorial]   = useState(false);
@@ -1868,6 +2354,54 @@ export default function SignalsPage() {
     } catch { /* stale */ }
   }, []);
 
+  // PLAN_SIGNAL_REPAIR_LIVE R5: progress perbaikan (selalu segar saat tab dibuka)
+  const fetchRepairs = useCallback(async () => {
+    try {
+      // PLAN_PERFORMANCE_INTEGRATION — paralel: FUTURES (Claude Code) + SPOT (mine)
+      const [futR, spotR] = await Promise.all([
+        fetch("/api/v1/signals/repairs?limit=100"),
+        fetch("/api/v1/spot-repair/repairs?limit=100"),
+      ]);
+      if (futR.ok)  setRepairsData(await futR.json() as RepairsResponse);
+      if (spotR.ok) setSpotRepairsData(await spotR.json() as RepairsResponse);
+    } catch { /* stale */ }
+  }, []);
+
+  // PLAN_PERFORMANCE_INTEGRATION — fetch SPOT saran auto-applicable
+  const fetchSpotReco = useCallback(async () => {
+    try {
+      const r = await fetch("/api/v1/spot-repair/recommendations");
+      if (r.ok) setSpotRecoData(await r.json() as SpotRecoResponse);
+    } catch { /* stale */ }
+  }, []);
+
+  const applySuggestion = useCallback(async (apply: NonNullable<RecoSuggestion["apply"]>) => {
+    setApplyMsg(null);
+    try {
+      // PLAN_PERFORMANCE_INTEGRATION — routing: SPOT saran punya apply.endpoint sendiri
+      const url = apply.endpoint ?? "/api/v1/signals/recommendations/apply";
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apply),
+      });
+      const d = await r.json() as { ok?: boolean; detail?: string;
+                                     weight?: { before: number; after: number };
+                                     before?: number; after?: number };
+      if (r.ok && d.ok) {
+        const before = d.weight?.before ?? d.before;
+        const after = d.weight?.after ?? d.after;
+        setApplyMsg(`✅ Diterapkan: ${apply.label} (${before} → ${after}) — tercatat di Progress`);
+        void fetchReco();
+        void fetchSpotReco();
+      } else {
+        setApplyMsg(`⚠️ ${d.detail ?? "Gagal menerapkan"}`);
+      }
+    } catch {
+      setApplyMsg("⚠️ Gagal menghubungi backend");
+    }
+  }, [fetchReco, fetchSpotReco]);
+
   const fetchPredictive = useCallback(async () => {
     try {
       const r = await fetch("/api/v1/predictive/hit_rate?hours=168");
@@ -1882,9 +2416,17 @@ export default function SignalsPage() {
     if (subTab === "regime"       && !regimeData)     void fetchRegime();
     if (subTab === "rejections"   && !rejectionsData) void fetchRejections();
     if (subTab === "predictive"   && !predictiveData) void fetchPredictive();
-    if (subTab === "improvements" && !weightPerf)     void fetchImprovements();
-    if (subTab === "suggestions") void fetchReco();   // selalu segar — saran dihitung dari data live
-  }, [subTab, regimeData, rejectionsData, predictiveData, weightPerf, fetchRegime, fetchRejections, fetchPredictive, fetchImprovements, fetchReco]);
+    if (subTab === "improvements" && (!weightPerf || !repairsData || !spotRepairsData)) {
+      void fetchImprovements();
+      void fetchRepairs(); // PLAN_PERFORMANCE_INTEGRATION — improvements sekarang butuh repairs data
+    }
+    // PLAN_PERFORMANCE_INTEGRATION — saran tab fetch semua (reco + spotReco + repairs untuk activity)
+    if (subTab === "suggestions") { void fetchReco(); void fetchSpotReco(); void fetchRepairs(); }
+    if (subTab === "progress")    void fetchRepairs();
+  }, [subTab, regimeData, rejectionsData, predictiveData, weightPerf,
+      repairsData, spotRepairsData,
+      fetchRegime, fetchRejections, fetchPredictive, fetchImprovements,
+      fetchReco, fetchSpotReco, fetchRepairs]);
 
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
@@ -1918,7 +2460,7 @@ export default function SignalsPage() {
   const nav = (
     <div className="space-y-3">
       {/* Level 1 — seksi utama (kartu ber-ikon + deskripsi) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
         {SECTIONS.map(s => {
           const active = s.key === activeSection;
           return (
@@ -2189,36 +2731,61 @@ export default function SignalsPage() {
             </div>
           )}
 
+          {/* ── PROGRESS PERBAIKAN (PLAN_SIGNAL_REPAIR_LIVE R5) ───────────── */}
+          {subTab === "progress" && (
+            <div className="space-y-4">
+              <div className="bg-teal-50 border border-teal-100 rounded-2xl p-4">
+                <p className="font-bold text-teal-800 mb-1">📈 Progress — setiap perbaikan diukur hasilnya</p>
+                <p className="text-xs text-teal-700">
+                  <strong>Untuk apa?</strong> Agen perbaikan bekerja tiap ~30 menit: sinyal futures yang
+                  hit-rate-nya buruk langsung diturunkan bobotnya (tercatat di sini dengan buktinya).
+                  24 jam kemudian verifier mengukur ulang: <strong className="text-green-700">terbukti membaik</strong>,
+                  netral, atau <strong className="text-red-700">di-revert otomatis</strong> bila aksinya ternyata salah.
+                  Tidak ada perbaikan senyap — semua aksi material ada di log ini.
+                </p>
+              </div>
+              <ProgressTab data={repairsData} spotData={spotRepairsData}
+                agentFilter={progressAgentFilter}
+                onClearAgentFilter={() => setProgressAgentFilter(null)} />
+            </div>
+          )}
+
           {/* ── PERBAIKAN LIVE (P4) ───────────────────────────────────────── */}
           {subTab === "improvements" && (
             <div className="space-y-4">
               <div className="bg-green-50 border border-green-100 rounded-2xl p-4">
-                <p className="font-bold text-green-800 mb-1">🔧 Perbaikan Live — apa yang sedang diperbaiki sistem sekarang</p>
+                <p className="font-bold text-green-800 mb-1">🔧 Perbaikan Live — aktivitas tiap agent, per SPOT & FUTURES</p>
                 <p className="text-xs text-green-700">
-                  <strong>Untuk apa?</strong> Melihat langsung hasil belajar sistem untuk SPOT dan FUTURES:
-                  sinyal mana yang bobotnya sedang DINAIKKAN (terbukti profit), mana yang DITURUNKAN atau
-                  DIVETO (sering rugi), plus pengaman yang sedang aktif (koin blacklist, lane dijeda).
-                  Semua otomatis — tidak ada yang diubah manual.
+                  <strong>Untuk apa?</strong> Tiap agent scanner (SPOT · FUTURES) punya kartu sendiri yang
+                  menampilkan pipeline perbaikannya secara live: <strong>Terapkan → Menunggu verifikasi →
+                  Hasil</strong> (terbukti membaik ✓ · tak berubah − · di-revert ↩), plus aksi terbaru.
+                  Datanya diambil langsung dari ledger repair (agen berjalan otomatis tiap ~30 menit) —
+                  bukan hanya info, ini perbaikan nyata yang sedang berlangsung. Klik satu agent untuk
+                  melihat seluruh aksinya di tab Progress.
                 </p>
               </div>
-              <ImprovementsTab weightPerf={weightPerf} health={agentHealth}
-                futures={futuresEngine} review={reviewData} catalog={catalogData} />
+              <ImprovementsTab data={repairsData} spotData={spotRepairsData} health={agentHealth}
+                futures={futuresEngine} review={reviewData} catalog={catalogData}
+                onAgentClick={(agent) => { setProgressAgentFilter(agent); setSubTab("progress"); }} />
             </div>
           )}
 
           {/* ── SARAN ENGINE ──────────────────────────────────────────────── */}
           {subTab === "suggestions" && (
             <div className="space-y-4">
-              <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
-                <p className="font-bold text-amber-800 mb-1">💡 Saran Engine — rekomendasi agar scanner terus bertumbuh</p>
-                <p className="text-xs text-amber-700">
-                  <strong>Untuk apa?</strong> Engine menganalisis datanya sendiri dan memberi saran perbaikan
-                  per kategori: SPOT dan 4 lane futures (Pre-Gainer, Accumulation, Momentum, BigMover).
-                  🔴 Perlu tindakan = ada masalah nyata; 🟡 Pantau = belum genting; 🟢 Baik = pertahankan.
-                  Sebagian perbaikan sudah dijalankan otomatis oleh sistem — saran di sini untuk keputusan yang butuh manusia.
+              <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3">
+                <p className="text-[11px] text-amber-800">
+                  💡 <strong>Saran Engine</strong> — 🔴 perlu tindakan · 🟡 pantau · 🟢 baik. Saran ber-tombol
+                  <span className="mx-1 text-[10px] font-bold bg-neutral-900 text-white rounded px-1.5">⚡ Terapkan</span>
+                  langsung tercatat di <strong>Progress</strong>. Saran info-only punya tombol
+                  <span className="mx-1 text-[10px] font-bold bg-teal-50 text-teal-700 border border-teal-200 rounded px-1.5">🔧 Lihat aktivitas</span>
+                  yang lompat ke <strong>Perbaikan Live</strong> agar tidak duplikat info.
                 </p>
               </div>
-              <SuggestionsTab data={recoData} />
+              <SuggestionsTab data={recoData} onApply={applySuggestion} applyMsg={applyMsg}
+                spotReco={spotRecoData}
+                repairs={repairsData} spotRepairs={spotRepairsData}
+                onNavigate={(agent) => { setProgressAgentFilter(agent); setSubTab("improvements"); }} />
             </div>
           )}
 

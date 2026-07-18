@@ -1,6 +1,9 @@
 # PLAN — Signal Repair Live: Agen Perbaikan + Progress (FUTURES)
 
-Tanggal: 2026-07-17 · Status: **DRAFT — analisa selesai, implementasi belum**
+Tanggal: 2026-07-17 · Status: **SELESAI — R1–R5 diimplementasi & live 17 Jul**
+Hasil live: pass pertama agen R2 menghasilkan 33 aksi bounded nyata (tercatat di
+`futures_repair_actions`), pass kedua 0 aksi (cooldown 24h terbukti). Verifier
+mulai bermakna 24 jam setelah aksi pertama (self-gating).
 Lanjutan: engine 10X (F0–F6, selesai & takeout 16 Jul) + PLAN_UX_PIPELINE_SIGNALS
 (P4 tab 🔧 Perbaikan + P6 tab 💡 Saran Engine — selesai, keduanya di-takeout di
 commit ini). Guardrail tetap: **nol file engine SPOT disentuh**.
