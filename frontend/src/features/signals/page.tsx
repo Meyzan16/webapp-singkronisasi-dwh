@@ -266,18 +266,23 @@ const SECTION_OF: Record<SubTab, Section> = {
   progress: "improve", improvements: "improve", suggestions: "improve",
 };
 
-// Tab default saat sebuah seksi dibuka
+// Tab default saat sebuah seksi dibuka.
+// P2: Improve mendarat di "suggestions" (AWAL cerita: temuan), bukan "progress"
+// (akhir cerita) seperti sebelumnya.
 const SECTION_DEFAULT: Record<Section, SubTab> = {
   overview: "overview", engine: "adaptive", signals: "spot",
-  analysis: "regime", improve: "progress",
+  analysis: "regime", improve: "suggestions",
 };
 
+// P2 — urutan naratif: tiap seksi menjawab SATU pertanyaan awam, berurut
+// sebab→akibat. Engine (paling teknis) sengaja ditaruh paling akhir; dulu ia
+// nomor 2 dan bikin orang awam langsung ketemu ledger/model/canary.
 const SECTIONS: { key: Section; icon: string; label: string; desc: string }[] = [
-  { key: "overview", icon: "📊", label: "Overview",  desc: "Ringkasan cepat: kesehatan agen & mesin" },
-  { key: "engine",   icon: "🧠", label: "Engine",    desc: "Mesin belajar adaptif SPOT & Futures" },
-  { key: "signals",  icon: "🎯", label: "Signals",   desc: "Bobot sinyal yang dipelajari per market" },
-  { key: "analysis", icon: "🔬", label: "Analysis",  desc: "Diagnostik: regime, rumus, rejections, prediksi" },
-  { key: "improve",  icon: "🔧", label: "Improve",   desc: "Agen perbaikan live: progress, aksi, saran" },
+  { key: "overview", icon: "📊", label: "Overview",  desc: "Sistem sehat tidak, dan apa yang perlu saya perhatikan?" },
+  { key: "signals",  icon: "🎯", label: "Signals",   desc: "Apa yang sudah dipelajari agent? (bobot per market)" },
+  { key: "analysis", icon: "🔬", label: "Analysis",  desc: "Di mana letak salahnya? (regime · rumus · tolakan · prediksi)" },
+  { key: "improve",  icon: "🔧", label: "Improve",   desc: "Apa yang diperbaiki, dan terbukti membaik tidak?" },
+  { key: "engine",   icon: "🧠", label: "Engine",    desc: "Mesin di baliknya — bagian teknis lanjutan" },
 ];
 
 // Sub-tab per seksi
@@ -295,10 +300,12 @@ const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
     { key: "rejections", label: "🚫 Rejections" },
     { key: "predictive", label: "🔮 Predictive" },
   ],
+  // P2: urut mengikuti alur yang diiklankan UI sendiri —
+  // temuan → sedang dikerjakan → bukti.
   improve: [
-    { key: "progress",     label: "📈 Progress" },
-    { key: "improvements", label: "🔧 Perbaikan Live" },
-    { key: "suggestions",  label: "💡 Saran Engine" },
+    { key: "suggestions",  label: "1· 💡 Saran" },
+    { key: "improvements", label: "2· 🔧 Perbaikan Live" },
+    { key: "progress",     label: "3· 📈 Progress" },
   ],
 };
 
@@ -980,6 +987,62 @@ function useMemoActionMerge(
     rows.sort((a, b) => b.detected_at - a.detected_at);
     return rows.slice(0, 120);
   }, [fut, spot, scope]);
+}
+
+// P3 — benang merah di Overview. Sebelumnya halaman pembuka tidak menyebut
+// perbaikan sama sekali, padahal itu kapabilitas inti sistem. Kartu ini hanya
+// MERUJUK (angka mentah tetap hidup di seksi Improve) lalu mengantar ke sana.
+function RepairTodayCard({ fut, spot, onOpen }: {
+  fut: RepairsResponse | null;
+  spot: RepairsResponse | null;
+  onOpen: () => void;
+}) {
+  const s = useMemo(() => {
+    const f = fut?.funnel, p = spot?.funnel;
+    const sum = (a?: number, b?: number) => (a ?? 0) + (b ?? 0);
+    return {
+      actions24h: sum(f?.actions_24h, p?.actions_24h),
+      pending:    sum(f?.applied,     p?.applied),
+      improved:   sum(f?.improved,    p?.improved),
+      reverted:   sum(f?.reverted,    p?.reverted),
+    };
+  }, [fut, spot]);
+
+  const loaded = !!(fut || spot);
+  return (
+    <div className="bg-white border border-teal-200 rounded-2xl p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div>
+          <p className="text-sm font-black text-neutral-800">🔧 Perbaikan hari ini</p>
+          <p className="text-[11px] text-neutral-500">
+            Agent memperbaiki dirinya otomatis di SPOT &amp; FUTURES — ini ringkasannya.
+          </p>
+        </div>
+        <button onClick={onOpen}
+          className="text-[10px] font-bold bg-neutral-900 text-white rounded-lg px-3 py-1.5 hover:bg-neutral-700 transition-colors">
+          Lihat detail perbaikan →
+        </button>
+      </div>
+      {loaded ? (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: "Aksi 24 jam",      val: s.actions24h, color: "text-neutral-800", sub: "SPOT + FUTURES" },
+            { label: "Menunggu bukti",   val: s.pending,    color: "text-blue-600",    sub: "diukur ulang ≥24 jam" },
+            { label: "Terbukti membaik", val: s.improved,   color: "text-green-600",   sub: "keputusan benar" },
+            { label: "Di-revert",        val: s.reverted,   color: "text-red-600",     sub: "aksi salah, dibatalkan" },
+          ].map(c => (
+            <div key={c.label} className="bg-neutral-50 rounded-xl p-3 text-center">
+              <p className={`text-2xl font-black tabular-nums ${c.color}`}>{c.val}</p>
+              <p className="text-[10px] font-bold uppercase text-neutral-400 mt-1">{c.label}</p>
+              <p className="text-[10px] text-neutral-400">{c.sub}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[11px] text-neutral-400">Memuat ringkasan perbaikan...</p>
+      )}
+    </div>
+  );
 }
 
 function formatMetric(v: number, action: string): string {
@@ -1700,7 +1763,8 @@ function SortTh({ col, label, sortBy, setSortBy, sortDir, setSortDir }: {
 
 // ── SignalTable ───────────────────────────────────────────────────────────────
 
-function SignalTable({ signals, agentKey, sortBy, setSortBy, sortDir, setSortDir, catalog }: {
+function SignalTable({ signals, agentKey, sortBy, setSortBy, sortDir, setSortDir, catalog,
+                       repairedKeys, onOpenRepair }: {
   signals: SignalRow[];
   agentKey: string;
   sortBy: SortBy;
@@ -1708,6 +1772,9 @@ function SignalTable({ signals, agentKey, sortBy, setSortBy, sortDir, setSortDir
   sortDir: "desc" | "asc";
   setSortDir: (d: "desc" | "asc") => void;
   catalog?: CatalogResponse | null;
+  // P3: sinyal yang punya aksi perbaikan → tautkan ke seksi Improve
+  repairedKeys?: Map<string, number>;
+  onOpenRepair?: (signalKey: string) => void;
 }) {
   if (signals.length === 0) return (
     <div className="text-center py-10 text-neutral-400 text-sm">Belum ada data sinyal dengan filter ini</div>
@@ -1746,6 +1813,15 @@ function SignalTable({ signals, agentKey, sortBy, setSortBy, sortDir, setSortDir
                     cross ×{s.cross_weight.toFixed(2)}
                   </span>
                 )}
+                {/* P3: sinyal ini sedang diperbaiki agent → lompat ke Improve */}
+                {repairedKeys?.get(s.signal_key) ? (
+                  <button
+                    onClick={() => onOpenRepair?.(s.signal_key)}
+                    title="Sinyal ini sedang diperbaiki otomatis — lihat aksinya"
+                    className="ml-0 mt-0.5 block text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-200 hover:border-teal-400 rounded px-1.5 py-0.5">
+                    🔧 {repairedKeys.get(s.signal_key)} aksi perbaikan →
+                  </button>
+                ) : null}
               </div>
               <WinRateBadge rate={agentData.win_rate} total={agentData.total} />
               <div className="text-right w-16">
@@ -2204,17 +2280,21 @@ function AdaptiveLearningTutorial({
 
           {/* Panduan 5 seksi (selaras navigasi baru) */}
           <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4">
-            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-3">Panduan 5 Seksi</p>
+            <p className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider mb-1">Urutan membaca (kiri → kanan)</p>
+            <p className="text-[10px] text-neutral-500 mb-3">
+              Tiap seksi menjawab satu pertanyaan. Alur intinya:{" "}
+              <strong className="text-neutral-700">temuan → perbaikan → bukti</strong>.
+            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {[
-                { tab: "📊 Overview", desc: "Ringkasan cepat: kesehatan agen, mesin, sinyal teratas" },
-                { tab: "🧠 Engine",   desc: "Mesin belajar adaptif SPOT & Futures — ledger, model, gate" },
-                { tab: "🎯 Signals",  desc: "Bobot sinyal per market → SPOT · Futures · Cross-Agent" },
-                { tab: "🔬 Analysis", desc: "Diagnostik → Regime · Formulas · Rejections · Predictive" },
-                { tab: "🔧 Improve",  desc: "Agen perbaikan live → Progress · Perbaikan · Saran Engine" },
+                { tab: "1· 📊 Overview", desc: "Sistem sehat tidak? Apa yang perlu saya perhatikan hari ini" },
+                { tab: "2· 🎯 Signals",  desc: "Apa yang sudah dipelajari agent → SPOT · Futures · Cross-Agent" },
+                { tab: "3· 🔬 Analysis", desc: "Di mana letak salahnya → Regime · Formulas · Rejections · Predictive" },
+                { tab: "4· 🔧 Improve",  desc: "Apa yang diperbaiki & terbukti → Saran → Perbaikan Live → Progress" },
+                { tab: "5· 🧠 Engine",   desc: "Mesin di baliknya (teknis) — ledger, model, gate. Boleh dilewati" },
               ].map(item => (
                 <div key={item.tab} className="flex gap-2">
-                  <span className="text-[10px] font-bold text-neutral-700 shrink-0 w-20">{item.tab}</span>
+                  <span className="text-[10px] font-bold text-neutral-700 shrink-0 w-24">{item.tab}</span>
                   <span className="text-[10px] text-neutral-500">{item.desc}</span>
                 </div>
               ))}
@@ -2406,6 +2486,9 @@ export default function SignalsPage() {
   // meng-set state baru → deps berubah → effect jalan lagi → LOOP FETCH tak
   // terbatas yang menggempur backend selama tab itu terbuka.
   useEffect(() => {
+    // P3: Overview butuh ringkasan repair (kartu "Perbaikan hari ini"); tab
+    // Signals butuh peta repairedKeys untuk badge "sedang diperbaiki".
+    if (subTab === "overview" || subTab === "spot" || subTab === "futures") void fetchRepairs();
     if (subTab === "regime")       void fetchRegime();
     if (subTab === "rejections")   void fetchRejections();
     if (subTab === "predictive")   void fetchPredictive();
@@ -2436,6 +2519,20 @@ export default function SignalsPage() {
     s.agents["futures_agent1"] || s.agents["futures_agent2"] || s.agents["futures_agent3"]
   ), [allSignals]);
   const crossSignals = useMemo(() => crossData?.signals ?? [], [crossData?.signals]);
+
+  // P3: peta signal_key → jumlah aksi perbaikan. `target_key` berbentuk
+  // "<agent>:<signal_key>", jadi kupas prefix agent-nya agar cocok dengan
+  // signal_key di /signals/performance (mis. "signal_id:tech.bb_squeeze").
+  const repairedKeys = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of [...(repairsData?.actions ?? []), ...(spotRepairsData?.actions ?? [])]) {
+      const key = a.agent && a.target_key.startsWith(`${a.agent}:`)
+        ? a.target_key.slice(a.agent.length + 1)
+        : a.target_key;
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    return m;
+  }, [repairsData, spotRepairsData]);
 
   const topSpot    = useMemo(() => spotSignals.slice(0, 3), [spotSignals]);
   const topFutures = useMemo(() => futSignals.slice(0, 3), [futSignals]);
@@ -2538,6 +2635,10 @@ export default function SignalsPage() {
             <div className="space-y-5">
               {/* U1 — Ringkasan awam: 3 pertanyaan kunci dijawab langsung */}
               <PlainSummaryBanner health={agentHealth} futures={futuresEngine} />
+
+              {/* P3 — benang merah ke seksi Improve */}
+              <RepairTodayCard fut={repairsData} spot={spotRepairsData}
+                onOpen={() => { setProgressAgentFilter(null); setSubTab("suggestions"); }} />
 
               {/* Agent health cards */}
               <AgentHealthCards health={agentHealth} />
@@ -2661,7 +2762,9 @@ export default function SignalsPage() {
               </div>
               <SignalTable signals={spotSignals} agentKey="opportunity_spot"
                 sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir}
-                catalog={catalogData} />
+                catalog={catalogData}
+                repairedKeys={repairedKeys}
+                onOpenRepair={() => { setProgressAgentFilter(null); setSubTab("progress"); }} />
             </div>
           )}
 
@@ -2700,6 +2803,8 @@ export default function SignalsPage() {
                 agentKey={agentFilter}
                 sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir}
                 catalog={catalogData}
+                repairedKeys={repairedKeys}
+                onOpenRepair={() => { setProgressAgentFilter(agentFilter); setSubTab("progress"); }}
               />
             </div>
           )}
@@ -2881,6 +2986,12 @@ export default function SignalsPage() {
                   benar bergerak sesuai prediksi (minimal 1.5% dalam 4 jam / 3% dalam 24 jam)?
                   Ini menilai SEMUA prediksi — termasuk yang tidak jadi dibuka sebagai trade.
                 </p>
+                {/* P3: hit-rate di tab inilah pemicu agen perbaikan — tautkan */}
+                <button
+                  onClick={() => { setProgressAgentFilter(null); setSubTab("improvements"); }}
+                  className="mt-2 text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 hover:border-indigo-400 rounded-lg px-3 py-1.5 transition-colors">
+                  🔧 Angka di sini yang dipakai agen perbaikan — lihat aksinya →
+                </button>
               </div>
               <PredictivePanel data={predictiveData} />
             </div>
