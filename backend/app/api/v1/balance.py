@@ -92,6 +92,7 @@ async def compute_spot_sizing(
     score: float,
     risk_pct: float,
     risk_fraction_override: float | None = None,
+    risk_multiplier: float = 1.0,
 ) -> dict:
     """
     Balance-aware position sizing for opportunity_spot.
@@ -104,6 +105,11 @@ async def compute_spot_sizing(
     sebagai risk_fraction (mengabaikan conviction scaling) — dipakai Early Radar
     yang risk-nya ½ normal (0.5%) karena micro-cap lebih berisiko. Drawdown
     halving tetap berlaku di atasnya.
+
+    risk_multiplier (PLAN_SPOT_LANES B-Fix 6): rem lane — 0.5 saat ekspektasi lane
+    berbalik negatif. Dikalikan SETELAH override/conviction dipilih, jadi ia berlaku
+    di kedua jalur. Sebelumnya rem ini hidup di scheduler dan hanya menempel pada
+    jalur Kelly, sehingga terlewat diam-diam ketika probabilitas learning belum ada.
 
     No partial entries: if available balance cannot fund the FULL notional,
     can_open is False — entering a big opportunity with a small margin biases
@@ -134,6 +140,10 @@ async def compute_spot_sizing(
         risk_fraction = risk_fraction_override
     else:
         risk_fraction = RISK_BASE_FRACTION + (RISK_MAX_FRACTION - RISK_BASE_FRACTION) * conviction
+
+    # B-Fix 6: rem lane berlaku untuk kedua jalur di atas, bukan hanya jalur Kelly.
+    if risk_multiplier != 1.0:
+        risk_fraction *= max(0.0, risk_multiplier)
 
     # §15.5: proteksi drawdown dari puncak ekuitas — pendarahan pelan yang tidak
     # tertangkap circuit breaker harian. Drawdown > 10% dari peak → risk dipotong

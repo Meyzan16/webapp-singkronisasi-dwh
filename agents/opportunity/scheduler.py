@@ -16,6 +16,7 @@ import structlog
 
 from agents.opportunity import scanner as opp_scanner
 from agents.opportunity import store as opp_store
+from agents.opportunity.monitor import lane_of
 
 logger = structlog.get_logger(__name__)
 
@@ -34,6 +35,9 @@ BIGMOVER_FASTPASS_MIN_PCT = 8.0    # Wave Rider: rescan from 8% change_24h (was 
 # §14.4: circuit breaker — rugi harian (WIB) melebihi batas → auto-open jeda
 DAILY_LOSS_LIMIT_FRACTION = 0.03
 WIB_UTC_OFFSET_H          = 7
+# PLAN_SPOT_LANES B-Fix 7: pembatas frekuensi. 12 Juli tercatat 10 entri auto dan
+# 13 penutupan dalam satu hari (−$36.44) — itu churn, bukan peluang.
+MAX_AUTO_OPENS_PER_DAY    = 6
 
 # §14.5: koin beta-BTC tinggi bergerak serentak — maksimal 1 posisi dari grup ini
 HIGH_BETA_GROUP = {
@@ -95,7 +99,8 @@ async def _lane_risk_multiplier(alert_type: str) -> float:
                 PaperTrade.pnl_pct.isnot(None),
             ).order_by(PaperTrade.closed_at.desc()).limit(40)
         )).scalars().all())
-    if len(pnls) < 10:
+    # B-Fix 6: 10 → 8 sampel supaya rem menyala lebih cepat saat lane berbalik rugi.
+    if len(pnls) < 8:
         return 1.0
     recent = pnls[:20]
     multiplier = 0.5 if sum(recent) / len(recent) <= 0 else 1.0
@@ -108,22 +113,70 @@ async def _lane_risk_multiplier(alert_type: str) -> float:
     return multiplier
 
 
+def _start_of_wib_day() -> float:
+    """Epoch UTC untuk awal hari WIB berjalan."""
+    now_wib = time.time() + WIB_UTC_OFFSET_H * 3600
+    return (int(now_wib) // 86400) * 86400 - WIB_UTC_OFFSET_H * 3600
+
+
+async def _unrealized_loss_today(open_trades: list) -> float:
+    """
+    PLAN_SPOT_LANES B-Fix 7: total kerugian BELUM terealisasi dari posisi terbuka.
+
+    Hanya sisi RUGI yang dihitung — laba mengambang tidak boleh mengendurkan rem,
+    karena ia belum dibukukan dan bisa menguap. Mengembalikan angka ≤ 0.
+    """
+    if not open_trades:
+        return 0.0
+
+    import httpx
+    from app.services.binance_urls import spot as _spot
+    from app.services.trading_costs import EXECUTION_COST_PCT
+
+    symbols = sorted({t.symbol for t in open_trades})
+    prices: dict[str, float] = {}
+    try:
+        query = json.dumps(symbols, separators=(",", ":"))
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(_spot(f"/api/v3/ticker/price?symbols={query}"))
+            if r.status_code == 200:
+                for row in r.json():
+                    prices[row["symbol"]] = float(row["price"])
+    except Exception as exc:
+        # Fail-safe: tanpa harga, jangan mengarang angka — rem jatuh kembali ke
+        # perilaku lama (realized saja) dan itu terlihat di log.
+        logger.warning("unrealized_price_fetch_failed", error=str(exc)[:80])
+        return 0.0
+
+    total = 0.0
+    for t in open_trades:
+        px = prices.get(t.symbol)
+        if not px or not t.entry_price or t.entry_price <= 0:
+            continue
+        pnl_pct = (px - t.entry_price) / t.entry_price * 100 - EXECUTION_COST_PCT
+        if pnl_pct < 0:
+            total += pnl_pct / 100 * (t.position_size or 0.0)
+    return round(total, 2)
+
+
 async def _daily_loss_breaker_active() -> bool:
     """
-    §14.4: True bila total pnl_dollar hari ini (WIB) ≤ −3% balance.
-    Auto-open jeda sampai hari berganti; manual open tetap boleh (keputusan user).
+    §14.4: True bila total P&L hari ini (WIB) ≤ −3% balance.
+
+    B-Fix 7: kini realized + kerugian mengambang posisi terbuka. Versi lama hanya
+    melihat realized, sehingga rem baru menyala SETELAH kerugian dibukukan —
+    12 Juli tercatat 13 penutupan dalam satu hari sebelum rem sempat bekerja.
+    Manual open tetap boleh (keputusan user).
     """
     from app.database import AsyncSessionLocal
     from app.models.paper_trade import PaperTrade
     from app.models.paper_balance import PaperBalance
     from sqlalchemy import func, select
 
-    # Awal hari WIB dalam epoch UTC
-    now_wib       = time.time() + WIB_UTC_OFFSET_H * 3600
-    start_of_day  = (int(now_wib) // 86400) * 86400 - WIB_UTC_OFFSET_H * 3600
+    start_of_day = _start_of_wib_day()
 
     async with AsyncSessionLocal() as session:
-        today_pnl = (await session.execute(
+        realized = (await session.execute(
             select(func.coalesce(func.sum(PaperTrade.pnl_dollar), 0.0)).where(
                 PaperTrade.style == "opportunity_spot",
                 PaperTrade.status.in_(["tp", "sl", "manual"]),
@@ -132,17 +185,45 @@ async def _daily_loss_breaker_active() -> bool:
             )
         )).scalar() or 0.0
 
+        open_trades = list((await session.execute(
+            select(PaperTrade).where(
+                PaperTrade.style  == "opportunity_spot",
+                PaperTrade.status == "open",
+            )
+        )).scalars().all())
+
         bal_row = (await session.execute(
             select(PaperBalance).where(PaperBalance.style == "opportunity_spot")
         )).scalar_one_or_none()
         balance = bal_row.balance if bal_row else 1000.0
 
+    unrealized = await _unrealized_loss_today(open_trades)
+    today_pnl  = realized + unrealized
+
     if today_pnl <= -(balance * DAILY_LOSS_LIMIT_FRACTION):
         logger.warning("daily_loss_breaker_active",
+                       realized=round(realized, 2),
+                       unrealized_loss=unrealized,
                        today_pnl=round(today_pnl, 2),
                        limit=round(-balance * DAILY_LOSS_LIMIT_FRACTION, 2))
         return True
     return False
+
+
+async def _auto_opens_today() -> int:
+    """B-Fix 7: jumlah posisi auto yang dibuka hari ini (WIB) — pembatas churn."""
+    from app.database import AsyncSessionLocal
+    from app.models.paper_trade import PaperTrade
+    from sqlalchemy import func, select
+
+    async with AsyncSessionLocal() as session:
+        return int((await session.execute(
+            select(func.count(PaperTrade.id)).where(
+                PaperTrade.style      == "opportunity_spot",
+                PaperTrade.entry_type == "auto",
+                PaperTrade.entry_at   >= _start_of_wib_day(),
+            )
+        )).scalar() or 0)
 
 
 async def _fetch_live_price(symbol: str) -> Optional[float]:
@@ -272,28 +353,47 @@ async def _auto_open_position(coin: dict) -> bool:
                 return False
 
     # Cooldown via DB — survives restarts.
-    # SL: 2 jam (jangan re-entry setup yang baru gagal).
+    # SL: 6 jam (jangan re-entry setup yang baru gagal).
     # §12.7: TP juga 45 menit — jangan langsung beli lagi di puncak pump yang sama.
     # B7: breakout_pump cooldown lebih pendek: 30 menit TP/SL
-    COOLDOWN_SL_HOURS = 0.5  if is_breakout else 2.0
-    COOLDOWN_TP_HOURS = 0.5  if is_breakout else 0.75   # 45 menit untuk akumulasi (§12.7)
+    # PLAN_SPOT_LANES B-Fix 5: SL beruntun pada simbol yang sama MENGGANDAKAN jeda
+    # (6→12→24 jam). Forensik 21 Jul: dengan cooldown 2 jam yang hanya melihat satu
+    # penutupan terakhir, 8 dari 9 re-entry pasca-SL rugi lagi (TONUSDT 6x beruntun).
+    COOLDOWN_SL_HOURS  = 0.5 if is_breakout else 6.0
+    COOLDOWN_TP_HOURS  = 0.5 if is_breakout else 0.75   # 45 menit untuk akumulasi (§12.7)
+    SL_STREAK_WINDOW_H = 48.0   # SL di luar window ini tidak lagi dihitung beruntun
+    SL_COOLDOWN_MAX_H  = 24.0   # plafon — jangan kunci simbol lebih dari sehari
     async with AsyncSessionLocal() as ck:
-        last_close_q = await ck.execute(
+        recent_closes = list((await ck.execute(
             select(PaperTrade).where(
                 PaperTrade.style  == "opportunity_spot",
                 PaperTrade.symbol == symbol,
                 PaperTrade.status.in_(["sl", "tp"]),
-            ).order_by(PaperTrade.closed_at.desc()).limit(1)
-        )
-        last_close = last_close_q.scalar_one_or_none()
-        if last_close and last_close.closed_at:
-            hrs_since = (time.time() - last_close.closed_at) / 3600
-            limit_h   = COOLDOWN_SL_HOURS if last_close.status == "sl" else COOLDOWN_TP_HOURS
-            if hrs_since < limit_h:
-                logger.info("auto_open_cooldown_db", symbol=symbol,
-                            last_status=last_close.status,
-                            hours_since=round(hrs_since, 1))
-                return False
+            ).order_by(PaperTrade.closed_at.desc()).limit(6)
+        )).scalars().all())
+
+    last_close = recent_closes[0] if recent_closes else None
+    if last_close and last_close.closed_at:
+        now       = time.time()
+        hrs_since = (now - last_close.closed_at) / 3600
+        sl_streak = 0
+        if last_close.status == "sl":
+            for t in recent_closes:
+                if t.status != "sl" or not t.closed_at:
+                    break
+                if (now - t.closed_at) / 3600 > SL_STREAK_WINDOW_H:
+                    break
+                sl_streak += 1
+            limit_h = min(COOLDOWN_SL_HOURS * (2 ** (sl_streak - 1)), SL_COOLDOWN_MAX_H)
+        else:
+            limit_h = COOLDOWN_TP_HOURS
+        if hrs_since < limit_h:
+            logger.info("auto_open_cooldown_db", symbol=symbol,
+                        last_status=last_close.status,
+                        sl_streak=sl_streak,
+                        limit_hours=round(limit_h, 2),
+                        hours_since=round(hrs_since, 1))
+            return False
 
     async with AsyncSessionLocal() as session:
         existing = await session.execute(
@@ -333,7 +433,11 @@ async def _auto_open_position(coin: dict) -> bool:
         reward_pct = float(coin.get("tp2_net_pct", coin.get("tp2_pct", 0)) or 0)
         payoff = reward_pct / risk_pct if risk_pct > 0 else 0.0
         kelly_fraction = max(0.0, float(lower_p) - (1.0 - float(lower_p)) / payoff) if payoff > 0 else 0.0
-        capped_kelly_risk = min(0.01, 0.25 * kelly_fraction) * lane_multiplier
+        # B-Fix 6: lane_multiplier TIDAK lagi dikalikan di sini. Dulu ia hanya
+        # berlaku di cabang ini, sehingga saat `lower_p` None (sinyal belum punya
+        # sampel learning) rem lane terlewat diam-diam dan sizing kembali penuh.
+        # Sekarang ia diteruskan ke compute_spot_sizing dan selalu berlaku.
+        capped_kelly_risk = min(0.01, 0.25 * kelly_fraction)
         _risk_frac_override = min(
             _risk_frac_override if _risk_frac_override is not None else 0.01,
             capped_kelly_risk,
@@ -346,6 +450,7 @@ async def _auto_open_position(coin: dict) -> bool:
         score    = min(raw_score, adaptive_score),
         risk_pct = coin.get("risk_pct", 0),
         risk_fraction_override = _risk_frac_override,
+        risk_multiplier        = lane_multiplier,
     )
     if not sizing["can_open"]:
         logger.info("auto_open_blocked", symbol=symbol,
@@ -382,6 +487,10 @@ async def _auto_open_position(coin: dict) -> bool:
             # "momentum_chase" trades pakai trailing-structure-stop (return
             # maksimal), "fresh_setup" tetap pakai TP1/TP2/TP3 tetap (existing).
             "entry_mode":        coin.get("entry_mode", "fresh_setup"),
+            # PLAN_SPOT_LANES B-Fix 3: identitas lane yang TIDAK pernah berubah.
+            # `entry_mode` di atas dimutasi monitor jadi "momentum_chase" begitu
+            # TP2/TP3 tersentuh, jadi ia tak bisa dipakai untuk atribusi lane.
+            "lane":              lane_of({}, coin.get("alert_type")),
             "change_7d":         coin.get("change_7d", 0.0),
             # P1 / B4.1: slippage info for analytics
             "entry_slippage_pct": round(_slip_pct, 4),
@@ -494,10 +603,19 @@ async def run_opportunity_loop() -> None:
                 logger.info("auto_open_quota_reduced",
                             quota=cycle_quota, candidates=len(auto_candidates))
 
-            if auto_candidates and await _daily_loss_breaker_active():
+            # B-Fix 7: sisa jatah entri hari ini (WIB) — batas churn harian.
+            opens_today   = await _auto_opens_today() if auto_candidates else 0
+            daily_room    = MAX_AUTO_OPENS_PER_DAY - opens_today
+            if auto_candidates and daily_room <= 0:
+                logger.info("auto_open_paused_daily_cap",
+                            opens_today=opens_today,
+                            cap=MAX_AUTO_OPENS_PER_DAY,
+                            skipped=len(auto_candidates))
+            elif auto_candidates and await _daily_loss_breaker_active():
                 logger.info("auto_open_paused_daily_breaker",
                             skipped=len(auto_candidates))
             else:
+                cycle_quota = min(cycle_quota, max(0, daily_room))
                 bm_open_now = await _bigmover_open_count()
                 er_open_now = await _early_radar_open_count()
                 for coin in auto_candidates:
@@ -638,6 +756,19 @@ async def _run_fastpass_cycle() -> int:
     bm_open_now = await _bigmover_open_count()
     if bm_open_now >= MAX_BIGMOVER_OPENS:
         return 0   # quota already full
+
+    # B-Fix 7: fastpass ikut memakai jatah entri harian yang sama — kalau tidak,
+    # lane dengan cadence 30 detik ini bisa melewati batas churn lewat pintu belakang.
+    if await _auto_opens_today() >= MAX_AUTO_OPENS_PER_DAY:
+        logger.info("fastpass_paused_daily_cap", cap=MAX_AUTO_OPENS_PER_DAY)
+        return 0
+
+    # B-Fix 7: fastpass juga TIDAK pernah memeriksa circuit breaker harian —
+    # di hari rugi, loop 30 detik ini tetap membuka posisi sementara loop utama
+    # sudah dijeda. Lubang itu ditutup di sini.
+    if await _daily_loss_breaker_active():
+        logger.info("fastpass_paused_daily_breaker")
+        return 0
 
     # Sort by abs(change_24h) desc — strongest movers first
     subset.sort(key=lambda t: abs(float(t.get("priceChangePercent", 0))), reverse=True)

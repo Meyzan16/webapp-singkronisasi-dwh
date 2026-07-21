@@ -20,7 +20,15 @@ export const LANES: Record<string, LaneInfo> = {
   weekly:       { key: "weekly",       label: "Weekly",       emoji: "📅", autoScore: 85, badge: "bg-purple-100 text-purple-700" },
 };
 
-const FALLBACK: LaneInfo = { key: "other", label: "Opportunity", emoji: "🎯", autoScore: 85, badge: "bg-neutral-100 text-neutral-600" };
+/**
+ * Lane SPOT yang benar-benar di-scan agent (agents/opportunity/scanner.py:
+ * accumulation, breakout, bigmover, early_radar). Dipakai untuk panel performa
+ * supaya lane yang aktif tapi NOL trade tetap terlihat — bukan hilang diam-diam.
+ * `weekly` sengaja tidak masuk: tak ada alert_type spot yang menghasilkannya.
+ */
+export const SPOT_LANE_KEYS = ["bigmover", "accumulation", "breakout", "early_radar"] as const;
+
+const FALLBACK: LaneInfo ={ key: "other", label: "Opportunity", emoji: "🎯", autoScore: 85, badge: "bg-neutral-100 text-neutral-600" };
 
 /**
  * Resolve the lane for a spot position from its alert_type (+ entry_mode fallback).

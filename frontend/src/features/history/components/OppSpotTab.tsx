@@ -13,9 +13,12 @@ import { PnlCalendar, localDayKey } from "./PnlCalendar";
 import { LanePerformance, type LaneStat } from "./LanePerformance";
 import { OpenPositionsList }  from "./OpenPositionsList";
 import { OppSpotToolbar }     from "./OppSpotToolbar";
-import { laneForSpot }        from "@/lib/lanes";
+import { laneForSpot, LANES, SPOT_LANE_KEYS } from "@/lib/lanes";
 
 const REFRESH_INTERVAL = 15_000;
+// Jendela riwayat yang diminta dari API — dipakai juga sebagai label panel lane
+// supaya angka win-rate tak pernah terbaca sebagai "sepanjang masa".
+const HISTORY_DAYS = 30;
 
 const STATUS_LABEL: Record<string, string> = {
   tp: "TP Hit", sl: "SL Hit", manual: "Ditutup Manual",
@@ -51,7 +54,7 @@ export function OppSpotTab() {
     if (!silent) setLoading(true);
     setError(false);
     try {
-      const r = await fetch("/api/v1/opportunity/positions");
+      const r = await fetch(`/api/v1/opportunity/positions?days=${HISTORY_DAYS}`);
       if (!r.ok) { setError(true); return; }
       const d = await r.json() as { positions: OppPosition[]; total: number };
       const next = d.positions ?? [];
@@ -261,27 +264,43 @@ export function OppSpotTab() {
 
   // PLAN_v9 G1a — performa per LANE, dinamis dari data aktual (semua lane yang
   // benar-benar muncul, termasuk BigMover & Early Radar yang dulu invisible).
+  // Semua lane SPOT yang di-scan agent selalu tampil — lane tanpa trade dulu
+  // hilang diam-diam, sehingga tampak "cuma ada 3 lane".
   const laneStats = useMemo((): LaneStat[] => {
-    const base = positions.filter(p => p.status === "tp" || p.status === "sl");
-    const map = new Map<string, { label: string; emoji: string; total: number; wins: number; sumPnl: number; pnl$: number }>();
-    base.forEach(p => {
+    const map = new Map<string, { label: string; emoji: string; total: number; wins: number; sumPnl: number; pnl$: number; open: number }>();
+    const seed = (key: string) => {
+      const info = LANES[key];
+      const cur  = map.get(key) ?? {
+        label: info?.label ?? key, emoji: info?.emoji ?? "🎯",
+        total: 0, wins: 0, sumPnl: 0, pnl$: 0, open: 0,
+      };
+      map.set(key, cur);
+      return cur;
+    };
+    SPOT_LANE_KEYS.forEach(seed);
+
+    positions.forEach(p => {
       const lane = laneForSpot(p.alert_type, p.entry_mode);
-      const cur  = map.get(lane.key) ?? { label: lane.label, emoji: lane.emoji, total: 0, wins: 0, sumPnl: 0, pnl$: 0 };
-      const isWin = p.status === "tp" && (p.pnl_pct ?? 0) > 0;
+      const cur  = seed(lane.key);
+      cur.label  = lane.label;
+      cur.emoji  = lane.emoji;
+      if (p.status === "open") { cur.open += 1; return; }
+      if (p.status !== "tp" && p.status !== "sl") return;
       cur.total  += 1;
-      cur.wins   += isWin ? 1 : 0;
+      cur.wins   += p.status === "tp" && (p.pnl_pct ?? 0) > 0 ? 1 : 0;
       cur.sumPnl += p.pnl_pct ?? 0;
       cur.pnl$   += p.pnl_dollar ?? 0;
-      map.set(lane.key, cur);
     });
+
     return [...map.entries()]
       .map(([key, v]) => ({
         key, label: v.label, emoji: v.emoji, total: v.total, wins: v.wins,
         winRate: v.total > 0 ? v.wins / v.total * 100 : 0,
         avgPnl:  v.total > 0 ? v.sumPnl / v.total : 0,
         pnl$:    v.pnl$,
+        open:    v.open,
       }))
-      .sort((a, b) => b.total - a.total);
+      .sort((a, b) => b.total - a.total || b.open - a.open);
   }, [positions]);
 
   const openList = useMemo(() => positions.filter(p => p.status === "open"), [positions]);
@@ -345,7 +364,7 @@ export function OppSpotTab() {
         balance={stats.currentBalance}
       />
 
-      <LanePerformance laneStats={laneStats} />
+      <LanePerformance laneStats={laneStats} windowDays={HISTORY_DAYS} />
 
       <OppSpotToolbar
         positionCount={positions.length}

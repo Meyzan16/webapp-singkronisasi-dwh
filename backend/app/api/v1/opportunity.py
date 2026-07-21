@@ -444,6 +444,30 @@ async def _fetch_spot_prices(symbols: list[str]) -> dict[str, float]:
     return prices
 
 
+def _monitor_snapshot(trade, meta: dict, current_price: float | None) -> dict | None:
+    """
+    Snapshot state monitor agent untuk satu posisi terbuka (None untuk yang sudah
+    tutup). Logika hidup di agents/opportunity/monitor.py — route hanya meneruskan.
+    """
+    if trade.status != "open":
+        return None
+    try:
+        from agents.opportunity.monitor import describe_monitor_state
+
+        return describe_monitor_state(
+            entry=trade.entry_price,
+            meta=meta,
+            stop_loss=trade.stop_loss,
+            take_profit=trade.take_profit,
+            entry_at=trade.entry_at,
+            current_price=current_price,
+            alert_type=trade.alert_type,
+        )
+    except Exception:
+        logger.warning("monitor_snapshot_failed", trade_id=trade.id)
+        return None
+
+
 @router.get("/opportunity/positions")
 async def get_open_positions(days: int = Query(default=30, ge=1, le=365)) -> dict:
     """
@@ -539,6 +563,9 @@ async def get_open_positions(days: int = Query(default=30, ge=1, le=365)) -> dic
             "remaining_fraction": meta.get("remaining_fraction", 1.0),
             "is_runner":          meta.get("entry_mode") == "momentum_chase" and bool(meta.get("tp1_hit")),
             "last_rung_price":    meta.get("last_rung_price"),
+            # State realtime dari monitor agent (SL setelah trailing/breakeven,
+            # rung berikutnya, profit-lock, umur) — hanya untuk posisi terbuka.
+            "monitor":            _monitor_snapshot(t, meta, current_price),
         })
 
     return {"positions": positions, "total": len(positions)}

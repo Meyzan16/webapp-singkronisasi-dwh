@@ -85,6 +85,11 @@ BTC_REGIME_CLOSED_24H  = -5.0    # BTC 24h ≤ −5% → CLOSED
 BTC_REGIME_REDUCED_24H = -3.0    # BTC 24h ≤ −3% (and > −5%) → REDUCED
 BTC_REGIME_DOUBLE_CONFIRM_24H = -1.0  # 4h EMA bearish + 24h < −1% → REDUCED
 BTC_REGIME_24H_MIN  = BTC_REGIME_REDUCED_24H   # legacy alias (kept for back-compat)
+# PLAN_SPOT_LANES B-Fix 8: breadth altcoin. Gerbang lama hanya membaca BTC, jadi
+# pasar 9–18 Juli — BTC relatif datar sementara alt meluruh — tidak pernah memicu
+# REDUCED sepanjang periode rugi. Breadth = porsi pair USDT yang naik dalam 24 jam.
+BREADTH_REDUCED_PCT = 35.0   # < 35% koin hijau → perlakukan seperti REDUCED
+BREADTH_MIN_SAMPLE  = 50     # di bawah ini sampelnya tak layak dipakai memutuskan
 
 # Stablecoin / fiat / low-vol token blacklist
 # BB Width secara natural sempit → false squeeze signals
@@ -144,6 +149,16 @@ BIGMOVER_AUTO_SCORE       = 65     # auto-open threshold
 BIGMOVER_MIN_SCORE        = 55     # min display score
 BIGMOVER_RISK_PCT_DEFAULT = 0.7    # 0.7% per-trade risk
 BIGMOVER_SL_PCT_MAX       = 5.0    # SL floor 5%
+# B-Fix 2: R:R minimum lane ini (TP2 terhadap risk). Naik dari 1.2 — ambang lama
+# terlalu longgar untuk lane dengan lantai SL selebar ini. Catatan jujur: dengan
+# TP2 12% dan risk maksimum 5.5%, rasio terburuk yang mungkin adalah 2.18, jadi
+# gerbang ini BELUM pernah mengikat — ia pagar kalau konstanta TP/SL diubah nanti.
+BIGMOVER_RR_MIN           = 2.0
+# B-Fix 2 (inti): TP1 harus minimal 1.5× risk NYATA, bukan angka tetap. Anak tangga
+# pertama lama +5% melawan lantai SL −5% = 1:1 — di titik itulah nasib trade
+# ditentukan (forensik 21 Jul: 9 tp1_breakeven vs 13 sl_hit). Setup ber-stop sempit
+# tetap memakai TP1 dasar; hanya yang ber-stop lebar yang targetnya ikut melebar.
+BIGMOVER_TP1_RR_MIN       = 1.5
 # Standard TP (change_24h 10–49%) — wider than before to ride the wave longer
 BIGMOVER_TP1_PCT          = 5.0    # was 3.0
 BIGMOVER_TP2_PCT          = 12.0   # was 6.0
@@ -464,12 +479,20 @@ def _calc_trade_levels_bigmover(
         tp2_pct = BIGMOVER_TP2_PCT
         tp3_pct = BIGMOVER_TP3_PCT
 
+    # B-Fix 2: lebarkan TP1 sampai minimal 1.5× risk nyata, supaya anak tangga
+    # pertama tidak lagi 1:1 saat lantai SL −5% yang dipakai. Dibatasi agar tidak
+    # pernah menyentuh TP2 (risk maks 5.5% → TP1 maks 8.25% < TP2 12%).
+    tp1_pct = min(round(max(tp1_pct, risk_pct * BIGMOVER_TP1_RR_MIN), 2), tp2_pct * 0.75)
+
     tp1 = entry * (1 + tp1_pct / 100)
     tp2 = entry * (1 + tp2_pct / 100)
     tp3 = entry * (1 + tp3_pct / 100)
 
+    # PLAN_SPOT_LANES B-Fix 2: gerbang R:R lane ini dinaikkan 1.2 → 2.0. Ambang lama
+    # meloloskan setup yang TP2-nya nyaris sedekat SL-nya, padahal lantai SL −5%
+    # hampir selalu yang dipakai (13 dari 13 stop di forensik 21 Jul tepat di 5.00%).
     rr = (tp2 - entry) / risk
-    if rr < 1.2:
+    if rr < BIGMOVER_RR_MIN:
         return None
 
     rp = _round_price
@@ -1457,7 +1480,29 @@ def _ev_per_risk(result: dict) -> float:
     return round(ev / risk, 3)
 
 
-def _btc_regime(tf_data_btc: Optional[dict], btc_change_24h: float) -> tuple[str, str]:
+def _alt_breadth_pct(tickers: list[dict]) -> Optional[float]:
+    """
+    B-Fix 8: porsi pair USDT yang naik dalam 24 jam (0–100), None bila sampel kecil.
+
+    Ini ukuran kesehatan pasar alt yang TIDAK terlihat dari BTC saja — persis
+    kondisi 9–18 Juli, saat BTC datar tapi mayoritas alt meluruh.
+    """
+    vals = []
+    for t in tickers:
+        try:
+            vals.append(float(t.get("priceChangePercent", 0) or 0))
+        except (TypeError, ValueError):
+            continue
+    if len(vals) < BREADTH_MIN_SAMPLE:
+        return None
+    return round(sum(1 for v in vals if v > 0) / len(vals) * 100, 1)
+
+
+def _btc_regime(
+    tf_data_btc: Optional[dict],
+    btc_change_24h: float,
+    breadth_pct: Optional[float] = None,
+) -> tuple[str, str]:
     """
     Phase 3 G3-regime: graceful 3-state degradation (was binary open/closed).
 
@@ -1466,12 +1511,18 @@ def _btc_regime(tf_data_btc: Optional[dict], btc_change_24h: float) -> tuple[str
     - CLOSED:  btc_change_24h ≤ −5%                          → no auto-open
     - REDUCED: btc_change_24h ≤ −3%                          → 1 open/cycle, not 3
     - REDUCED: BTC 4h EMA bearish AND btc_change_24h < −1%   → double-confirm
+    - REDUCED: breadth alt < 35% (B-Fix 8)                   → BTC datar, alt meluruh
     - OPEN:    everything else (incl. mildly red days)       → normal full quota
     """
     if btc_change_24h <= BTC_REGIME_CLOSED_24H:
         return "bearish_24h_severe", "CLOSED"
     if btc_change_24h <= BTC_REGIME_REDUCED_24H:
         return "bearish_24h", "REDUCED"
+
+    # B-Fix 8 — diperiksa SEBELUM jalur BTC-bullish, supaya "BTC hijau" tidak lagi
+    # menutupi pasar alt yang mayoritas merah.
+    if breadth_pct is not None and breadth_pct < BREADTH_REDUCED_PCT:
+        return f"weak_alt_breadth_{breadth_pct:.0f}pct", "REDUCED"
 
     if tf_data_btc:
         d4h = tf_data_btc.get("4h")
@@ -1947,7 +1998,8 @@ async def run_opportunity_scan() -> dict:
 
     # §12.5 + Phase 3 G3-regime: 3-state — CLOSED kills auto-open, REDUCED keeps
     # auto_open flag (scheduler enforces lower quota), OPEN normal.
-    regime, regime_status = _btc_regime(btc_tf_data, btc_change_24h)
+    breadth_pct = _alt_breadth_pct(tickers_all)
+    regime, regime_status = _btc_regime(btc_tf_data, btc_change_24h, breadth_pct)
     if regime_status == "CLOSED":
         for r_ in results:
             r_["auto_open"] = False
@@ -2004,7 +2056,7 @@ async def run_opportunity_scan() -> dict:
                 breakout_found=len(breakout_results),
                 bigmover_found=len(bigmover_results),
                 early_radar_found=len(early_radar_results),
-                regime=regime, elapsed_sec=elapsed)
+                regime=regime, breadth_pct=breadth_pct, elapsed_sec=elapsed)
 
     return {
         "results":            all_results,
@@ -2017,6 +2069,7 @@ async def run_opportunity_scan() -> dict:
         "btc_regime":         regime,
         "regime_status":      regime_status,    # Phase 3 G3-regime: OPEN | REDUCED | CLOSED
         "btc_change_24h":     round(btc_change_24h, 2),
+        "alt_breadth_pct":    breadth_pct,          # B-Fix 8: % pair USDT hijau 24h
         "learning_status":    "degraded" if learning_error else "active",
         "learning_error":     learning_error,
         "learning_weight_count": len(learning_weights),

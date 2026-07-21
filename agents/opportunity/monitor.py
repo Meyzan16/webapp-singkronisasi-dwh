@@ -82,6 +82,10 @@ GATE_MIN_VOL_RATIO  = 1.2     # volume belum sepi
 # BM7: per entry_mode — accumulation needs more time, failed momentum exits faster
 MAX_AGE_DAYS_FRESH_SETUP    = 10   # akumulasi butuh waktu lebih lama untuk resolve
 MAX_AGE_DAYS_MOMENTUM_CHASE = 5    # momentum yang gagal bergerak = capital idle, exit lebih cepat
+# PLAN_SPOT_LANES B-Fix 3: BigMover mengejar gelombang yang sedang berjalan — kalau
+# 3 hari belum resolve, gelombangnya sudah lewat. Sebelumnya lane ini diam-diam
+# mewarisi 10 hari milik akumulasi karena monitor tidak mengenal entry_mode-nya.
+MAX_AGE_DAYS_BIGMOVER       = 3
 WICK_LOOKBACK_MIN  = 3            # 1m candles checked per cycle (covers restarts)
 WEIGHT_UPDATE_SEC  = 30 * 60      # time-based (§1.12), not cycle-based
 
@@ -92,6 +96,9 @@ STAGNANT_SCORE_GAP  = 10    # candidate must score ≥ current_score + 10 AND �
 URGENT_ROTATION_DAYS = 1.0  # urgent: rotate after 1 day if candidate is much better
 URGENT_SCORE_GAP     = 25   # candidate must outscore by ≥ 25 (clear opportunity cost)
 URGENT_SCORE_MIN     = 90   # minimum candidate score for urgent rotation
+# PLAN_SPOT_LANES B-Fix 4: lantai P&L bersih agar rotasi (stagnant MAUPUN urgent)
+# tidak membukukan kerugian hanya karena ada kandidat lebih menarik.
+ROTATION_MIN_PNL_PCT = -0.5
 
 _running      = False
 _cycle_count  = 0
@@ -118,6 +125,28 @@ def get_state() -> dict:
 # than this (scan failed / agent stalled / Binance down), rotating a position based
 # on ghost candidates would force-close a live trade on outdated evidence.
 ROTATION_MAX_STALE_SEC = 10 * 60   # scan cache older than 10 min → do not rotate
+
+
+def lane_of(meta: dict, alert_type: str | None) -> str:
+    """
+    Lane trade ini — identitas TETAP, berbeda dari `entry_mode` yang dimutasi
+    monitor jadi "momentum_chase" begitu TP2/TP3 tersentuh.
+
+    Sumber utama: `meta["lane"]` yang ditulis scheduler saat auto-open. Untuk
+    trade lama (dan open manual) turunkan dari `alert_type`, yang tidak pernah
+    diubah siapa pun — pemetaannya sama persis dengan `laneForSpot` di frontend.
+    """
+    lane = str(meta.get("lane") or "").strip().lower()
+    if lane:
+        return lane
+    a = (alert_type or "").lower()
+    if "bigmover" in a:
+        return "bigmover"
+    if "early" in a:
+        return "early_radar"
+    if "breakout" in a:
+        return "breakout"
+    return "accumulation"
 
 
 def _has_better_candidate(
@@ -274,6 +303,130 @@ def _compute_trailing_sl(klines_4h: list, current_sl: float) -> float:
     swing_low = min(lows[-10:])
     candidate = max(ema21 * 0.99, swing_low * 0.99)
     return max(current_sl, candidate)
+
+
+def describe_monitor_state(
+    entry:         float,
+    meta:          dict,
+    stop_loss:     float,
+    take_profit:   float,
+    entry_at:      float | None,
+    current_price: float | None,
+    alert_type:    str | None = None,
+) -> dict:
+    """
+    Read-only snapshot of what THIS monitor will do to an open trade right now.
+
+    Pure display helper (no I/O, no mutation) so the API can show the same
+    numbers the monitor acts on: live SL after trailing/breakeven/ladder floor,
+    the next rung it is hunting, the profit-lock give-back level, and the age
+    budget. Everything here mirrors `_check_trade` above — keep them in sync.
+    """
+    sl   = meta.get("current_sl") or stop_loss or 0.0
+    tp1  = meta.get("tp1") or None
+    tp2  = meta.get("tp2") or take_profit or None
+    tp3  = meta.get("tp3") or None
+    mode = meta.get("entry_mode", "fresh_setup")
+    lane = lane_of(meta, alert_type)
+
+    def _pct(level: float | None) -> float | None:
+        if not level or not entry or entry <= 0:
+            return None
+        return round((level - entry) / entry * 100, 2)
+
+    # ── live SL + why it sits where it sits ─────────────────────────────────
+    risk_pct    = float(meta.get("risk_pct", 0) or 0)
+    sl_original = entry * (1 - risk_pct / 100) if (entry and risk_pct > 0) else stop_loss
+    sl_moved    = bool(sl and sl_original and sl > sl_original * 1.0001)
+    if not sl_moved:
+        sl_source = "awal"
+    elif meta.get("breakeven_set"):
+        sl_source = "breakeven"
+    elif (mode == "momentum_chase" or lane == "bigmover") and meta.get("tp1_hit"):
+        sl_source = "trailing 4h"
+    elif meta.get("ladder"):
+        sl_source = "lantai ladder"
+    else:
+        sl_source = "dinaikkan"
+
+    # ── phase: what the monitor is currently doing ──────────────────────────
+    tp1_hit  = bool(meta.get("tp1_hit"))
+    is_runner = mode == "momentum_chase" and tp1_hit
+    if is_runner:
+        phase = "Runner — trailing struktur 4h"
+    elif tp1_hit and lane == "bigmover":
+        # B-Fix 3: sisa posisi BigMover kini dijaga trailing 4h sambil menuju TP2.
+        phase = "TP1 kena — sisa dijaga trailing 4h"
+    elif tp1_hit:
+        phase = "TP1 kena — sisa posisi jalan ke TP2"
+    elif meta.get("breakeven_set"):
+        phase = "SL sudah di breakeven — menunggu TP1"
+    else:
+        phase = "Menunggu TP1"
+
+    # ── next rung the monitor hunts ─────────────────────────────────────────
+    ladder_done = {r.get("rung") for r in (meta.get("ladder") or [])}
+    next_target: dict | None = None
+    for name, price, frac in (
+        ("TP1", tp1, LADDER_FRAC_TP1),
+        ("TP2", tp2, LADDER_FRAC_TP2),
+        ("TP3", tp3, LADDER_FRAC_TP3),
+    ):
+        if price and name.lower() not in ladder_done and not (name == "TP1" and tp1_hit):
+            next_target = {"name": name, "price": price, "pct": _pct(price),
+                           "sell_fraction": frac}
+            break
+    if next_target is None and is_runner:
+        last_rung = meta.get("last_rung_price") or tp3 or tp2
+        next_target = {"name": "rung dinamis", "price": last_rung, "pct": _pct(last_rung),
+                       "sell_fraction": DYN_RUNG_FRAC}
+
+    # ── absolute profit lock: at what P&L does the monitor bank the runner? ─
+    peak_pnl     = float(meta.get("peak_pnl_pct", 0.0) or 0.0)
+    lock_at_pct  = None
+    for tier_peak, keep in _PROFIT_LOCK_TIERS_SPOT:
+        if peak_pnl >= tier_peak:
+            lock_at_pct = round(peak_pnl * keep, 2)
+            break
+
+    # ── age budget ─────────────────────────────────────────────────────────
+    max_age = (
+        0.25 if mode == "momentum_entry"
+        else MAX_AGE_DAYS_BIGMOVER if lane == "bigmover"
+        else MAX_AGE_DAYS_MOMENTUM_CHASE if mode == "momentum_chase"
+        else MAX_AGE_DAYS_FRESH_SETUP
+    )
+    age_days = (
+        round((time.time() - entry_at) / 86400, 2)
+        if entry_at and entry_at > 1_000_000_000 else None
+    )
+
+    # distance from live price to the two things that can close the trade now
+    to_sl_pct = (
+        round((sl - current_price) / current_price * 100, 2)
+        if current_price and sl else None
+    )
+    to_target_pct = (
+        round((next_target["price"] - current_price) / current_price * 100, 2)
+        if current_price and next_target and next_target.get("price") else None
+    )
+
+    return {
+        "lane":           lane,
+        "phase":          phase,
+        "sl_live":        sl,
+        "sl_pct":         _pct(sl),
+        "sl_source":      sl_source,
+        "sl_moved":       sl_moved,
+        "to_sl_pct":      to_sl_pct,
+        "next_target":    next_target,
+        "to_target_pct":  to_target_pct,
+        "peak_pnl_pct":   round(peak_pnl, 2),
+        "lock_at_pct":    lock_at_pct,
+        "age_days":       age_days,
+        "max_age_days":   max_age,
+        "check_every_sec": INTERVAL_SEC,
+    }
 
 
 def _atr(klines: list, n: int = 14) -> float:
@@ -552,13 +705,19 @@ async def _process_trade(
         logger.warning("monitor_invalid_levels", id=trade.id, symbol=trade.symbol)
         return 0, 0
 
-    # ── Trailing SL ratchet for momentum_chase trades post-TP1 ──────────────
+    # ── Trailing SL ratchet post-TP1 ────────────────────────────────────────
     # Runs every cycle to ratchet the SL up as price climbs. Only moves UP.
+    # B-Fix 3: gate-nya kini lane + entry_mode. Sebelumnya HANYA entry_mode ==
+    # "momentum_chase", sehingga lane BigMover — yang seluruh tesisnya "ride the
+    # wave" — tak pernah trailing di TP1 dan sisa 70% posisinya jatuh kembali ke
+    # SL awal. Itu penyebab avg loss (−$11.33) > avg win (+$10.11) di lane itu.
+    _lane             = lane_of(meta, trade.alert_type)
     _entry_mode_early = meta.get("entry_mode", "fresh_setup")
     is_momentum_chase = _entry_mode_early == "momentum_chase"
     is_momentum_entry = _entry_mode_early == "momentum_entry"
+    trails_after_tp1  = is_momentum_chase or _lane == "bigmover"
 
-    if is_momentum_chase and meta.get("tp1_hit") and len(k4h) >= 22:
+    if trails_after_tp1 and meta.get("tp1_hit") and len(k4h) >= 22:
         new_trail = _compute_trailing_sl(k4h, sl)
         if new_trail > sl:
             sl = new_trail
@@ -632,10 +791,14 @@ async def _process_trade(
             meta["current_sl"] = round(_new_floor, 8)
             trade.stop_loss    = round(_new_floor, 8)
 
-    # ── Layer 3: max age — BM7: per entry_mode ──────────────────────────────
+    # ── Layer 3: max age — BM7 per entry_mode, B-Fix 3 per lane ─────────────
     _entry_mode = meta.get("entry_mode", "fresh_setup")
     if _entry_mode == "momentum_entry":
         _age_expired = entry_at_valid and hold_minutes > 6 * 60   # B6: 6-hour max
+    elif _lane == "bigmover":
+        # B-Fix 3: budget umur sendiri — dulu lane ini jatuh ke cabang `else`
+        # dan mewarisi 10 hari milik akumulasi (ADAUSDT tertahan 4.9 hari lalu SL).
+        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > MAX_AGE_DAYS_BIGMOVER
     elif _entry_mode == "momentum_chase":
         _age_expired = entry_at_valid and hold_minutes / (60 * 24) > MAX_AGE_DAYS_MOMENTUM_CHASE
     else:
@@ -662,7 +825,12 @@ async def _process_trade(
         pnl_probe  = (close_price - entry) / entry * 100 - EXECUTION_COST_PCT
         new_status = "tp" if (meta.get("tp1_hit") and pnl_probe > 0) else "sl"
     elif is_momentum_chase and meta.get("tp1_hit"):
-        # ── PLAN_v10 RUNNER: ride winner tanpa cap. Lahirkan rung dinamis
+        # ── PLAN_v10 RUNNER: ride winner tanpa cap.
+        # Sengaja TETAP `is_momentum_chase`, bukan `trails_after_tp1`: kalau lane
+        # BigMover masuk ke sini sejak TP1, ia akan melewati rung TP2 (20%) dan
+        # TP3 (15%) dan langsung ke rung dinamis — mengurangi profit yang dikunci.
+        # BigMover tetap menaiki tangga ladder-nya, lalu berubah jadi runner
+        # sendirinya di TP2 (baris di bawah menulis entry_mode="momentum_chase"). Lahirkan rung dinamis
         # TP4..TP-n selama gate (flow+TA) hijau; kalau tidak, keluar hanya saat
         # struktur 4h patah. Trailing SL (di atas) sudah ratchet floor tiap cycle.
         _atr1h     = _atr(k1h)
@@ -791,8 +959,22 @@ async def _process_trade(
                 _rotate     = True
                 _rotate_why = "urgent_rotation"
 
+        # PLAN_SPOT_LANES B-Fix 4: rotasi tidak boleh MEMBUKUKAN kerugian.
+        # Rotasi adalah keputusan biaya-peluang ("modal ini lebih baik di tempat
+        # lain"), bukan sinyal bahwa setup-nya patah. Forensik 21 Jul: 7 dari 17
+        # rotasi tutup rugi. Kalau posisi sedang merah lebih dari ambang ini,
+        # biarkan SL/TP-nya sendiri yang memutuskan — struktur yang benar-benar
+        # patah sudah punya jalan keluarnya sendiri lewat `trend_reversal`.
+        _rotate_pnl_net = (price - entry) / entry * 100 - EXECUTION_COST_PCT
+        if _rotate and _rotate_pnl_net < ROTATION_MIN_PNL_PCT:
+            logger.info("rotation_skipped_in_drawdown",
+                        symbol=trade.symbol, why=_rotate_why,
+                        pnl_net=round(_rotate_pnl_net, 2),
+                        floor=ROTATION_MIN_PNL_PCT)
+            _rotate = False
+
         if _rotate:
-            pnl_net      = (price - entry) / entry * 100 - EXECUTION_COST_PCT
+            pnl_net      = _rotate_pnl_net
             new_status   = "tp" if pnl_net > 0 else "sl"
             close_price  = round(price, 8)
             close_reason = _rotate_why

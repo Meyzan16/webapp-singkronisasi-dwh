@@ -13,6 +13,25 @@ export interface ApiBalance {
   updated_at:      number;
 }
 
+// State realtime dari monitor agent (agents/opportunity/monitor.py) — satu-satunya
+// angka yang benar-benar dipakai agent untuk menutup posisi.
+export interface MonitorState {
+  lane:            string;   // identitas lane immutable (B-Fix 3)
+  phase:           string;
+  sl_live:         number;
+  sl_pct:          number | null;   // jarak SL dari ENTRY (%)
+  sl_source:       string;          // awal | breakeven | trailing 4h | lantai ladder
+  sl_moved:        boolean;
+  to_sl_pct:       number | null;   // jarak SL dari HARGA SEKARANG (%)
+  next_target:     { name: string; price: number | null; pct: number | null; sell_fraction: number } | null;
+  to_target_pct:   number | null;   // jarak target berikut dari HARGA SEKARANG (%)
+  peak_pnl_pct:    number;
+  lock_at_pct:     number | null;   // profit-lock aktif: tutup bila P&L turun ke sini
+  age_days:        number | null;
+  max_age_days:    number;
+  check_every_sec: number;
+}
+
 export interface OppPosition {
   id:                  number;
   symbol:              string;
@@ -53,6 +72,7 @@ export interface OppPosition {
   remaining_fraction?: number;
   is_runner?:          boolean;
   last_rung_price?:    number | null;
+  monitor?:            MonitorState | null;
 }
 
 

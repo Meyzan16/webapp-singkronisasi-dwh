@@ -23,12 +23,13 @@ export function OpenPositionCard({
   const riskPct   = p.risk_pct > 0 ? p.risk_pct : 2.0;
   const notional$ = p.position_size ?? (riskDollar / (riskPct / 100));
   const maxLoss$  = p.risk_dollar ?? riskDollar;
-  const conf      = p.confidence > 0
-    ? p.confidence
-    : Math.min(85, Math.round(40 + Math.max(0, p.score - 30) * 0.75));
-  const tp1Prob   = Math.min(85, conf);
-  const tp2Prob   = Math.round(tp1Prob * 0.65);
   const lane      = laneForSpot(p.alert_type, p.entry_mode);   // PLAN_v9 G3
+
+  // Sumber kebenaran level: snapshot monitor agent (SL setelah trailing/breakeven,
+  // rung berikutnya). Fallback ke rencana awal kalau backend belum mengirimnya.
+  const mon    = p.monitor ?? null;
+  const slPct  = mon?.sl_pct ?? -riskPct;
+  const target = mon?.next_target ?? null;
 
   // PLAN_v10 — dynamic profit ladder
   const banked     = p.banked_dollar ?? 0;
@@ -133,17 +134,38 @@ export function OpenPositionCard({
           }
         </div>
 
-        {/* Target / Stop */}
-        <div className="bg-white/70 rounded-xl p-2">
-          <p className="text-[9px] text-neutral-400 font-semibold uppercase mb-1">
-            Target / Stop
+        {/* Level LIVE — angka yang benar-benar dipakai agent untuk menutup posisi */}
+        <div className="bg-white/70 rounded-xl p-2 ring-1 ring-blue-200">
+          <p className="text-[9px] text-blue-500 font-semibold uppercase mb-1">
+            🎯 Level Live · dipakai agent
           </p>
-          {p.tp1 != null && p.tp1_pct > 0 && (
-            <p className="text-[10px] text-green-500 font-semibold">TP1 +{p.tp1_pct.toFixed(1)}%</p>
+          {target?.price != null ? (
+            <p className="text-[10px] text-green-700 font-bold">
+              {target.name} ${fmtPrice(target.price)}
+              {mon?.to_target_pct != null && (
+                <span className="text-neutral-400 font-normal"> · {mon.to_target_pct >= 0 ? "+" : ""}{mon.to_target_pct.toFixed(1)}% lagi</span>
+              )}
+            </p>
+          ) : (
+            <p className="text-[10px] text-green-700 font-bold">TP2 +{p.tp2_pct.toFixed(1)}%</p>
           )}
-          <p className="text-[10px] text-green-700 font-bold">TP2 +{p.tp2_pct.toFixed(1)}%</p>
-          <p className="text-[10px] text-red-500 font-semibold">SL −{riskPct.toFixed(1)}%</p>
-          <p className="text-[10px] text-neutral-400">R:R 1:{p.rr_ratio}</p>
+          <p className="text-[10px] text-red-600 font-bold">
+            SL ${fmtPrice(mon?.sl_live ?? p.sl)}
+            <span className="font-semibold"> ({slPct >= 0 ? "+" : ""}{slPct.toFixed(1)}%)</span>
+            {mon?.to_sl_pct != null && (
+              <span className="text-neutral-400 font-normal"> · {Math.abs(mon.to_sl_pct).toFixed(1)}% di bawah harga</span>
+            )}
+          </p>
+          {mon?.sl_moved && (
+            <span className="inline-block mt-0.5 text-[9px] bg-green-100 text-green-700 border border-green-200 px-1.5 py-0.5 rounded font-bold"
+              title="Monitor sudah menaikkan SL dari level awal">
+              🔼 SL naik · {mon.sl_source}
+            </span>
+          )}
+          <p className="text-[9px] text-neutral-400 mt-0.5">
+            Rencana awal: {p.tp1 != null && p.tp1_pct > 0 ? `TP1 +${p.tp1_pct.toFixed(1)}% · ` : ""}
+            TP2 +{p.tp2_pct.toFixed(1)}% · SL −{riskPct.toFixed(1)}% · R:R 1:{p.rr_ratio}
+          </p>
         </div>
 
         {/* Modal spot */}
@@ -157,16 +179,33 @@ export function OpenPositionCard({
           </p>
         </div>
 
-        {/* Probability TP1/TP2 */}
+        {/* Status monitor agent — menggantikan "Prob (estimasi)" yang statis &
+            hanya turunan score, jadi tak bisa dibedakan dari angka realtime. */}
         <div className="bg-white/70 rounded-xl p-2">
           <p className="text-[9px] text-neutral-400 font-semibold uppercase mb-1">
-            Prob (estimasi)
+            🤖 Monitor Agent
           </p>
-          {p.tp1 != null && p.tp1_pct > 0 && (
-            <p className="text-[10px] font-bold text-green-600">TP1: ~{tp1Prob}%</p>
+          {mon ? (
+            <>
+              <p className="text-[10px] font-bold text-neutral-700">{mon.phase}</p>
+              <p className="text-[9px] text-neutral-500">
+                Puncak {mon.peak_pnl_pct >= 0 ? "+" : ""}{mon.peak_pnl_pct.toFixed(1)}%
+                {mon.lock_at_pct != null
+                  ? <span className="text-green-600 font-semibold"> · kunci profit di +{mon.lock_at_pct.toFixed(1)}%</span>
+                  : <span className="text-neutral-400"> · kunci profit belum aktif</span>}
+              </p>
+              {mon.age_days != null && (
+                <p className="text-[9px] text-neutral-500">
+                  Umur {mon.age_days.toFixed(1)}d / maks {mon.max_age_days}d
+                </p>
+              )}
+              <p className="text-[9px] text-neutral-400 mt-0.5">
+                dicek tiap {mon.check_every_sec}s
+              </p>
+            </>
+          ) : (
+            <p className="text-[10px] text-neutral-400">Status monitor belum tersedia</p>
           )}
-          <p className="text-[10px] font-bold text-green-500">TP2: ~{tp2Prob}%</p>
-          <p className="text-[9px] text-neutral-400 mt-0.5">dari score {p.score}/100</p>
         </div>
 
       </div>
