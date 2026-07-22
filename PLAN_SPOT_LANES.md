@@ -380,6 +380,101 @@ Catatan jujur atas B-Fix 5: basis 6 jam tidak akan memblokir re-entry TUSDT (jed
 Basis 10 jam akan memblokirnya, tapi itu berarti menyetel angka ke 2 titik data dan nyaris memblokir
 SXTUSDT (jeda 12.8 jam → TP +2.9%). Biarkan 6 jam, nilai ulang setelah 20 trade.
 
+## B7c. Audit menyeluruh — 22 Juli 2026
+
+Pemeriksaan ulang seluruh item plan terhadap kode yang benar-benar berjalan.
+
+### Status tiap item
+
+| Item | Status | Bukti |
+|------|--------|-------|
+| S1 — luruskan cerita lane | **SELESAI** | `weekly` turun dari `SPOT_LANES` jadi `SPOT_FEEDERS` (bersama supplement momentum 24h R7); judul "5 Scanning Lanes" → "4"; entri `weekly` dihapus dari `LANE_DB_KEYS` dan dari `LANES` + cabang mati di `laneForSpot`. Angka basi diperbaiki: TP1 partial 50%→30% (4 lane), maks umur breakout "5 hari"→"6 jam", BigMover rrMin 1.2→2.0 + umur 3 hari + TP1 adaptif |
+| S2 — funnel per lane terlihat | **SELESAI** | `_new_funnel()` di 4 lane; `_filter()` meneruskan `lane_funnel` + `regime_status` + `alt_breadth_pct` + `found_*`; panel History menampilkan corong per kartu lane + spanduk gerbang pasar |
+| S3 — Early Radar | **MENUNGGU KEPUTUSAN** | lihat temuan baru di bawah |
+| S4 — lane immutable | **SELESAI** | dikerjakan sebagai B-Fix 3 (`lane_of`) |
+| S5 — quota penjamin per lane | **BELUM** | menunggu data dari S2 |
+| S6 — bersihkan bias analitik `entry_mode` | **BELUM** | menunggu S4 matang di data |
+| S7 — cap posisi terbuka (BARU) | **MENUNGGU KEPUTUSAN** | lihat temuan 4 di bawah |
+| B-Fix 1…8 | **SELESAI & LIVE** | lihat §B7b |
+
+**Plan ini BELUM boleh di-takeout**: S3, S5, S6, S7 masih terbuka. S3 dan S7 menunggu
+keputusan owner; S5 dan S6 tinggal dikerjakan.
+
+### Temuan baru S2 — Early Radar lebih parah dari dugaan
+
+Corong nyata dari scan live pertama:
+
+| Lane | pool | no_data | gugur skor | gugur level | lolos | layak auto |
+|------|------|---------|-----------|-------------|-------|-----------|
+| accumulation | 53 | 0 | 30 | 19 | 4 | 2 |
+| breakout | 65 | 0 | 63 | 1 | 1 | 0 |
+| bigmover | 13 | 0 | 13 | 0 | 0 | 0 |
+| **early_radar** | **50** | **13** | **37** | 0 | **0** | 0 |
+
+Analisis di §B6/R1 menduga penyumbatnya ambang auto-open 85. **Corong membantahnya**:
+37 dari 37 kandidat yang datanya cukup gugur di `EARLY_RADAR_MIN_SCORE = 70` — tak satu
+pun sampai ke gerbang auto-open. Jadi opsi S3-A (turunkan auto 85→75) **tidak akan
+mengubah apa pun**. Yang mengikat adalah bar tampil 70, atau skala skornya sendiri.
+Ini persis alasan S2 harus dikerjakan sebelum S3.
+
+Catatan kedua: 13 dari 50 kandidat Early Radar gugur karena klines harian < 31 candle —
+koin yang terlalu baru listing. Itu ~26% dari pool, layak dilihat lagi saat S3 dikerjakan.
+
+### Bug yang ditemukan & diperbaiki dalam audit ini
+
+1. **Rem harian menghitung drawdown lintas hari sebagai "rugi hari ini".**
+   `_daily_loss_breaker_active` mengambil SEMUA posisi terbuka, termasuk yang dibuka
+   kemarin. Posisi lama yang sedang −5% membuat rem menyala di hari yang sebenarnya
+   datar. Diperbaiki: sisi mengambang dibatasi ke posisi dengan `entry_at >= awal hari
+   WIB`. Drawdown lintas hari sudah punya pengaman sendiri (potong risk 50% saat DD > 10%
+   di `compute_spot_sizing`).
+2. **Rem harian menembak Binance tiap 30 detik.** Sejak fastpass ikut memeriksa breaker
+   (B-Fix 7), fungsi ini dipanggil ~120×/jam dan tiap panggilan menarik harga.
+   Diperbaiki dengan cache TTL 60 detik; kegagalan fetch sengaja TIDAK di-cache supaya
+   percobaan berikutnya langsung mencoba lagi. Terukur: panggilan kedua 3017 ms → 0 ms.
+
+### Bug lanjutan yang ditemukan DARI layar S2 sendiri
+
+3. **Panel lane menampilkan ambang basi.** Kartu Big Mover menulis "auto ≥65"
+   padahal B-Fix 1 sudah menaikkannya ke 71 — karena `LanePerformance` membaca
+   konstanta frontend `LANES[key].autoScore`, bukan nilai hidup. Diperbaiki: scan
+   payload kini membawa `lane_thresholds` (nilai setelah override `agent_config`),
+   konstanta frontend turun jadi cadangan saat scan belum termuat. Terverifikasi di
+   layar: kartu berubah jadi "auto ≥71".
+4. **Layar menjanjikan pengaman yang tidak ada.** Kartu Posisi Terbuka menulis
+   "Kebijakan: maks 3 posisi bersamaan". **Tidak ada kode yang menegakkannya** —
+   `MAX_OPENS_PER_CYCLE = 3` membatasi entri BARU per siklus, bukan jumlah posisi.
+   Satu-satunya rem adalah modal. Terbukti di layar: 5 posisi terbuka, notional
+   $1016 dari saldo $1083 (94% terpakai), total risk $43 = **4% saldo — di atas
+   batas rugi harian 3%**, artinya bila kelimanya stop di hari yang sama, breaker
+   baru menyala setelah batas terlampaui. Label diluruskan; **penegakan cap-nya
+   sendiri diusulkan sebagai S7 di bawah** karena itu keputusan kebijakan, bukan
+   perbaikan teks.
+
+### S7 (BARU) — cap posisi terbuka bersamaan, untuk diputuskan owner
+
+Pilihan:
+- **A**: cap keras N posisi (mis. 4) di `_auto_open_position`, lewat `agent_config`
+  supaya bisa disetel tanpa deploy.
+- **B**: cap berbasis risiko — tolak entri baru bila total `risk_dollar` posisi
+  terbuka + entri baru > batas rugi harian (3%). Ini mengikat kedua rem jadi satu
+  angka yang konsisten, dan otomatis menyesuaikan saat sizing berubah.
+- **C**: biarkan modal sebagai satu-satunya rem (status quo), dan cukup luruskan
+  label — sudah dikerjakan.
+
+Rekomendasi: **B**. Ia menutup celah yang terlihat hari ini (risk 4% > breaker 3%)
+tanpa menambah angka ajaib baru.
+
+### Yang sengaja dibiarkan (bukan bug, tapi dicatat)
+
+- **Fastpass BigMover tidak menerapkan `_apply_lane_learning` maupun gerbang net-EV**
+  yang dipakai scan utama. Ia hanya memakai ambang skor lane. Konsekuensinya veto
+  learning tidak berlaku di jalur 30 detik. Perlu diputuskan terpisah — menyamakannya
+  berarti fastpass harus menarik bobot learning tiap siklus.
+- **`quote_vol_24h` tidak diisi di jalur fastpass**, sehingga slippage di meta dihitung
+  dari volume 0. Hanya informasional, tidak memengaruhi keputusan.
+- **Gerbang `BIGMOVER_RR_MIN = 2.0` belum pernah mengikat** (rasio terburuk 12/5.5 = 2.18).
+
 ## B8. Urutan eksekusi
 
 ```

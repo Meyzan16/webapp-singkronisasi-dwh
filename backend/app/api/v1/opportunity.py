@@ -695,4 +695,16 @@ def _filter(cached: dict, min_score: float, alert_type: str, limit: int) -> dict
         "error":        cached.get("error"),
         "generated_at": cached.get("generated_at", 0),
         "elapsed_sec":  cached.get("elapsed_sec", 0),
+        # PLAN_SPOT_LANES S2: scanner sudah menghitung semua ini tiap cycle, tapi
+        # dulu dibuang di sini — sehingga UI tak bisa membedakan "lane tak
+        # menemukan kandidat" dari "menemukan tapi tertahan gerbang".
+        "regime_status":      cached.get("regime_status"),
+        "btc_change_24h":     cached.get("btc_change_24h"),
+        "alt_breadth_pct":    cached.get("alt_breadth_pct"),
+        "found_accumulation": cached.get("found_accumulation", 0),
+        "found_breakout":     cached.get("found_breakout", 0),
+        "found_bigmover":     cached.get("found_bigmover", 0),
+        "found_early_radar":  cached.get("found_early_radar", 0),
+        "lane_funnel":        cached.get("lane_funnel", {}),
+        "lane_thresholds":    cached.get("lane_thresholds", {}),
     }

@@ -13,6 +13,31 @@ export interface ApiBalance {
   updated_at:      number;
 }
 
+// PLAN_SPOT_LANES S2 — corong per lane dari scan terakhir: di tahap mana kandidat
+// gugur. Ini yang membuat "kenapa lane ini kosong" bisa dijawab dengan angka.
+export interface LaneFunnel {
+  pool:              number;
+  no_data:           number;
+  rejected_score:    number;
+  rejected_levels:   number;
+  rejected_net_ev:   number;
+  rejected_learning: number;
+  found:             number;
+  auto_eligible:     number;
+}
+
+export interface ScanMeta {
+  generated_at:     number;
+  regime_status:    string | null;
+  btc_regime:       string | null;
+  btc_change_24h:   number | null;
+  alt_breadth_pct:  number | null;
+  lane_funnel:      Record<string, LaneFunnel>;
+  /** Ambang HIDUP per lane (sudah termasuk override agent_config) — jangan pakai
+   *  konstanta frontend, itu basi begitu threshold diubah lewat config. */
+  lane_thresholds:  Record<string, { min: number; auto: number }>;
+}
+
 // State realtime dari monitor agent (agents/opportunity/monitor.py) — satu-satunya
 // angka yang benar-benar dipakai agent untuk menutup posisi.
 export interface MonitorState {

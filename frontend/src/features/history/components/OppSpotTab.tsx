@@ -4,7 +4,7 @@ import { DBHistoryTable } from "@/features/health/components/DBHistoryTable";
 
 import type {
   ApiBalance, OppPosition,
-  OppStats,
+  OppStats, ScanMeta,
 } from "./OppSpotTypes";
 import { DepositModal }       from "./DepositModal";
 import { BalanceBanner }      from "./BalanceBanner";
@@ -29,6 +29,7 @@ const STATUS_LABEL: Record<string, string> = {
 export function OppSpotTab() {
   const [positions, setPositions]     = useState<OppPosition[]>([]);
   const [apiBalance, setApiBalance]   = useState<ApiBalance | null>(null);
+  const [scanMeta, setScanMeta]       = useState<ScanMeta | null>(null);
   const [loading, setLoading]         = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError]             = useState(false);
@@ -48,6 +49,15 @@ export function OppSpotTab() {
       const r = await fetch("/api/v1/balance/spot");
       if (r.ok) setApiBalance(await r.json() as ApiBalance);
     } catch { /* silent */ }
+  }, []);
+
+  // S2: corong per lane + status regime dari cache scan (read-only, tak memicu scan).
+  // limit=1 karena kita hanya butuh metadatanya, bukan daftar hasilnya.
+  const fetchScanMeta = useCallback(async () => {
+    try {
+      const r = await fetch("/api/v1/opportunity/scan?min_score=0&limit=1");
+      if (r.ok) setScanMeta(await r.json() as ScanMeta);
+    } catch { /* silent — panel lane tetap tampil tanpa corong */ }
   }, []);
 
   const fetchPositions = useCallback(async (silent = false) => {
@@ -164,12 +174,14 @@ export function OppSpotTab() {
   useEffect(() => {
     void fetchPositions();
     void fetchBalance();
-  }, [fetchPositions, fetchBalance]);
+    void fetchScanMeta();
+  }, [fetchPositions, fetchBalance, fetchScanMeta]);
 
   useEffect(() => {
     const poll = setInterval(() => {
       void fetchPositions(true);
       void fetchBalance();
+      void fetchScanMeta();
       countRef.current = REFRESH_INTERVAL / 1000;
       setCountdown(REFRESH_INTERVAL / 1000);
     }, REFRESH_INTERVAL);
@@ -178,7 +190,7 @@ export function OppSpotTab() {
       setCountdown(countRef.current);
     }, 1000);
     return () => { clearInterval(poll); clearInterval(tick); };
-  }, [fetchPositions, fetchBalance]);
+  }, [fetchPositions, fetchBalance, fetchScanMeta]);
 
   // ── Derived stats ──────────────────────────────────────────────────────────
 
@@ -364,7 +376,7 @@ export function OppSpotTab() {
         balance={stats.currentBalance}
       />
 
-      <LanePerformance laneStats={laneStats} windowDays={HISTORY_DAYS} />
+      <LanePerformance laneStats={laneStats} windowDays={HISTORY_DAYS} scanMeta={scanMeta} />
 
       <OppSpotToolbar
         positionCount={positions.length}

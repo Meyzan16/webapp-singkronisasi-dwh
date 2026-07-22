@@ -50,7 +50,7 @@ export const SPOT_LANES = [
     tp: ["Entry + risk × 2.5", "max(Entry + risk × 4.0, Entry × 1.06)", "max(Entry + risk × 7.0, Entry × 1.10)"],
     rrMin: 3.5,
     maxAge: "10 hari",
-    tp1Partial: "50% posisi dijual",
+    tp1Partial: "30% posisi dijual di TP1 (ladder PLAN_v10)",
   },
   {
     key: "breakout",
@@ -67,8 +67,8 @@ export const SPOT_LANES = [
     slRange: "2.0% – 12.0%",
     tp: ["Entry + risk × 2.0", "Entry + risk × 3.5", "Entry + risk × 6.0"],
     rrMin: 3.0,
-    maxAge: "5 hari",
-    tp1Partial: "50% posisi dijual",
+    maxAge: "6 jam (entry_mode momentum_entry)",
+    tp1Partial: "30% posisi dijual di TP1 (ladder PLAN_v10)",
   },
   {
     key: "bigmover",
@@ -84,40 +84,19 @@ export const SPOT_LANES = [
     slMethod: "Swing Low 15m (12 candle terakhir) − 1.5% buffer, max 5% dari entry",
     slRange: "1.0% – 5.5%",
     tp: [
-      "Standard (< 50%): +5%, +12%, +25%",
-      "Explosive (≥ 50%): +8%, +20%, +45%",
+      "Standard (< 50%): TP1 max(+5%, risk×1.5), lalu +12%, +25%",
+      "Explosive (≥ 50%): TP1 max(+8%, risk×1.5), lalu +20%, +45%",
     ],
-    rrMin: 1.2,
-    maxAge: "5 hari",
-    tp1Partial: "50% posisi dijual",
+    rrMin: 2.0,
+    maxAge: "3 hari",
+    tp1Partial: "30% posisi dijual di TP1 (ladder PLAN_v10)",
     extras: [
+      "B-Fix 2: TP1 adaptif minimal 1.5× risk — dulu +5% melawan lantai SL −5% (1:1)",
+      "B-Fix 3: trailing struktur 4h aktif sejak TP1 (dulu hanya setelah TP2)",
       "Fastpass: rescan setiap 30 detik untuk coin ≥ 8% change_24h",
       "Drift tolerance: 3% (bukan 1% seperti lane lain) karena coin bergerak cepat",
       "RSI gate: >85 = skip; 80–85 OK jika change_1h ≥ 2% DAN 7d ≥ 30%",
       "Entry trap (G18): skip jika change_30m > 15% — sudah di puncak",
-    ],
-  },
-  {
-    key: "weekly",
-    label: "Weekly Momentum (S4)",
-    emoji: "📅",
-    color: "bg-teal-50 border-teal-200 text-teal-800",
-    badgeColor: "bg-teal-100 text-teal-700",
-    desc: "Supplemental lane — scan rank 100–250 by volume yang bergerak kuat dalam 7 hari. Universe lebih luas.",
-    trigger: "change_7d ≥ 20%, volume ≥ $1M, rank 100–250",
-    minVolume: "$1,000,000",
-    minScore: 65,
-    autoScore: 85,
-    slMethod: "Sama dengan Accumulation",
-    slRange: "1.5% – 5.0%",
-    tp: ["Sama dengan Accumulation"],
-    rrMin: 3.5,
-    maxAge: "10 hari",
-    tp1Partial: "50% posisi dijual",
-    extras: [
-      "Pool: top 150 dari rank 100–250 by volume",
-      "Max 15 coin tambahan per cycle",
-      "Sama scoring logic dengan accumulation",
     ],
   },
   {
@@ -136,8 +115,9 @@ export const SPOT_LANES = [
     tp: ["Entry + 10%", "Entry + 25%", "Entry + 60%"],
     rrMin: 4.0,
     maxAge: "10 hari",
-    tp1Partial: "50% posisi dijual",
+    tp1Partial: "30% posisi dijual di TP1 (ladder PLAN_v10)",
     extras: [
+      "⚠ Lane ini 0 trade seumur hidup — auto-open ≥85 dari skala maks 100 nyaris mustahil (lihat PLAN_SPOT_LANES S3)",
       "Universe $100K–$1M — blind spot lane lain (SYN-type coins mulai di sini)",
       "Risk ½ normal (0.5%/trade) — micro-cap lebih berisiko",
       "Max 2 posisi aktif sekaligus (cap ketat)",
@@ -145,6 +125,39 @@ export const SPOT_LANES = [
       "Scoring: vol surge 40pts + near-high 30pts + momentum 15pts + RSI 10pts + BB 5pts",
       "Penalty −20pts jika Δ24h > 30% (sudah lari, terlambat)",
     ],
+  },
+];
+
+// ─── SPOT: UNIVERSE FEEDERS (bukan lane) ─────────────────────────────────────
+// PLAN_SPOT_LANES S1: keduanya hanya MENAMBAH koin ke pool kandidat, lalu koin itu
+// dinilai oleh salah satu dari 4 lane di atas. Mereka tidak punya alert_type,
+// entry_mode, maupun rumus SL/TP sendiri — jadi tidak akan pernah muncul sebagai
+// lane tersendiri di History. Dulu "Weekly Momentum" tercantum sebagai lane ke-5
+// lengkap dengan minScore/autoScore/rrMin yang tidak pernah dibaca kode mana pun.
+
+export const SPOT_FEEDERS = [
+  {
+    key: "weekly",
+    label: "Weekly Momentum (S4)",
+    emoji: "📅",
+    badgeColor: "bg-teal-100 text-teal-700",
+    desc: "Menambah koin rank 100–250 by volume yang naik ≥20% dalam 7 hari. Koin yang sudah 'selesai moon' minggu ini lalu sepi tidak pernah masuk top-100 volume maupun supplement 24 jam.",
+    trigger: "change_7d ≥ 20%, volume ≥ $1M, rank 100–250",
+    cost: "Fetch klines 4h SAJA (1 TF, bukan 3) — murah",
+    extras: [
+      "Pool: 150 koin dari rank 100–250, maksimal 15 tambahan per cycle",
+      "Hasilnya dinilai lane Accumulation / BigMover — dicatat atas nama lane itu",
+    ],
+  },
+  {
+    key: "momentum_24h",
+    label: "Momentum 24h (R7)",
+    emoji: "⚡",
+    badgeColor: "bg-amber-100 text-amber-700",
+    desc: "Menambah koin di luar top-100 volume yang sedang bergerak ≥5% dalam 24 jam — volume normalnya kecil tapi melonjak saat pump.",
+    trigger: "change_24h ≥ 5%, di luar top-100 volume",
+    cost: "Ikut fetch 3 TF bersama kandidat utama",
+    extras: ["Maksimal 20 koin tambahan per cycle"],
   },
 ];
 

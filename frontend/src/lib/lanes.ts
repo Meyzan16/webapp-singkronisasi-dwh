@@ -17,7 +17,6 @@ export const LANES: Record<string, LaneInfo> = {
   breakout:     { key: "breakout",     label: "Breakout",     emoji: "💥", autoScore: 75, badge: "bg-orange-100 text-orange-700" },
   bigmover:     { key: "bigmover",     label: "Big Mover",    emoji: "🚀", autoScore: 65, badge: "bg-yellow-100 text-yellow-700" },
   early_radar:  { key: "early_radar",  label: "Early Radar",  emoji: "🛰", autoScore: 85, badge: "bg-rose-100 text-rose-700" },
-  weekly:       { key: "weekly",       label: "Weekly",       emoji: "📅", autoScore: 85, badge: "bg-purple-100 text-purple-700" },
 };
 
 /**
@@ -41,7 +40,6 @@ export function laneForSpot(alertType?: string | null, entryMode?: string | null
   if (a.includes("bigmover") || e.includes("bigmover")) return LANES.bigmover;
   if (a.includes("early") || e.includes("early"))       return LANES.early_radar;
   if (a.includes("breakout"))                            return LANES.breakout;
-  if (a.includes("weekly"))                              return LANES.weekly;
   // squeeze / accumulation / fresh_setup / momentum_chase → accumulation lane
   if (a.includes("squeeze") || a.includes("accumulation") || e.includes("fresh") || e.includes("momentum"))
     return LANES.accumulation;

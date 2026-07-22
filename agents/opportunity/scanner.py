@@ -1327,11 +1327,16 @@ async def _fetch_klines(client: httpx.AsyncClient, symbol: str, tf: str) -> list
     return []
 
 
-async def scan_early_radar(tickers_all: list[dict], done_syms: set[str]) -> list[dict]:
+async def scan_early_radar(
+    tickers_all: list[dict], done_syms: set[str]
+) -> tuple[list[dict], dict]:
     """
     Early Radar pass (PLAN_v5 Group A) — micro-cap $100K–$1M volume.
     Fetch HANYA klines harian (1d) — murah, 1 TF, tidak seperti lane lain (3 TF).
     Universe ini tidak disentuh lane lain. done_syms di-mutate untuk dedup global.
+
+    S2: mengembalikan (hasil, corong) — lane ini nol trade seumur hidup, jadi
+    justru corongnya yang perlu dilihat, bukan hasilnya.
     """
     pool = [
         t for t in tickers_all
@@ -1343,8 +1348,9 @@ async def scan_early_radar(tickers_all: list[dict], done_syms: set[str]) -> list
     ]
     pool.sort(key=lambda t: float(t.get("priceChangePercent", 0) or 0), reverse=True)
     pool = pool[:EARLY_RADAR_POOL]
+    funnel = _new_funnel(len(pool))
     if not pool:
-        return []
+        return [], funnel
 
     _er_sem = asyncio.Semaphore(10)
 
@@ -1364,11 +1370,17 @@ async def scan_early_radar(tickers_all: list[dict], done_syms: set[str]) -> list
         sym = t["symbol"]
         if sym in done_syms:
             continue
-        res = _score_early_radar(sym, klines_1d_map.get(sym, []), t)
+        _kl = klines_1d_map.get(sym, [])
+        if len(_kl) < 31:
+            funnel["no_data"] += 1
+            continue
+        res = _score_early_radar(sym, _kl, t)
         if res is None:
+            funnel["rejected_score"] += 1
             continue
         levels = _calc_trade_levels_early_radar(res.pop("_low_30d", 0.0), res["current_price"])
         if levels is None:
+            funnel["rejected_levels"] += 1
             continue
         res.update(levels)
         res["quote_vol_24h"] = float(t.get("quoteVolume", 0) or 0)
@@ -1378,8 +1390,10 @@ async def scan_early_radar(tickers_all: list[dict], done_syms: set[str]) -> list
 
     results.sort(key=lambda x: x.get("raw_score", 0), reverse=True)
     results = results[:5]
-    logger.info("early_radar_scan_done", found=len(results), pool=len(pool))
-    return results
+    logger.info("early_radar_scan_done", found=len(results), pool=len(pool),
+                rejected_score=funnel["rejected_score"],
+                rejected_levels=funnel["rejected_levels"])
+    return results, funnel
 
 
 # ── Main scan ──────────────────────────────────────────────────────────────────
@@ -1450,8 +1464,14 @@ def _apply_lane_learning(
     banned_keys: set[str],
     min_score: float,
     auto_threshold: float,
+    funnel: Optional[dict] = None,
 ) -> list[dict]:
-    """Apply one learning contract to a complete SPOT lane."""
+    """
+    Apply one learning contract to a complete SPOT lane.
+
+    S2: `funnel` (opsional) dicatat di sini — berapa kandidat yang sudah lolos
+    scoring deterministik lalu dijatuhkan bobot adaptif.
+    """
     kept: list[dict] = []
     for row in rows:
         apply_learning_policy(
@@ -1460,6 +1480,8 @@ def _apply_lane_learning(
             sample_counts=sample_counts,
         )
         if float(row.get("adaptive_score", 0.0)) < min_score:
+            if funnel is not None:
+                funnel["rejected_learning"] += 1
             continue
         if row.get("risk_pct"):
             row["ev_per_risk"] = _ev_per_risk(row)
@@ -1496,6 +1518,25 @@ def _alt_breadth_pct(tickers: list[dict]) -> Optional[float]:
     if len(vals) < BREADTH_MIN_SAMPLE:
         return None
     return round(sum(1 for v in vals if v > 0) / len(vals) * 100, 1)
+
+
+def _new_funnel(pool: int) -> dict:
+    """
+    PLAN_SPOT_LANES S2: kerangka corong satu lane.
+
+    `pool` = kandidat yang diperiksa lane ini. Sisanya diisi saat kandidat gugur,
+    supaya UI bisa menjawab "kenapa lane ini kosong" dengan angka, bukan tebakan.
+    """
+    return {
+        "pool":              pool,
+        "no_data":           0,   # klines tak cukup untuk dianalisa
+        "rejected_score":    0,   # skor / jumlah sinyal di bawah minimum lane
+        "rejected_levels":   0,   # entry/SL/TP tidak valid (R:R, jarak SL, dst)
+        "rejected_net_ev":   0,   # TP2 net < 1.5% setelah fee + slippage
+        "rejected_learning": 0,   # adaptive_score jatuh di bawah minimum lane
+        "found":             0,   # lolos semua gerbang, tampil sebagai rekomendasi
+        "auto_eligible":     0,   # dari `found`, yang boleh auto-open (pasca regime)
+    }
 
 
 def _btc_regime(
@@ -1722,6 +1763,10 @@ async def run_opportunity_scan() -> dict:
     # 3. Score + calculate trade levels
     results = []
     btc_tf_data: Optional[dict] = None
+    # PLAN_SPOT_LANES S2: corong per lane — di tahap mana kandidat gugur. Tanpa ini
+    # layar tak bisa membedakan "lane tak menemukan apa-apa" dari "lane menemukan
+    # tapi tertahan skor / level / net-EV / learning / regime".
+    _fn_accum = _new_funnel(len(candidates))
     for ticker in candidates:
         symbol     = ticker["symbol"]
         change_24h = float(ticker.get("priceChangePercent", 0))
@@ -1733,6 +1778,7 @@ async def run_opportunity_scan() -> dict:
                 tf_data[tf] = d
 
         if not tf_data:
+            _fn_accum["no_data"] += 1
             continue
         if symbol == "BTCUSDT":
             btc_tf_data = tf_data
@@ -1755,10 +1801,12 @@ async def run_opportunity_scan() -> dict:
 
         result = _score_symbol(symbol, tf_data, change_24h, change_1h, change_7d)
         if result is None:
+            _fn_accum["rejected_score"] += 1
             continue
 
         levels = _calc_trade_levels(tf_data, result["current_price"])
         if levels is None:
+            _fn_accum["rejected_levels"] += 1
             continue  # skip coins without valid Entry/SL/TP
 
         result.update(levels)
@@ -1770,6 +1818,7 @@ async def run_opportunity_scan() -> dict:
         _SPOT_FIXED_COST = 0.26   # 0.10%×2 taker + 0.06% spread
         _net_tp2 = result.get("tp2_pct", 0) - _SPOT_FIXED_COST - _cslip(quote_vol)
         if _net_tp2 < 1.5:
+            _fn_accum["rejected_net_ev"] += 1
             continue
 
         results.append(result)
@@ -1821,6 +1870,7 @@ async def run_opportunity_scan() -> dict:
         + [t["symbol"] for t in _extra_movers]   # just fetched
     )
     breakout_results: list[dict] = []
+    _fn_breakout = _new_funnel(0)   # pool dihitung setelah gate universe di bawah
 
     for bsym in _breakout_pool:
         if bsym in _breakout_done:
@@ -1830,14 +1880,16 @@ async def run_opportunity_scan() -> dict:
             continue
         bchange_24h = float(bticker.get("priceChangePercent", 0))
         if bchange_24h < BREAKOUT_CHANGE_24H_GATE:
-            continue
+            continue   # di luar universe lane ini — bukan "gugur", memang bukan kandidat
 
+        _fn_breakout["pool"] += 1
         btf_data: dict[str, TFData] = {}
         for tf in TIMEFRAMES:
             bd = _analyze_tf(tf, klines_map.get((bsym, tf), []))
             if bd:
                 btf_data[tf] = bd
         if not btf_data:
+            _fn_breakout["no_data"] += 1
             continue
 
         bd1h      = btf_data.get("1h")
@@ -1847,12 +1899,14 @@ async def run_opportunity_scan() -> dict:
 
         bres = _score_breakout(bsym, btf_data, bchange_24h, bchange_1h)
         if bres is None:
+            _fn_breakout["rejected_score"] += 1
             continue
 
         blevels = _calc_trade_levels_breakout(
             klines_map.get((bsym, "15m"), []), bres["current_price"]
         )
         if blevels is None:
+            _fn_breakout["rejected_levels"] += 1
             continue
 
         bres.update(blevels)
@@ -1861,6 +1915,7 @@ async def run_opportunity_scan() -> dict:
         # P2: MIN_NET_EV gate
         from app.services.slippage_sim import calculate_entry_slippage as _cslip
         if bres.get("tp2_pct", 0) - 0.26 - _cslip(bres["quote_vol_24h"]) < 1.5:
+            _fn_breakout["rejected_net_ev"] += 1
             continue
         breakout_results.append(bres)
         _breakout_done.add(bsym)
@@ -1872,6 +1927,7 @@ async def run_opportunity_scan() -> dict:
     # LONG-only. Pool: change_24h ≥ 20% OR change_7d ≥ 30%. Min vol $1M.
     # B2.4: dedup via _breakout_done (shared across accumulation + breakout + bigmover).
     bigmover_results: list[dict] = []
+    _fn_bigmover = _new_funnel(0)   # pool dihitung setelah gate universe di bawah
     bm_extra_movers = [
         t for t in tickers_all
         if (
@@ -1918,14 +1974,16 @@ async def run_opportunity_scan() -> dict:
         except (TypeError, ValueError):
             continue
         if bm_change_24h < BIGMOVER_MIN_CHANGE_24H:
-            continue
+            continue   # di luar universe lane ini
 
+        _fn_bigmover["pool"] += 1
         bm_tf: dict[str, TFData] = {}
         for tf in TIMEFRAMES:
             bd = _analyze_tf(tf, klines_map.get((bsym, tf), []))
             if bd:
                 bm_tf[tf] = bd
         if not bm_tf:
+            _fn_bigmover["no_data"] += 1
             continue
 
         bm_d1h = bm_tf.get("1h")
@@ -1946,12 +2004,14 @@ async def run_opportunity_scan() -> dict:
             bsym, bm_tf, bm_change_24h, bm_change_1h, bm_change_7d,
         )
         if bm_res is None:
+            _fn_bigmover["rejected_score"] += 1
             continue
 
         bm_levels = _calc_trade_levels_bigmover(
             klines_map.get((bsym, "15m"), []), bm_res["current_price"], bm_change_24h,
         )
         if bm_levels is None:
+            _fn_bigmover["rejected_levels"] += 1
             continue
 
         bm_res.update(bm_levels)
@@ -1960,6 +2020,7 @@ async def run_opportunity_scan() -> dict:
         # P2: MIN_NET_EV gate
         from app.services.slippage_sim import calculate_entry_slippage as _cslip
         if bm_res.get("tp2_pct", 0) - 0.26 - _cslip(bm_res["quote_vol_24h"]) < 1.5:
+            _fn_bigmover["rejected_net_ev"] += 1
             continue
         bigmover_results.append(bm_res)
         _breakout_done.add(bsym)   # B2.4: shared dedup across all passes
@@ -1973,27 +2034,28 @@ async def run_opportunity_scan() -> dict:
     # Micro-cap $100K–$1M — universe yang tidak disentuh lane lain. Dedup via
     # _breakout_done (shared set). Fetch klines 1d SAJA (murah).
     try:
-        early_radar_results = await scan_early_radar(tickers_all, _breakout_done)
+        early_radar_results, _fn_early = await scan_early_radar(tickers_all, _breakout_done)
     except Exception as e:
         logger.warning("early_radar_scan_failed", error=str(e))
-        early_radar_results = []
+        early_radar_results, _fn_early = [], _new_funnel(0)
 
     # F0: one adaptive policy for every SPOT lane. Learning is conservative at
     # this stage: it can veto an existing auto-open but cannot promote a new one.
     results = _apply_lane_learning(
         results, learning_weights, learning_probabilities, learning_sample_counts, banned_keys, MIN_SCORE, AUTO_OPEN_SCORE,
+        funnel=_fn_accum,
     )
     breakout_results = _apply_lane_learning(
         breakout_results, learning_weights, learning_probabilities, learning_sample_counts, banned_keys,
-        BREAKOUT_MIN_SCORE, BREAKOUT_AUTO_SCORE,
+        BREAKOUT_MIN_SCORE, BREAKOUT_AUTO_SCORE, funnel=_fn_breakout,
     )
     bigmover_results = _apply_lane_learning(
         bigmover_results, learning_weights, learning_probabilities, learning_sample_counts, banned_keys,
-        BIGMOVER_MIN_SCORE, BIGMOVER_AUTO_SCORE,
+        BIGMOVER_MIN_SCORE, BIGMOVER_AUTO_SCORE, funnel=_fn_bigmover,
     )
     early_radar_results = _apply_lane_learning(
         early_radar_results, learning_weights, learning_probabilities, learning_sample_counts, banned_keys,
-        EARLY_RADAR_MIN_SCORE, EARLY_RADAR_AUTO_SCORE,
+        EARLY_RADAR_MIN_SCORE, EARLY_RADAR_AUTO_SCORE, funnel=_fn_early,
     )
 
     # §12.5 + Phase 3 G3-regime: 3-state — CLOSED kills auto-open, REDUCED keeps
@@ -2020,6 +2082,18 @@ async def run_opportunity_scan() -> dict:
     # Breakout lane: sort by raw_score, cap at 10 results
     breakout_results.sort(key=lambda x: x.get("raw_score", 0), reverse=True)
     breakout_results = breakout_results[:10]
+
+    # S2: tutup corong tiap lane SETELAH regime gate, supaya `auto_eligible`
+    # mencerminkan keputusan akhir (REDUCED/CLOSED sudah diperhitungkan).
+    lane_funnels = {
+        "accumulation": (_fn_accum,    results),
+        "breakout":     (_fn_breakout, breakout_results),
+        "bigmover":     (_fn_bigmover, bigmover_results),
+        "early_radar":  (_fn_early,    early_radar_results),
+    }
+    for _fn, _rows in lane_funnels.values():
+        _fn["found"]         = len(_rows)
+        _fn["auto_eligible"] = sum(1 for r in _rows if r.get("auto_open"))
 
     all_results = results + breakout_results + bigmover_results + early_radar_results
     try:
@@ -2070,6 +2144,18 @@ async def run_opportunity_scan() -> dict:
         "regime_status":      regime_status,    # Phase 3 G3-regime: OPEN | REDUCED | CLOSED
         "btc_change_24h":     round(btc_change_24h, 2),
         "alt_breadth_pct":    breadth_pct,          # B-Fix 8: % pair USDT hijau 24h
+        # S2: corong per lane — di tahap mana kandidat gugur. Ini yang membuat
+        # pertanyaan "kenapa lane ini kosong" bisa dijawab dari layar.
+        "lane_funnel":        {k: v[0] for k, v in lane_funnels.items()},
+        # S2: ambang HIDUP per lane (sudah termasuk override agent_config). Tanpa ini
+        # UI memakai konstanta hardcode-nya sendiri dan menampilkan angka basi —
+        # panel History sempat menulis "auto ≥65" setelah B-Fix 1 menaikkannya ke 71.
+        "lane_thresholds": {
+            "accumulation": {"min": MIN_SCORE,             "auto": AUTO_OPEN_SCORE},
+            "breakout":     {"min": BREAKOUT_MIN_SCORE,    "auto": BREAKOUT_AUTO_SCORE},
+            "bigmover":     {"min": BIGMOVER_MIN_SCORE,    "auto": BIGMOVER_AUTO_SCORE},
+            "early_radar":  {"min": EARLY_RADAR_MIN_SCORE, "auto": EARLY_RADAR_AUTO_SCORE},
+        },
         "learning_status":    "degraded" if learning_error else "active",
         "learning_error":     learning_error,
         "learning_weight_count": len(learning_weights),

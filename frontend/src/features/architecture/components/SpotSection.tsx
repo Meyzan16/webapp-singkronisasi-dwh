@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge, LiveBadge, SectionTitle, SourceBadge } from "./primitives";
 import {
   SPOT_LANES,
+  SPOT_FEEDERS,
   SPOT_SIGNALS,
   SPOT_DIRECTION_GATE,
   SPOT_MONITOR_LAYERS,
@@ -56,14 +57,12 @@ function UniverseBar() {
 }
 
 // PLAN_v5 Group C7 — DB key per lane (matches agent_config_defaults.py seed keys).
-// "weekly" volume is DB-wired but its score reuses accumulation's threshold at
-// runtime (scanner.py has no separate weekly score gate), so its score badge
-// points at the accumulation keys.
+// PLAN_SPOT_LANES S1: entri "weekly" dihapus — ia feeder universe, bukan lane,
+// dan tidak punya gerbang skor sendiri di scanner.py.
 const LANE_DB_KEYS: Record<string, { vol: string; min: string; auto: string }> = {
   accumulation: { vol: "spot.min_quote_volume",      min: "spot.min_score",             auto: "spot.auto_open_score" },
   breakout:     { vol: "spot.breakout_min_volume",   min: "spot.breakout_min_score",    auto: "spot.breakout_auto_score" },
   bigmover:     { vol: "spot.bigmover_min_volume",   min: "spot.bigmover_min_score",    auto: "spot.bigmover_auto_score" },
-  weekly:       { vol: "spot.weekly_min_volume",     min: "spot.min_score",             auto: "spot.auto_open_score" },
   early_radar:  { vol: "spot.early_radar_min_volume", min: "spot.early_radar_min_score", auto: "spot.early_radar_auto_score" },
 };
 
@@ -86,7 +85,7 @@ function LanesSection() {
 
   return (
     <div className="mb-6">
-      <SectionTitle icon="🛣" title="5 Scanning Lanes" sub="Setiap lane punya universe, trigger, dan SL/TP berbeda" />
+      <SectionTitle icon="🛣" title="4 Scanning Lanes" sub="Setiap lane punya universe, trigger, alert_type, dan SL/TP sendiri" />
       <div className="flex gap-2 mb-4 flex-wrap">
         {SPOT_LANES.map(l => (
           <button key={l.key} onClick={() => setActive(l.key)}
@@ -151,6 +150,46 @@ function LanesSection() {
             )}
           </div>
         </div>
+      </div>
+
+      <FeedersSection />
+    </div>
+  );
+}
+
+// ─── UNIVERSE FEEDERS ────────────────────────────────────────────────────────
+// PLAN_SPOT_LANES S1: sebelumnya "Weekly Momentum" berdiri sejajar 4 lane di atas
+// lengkap dengan minScore/autoScore/rrMin — angka yang tidak pernah dibaca kode.
+// Ia (dan supplement momentum 24h) hanya memperluas pool kandidat.
+function FeedersSection() {
+  return (
+    <div className="mt-4 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 p-4">
+      <p className="text-xs font-bold text-neutral-700 mb-1">🍽 Universe Feeder — bukan lane</p>
+      <p className="text-[11px] text-neutral-500 mb-3 max-w-2xl">
+        Keduanya hanya <strong>menambah koin</strong> ke pool kandidat; penilaiannya tetap
+        dilakukan salah satu dari 4 lane di atas. Karena itu mereka tidak punya
+        <code className="mx-1 px-1 bg-white rounded border border-neutral-200">alert_type</code>
+        sendiri dan tidak akan pernah muncul sebagai lane tersendiri di halaman History.
+      </p>
+      <div className="grid md:grid-cols-2 gap-3">
+        {SPOT_FEEDERS.map(f => (
+          <div key={f.key} className="rounded-lg bg-white border border-neutral-200 p-3">
+            <p className="text-xs font-bold flex items-center gap-1.5 mb-1">
+              <span>{f.emoji}</span> {f.label}
+              <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold ${f.badgeColor}`}>feeder</span>
+            </p>
+            <p className="text-[11px] text-neutral-600 leading-relaxed mb-2">{f.desc}</p>
+            <InfoRow label="Trigger" val={f.trigger} />
+            <InfoRow label="Biaya" val={f.cost} />
+            <div className="mt-2 space-y-0.5">
+              {f.extras.map(e => (
+                <p key={e} className="text-[10px] text-neutral-500 flex items-start gap-1">
+                  <span className="text-teal-600 shrink-0">›</span> {e}
+                </p>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

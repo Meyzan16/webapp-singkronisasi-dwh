@@ -4,7 +4,12 @@ import type { OppPosition, OppStats } from "./OppSpotTypes";
 import { OpenPositionCard } from "./OpenPositionCard";
 
 const PAGE_SIZE = 5;
-const MAX_CONCURRENT_POLICY = 3;   // §7B/8.5: aturan eksplisit, bukan hitungan rata-rata
+// PLAN_SPOT_LANES audit 22 Jul: kartu ini dulu menulis "maks 3 posisi bersamaan"
+// — kebijakan yang TIDAK ADA di kode. `MAX_OPENS_PER_CYCLE = 3` membatasi entri
+// BARU per siklus scan (3 menit), bukan jumlah posisi terbuka. Satu-satunya rem
+// jumlah posisi adalah modal: entri ditolak saat sisa saldo tak cukup mendanai
+// notional penuh. Label diluruskan supaya layar tidak menjanjikan pengaman fiktif.
+const MAX_OPENS_PER_CYCLE = 3;
 
 interface OpenPositionsListProps {
   openList:  OppPosition[];
@@ -82,8 +87,9 @@ export function OpenPositionsList({ openList, stats, closingId, onClose }: OpenP
           <p className="mt-1 text-[10px] text-neutral-400">
             Modal tersisa{" "}
             <strong className="text-neutral-600">${stats.availableBalance$.toFixed(0)}</strong>
-            {" "}· Kebijakan: maks <strong>{MAX_CONCURRENT_POLICY} posisi</strong> bersamaan,
-            modal terkonsentrasi di setup terbaik (risk-adjusted).
+            {" "}· Kebijakan: maks <strong>{MAX_OPENS_PER_CYCLE} entri baru</strong> per siklus scan.
+            Jumlah posisi terbuka dibatasi <strong>modal</strong>, bukan angka tetap —
+            entri ditolak saat sisa saldo tak cukup mendanai notional penuh.
           </p>
         )}
       </div>

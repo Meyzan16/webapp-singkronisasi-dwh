@@ -119,15 +119,31 @@ def _start_of_wib_day() -> float:
     return (int(now_wib) // 86400) * 86400 - WIB_UTC_OFFSET_H * 3600
 
 
+# B-Fix 7 (perbaikan lanjutan): breaker kini dipanggil dari loop utama (3 mnt) DAN
+# fastpass (30 dtk). Tanpa cache, tiap panggilan menembak Binance — 120 request/jam
+# hanya untuk membaca harga yang nyaris tak berubah. TTL pendek cukup: rem harian
+# tidak perlu presisi detik.
+_UNREALIZED_TTL_SEC = 60.0
+_unrealized_cache: tuple[float, float] = (0.0, 0.0)   # (dihitung_pada, nilai)
+
+
 async def _unrealized_loss_today(open_trades: list) -> float:
     """
     PLAN_SPOT_LANES B-Fix 7: total kerugian BELUM terealisasi dari posisi terbuka.
 
     Hanya sisi RUGI yang dihitung — laba mengambang tidak boleh mengendurkan rem,
     karena ia belum dibukukan dan bisa menguap. Mengembalikan angka ≤ 0.
+
+    Pemanggil bertanggung jawab menyaring posisi mana yang relevan (lihat
+    `_daily_loss_breaker_active`: hanya posisi yang DIBUKA hari ini).
     """
+    global _unrealized_cache
     if not open_trades:
         return 0.0
+
+    cached_at, cached_val = _unrealized_cache
+    if time.time() - cached_at < _UNREALIZED_TTL_SEC:
+        return cached_val
 
     import httpx
     from app.services.binance_urls import spot as _spot
@@ -144,7 +160,8 @@ async def _unrealized_loss_today(open_trades: list) -> float:
                     prices[row["symbol"]] = float(row["price"])
     except Exception as exc:
         # Fail-safe: tanpa harga, jangan mengarang angka — rem jatuh kembali ke
-        # perilaku lama (realized saja) dan itu terlihat di log.
+        # perilaku lama (realized saja) dan itu terlihat di log. Sengaja TIDAK
+        # di-cache supaya percobaan berikutnya langsung mencoba lagi.
         logger.warning("unrealized_price_fetch_failed", error=str(exc)[:80])
         return 0.0
 
@@ -156,16 +173,24 @@ async def _unrealized_loss_today(open_trades: list) -> float:
         pnl_pct = (px - t.entry_price) / t.entry_price * 100 - EXECUTION_COST_PCT
         if pnl_pct < 0:
             total += pnl_pct / 100 * (t.position_size or 0.0)
-    return round(total, 2)
+    total = round(total, 2)
+    _unrealized_cache = (time.time(), total)
+    return total
 
 
 async def _daily_loss_breaker_active() -> bool:
     """
     §14.4: True bila total P&L hari ini (WIB) ≤ −3% balance.
 
-    B-Fix 7: kini realized + kerugian mengambang posisi terbuka. Versi lama hanya
-    melihat realized, sehingga rem baru menyala SETELAH kerugian dibukukan —
-    12 Juli tercatat 13 penutupan dalam satu hari sebelum rem sempat bekerja.
+    B-Fix 7: kini realized + kerugian mengambang. Versi lama hanya melihat realized,
+    sehingga rem baru menyala SETELAH kerugian dibukukan — 12 Juli tercatat 13
+    penutupan dalam satu hari sebelum rem sempat bekerja.
+
+    Sisi mengambang dibatasi ke posisi yang DIBUKA hari ini (WIB). Kalau tidak,
+    drawdown posisi kemarin ikut dihitung sebagai "rugi hari ini" dan rem bisa
+    menyala di hari yang sebenarnya datar. Drawdown lintas hari sudah punya
+    pengaman sendiri: pemotongan risk 50% di compute_spot_sizing saat DD > 10%.
+
     Manual open tetap boleh (keputusan user).
     """
     from app.database import AsyncSessionLocal
@@ -187,8 +212,9 @@ async def _daily_loss_breaker_active() -> bool:
 
         open_trades = list((await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style  == "opportunity_spot",
-                PaperTrade.status == "open",
+                PaperTrade.style   == "opportunity_spot",
+                PaperTrade.status  == "open",
+                PaperTrade.entry_at >= start_of_day,
             )
         )).scalars().all())
 
