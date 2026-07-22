@@ -47,6 +47,22 @@ export function laneForSpot(alertType?: string | null, entryMode?: string | null
 }
 
 /**
+ * PLAN_SPOT_LANES S6 — lane sebuah posisi, memakai field `lane` immutable dari
+ * backend bila ada. `laneForSpot` (di atas) hanya cadangan untuk respons lama:
+ * ia ikut membaca `entry_mode`, yang DIMUTASI monitor jadi "momentum_chase"
+ * begitu TP2/TP3 tersentuh — jadi ia tidak layak jadi kunci analitik.
+ */
+export function laneFromPosition(p: {
+  lane?: string | null;
+  alert_type?: string | null;
+  entry_mode?: string | null;
+}): LaneInfo {
+  const key = (p.lane ?? "").trim().toLowerCase();
+  if (key && LANES[key]) return LANES[key];
+  return laneForSpot(p.alert_type, p.entry_mode);
+}
+
+/**
  * Human open-reason for a spot position:
  * - manual (force-open) → "🖐 Manual"
  * - auto → "{emoji} {Lane} · auto ≥{threshold}"

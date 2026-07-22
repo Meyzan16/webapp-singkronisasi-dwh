@@ -13,7 +13,7 @@ import { PnlCalendar, localDayKey } from "./PnlCalendar";
 import { LanePerformance, type LaneStat } from "./LanePerformance";
 import { OpenPositionsList }  from "./OpenPositionsList";
 import { OppSpotToolbar }     from "./OppSpotToolbar";
-import { laneForSpot, LANES, SPOT_LANE_KEYS } from "@/lib/lanes";
+import { laneFromPosition, LANES, SPOT_LANE_KEYS } from "@/lib/lanes";
 
 const REFRESH_INTERVAL = 15_000;
 // Jendela riwayat yang diminta dari API — dipakai juga sebagai label panel lane
@@ -145,13 +145,16 @@ export function OppSpotTab() {
   }, []);
 
   const exportCSV = useCallback(() => {
+    // S6: kolom "Lane" kini dari identitas immutable. "Mode Saat Tutup" diberi
+    // nama apa adanya — ia state akhir monitor, BUKAN mode saat entry.
     const headers = [
-      "ID","Symbol","Status","Lane","Alert Type","Manual","Entry","SL","TP1","TP2",
+      "ID","Symbol","Status","Lane","Mode Saat Tutup","Alert Type","Manual","Entry","SL","TP1","TP2",
       "Close Price","P&L %","Score","R:R","Entry Date","Close Date",
     ];
     const rows = positions.map(p => [
       p.id, p.symbol, p.status,
-      laneForSpot(p.alert_type, p.entry_mode).label,     // PLAN_v9 G1c
+      laneFromPosition(p).label,                         // PLAN_v9 G1c + S6
+      p.entry_mode ?? "",
       p.alert_type, p.manual ? "yes" : "",
       p.entry, p.sl, p.tp1 ?? "", p.tp2,
       p.close_price ?? "", p.pnl_pct ?? "",
@@ -292,7 +295,11 @@ export function OppSpotTab() {
     SPOT_LANE_KEYS.forEach(seed);
 
     positions.forEach(p => {
-      const lane = laneForSpot(p.alert_type, p.entry_mode);
+      // S6: pakai lane immutable dari backend; laneForSpot hanya cadangan untuk
+      // respons lama. Jangan mengelompokkan lewat entry_mode — nilainya ditulis
+      // ulang monitor jadi "momentum_chase" begitu TP2 tersentuh, sehingga
+      // pengelompokan per mode selalu condong ke arah pemenang.
+      const lane = laneFromPosition(p);
       const cur  = seed(lane.key);
       cur.label  = lane.label;
       cur.emoji  = lane.emoji;

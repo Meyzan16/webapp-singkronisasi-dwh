@@ -76,7 +76,8 @@ export interface OppPosition {
   score:               number;
   confidence:          number;
   alert_type:          string;
-  entry_mode?:         string | null;   // PLAN_v9 — lane hint
+  entry_mode?:         string | null;   // MODE SAAT INI — dimutasi monitor di TP2/TP3
+  lane?:               string | null;   // S6 — identitas lane immutable (untuk analitik)
   manual?:             boolean;          // PLAN_v9 G3b — force-open marker
   signals:             string[];
   entry_at:            number;

@@ -444,6 +444,19 @@ async def _fetch_spot_prices(symbols: list[str]) -> dict[str, float]:
     return prices
 
 
+def _lane_of_trade(meta: dict, alert_type: str | None) -> str:
+    """
+    S6: lane immutable satu trade. Logika hidup di agents/opportunity/monitor.py
+    (satu sumber dengan yang dipakai monitor untuk memilih regime exit).
+    """
+    try:
+        from agents.opportunity.monitor import lane_of
+
+        return lane_of(meta, alert_type)
+    except Exception:
+        return "accumulation"
+
+
 def _monitor_snapshot(trade, meta: dict, current_price: float | None) -> dict | None:
     """
     Snapshot state monitor agent untuk satu posisi terbuka (None untuk yang sudah
@@ -542,7 +555,12 @@ async def get_open_positions(days: int = Query(default=30, ge=1, le=365)) -> dic
             "entry_type":         t.entry_type,           # "market" | "auto"
             "auto_open":          meta.get("auto_open", t.entry_type == "auto"),
             "manual":             bool(meta.get("manual", False)),   # PLAN_v8 P5: force-open marker
-            "entry_mode":         meta.get("entry_mode"),            # PLAN_v8 P2: lane hint (bigmover_chase, etc.)
+            "entry_mode":         meta.get("entry_mode"),            # PLAN_v8 P2: MODE SAAT INI — dimutasi monitor
+            # PLAN_SPOT_LANES S6: identitas lane yang tidak pernah berubah. Semua
+            # atribusi/analitik harus memakai ini; `entry_mode` di atas ditulis ulang
+            # jadi "momentum_chase" begitu TP2/TP3 tersentuh, sehingga pengelompokan
+            # per entry_mode selalu bias ke arah pemenang.
+            "lane":               _lane_of_trade(meta, t.alert_type),
             "close_reason":       meta.get("close_reason"),
             "entry_at":           t.entry_at,
             "close_price":        t.close_price,

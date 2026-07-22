@@ -392,8 +392,9 @@ Pemeriksaan ulang seluruh item plan terhadap kode yang benar-benar berjalan.
 | S2 — funnel per lane terlihat | **SELESAI** | `_new_funnel()` di 4 lane; `_filter()` meneruskan `lane_funnel` + `regime_status` + `alt_breadth_pct` + `found_*`; panel History menampilkan corong per kartu lane + spanduk gerbang pasar |
 | S3 — Early Radar | **MENUNGGU KEPUTUSAN** | lihat temuan baru di bawah |
 | S4 — lane immutable | **SELESAI** | dikerjakan sebagai B-Fix 3 (`lane_of`) |
-| S5 — quota penjamin per lane | **BELUM** | menunggu data dari S2 |
-| S6 — bersihkan bias analitik `entry_mode` | **BELUM** | menunggu S4 matang di data |
+| S5 — quota penjamin per lane | **SELESAI** | lihat §B7d |
+| S6 — bersihkan bias analitik `entry_mode` | **SELESAI** | lihat §B7d |
+| S7 — samakan rem portofolio & rem harian | **SELESAI** | lihat §B7d |
 | S7 — cap posisi terbuka (BARU) | **MENUNGGU KEPUTUSAN** | lihat temuan 4 di bawah |
 | B-Fix 1…8 | **SELESAI & LIVE** | lihat §B7b |
 
@@ -474,6 +475,80 @@ tanpa menambah angka ajaib baru.
 - **`quote_vol_24h` tidak diisi di jalur fastpass**, sehingga slippage di meta dihitung
   dari volume 0. Hanya informasional, tidak memengaruhi keputusan.
 - **Gerbang `BIGMOVER_RR_MIN = 2.0` belum pernah mengikat** (rasio terburuk 12/5.5 = 2.18).
+
+## B7d. S5 · S6 · S7 — 22 Juli 2026
+
+### Koreksi atas laporan sebelumnya
+
+Di audit §B7c saya menulis bahwa SPOT **tidak punya** plafon posisi bersamaan dan
+kalimat "maks 3 posisi" di UI tidak ditegakkan kode mana pun. **Itu keliru.** Saya
+memeriksa `scheduler.py` dan berhenti di sana; ternyata penjaganya ada di
+`compute_spot_sizing` ([balance.py:192](backend/app/api/v1/balance.py:192)):
+
+- `MAX_CONCURRENT_POSITIONS = 5` — plafon posisi bersamaan **ada**. Lima posisi yang
+  terbuka kemarin bukan kebocoran, melainkan tepat di plafon.
+- `MAX_PORTFOLIO_RISK = 0.04` — gerbang portfolio heat **juga sudah ada**.
+
+Yang salah bukan ketiadaan rem, melainkan **angkanya tidak nyambung**: portofolio
+boleh dimuati sampai 4% risiko sementara circuit breaker harian menyala di 3%.
+Kalimat "maks 3 posisi" di UI memang tetap keliru — angka sebenarnya 5.
+
+### S7 (opsi B) — satu angka untuk dua rem
+
+`MAX_PORTFOLIO_RISK` 4% → **3%**, dan `compute_spot_sizing` menerima parameter
+`max_portfolio_risk` yang diisi scheduler dengan nilai HIDUP
+`spot.daily_loss_limit_pct`. Mengubah satu angka di config kini menggerakkan keduanya.
+
+Bukti seberapa mengikatnya, dari portofolio saat ini:
+
+```
+posisi terbuka   : 5   (plafon MAX_CONCURRENT_POSITIONS = 5)
+risk terbuka     : $43.13
+balance          : $1083.15
+plafon heat LAMA : $43.33  (4%)   ← terpakai 99.5%
+plafon heat BARU : $32.49  (3%)   ← = batas rem harian
+```
+
+Buku posisi duduk di **99.5% plafon lama** — artinya gerbang 4% itu aktif mengikat,
+dan membiarkan eksposur ~33% di atas apa yang sanggup ditanggung batas harian. Efek
+langsung: entri auto baru diblokir sampai risiko terbuka turun di bawah $32.49.
+Itu memang yang diinginkan, tapi perlu diketahui — bukan kejutan.
+
+### S5 — kuota PENJAMIN per lane (bukan pembatas)
+
+Dua lintasan di `run_opportunity_loop`:
+1. Sisakan `RESERVED_SLOTS_NON_ACCUM = 1` slot bila ada kandidat auto-open
+   non-Accumulation; Accumulation dibatasi `cycle_quota − reserve`.
+2. Slot cadangan yang tak terpakai **dikembalikan** — diisi kandidat terbaik yang
+   tersisa tanpa batas lane, supaya reservasi tidak pernah menghanguskan slot.
+
+Diuji terhadap 4 skenario:
+
+| Skenario | Kuota | Hasil |
+|----------|-------|-------|
+| 5 accum + 1 bigmover (kondisi nyata) | 3 | accumulation, accumulation, **bigmover** |
+| semua accumulation | 3 | accumulation ×3 (tak ada slot hangus) |
+| kuota 1 (regime REDUCED) | 1 | accumulation (reservasi tidak merampas kuota tunggal) |
+| accum + breakout + early | 3 | accumulation, accumulation, **breakout** |
+
+### S6 — analitik pindah ke `lane` immutable
+
+- Endpoint posisi kini mengirim field `lane` per trade (dari `lane_of`, satu sumber
+  dengan monitor). Terverifikasi live untuk 5 posisi terbuka.
+- Frontend memakai `laneFromPosition()`; `laneForSpot` turun jadi cadangan untuk
+  respons lama, karena ia ikut membaca `entry_mode` yang dimutasi.
+- Export CSV: kolom `Lane` kini dari identitas immutable, dan `entry_mode` diberi
+  nama jujur **"Mode Saat Tutup"** — ia state akhir monitor, bukan mode saat entry.
+- Uji kebal-mutasi: `{lane: bigmover, entry_mode: momentum_chase}` → `bigmover`;
+  accumulation yang di-upgrade jadi `momentum_chase` → tetap `accumulation`.
+
+### Bug tambahan yang diperbaiki
+
+- Panel History menampilkan **"auto ≥65"** untuk BigMover padahal B-Fix 1 sudah
+  menaikkannya ke 71 — UI membaca konstanta frontend, bukan nilai hidup. Scanner kini
+  mengirim `lane_thresholds` (nilai HIDUP termasuk override config) dan panel
+  memakainya; konstanta frontend tinggal cadangan. Terverifikasi:
+  `bigmover {min: 65, auto: 71}`.
 
 ## B8. Urutan eksekusi
 

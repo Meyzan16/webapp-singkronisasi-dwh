@@ -38,6 +38,10 @@ WIB_UTC_OFFSET_H          = 7
 # PLAN_SPOT_LANES B-Fix 7: pembatas frekuensi. 12 Juli tercatat 10 entri auto dan
 # 13 penutupan dalam satu hari (−$36.44) — itu churn, bukan peluang.
 MAX_AUTO_OPENS_PER_DAY    = 6
+# PLAN_SPOT_LANES S5: slot yang DISISIHKAN untuk lane non-Accumulation tiap cycle
+# selama ada kandidatnya. Bukan memaksa entri — slot yang tak terpakai dikembalikan
+# di lintasan kedua. Tujuannya memberi lane kecil kesempatan mengumpulkan sampel.
+RESERVED_SLOTS_NON_ACCUM  = 1
 
 # §14.5: koin beta-BTC tinggi bergerak serentak — maksimal 1 posisi dari grup ini
 HIGH_BETA_GROUP = {
@@ -477,6 +481,10 @@ async def _auto_open_position(coin: dict) -> bool:
         risk_pct = coin.get("risk_pct", 0),
         risk_fraction_override = _risk_frac_override,
         risk_multiplier        = lane_multiplier,
+        # S7 opsi B: rem portofolio memakai angka yang SAMA dengan rem harian.
+        # Dulu portfolio heat 4% vs breaker harian 3% — portofolio boleh dimuati
+        # melebihi apa yang sanggup ditanggung batas harian.
+        max_portfolio_risk     = DAILY_LOSS_LIMIT_FRACTION,
     )
     if not sizing["can_open"]:
         logger.info("auto_open_blocked", symbol=symbol,
@@ -644,25 +652,70 @@ async def run_opportunity_loop() -> None:
                 cycle_quota = min(cycle_quota, max(0, daily_room))
                 bm_open_now = await _bigmover_open_count()
                 er_open_now = await _early_radar_open_count()
-                for coin in auto_candidates:
-                    if opened >= cycle_quota:
-                        break
+
+                # PLAN_SPOT_LANES S5 — kuota PENJAMIN, bukan pembatas.
+                # Sebelumnya kandidat diurut global by EV lalu dipotong 3; lane
+                # Accumulation (skor 99) menyerap semua slot, sehingga lane kecil
+                # tak pernah mengumpulkan sampel untuk membuktikan dirinya —
+                # lingkaran tertutup. Kalau ada kandidat non-accumulation yang
+                # layak, sisakan slot untuk mereka di lintasan pertama.
+                lanes_waiting = {lane_of({}, c.get("alert_type")) for c in auto_candidates}
+                reserve = (
+                    min(RESERVED_SLOTS_NON_ACCUM, max(0, cycle_quota - 1))
+                    if any(l != "accumulation" for l in lanes_waiting) else 0
+                )
+                accum_cap = cycle_quota - reserve
+                if reserve:
+                    logger.info("auto_open_lane_reserve",
+                                reserve=reserve, accum_cap=accum_cap,
+                                lanes=sorted(lanes_waiting))
+
+                async def _try_open(coin: dict) -> bool:
+                    """Buka satu kandidat bila semua kuota lane mengizinkan."""
+                    nonlocal opened, bm_open_now, er_open_now
+                    global _auto_opened
                     # Phase 2 BM3: separate quota for bigmover_chase
                     is_bm = coin.get("entry_mode") == "bigmover_chase"
                     if is_bm and bm_open_now >= MAX_BIGMOVER_OPENS:
-                        continue
+                        return False
                     # PLAN_v5 Group A: separate quota for early_radar
                     is_er = coin.get("entry_mode") == "early_radar"
                     if is_er and er_open_now >= opp_scanner.EARLY_RADAR_MAX_OPEN:
+                        return False
+                    if not await _auto_open_position(coin):
+                        return False
+                    opened += 1
+                    opened_symbols.add(str(coin.get("symbol") or ""))
+                    _auto_opened += 1
+                    if is_bm:
+                        bm_open_now += 1
+                    if is_er:
+                        er_open_now += 1
+                    return True
+
+                # Lintasan 1 — hormati slot cadangan.
+                accum_opened = 0
+                taken: set[int] = set()
+                for idx, coin in enumerate(auto_candidates):
+                    if opened >= cycle_quota:
+                        break
+                    is_accum = lane_of({}, coin.get("alert_type")) == "accumulation"
+                    if is_accum and accum_opened >= accum_cap:
                         continue
-                    if await _auto_open_position(coin):
-                        opened += 1
-                        opened_symbols.add(str(coin.get("symbol") or ""))
-                        _auto_opened += 1
-                        if is_bm:
-                            bm_open_now += 1
-                        if is_er:
-                            er_open_now += 1
+                    if await _try_open(coin):
+                        taken.add(idx)
+                        if is_accum:
+                            accum_opened += 1
+
+                # Lintasan 2 — slot cadangan yang tak terpakai jangan hangus:
+                # isi dengan kandidat terbaik yang tersisa, tanpa batas lane.
+                if opened < cycle_quota and reserve:
+                    for idx, coin in enumerate(auto_candidates):
+                        if opened >= cycle_quota:
+                            break
+                        if idx in taken:
+                            continue
+                        await _try_open(coin)
 
             # F1: persist point-in-time evidence for opened and non-opened
             # candidates. Ledger failure is observable but never blocks trading.

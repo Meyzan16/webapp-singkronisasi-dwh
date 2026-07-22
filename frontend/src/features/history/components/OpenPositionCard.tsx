@@ -1,6 +1,6 @@
 "use client";
 import { fmtPrice } from "@/lib/format";
-import { laneForSpot } from "@/lib/lanes";
+import { laneFromPosition } from "@/lib/lanes";
 import type { OppPosition } from "./OppSpotTypes";
 
 interface OpenPositionCardProps {
@@ -23,7 +23,7 @@ export function OpenPositionCard({
   const riskPct   = p.risk_pct > 0 ? p.risk_pct : 2.0;
   const notional$ = p.position_size ?? (riskDollar / (riskPct / 100));
   const maxLoss$  = p.risk_dollar ?? riskDollar;
-  const lane      = laneForSpot(p.alert_type, p.entry_mode);   // PLAN_v9 G3
+  const lane      = laneFromPosition(p);   // PLAN_v9 G3 + S6 (lane immutable)
 
   // Sumber kebenaran level: snapshot monitor agent (SL setelah trailing/breakeven,
   // rung berikutnya). Fallback ke rencana awal kalau backend belum mengirimnya.

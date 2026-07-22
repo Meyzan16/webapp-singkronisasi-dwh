@@ -59,7 +59,13 @@ MAX_CONCURRENT_POSITIONS = 5      # capital concentrated in best setups only
 MIN_NOTIONAL_ABS         = 150.0  # never open dust positions
 MIN_NOTIONAL_FRACTION    = 0.15   # ...or 15% of balance, whichever is higher
 MAX_NOTIONAL_FRACTION    = 0.40   # one position never exceeds 40% of balance
-MAX_PORTFOLIO_RISK       = 0.04   # sum of open risk_dollar ≤ 4% of balance
+# PLAN_SPOT_LANES S7 (opsi B): portfolio heat HARUS sama dengan batas rugi harian.
+# Dulu 4% sementara circuit breaker harian 3% — portofolio boleh dimuati sampai 4%
+# risiko, jadi bila semua posisi stop di hari yang sama, batas harian terlampaui
+# SEBELUM breaker sempat menyala. Dua rem, dua angka, saling bertabrakan.
+# Scheduler meneruskan nilai HIDUP `spot.daily_loss_limit_pct` lewat parameter
+# `max_portfolio_risk`, sehingga mengubah satu angka di config menggerakkan keduanya.
+MAX_PORTFOLIO_RISK       = 0.03   # = DAILY_LOSS_LIMIT_FRACTION di scheduler
 
 
 async def get_or_create_balance(style_key: str) -> PaperBalance:
@@ -93,6 +99,7 @@ async def compute_spot_sizing(
     risk_pct: float,
     risk_fraction_override: float | None = None,
     risk_multiplier: float = 1.0,
+    max_portfolio_risk: float | None = None,
 ) -> dict:
     """
     Balance-aware position sizing for opportunity_spot.
@@ -179,16 +186,21 @@ async def compute_spot_sizing(
 
     min_notional = max(MIN_NOTIONAL_ABS, bal.balance * MIN_NOTIONAL_FRACTION)
 
+    # S7 opsi B: plafon portfolio heat. Pemanggil (scheduler) meneruskan nilai HIDUP
+    # `spot.daily_loss_limit_pct` supaya rem portofolio dan rem harian selalu satu
+    # angka; tanpa parameter, pakai konstanta modul yang nilainya sama.
+    heat_cap = max_portfolio_risk if max_portfolio_risk is not None else MAX_PORTFOLIO_RISK
+
     # Discipline checks, most binding first
     can_open = True
     reason   = "ok"
     if len(open_trades) >= MAX_CONCURRENT_POSITIONS:
         can_open = False
         reason   = f"max {MAX_CONCURRENT_POSITIONS} posisi bersamaan (sekarang {len(open_trades)})"
-    elif open_risk + risk_dollar > bal.balance * MAX_PORTFOLIO_RISK:
+    elif open_risk + risk_dollar > bal.balance * heat_cap:
         can_open = False
         reason   = (f"portfolio heat: risk terbuka ${open_risk:,.2f} + ${risk_dollar:,.2f} "
-                    f"> {MAX_PORTFOLIO_RISK:.0%} dari balance ${bal.balance:,.0f}")
+                    f"> {heat_cap:.0%} dari balance ${bal.balance:,.0f}")
     elif position_size < min_notional:
         can_open = False
         reason   = f"notional ${position_size:,.0f} < minimum ${min_notional:,.0f} (anti-debu)"
@@ -207,6 +219,7 @@ async def compute_spot_sizing(
         "locked_margin":  round(locked_margin, 2),
         "open_positions": len(open_trades),
         "open_risk":      round(open_risk, 2),
+        "heat_cap":       round(heat_cap, 4),      # S7: plafon yang benar-benar dipakai
         "drawdown_pct":   round(drawdown_pct, 2),
         "reason":         reason,
     }
