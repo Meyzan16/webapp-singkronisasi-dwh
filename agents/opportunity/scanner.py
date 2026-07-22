@@ -951,7 +951,9 @@ def _calc_trade_levels_early_radar(low_30d: float, entry: float) -> Optional[dic
     }
 
 
-def _score_early_radar(symbol: str, klines_1d: list, ticker: dict) -> Optional[dict]:
+def _score_early_radar(
+    symbol: str, klines_1d: list, ticker: dict, funnel: Optional[dict] = None,
+) -> Optional[dict]:
     """
     Scoring lane Early Radar dari klines HARIAN saja (murah, 1 TF).
     Sinyal: volume surge (vs avg 7d) + harga dekat 30d high + momentum sehat + RSI + BB.
@@ -989,7 +991,12 @@ def _score_early_radar(symbol: str, klines_1d: list, ticker: dict) -> Optional[d
         score += 25
         signals.append(f"Volume surge {surge:.1f}× vs rata-rata 7d")
     else:
-        return None   # tanpa surge = bukan early radar signal
+        # S3-prep: "tak ada surge" BUKAN "skornya kurang" — ini gerbang sinyal inti,
+        # kandidatnya memang di luar pola lane ini. Dipisah supaya keputusan S3
+        # (turunkan ambang vs perlebar skala skor) berdiri di atas angka, bukan tebakan.
+        if funnel is not None:
+            funnel["rejected_no_surge"] += 1
+        return None
 
     # ── 2. Near 30d high (0-30 pts) ─────────────────────────────────────────────
     high_30d = max(highs[-30:])
@@ -1025,6 +1032,10 @@ def _score_early_radar(symbol: str, klines_1d: list, ticker: dict) -> Optional[d
         signals.append(f"⚠ Δ24h +{change_24h:.0f}% — mungkin sudah terlambat")
 
     if score < EARLY_RADAR_MIN_SCORE:
+        # S3-prep: kandidat PUNYA surge tapi skor totalnya kurang — catat skor
+        # tertingginya supaya terlihat seberapa jauh ambang 70 dari kenyataan.
+        if funnel is not None:
+            funnel["best_score_rejected"] = max(funnel.get("best_score_rejected", 0.0), round(score, 1))
         return None
 
     clean_signals = [s for s in signals if not s.startswith("⚠")]
@@ -1374,9 +1385,12 @@ async def scan_early_radar(
         if len(_kl) < 31:
             funnel["no_data"] += 1
             continue
-        res = _score_early_radar(sym, _kl, t)
+        _before_no_surge = funnel["rejected_no_surge"]
+        res = _score_early_radar(sym, _kl, t, funnel)
         if res is None:
-            funnel["rejected_score"] += 1
+            # kalau bukan karena gerbang surge, berarti skornya yang kurang
+            if funnel["rejected_no_surge"] == _before_no_surge:
+                funnel["rejected_score"] += 1
             continue
         levels = _calc_trade_levels_early_radar(res.pop("_low_30d", 0.0), res["current_price"])
         if levels is None:
@@ -1536,6 +1550,10 @@ def _new_funnel(pool: int) -> dict:
         "rejected_learning": 0,   # adaptive_score jatuh di bawah minimum lane
         "found":             0,   # lolos semua gerbang, tampil sebagai rekomendasi
         "auto_eligible":     0,   # dari `found`, yang boleh auto-open (pasca regime)
+        # Khusus Early Radar: gerbang sinyal INTI (volume surge ≥2×). Gugur di sini
+        # berarti kandidatnya di luar pola lane — beda dari "skornya kurang".
+        "rejected_no_surge":   0,
+        "best_score_rejected": 0.0,   # skor tertinggi yang masih ditolak ambang lane
     }
 
 
