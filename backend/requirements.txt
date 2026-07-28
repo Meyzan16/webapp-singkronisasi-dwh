@@ -8,4 +8,5 @@ pytest>=8.3.0
 pytest-asyncio>=0.25.0
 SQLAlchemy[asyncio]>=2.0.36
 structlog>=24.4.0
+truststore>=0.10.0   # pakai Windows cert store → tahan sadapan SSL antivirus (Bitdefender)
 uvicorn[standard]>=0.34.0

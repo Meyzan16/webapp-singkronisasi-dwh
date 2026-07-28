@@ -9,6 +9,15 @@ import asyncio
 import os
 import sys
 
+# TLS trust via Windows store (lihat penjelasan di backend/app/main.py) — wajib
+# sebelum modul apa pun membuat httpx/websocket client, agar tak kena
+# CERTIFICATE_VERIFY_FAILED saat antivirus menyadap HTTPS (mis. Bitdefender).
+try:
+    import truststore as _truststore
+    _truststore.inject_into_ssl()
+except Exception:  # noqa: BLE001 — best-effort; fallback ke certifi bila gagal
+    pass
+
 import structlog
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

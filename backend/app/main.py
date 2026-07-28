@@ -16,6 +16,22 @@ _repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
+# ── TLS trust: pakai Windows certificate store, bukan hanya bundle `certifi` ──────
+# Antivirus dgn "Encrypted Web Scan" (mis. Bitdefender) menyadap HTTPS dan
+# menyodorkan sertifikat MITM yang ditandatangani CA lokalnya. CA itu ada di
+# Windows store (schannel/PowerShell percaya), TAPI TIDAK ada di certifi → httpx &
+# websockets Python gagal "CERTIFICATE_VERIFY_FAILED: unable to get local issuer
+# certificate", walau hanya intermiten. Cukup 1 koneksi tersadap per cycle sudah
+# bikin _run_scan raise → cycle_count mentok 0 (scanner spot & futures tak jalan).
+# truststore.inject_into_ssl() mengalihkan ssl.create_default_context ke Windows
+# store → httpx/websockets otomatis mempercayai CA AV. Harus jalan SEBELUM modul
+# lain membuat client. Defensif: kalau paket tak ada, jangan halangi startup.
+try:
+    import truststore as _truststore
+    _truststore.inject_into_ssl()
+except Exception:  # noqa: BLE001 — best-effort; fallback ke certifi bila gagal
+    pass
+
 import structlog
 from fastapi import FastAPI, WebSocket
 
