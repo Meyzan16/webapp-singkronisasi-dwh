@@ -26,8 +26,11 @@ engine = create_async_engine(
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 # ── DB availability flag ───────────────────────────────────────────────────────
-# Set to True in main.py lifespan if create_db_schema() succeeds.
-# Stays False when PostgreSQL is down — DB-dependent endpoints return 503.
+# Dijaga oleh watchdog di main.py (`_db_watchdog`), bukan lagi diset sekali saat
+# startup. Riwayat: 22 Jul 2026 mesin restart, uvicorn naik 61 detik SEBELUM
+# PostgreSQL siap, flag terkunci False selamanya dan seluruh fitur mati sampai
+# backend di-restart manual. Sekarang flag mengikuti kondisi nyata: turun sendiri
+# saat DB hilang, naik sendiri saat DB kembali.
 _db_available: bool = False
 
 
@@ -40,6 +43,23 @@ def is_db_available() -> bool:
     return _db_available
 
 
+async def probe_db() -> bool:
+    """
+    `SELECT 1` — apakah PostgreSQL benar-benar menjawab SEKARANG.
+
+    Dipakai watchdog untuk menyetel `_db_available` dari kenyataan, bukan dari
+    satu percobaan saat startup.
+    """
+    from sqlalchemy import text
+
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+
+
 async def require_db() -> None:
     """
     FastAPI dependency — raises 503 when PostgreSQL is unavailable.
@@ -50,7 +70,8 @@ async def require_db() -> None:
     if not _db_available:
         raise HTTPException(
             status_code=503,
-            detail="Database unavailable. Start PostgreSQL / Docker and restart the backend.",
+            detail="Database unavailable — menunggu PostgreSQL kembali "
+                   "(backend menyambung ulang otomatis, tidak perlu restart).",
         )
 
 

@@ -42,10 +42,19 @@ AGENT_LABELS = {
     "cross_agent":      "Cross-Agent",
 }
 
+# TTL cache endpoint adaptive-engine: agregasi ledger puluhan-ribu baris mahal
+# (dulu ~8 dtk -> ECONNRESET). Poll UI berulang dilayani dari cache; recompute
+# paling sering tiap _ENGINE_TTL detik. Data engine berubah lambat (jam-an) jadi aman.
+_ENGINE_CACHE: dict = {"spot": {"ts": 0.0, "data": None}, "futures": {"ts": 0.0, "data": None}}
+_ENGINE_TTL = 45.0
+
 
 @router.get("/signals/adaptive-engine", dependencies=[Depends(require_db)])
 async def get_adaptive_engine() -> dict:
     """Current SPOT Adaptive Learning Engine state for Signal Performance UI."""
+    _c = _ENGINE_CACHE["spot"]
+    if _c["data"] is not None and (time.time() - _c["ts"]) < _ENGINE_TTL:
+        return _c["data"]
     now = time.time()
     async with AsyncSessionLocal() as session:
         models = list((await session.execute(
@@ -66,11 +75,19 @@ async def get_adaptive_engine() -> dict:
             SpotDecisionEvent.scan_ts <= now - 24 * 3600,
             SpotDecisionEvent.pnl_24h_pct.isnot(None),
         )) or 0)
-        mature_snapshots = list((await session.execute(
-            select(SpotDecisionEvent.feature_snapshot_json).where(
-                SpotDecisionEvent.pnl_24h_pct.isnot(None)
+        # mature_feature_samples via SQL count (dulu: muat ~puluhan-ribu blob JSON
+        # lalu parse di Python -> ~8 detik/request -> ECONNRESET). feature_snapshot_json
+        # ditulis json.dumps(sort_keys=True) default separators -> `"key": value`.
+        # Hitung baris matang yang punya challenger_features NON-KOSONG.
+        mature_feature_samples = int(await session.scalar(
+            select(func.count(SpotDecisionEvent.id)).where(
+                SpotDecisionEvent.pnl_24h_pct.isnot(None),
+                SpotDecisionEvent.feature_snapshot_json.like('%"challenger_features": %'),
+                SpotDecisionEvent.feature_snapshot_json.notlike('%"challenger_features": {}%'),
+                SpotDecisionEvent.feature_snapshot_json.notlike('%"challenger_features": []%'),
+                SpotDecisionEvent.feature_snapshot_json.notlike('%"challenger_features": null%'),
             )
-        )).scalars().all())
+        ) or 0)
         missing_snapshots = int(await session.scalar(select(func.count(SpotDecisionEvent.id)).where(
             (SpotDecisionEvent.feature_snapshot_json.is_(None)) |
             (SpotDecisionEvent.feature_snapshot_json == "")
@@ -82,16 +99,6 @@ async def get_adaptive_engine() -> dict:
             SpotDecisionEvent.closed_at.isnot(None),
             SpotDecisionEvent.closed_at < SpotDecisionEvent.scan_ts,
         )) or 0)
-
-    mature_feature_samples = 0
-    for raw_snapshot in mature_snapshots:
-        if raw_snapshot:
-            try:
-                snapshot = json.loads(raw_snapshot)
-            except (TypeError, json.JSONDecodeError):
-                snapshot = {}
-            if snapshot.get("challenger_features"):
-                mature_feature_samples += 1
 
     model_payload = []
     for model in models[:10]:
@@ -147,7 +154,7 @@ async def get_adaptive_engine() -> dict:
         "champion_exists": any(model.status == "champion" for model in models),
         "rollback_ready": any(model.status == "retired" for model in models),
     }
-    return {
+    result = {
         "engine_status": (
             "degraded" if weight_state.get("last_error") or not gates["data_quality"]
             else "collecting" if not gates["training_data"]
@@ -176,6 +183,9 @@ async def get_adaptive_engine() -> dict:
         "gates": gates,
         "updated_at": now,
     }
+    _ENGINE_CACHE["spot"]["ts"] = time.time()
+    _ENGINE_CACHE["spot"]["data"] = result
+    return result
 
 
 @router.get("/signals/adaptive-engine/futures", dependencies=[Depends(require_db)])
@@ -189,6 +199,9 @@ async def get_adaptive_engine_futures() -> dict:
     from app.models.futures_decision_event import FuturesDecisionEvent
     from app.models.futures_model_version import FuturesModelVersion
 
+    _cf = _ENGINE_CACHE["futures"]
+    if _cf["data"] is not None and (time.time() - _cf["ts"]) < _ENGINE_TTL:
+        return _cf["data"]
     now = time.time()
     required = 60   # gate training model F3 (horizon 4h). Catatan: learning_loader
     # pakai 24h utk aktivasi soft-veto runtime — sengaja lebih konservatif.
@@ -253,6 +266,13 @@ async def get_adaptive_engine_futures() -> dict:
     except Exception as exc:
         walkforward = {"status": "error", "error": str(exc)[:120], "promotion_eligible": False}
 
+    # Fase 1 shadow-compare (READ-ONLY): apakah pakai adaptive_score membaik vs raw
+    try:
+        from agents.learning.futures_shadow_compare import run_futures_shadow_compare
+        shadow_compare = await run_futures_shadow_compare()
+    except Exception as exc:
+        shadow_compare = {"status": "error", "error": str(exc)[:120]}
+
     # F3: model registry futures
     model_payload = []
     for m in fmodels[:10]:
@@ -295,7 +315,7 @@ async def get_adaptive_engine_futures() -> dict:
         else "shadow" if gates["model_trained"]
         else "ready_to_train"
     )
-    return {
+    result = {
         "market": "futures",
         "engine_status": engine_status,          # collecting|ready_to_train|shadow|champion|degraded
         "learning_status": runtime_status,       # warming | active | degraded (runtime scan)
@@ -320,6 +340,7 @@ async def get_adaptive_engine_futures() -> dict:
         },
         "models": model_payload,     # F3 model registry
         "walkforward": walkforward,  # F4 (termasuk test_stressed_1_5x)
+        "shadow_compare": shadow_compare,  # Fase 1: raw vs adaptive (read-only)
         "phases": {
             "F0_policy": True, "F1_ledger": True, "F2_integration": True,
             "F3_model": True, "F4_walkforward": True, "F5_canary": True,
@@ -327,6 +348,9 @@ async def get_adaptive_engine_futures() -> dict:
         "gates": gates,
         "updated_at": now,
     }
+    _ENGINE_CACHE["futures"]["ts"] = time.time()
+    _ENGINE_CACHE["futures"]["data"] = result
+    return result
 
 
 # ── GET /signals/performance ──────────────────────────────────────────────────
