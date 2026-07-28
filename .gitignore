@@ -65,3 +65,9 @@ backend/.secrets/
 ops/last-ip.txt
 
 ops/forward-baseline.json
+
+# IDE + artefak lokal/sesaat (jangan commit)
+.idea/
+backups/
+backend/reco.json
+-w
