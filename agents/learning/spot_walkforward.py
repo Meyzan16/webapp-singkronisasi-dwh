@@ -88,20 +88,35 @@ def evaluate_walkforward(rows: list[dict]) -> dict:
     }
 
 
-async def run_spot_walkforward() -> dict:
+# Cache TTL — walkforward hanya berubah saat outcome baru matang (jam-an), jadi
+# aman di-cache beberapa menit. Menghindari beban berat di request path endpoint.
+import time as _time
+
+_WF_CACHE: dict = {"ts": 0.0, "data": None}
+_WF_TTL = 300.0
+
+
+async def run_spot_walkforward(force: bool = False) -> dict:
+    if not force and _WF_CACHE["data"] is not None and (_time.time() - _WF_CACHE["ts"]) < _WF_TTL:
+        return _WF_CACHE["data"]
     async with AsyncSessionLocal() as session:
-        events = list((await session.execute(
-            select(SpotDecisionEvent).where(
+        # Ambil HANYA 3 kolom yang dipakai (bukan hydrate ribuan ORM penuh) —
+        # jauh lebih ringan untuk ledger puluhan ribu baris.
+        raw = (await session.execute(
+            select(
+                SpotDecisionEvent.scan_ts,
+                SpotDecisionEvent.adaptive_score,
+                SpotDecisionEvent.pnl_24h_pct,
+            ).where(
                 SpotDecisionEvent.pnl_24h_pct.isnot(None),
                 SpotDecisionEvent.outcome_status.in_(["partial", "complete"]),
             ).order_by(SpotDecisionEvent.scan_ts)
-        )).scalars().all())
+        )).all()
     rows = [
-        {
-            "scan_ts": event.scan_ts,
-            "score": event.adaptive_score,
-            "pnl_24h_pct": event.pnl_24h_pct,
-        }
-        for event in events
+        {"scan_ts": scan_ts, "score": score, "pnl_24h_pct": pnl}
+        for scan_ts, score, pnl in raw
     ]
-    return evaluate_walkforward(rows)
+    result = evaluate_walkforward(rows)
+    _WF_CACHE["ts"] = _time.time()
+    _WF_CACHE["data"] = result
+    return result

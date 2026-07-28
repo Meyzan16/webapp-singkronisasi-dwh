@@ -111,7 +111,15 @@ def evaluate_walkforward(rows: list[dict]) -> dict:
     }
 
 
-async def run_futures_walkforward() -> dict:
+import time as _time
+
+_WF_CACHE: dict = {"ts": 0.0, "data": None}
+_WF_TTL = 300.0
+
+
+async def run_futures_walkforward(force: bool = False) -> dict:
+    if not force and _WF_CACHE["data"] is not None and (_time.time() - _WF_CACHE["ts"]) < _WF_TTL:
+        return _WF_CACHE["data"]
     if not is_db_available():
         return {"status": "db_unavailable", "promotion_eligible": False}
     async with AsyncSessionLocal() as session:
@@ -133,4 +141,7 @@ async def run_futures_walkforward() -> dict:
             "pnl_4h_pct": ev.pnl_4h_pct,
             "cost_pct": float(cost) if isinstance(cost, (int, float)) else DEFAULT_COST_PCT,
         })
-    return evaluate_walkforward(rows)
+    result = evaluate_walkforward(rows)
+    _WF_CACHE["ts"] = _time.time()
+    _WF_CACHE["data"] = result
+    return result
