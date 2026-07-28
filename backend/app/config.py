@@ -59,6 +59,18 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Return cached application settings."""
+    """Return cached application settings.
 
-    return Settings()
+    Kunci Binance di-overlay dari encrypted store (DPAPI, Windows) bila ada,
+    menggantikan nilai plaintext .env. Di non-Windows / tanpa store -> pakai .env.
+    """
+
+    s = Settings()
+    try:
+        from app.services.secret_store import load_binance_secrets
+        sec = load_binance_secrets()
+        if sec:
+            s.binance_api_key, s.binance_api_secret = sec
+    except Exception:
+        pass
+    return s

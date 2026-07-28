@@ -56,3 +56,12 @@ next_stdout.log
 
 # Server logs (§9.3)
 *.log
+
+# ops runtime + secrets (jangan commit)
+ops/logs/
+ops/backend.pid
+ops/notify.config.json
+backend/.secrets/
+ops/last-ip.txt
+
+ops/forward-baseline.json
