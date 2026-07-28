@@ -56,6 +56,18 @@ HARD_LONG_FUNDING_PCT  = 0.25    # hard threshold: beyond this → veto (unsusta
 HARD_SHORT_FUNDING_PCT = -0.25
 FUNDING_SOFT_SIZE_MULT = 0.5
 
+# Overextension guard (diagnostik 23 Jul, n=1640): skor >=80 exp -11.28% pf 0.14
+# (setup overextended reversal keras), sedangkan sweet-spot 75-80 exp +0.35% pf 1.11.
+# Veto auto-open kandidat overextended -> buang ekor kerugian terbesar.
+# 0 = nonaktif. Override DB: futures.overextension_ceiling
+OVEREXTENSION_CEILING = 80
+
+# Floor auto-open lane lemah (pre_gainer/accumulation). PLAN_v14 dulu turunkan ke
+# 65 agar lane aktif, TAPI diagnostik 23 Jul (n=1640): band skor 65-70 rugi
+# (accumulation pf0.49, pre_gainer pf0.45). Naikkan ke 70 -> pool eligible
+# +0.07%->+0.19% pf1.02->1.05. Override DB: futures.weak_lane_floor
+WEAK_LANE_FLOOR = 70
+
 # Regimes where auto-open is fully disabled
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
 
@@ -156,13 +168,13 @@ def _effective_threshold(agent: str) -> int:
         return _manual_threshold
     from agents.futures.weight_updater import get_adaptive_thresholds
     _base = get_adaptive_thresholds(agent)["auto_threshold"]
-    # PLAN_v14 P2-B1: Pre-Gainer & Accumulation nyaris dormant — setup "quiet coil"
-    # skornya 52-72 tapi auto-open butuh 72 (default). Turunkan ke 65 SUPAYA lane ini
-    # aktif. Skor 65 sendiri sudah mensyaratkan OI/funding/volume/breakout selaras
-    # (konfirmasi B2 inheren). Hanya override default 72 yang belum disentuh adaptif —
-    # jika adaptif menaikkan (WR jelek), biarkan (jangan lawan proteksi).
+    # PLAN_v14 P2-B1: Pre-Gainer & Accumulation nyaris dormant di default 72, jadi
+    # floor-nya diturunkan supaya lane aktif. Diagnostik 23 Jul (n=1640): floor 65
+    # membiarkan band 65-70 yang rugi (pf 0.29/0.45) — dinaikkan ke WEAK_LANE_FLOOR
+    # (default 70). Tetap hanya override default 72; jika adaptif menaikkan (WR
+    # jelek) biarkan (jangan lawan proteksi).
     if agent in ("futures_agent1", "futures_agent2") and _base == 72:
-        _base = 65
+        _base = WEAK_LANE_FLOOR
     return _base
 
 
@@ -204,6 +216,10 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         # PLAN_v16 F2
         global MIN_TP1_COST_MULT
         MIN_TP1_COST_MULT      = await cfg.get("futures", "min_tp1_cost_mult", MIN_TP1_COST_MULT)
+        # Overextension guard + floor lane lemah (diagnostik 23 Jul)
+        global OVEREXTENSION_CEILING, WEAK_LANE_FLOOR
+        OVEREXTENSION_CEILING  = await cfg.get("futures", "overextension_ceiling", OVEREXTENSION_CEILING)
+        WEAK_LANE_FLOOR        = int(await cfg.get("futures", "weak_lane_floor", WEAK_LANE_FLOOR))
         # LANE_QUOTAS is a dict shared by reference with importers — mutate in
         # place so `from auto_trader import LANE_QUOTAS` bindings elsewhere stay in sync.
         LANE_QUOTAS["momentum"]     = int(await cfg.get("futures", "lane_quota_momentum", LANE_QUOTAS["momentum"]))
@@ -291,6 +307,11 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                     pass
             _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"),
                  "below_auto_threshold")   # F1
+            continue
+        # Overextension guard: skor ekstrem = setup overextended yang reversal keras
+        # (diagnostik 23 Jul: >=80 exp -11.28%). Veto auto-open; 0 = nonaktif.
+        if OVEREXTENSION_CEILING and r.get("score", 0) >= OVEREXTENSION_CEILING:
+            _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"), "overextension_veto")
             continue
         # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
         if coin_regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":
