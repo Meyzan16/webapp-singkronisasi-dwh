@@ -31,7 +31,11 @@ MIN_ABS_CHANGE_1M  = 1.0    # spike: ≥1% in 1 min
 HEARTBEAT_SEC      = 10
 STALE_FALLBACK_SEC = 30
 RECONNECT_BASE_SEC = 5
-RECONNECT_MAX_SEC  = 60
+# Mirror binance.bh (dipakai dari Indonesia) TIDAK menyediakan WS futures, dan
+# domain utama fstream.binance.com geo-blocked → WS praktis selalu gagal di sini.
+# Maks backoff dinaikkan 60→300 dtk supaya percobaan WS tak membanjiri log; feed
+# tetap segar lewat REST-poll mirror (lihat _rest_fallback_poll + watchdog).
+RECONNECT_MAX_SEC  = 300
 
 # State
 _running:        bool                       = False
@@ -168,18 +172,28 @@ def _process_tickers(tickers: list[dict]) -> None:
 
 # ── EC3: REST fallback + heartbeat watchdog ────────────────────────────────────
 
-_REST_URL = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+def _rest_url() -> str:
+    """Ticker 24h via resolver terpusat → ikut mirror binance.bh (bukan domain
+    utama fapi.binance.com yang geo-blocked). Dipanggil saat poll agar menghormati
+    config .env terbaru."""
+    try:
+        from app.services.binance_urls import fapi
+        return fapi("/fapi/v1/ticker/24hr")
+    except Exception:
+        return "https://www.binance.bh/fapi/v1/ticker/24hr"
 
 
 async def _rest_fallback_poll() -> None:
-    """EC3: Populate _movers_live via REST when WS feed has been silent >30s.
+    """EC3: Populate _movers_live via REST saat WS diam >30s ATAU tak pernah konek.
 
     Uses the same field names as _process_tickers so consumers see consistent data.
-    change_1m_pct is unknown from REST → set to 0.0.
+    change_1m_pct is unknown from REST → set to 0.0. Menandai _last_msg_ts supaya
+    get_live_movers() menganggap data segar & watchdog tak poll tiap 10 dtk.
     """
+    global _last_msg_ts
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(_REST_URL)
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(_rest_url())
             if r.status_code != 200:
                 return
             now  = time.time()
@@ -204,21 +218,30 @@ async def _rest_fallback_poll() -> None:
                         "ts":            now,
                     }
                     kept += 1
-            logger.info("ws_rest_fallback_done", movers=kept)
+            # Tandai feed segar (REST dianggap "pesan") — get_live_movers() jadi
+            # mengembalikan movers & watchdog menahan poll berikutnya ~30 dtk.
+            _last_msg_ts = now
+            logger.info("ws_rest_fallback_done", movers=kept, src="mirror")
     except Exception as exc:
         logger.warning("ws_rest_fallback_error", error=str(exc)[:80])
 
 
 async def _heartbeat_watchdog() -> None:
-    """EC3: Every 10s check WS message age; trigger REST fallback when stale >30s."""
+    """EC3: tiap 10s cek umur pesan; REST-poll fallback saat WS basi >30s.
+
+    BUG-FIX 28 Jul 2026: dulu `if not _last_msg_ts: continue` → saat WS TAK PERNAH
+    konek (fstream.binance.com geo-blocked/SSL disadap), _last_msg_ts tetap 0
+    selamanya → fallback tak pernah jalan → feed mati total, bukan degrade. Kini
+    saat belum ada pesan sama sekali, umur dihitung dari start proses → setelah
+    ~30 dtk WS senyap, REST-poll mirror tetap menghidupkan feed.
+    """
+    started = time.time()
     while True:
         await asyncio.sleep(HEARTBEAT_SEC)
-        if not _last_msg_ts:
-            continue
-        age = time.time() - _last_msg_ts
+        age = (time.time() - _last_msg_ts) if _last_msg_ts else (time.time() - started)
         if age > STALE_FALLBACK_SEC:
-            logger.warning("ws_feed_stale", age_sec=round(age, 1),
-                           msg="no WS message — falling back to REST poll")
+            logger.info("ws_feed_stale_rest_poll", age_sec=round(age, 1),
+                        connected=bool(_last_msg_ts))
             await _rest_fallback_poll()
 
 

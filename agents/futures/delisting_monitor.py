@@ -66,8 +66,11 @@ async def _fetch_delist_schedule() -> list[dict]:
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            # Primary: fapi exchangeInfo — symbols with deliveryDate close to now
-            r = await client.get("https://fapi.binance.com/fapi/v1/exchangeInfo")
+            # Primary: fapi exchangeInfo — symbols with deliveryDate close to now.
+            # Pakai resolver terpusat → mirror binance.bh (domain utama
+            # fapi.binance.com geo-blocked di Indonesia → "root not trusted").
+            from app.services.binance_urls import fapi
+            r = await client.get(fapi("/fapi/v1/exchangeInfo"))
             if r.status_code == 200:
                 data = r.json()
                 now_ms = int(time.time() * 1000)
