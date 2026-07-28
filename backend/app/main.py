@@ -134,6 +134,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ws_big_mover_task = asyncio.create_task(run_ws_big_mover_feed())
     # G17: delisting risk monitor (poll every 6h)
     delisting_task = asyncio.create_task(run_delisting_monitor())
+    # Notifier Telegram — pantau paper_trades, kabari open/close (zero-touch trading)
+    from agents.notify.trade_watcher import run_notifier_loop
+    notifier_task = asyncio.create_task(run_notifier_loop())
 
     # SPOT Adaptive Repair Agent + Verifier — guarded env, default off untuk safety launch
     _spot_repair_enabled = os.getenv("SPOT_REPAIR_ENABLED", "false").lower() == "true"
@@ -154,7 +157,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Shutdown ───────────────────────────────────────────────────────────────
     _shutdown_tasks = [
         opportunity_task, monitor_task, futures_task, futures_monitor_task,
-        bigmover_fastpass_task, ws_big_mover_task, delisting_task,
+        bigmover_fastpass_task, ws_big_mover_task, delisting_task, notifier_task,
     ]
     if spot_repair_task is not None:
         _shutdown_tasks.append(spot_repair_task)
@@ -261,8 +264,18 @@ async def health() -> dict:
         "futures_scanner": fut_s,
         "futures_monitor": fut_m,
         "weight_updater":  w_s,
+        "notifier":        _notifier_state(),
         "scheduler":       opp_s,  # legacy key
     }
+
+
+def _notifier_state() -> dict:
+    """Status notifier Telegram (aman kalau modul belum siap)."""
+    try:
+        from agents.notify.trade_watcher import get_state
+        return get_state()
+    except Exception:
+        return {"running": False, "last_error": "unavailable"}
 
 
 @app.get("/health/log")
