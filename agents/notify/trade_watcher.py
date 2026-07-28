@@ -144,13 +144,15 @@ async def _poll_once() -> None:
     if opens:
         if len(opens) > _MAX_DETAIL:
             longs = sum(1 for t in opens if (t.direction or "").upper() == "LONG")
-            await send_telegram(
+            ok = await send_telegram(
                 f"🟢 {len(opens)} posisi baru dibuka "
                 f"({longs} LONG / {len(opens) - longs} SHORT)."
             )
         else:
-            await send_telegram("\n\n".join(_open_line(t) for t in opens))
+            ok = await send_telegram("\n\n".join(_open_line(t) for t in opens))
         _last_open_id = max(t.id for t in opens)
+        logger.info("notifier_open_sent", count=len(opens), delivered=ok,
+                    symbols=[t.symbol for t in opens][:8], last_open_id=_last_open_id)
 
     # Kirim CLOSE
     if closes:
@@ -158,13 +160,15 @@ async def _poll_once() -> None:
             tp = sum(1 for t in closes if t.status == "tp")
             sl = sum(1 for t in closes if t.status == "sl")
             pnl = sum(t.pnl_dollar or 0.0 for t in closes)
-            await send_telegram(
+            ok = await send_telegram(
                 f"🔔 {len(closes)} posisi ditutup — ✅{tp} TP / ❌{sl} SL · "
                 f"net {pnl:+.2f}$."
             )
         else:
-            await send_telegram("\n\n".join(_close_line(t) for t in closes))
+            ok = await send_telegram("\n\n".join(_close_line(t) for t in closes))
         _last_close_ts = max(t.closed_at for t in closes)
+        logger.info("notifier_close_sent", count=len(closes), delivered=ok,
+                    symbols=[f"{t.symbol}:{t.status}" for t in closes][:8])
 
 
 # ── Loop utama ───────────────────────────────────────────────────────────────────
