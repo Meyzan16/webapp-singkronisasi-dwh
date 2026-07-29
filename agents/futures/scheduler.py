@@ -864,8 +864,12 @@ async def run_futures_loop() -> None:
             raise
         except Exception as exc:
             futures_store.set_scanning(False)
-            _last_error = str(exc)[:120]
-            logger.error("futures_scanner_error", error=_last_error)
+            # str(exc) bisa KOSONG utk sejumlah exception (mis. httpx/asyncio tanpa
+            # message) → error="" tak terdiagnosis. Fallback repr + simpan tipe
+            # supaya penyebab selalu terbaca (Fase 4 verifikasi bebas-bug).
+            _last_error = (str(exc) or repr(exc))[:160]
+            logger.error("futures_scanner_error", error=_last_error,
+                         exc_type=type(exc).__name__)
 
         elapsed   = time.time() - (_last_scan or time.time())
         sleep_for = max(30, INTERVAL_SEC - elapsed)   # min 30s gap between scans

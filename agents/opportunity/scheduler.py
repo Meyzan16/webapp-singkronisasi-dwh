@@ -761,8 +761,12 @@ async def run_opportunity_loop() -> None:
             raise
         except Exception as exc:
             opp_store.set_scanning(False)
-            _last_error = str(exc)[:120]
-            logger.error("opportunity_agent_error", error=_last_error)
+            # str(exc) bisa KOSONG untuk sejumlah exception (mis. httpx/asyncio
+            # tanpa message) → error="" tak bisa didiagnosis. Fallback ke repr +
+            # simpan tipe supaya penyebab selalu terbaca (Fase 4 verifikasi).
+            _last_error = (str(exc) or repr(exc))[:160]
+            logger.error("opportunity_agent_error", error=_last_error,
+                         exc_type=type(exc).__name__)
 
         elapsed   = time.time() - (_last_scan_ts or time.time())
         sleep_for = max(60, INTERVAL_SEC - elapsed)
