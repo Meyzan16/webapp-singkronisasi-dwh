@@ -234,6 +234,11 @@ interface RepairAction {
 }
 interface RepairsResponse {
   funnel: { total: number; applied: number; verified: number; improved: number;
+            /** Vonis "improved" pada era efek nyata — satu-satunya yang sah jadi bukti. */
+            improved_measured?: number;
+            /** Vonis pra-fix: bobot repair terhapus ~5 menit, jadi tak terukur. */
+            improved_legacy?: number;
+            effect_epoch?: number;
             no_change: number; reverted: number; suggested: number; actions_24h: number };
   agent: { last_run?: number | null; checked?: number; actions_last_run?: number; actions_total?: number };
   verifier: { last_run?: number | null; verified_last_run?: number; reverted_total?: number };
@@ -643,7 +648,7 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
             <span className="text-neutral-300">→</span>
             <span className="px-2 py-1 rounded bg-neutral-100 text-neutral-600 font-bold">{c.pending_verify}</span>
             <span className="text-neutral-300">→</span>
-            <span className="px-2 py-1 rounded bg-green-50 text-green-700 font-bold" title="Terbukti membaik">✓ {c.verified_improved}</span>
+            <span className="px-2 py-1 rounded bg-green-50 text-green-700 font-bold" title="Keputusan benar (diagnosis terbukti)">✓ {c.verified_improved}</span>
             <span className="px-2 py-1 rounded bg-neutral-50 text-neutral-500 font-bold" title="Tak berubah">− {c.verified_no_change}</span>
             <span className="px-2 py-1 rounded bg-red-50 text-red-700 font-bold" title="Di-revert">↩ {c.reverted}</span>
           </div>
@@ -777,7 +782,9 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
 const REPAIR_STATUS_BADGE: Record<string, { label: string; cls: string }> = {
   applied:            { label: "Menunggu verifikasi", cls: "bg-blue-100 text-blue-700" },
   suggested:          { label: "Saran",               cls: "bg-neutral-100 text-neutral-600" },
-  verified_improved:  { label: "✓ Terbukti membaik",  cls: "bg-green-100 text-green-700" },
+  // Untuk weight_down ini berarti hit-rate sinyal TETAP rendah = diagnosis benar,
+  // bukan klaim performa portofolio naik.
+  verified_improved:  { label: "✓ Keputusan benar",   cls: "bg-green-100 text-green-700" },
   verified_no_change: { label: "− Tak berubah",       cls: "bg-neutral-100 text-neutral-600" },
   reverted:           { label: "↩ Di-revert",          cls: "bg-red-100 text-red-700" },
   dismissed:          { label: "Diabaikan",            cls: "bg-neutral-100 text-neutral-500" },
@@ -856,7 +863,16 @@ function ProgressTab({ data, spotData, agentFilter, onClearAgentFilter }: {
                   {[
                     { label: "Total Aksi",       val: f.total,      sub: `${f.actions_24h} dalam 24 jam`, color: "text-neutral-800" },
                     { label: "Menunggu Verif.",  val: f.applied,    sub: "diukur ulang ≥24 jam",          color: "text-blue-600" },
-                    { label: "Terbukti Membaik", val: f.improved,   sub: "keputusan benar",               color: "text-green-600" },
+                    // "improved" utk weight_down = hit-rate sinyal TETAP rendah,
+                    // artinya DIAGNOSIS-nya benar — bukan "performa naik". Yang
+                    // ditampilkan hanya era terukur (efek aksi benar berlaku);
+                    // vonis pra-fix ditandai terpisah karena tak membuktikan apa pun.
+                    { label: "Keputusan Benar",
+                      val: f.improved_measured ?? f.improved,
+                      sub: (f.improved_legacy ?? 0) > 0
+                        ? `${f.improved_legacy} lama: tak terukur`
+                        : "diagnosis terbukti benar",
+                      color: "text-green-600" },
                     { label: "Tak Berubah",      val: f.no_change,  sub: "netral",                        color: "text-neutral-500" },
                     { label: "Di-revert",        val: f.reverted,   sub: "aksi salah → dikembalikan",     color: "text-red-600" },
                   ].map(c => (

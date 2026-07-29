@@ -31,6 +31,11 @@ from app.database import AsyncSessionLocal, is_db_available
 from app.models.paper_trade import PaperTrade
 from app.models.signal_weight import AgentSignalWeight
 from app.models.signal_weight_history import SignalWeightHistory
+# learning_policy murni (hanya re+typing) — tak ada risiko circular import.
+from agents.futures.learning_policy import (
+    canonical_signal_key as _canonical_signal_key,
+    signal_key as _namespaced_signal_key,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -218,6 +223,26 @@ EXPECTANCY_AWARE_WEIGHTS = False
 # terhapus dalam 1 run). Override DB: futures.repair_weights_persist.
 REPAIR_WEIGHTS_PERSIST = True
 
+# BUGFIX namespace (29 Jul): bobot dari trade disimpan pakai _normalize_signal
+# (kunci telanjang, mis. "wyckoff_markup_awal_masih") sementara SCORING membaca
+# `canonical_signal_key(raw) or signal_key(raw)` (mis. "signal_id:wyckoff.markup"
+# / "signal:..."). Kedua namespace TAK PERNAH beririsan → SELURUH bobot hasil
+# belajar dari trade tak pernah dibaca saat scoring (factor selalu 1.0).
+# 1 = simpan memakai kunci scoring (nyambung); 0 = perilaku lama. Bobot dihitung
+# ulang dari trades tiap run, jadi peralihan tak kehilangan pembelajaran —
+# statistik yang sama sekadar diberi label kunci yang benar.
+# Override DB: futures.unified_signal_keys.
+UNIFIED_SIGNAL_KEYS = True
+
+
+def _scoring_key(raw: str) -> str:
+    """Kunci bobot IDENTIK dengan `learning_keys()` di learning_policy.
+
+    Inilah satu-satunya kunci yang dibaca `apply_learning_policy` saat menilai
+    kandidat, sehingga bobot yang disimpan dengan kunci ini benar-benar terpakai.
+    """
+    return _canonical_signal_key(raw) or _namespaced_signal_key(raw)
+
 # Prefix kunci yang TIDAK berasal dari statistik trade (namespace canonical
 # scoring + lane). Sumber pengisinya: predictive_repair, weekly_signal_review.
 _EXTERNAL_KEY_PREFIXES = ("signal_id:", "lane:")
@@ -378,7 +403,8 @@ async def update_weights() -> int:
     SP2: upgraded with recency decay, Laplace smoothing, step cap, zombie pruning.
     Returns number of rows upserted.
     """
-    global _last_run, _last_error, STEP_CAP, EXPECTANCY_AWARE_WEIGHTS, REPAIR_WEIGHTS_PERSIST
+    global _last_run, _last_error, STEP_CAP, EXPECTANCY_AWARE_WEIGHTS
+    global REPAIR_WEIGHTS_PERSIST, UNIFIED_SIGNAL_KEYS
 
     if not is_db_available():
         return 0
@@ -399,6 +425,9 @@ async def update_weights() -> int:
         # Bobot hasil repair bertahan (tidak dinetralkan zombie-pruning).
         REPAIR_WEIGHTS_PERSIST = bool(await cfg.get(
             "futures", "repair_weights_persist", REPAIR_WEIGHTS_PERSIST))
+        # Kunci bobot memakai namespace scoring (nyambung ke apply_learning_policy).
+        UNIFIED_SIGNAL_KEYS = bool(await cfg.get(
+            "futures", "unified_signal_keys", UNIFIED_SIGNAL_KEYS))
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="futures_weight_updater", error=str(exc)[:120])
 
@@ -456,7 +485,10 @@ async def update_weights() -> int:
             pnl_pct = trade.pnl_pct or 0.0
 
             for raw_sig in signals:
-                sig_key = _normalize_signal(raw_sig)
+                # Kunci scoring (canonical) supaya bobot hasil belajar benar-benar
+                # dibaca saat menilai kandidat — lihat UNIFIED_SIGNAL_KEYS.
+                sig_key = (_scoring_key(raw_sig) if UNIFIED_SIGNAL_KEYS
+                           else _normalize_signal(raw_sig))
                 if not sig_key:
                     continue
                 for key in [(agent, sig_key, "all"), (agent, sig_key, regime)]:

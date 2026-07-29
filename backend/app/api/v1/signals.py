@@ -1102,10 +1102,21 @@ async def get_recommendations() -> dict:
 
 # ── PLAN_SIGNAL_REPAIR_LIVE R4 — repair log + apply saran ─────────────────────
 
+# Sejak epoch ini aksi repair BENAR-BENAR berlaku pada scoring: namespace kunci
+# bobot disatukan + zombie-pruning tak lagi menetralkan bobot repair, dan verifier
+# mensyaratkan efek masih aktif sebelum memberi vonis "improved". Vonis SEBELUM
+# epoch dihasilkan saat bobot terhapus dalam ~5 menit → mengukur sistem tanpa
+# perlakuan, jadi TIDAK boleh dibaca sebagai bukti keberhasilan.
+REPAIR_EFFECT_EPOCH = 1785334073.0   # 29 Jul 2026 21:07 WIB
+
+
 @router.get("/signals/repairs", dependencies=[Depends(require_db)])
 async def get_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
     """Progress perbaikan sinyal futures: funnel deteksi→aksi→verifikasi, log aksi
-    (before→after), dan status agen perbaikan + verifier."""
+    (before→after), dan status agen perbaikan + verifier.
+
+    `funnel.improved` dipecah jadi `improved_measured` (era efek nyata, sah jadi
+    bukti) dan `improved_legacy` (pra-fix, tak terukur)."""
     from app.models.futures_repair_action import FuturesRepairAction
 
     now = time.time()
@@ -1124,6 +1135,13 @@ async def get_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
                 FuturesRepairAction.applied_at >= now - 86400,
             )) or 0)
         total = int(await session.scalar(select(func.count(FuturesRepairAction.id))) or 0)
+        # "Improved" yang benar-benar terukur: diverifikasi setelah aksi repair
+        # mulai berefek nyata pada scoring.
+        improved_measured = int(await session.scalar(
+            select(func.count(FuturesRepairAction.id)).where(
+                FuturesRepairAction.status == "verified_improved",
+                FuturesRepairAction.verified_at >= REPAIR_EFFECT_EPOCH,
+            )) or 0)
 
     try:
         from agents.learning.predictive_repair import get_repair_agent_status
@@ -1160,6 +1178,9 @@ async def get_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
             "applied": status_counts.get("applied", 0),
             "verified": verified_total,
             "improved": status_counts.get("verified_improved", 0),
+            "improved_measured": improved_measured,
+            "improved_legacy": max(0, status_counts.get("verified_improved", 0) - improved_measured),
+            "effect_epoch": REPAIR_EFFECT_EPOCH,
             "no_change": status_counts.get("verified_no_change", 0),
             "reverted": status_counts.get("reverted", 0),
             "suggested": status_counts.get("suggested", 0),
