@@ -203,6 +203,39 @@ def _target_weight(win_rate_adj: float) -> float:
     return 0.7
 
 
+# B1 (PLAN_ADAPTIVE_ENGINE_BOOST): target bobot berbasis EXPECTANCY, bukan win-rate.
+# Default OFF → perilaku IDENTIK lama. Override DB: futures.expectancy_aware_weights.
+# Alasan: strategi futures R:R 1:3 → win-rate rendah (9–17%) NORMAL & bisa profit,
+# tapi _target_weight win-rate-murni mengunci semua bobot ≤1.0 (tak pernah reward
+# sinyal profit) → adaptive_score ≈ raw → engine inert (shadow lift ~0). Saat ON,
+# sinyal dgn expectancy realized positif dapat target >1.0 sehingga bobot menyimpang
+# ke atas dan adaptive_score benar-benar bisa mengangkat ranking.
+EXPECTANCY_AWARE_WEIGHTS = False
+
+
+def _target_weight_expectancy(exp_pct: float) -> float:
+    """Target dari expectancy realized (rata-rata PnL% per trade, SEMUA trade).
+
+    Simetris dgn _target_weight tapi sadar R:R: sinyal profit walau WR rendah tetap
+    di-reward. Ambang konservatif — clamp akhir [0.70,1.50] + STEP_CAP tetap berlaku.
+    """
+    if exp_pct >=  1.0: return 1.5
+    if exp_pct >=  0.3: return 1.2
+    if exp_pct >= -0.3: return 1.0
+    return 0.7
+
+
+def _target_from_stats(v: dict, n_eff: float) -> float:
+    """Target bobot dari stats satu sinyal. EXPECTANCY_AWARE_WEIGHTS ON → berbasis
+    expectancy realized; OFF (default) → win-rate Laplace seperti semula."""
+    if EXPECTANCY_AWARE_WEIGHTS:
+        total = v.get("total", 0.0)
+        exp_pct = (v.get("pnl_sum_all", 0.0) / total) if total > 0 else 0.0
+        return _target_weight_expectancy(exp_pct)
+    wr_adj = (v["wins"] + 1.0) / (n_eff + 2.0)
+    return _target_weight(wr_adj)
+
+
 def _update_coin_blacklist(trades: list) -> None:
     global _coin_blacklist_dir
     by_symbol: dict = defaultdict(list)
@@ -330,7 +363,7 @@ async def update_weights() -> int:
     SP2: upgraded with recency decay, Laplace smoothing, step cap, zombie pruning.
     Returns number of rows upserted.
     """
-    global _last_run, _last_error, STEP_CAP
+    global _last_run, _last_error, STEP_CAP, EXPECTANCY_AWARE_WEIGHTS
 
     if not is_db_available():
         return 0
@@ -345,6 +378,9 @@ async def update_weights() -> int:
     try:
         from agents.shared.config_reader import cfg
         STEP_CAP = await cfg.get("learning", "step_cap", STEP_CAP)
+        # B1: target bobot expectancy-aware — default OFF (perilaku identik lama).
+        EXPECTANCY_AWARE_WEIGHTS = bool(await cfg.get(
+            "futures", "expectancy_aware_weights", EXPECTANCY_AWARE_WEIGHTS))
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="futures_weight_updater", error=str(exc)[:120])
 
@@ -374,9 +410,12 @@ async def update_weights() -> int:
 
         def _add(key: tuple, is_win: bool, decay: float, pnl_pct: float) -> None:
             s = stats.setdefault(key, {"wins": 0.0, "total": 0.0, "raw_n": 0,
-                                       "pnl_sum": 0.0, "win_n": 0})
+                                       "pnl_sum": 0.0, "win_n": 0, "pnl_sum_all": 0.0})
             s["total"] += decay
             s["raw_n"] += 1
+            # B1: numerator expectancy = PnL SEMUA trade (winner+loser), decay-tertimbang
+            # konsisten dgn `total`. Dipakai hanya saat EXPECTANCY_AWARE_WEIGHTS ON.
+            s["pnl_sum_all"] += pnl_pct * decay
             if is_win:
                 s["wins"]    += decay
                 s["pnl_sum"] += pnl_pct
@@ -412,8 +451,7 @@ async def update_weights() -> int:
             if v["raw_n"] < MIN_SAMPLE_RAW:
                 continue
             n_eff   = v["total"]
-            wr_adj  = (v["wins"] + 1.0) / (n_eff + 2.0)
-            target  = _target_weight(wr_adj)
+            target  = _target_from_stats(v, n_eff)   # B1: expectancy-aware bila ON
             conf    = min(1.0, n_eff / 10.0)
             desired = 1.0 + (target - 1.0) * conf
             weight  = round(max(0.70, min(1.50, desired)), 3)
@@ -511,8 +549,7 @@ async def update_weights() -> int:
                 if v["raw_n"] < MIN_SAMPLE_RAW:
                     continue  # not enough data — apply to all regimes, not just "all"
                 n_eff      = v["total"]
-                wr_adj     = (v["wins"] + 1.0) / (n_eff + 2.0)
-                target     = _target_weight(wr_adj)
+                target     = _target_from_stats(v, n_eff)   # B1: expectancy-aware bila ON
                 conf       = min(1.0, n_eff / 10.0)
                 desired    = 1.0 + (target - 1.0) * conf
                 win_rate   = v["wins"] / n_eff if n_eff > 0 else 0.0
