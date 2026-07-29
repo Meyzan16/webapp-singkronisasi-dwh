@@ -106,6 +106,9 @@ DEFAULTS: list[dict] = [
     # ── FUTURES — PLAN_v16 (true-cost profit engine) ─────────────────────────
     {"group": "futures", "key": "min_tp1_cost_mult", "default": 3.0, "category": "threshold",
      "description": "F2: TP1 minimum sebagai kelipatan cost_floor (fee+slippage+funding) sebelum posisi boleh dibuka"},
+    # ── FUTURES — PLAN_ADAPTIVE_ENGINE_BOOST (Fase B1) ───────────────────────
+    {"group": "futures", "key": "expectancy_aware_weights", "default": 0, "category": "learning",
+     "description": "Fase B1 (DEFAULT 0=OFF): 1=target bobot sinyal berbasis EXPECTANCY realized (reward sinyal profit walau win-rate rendah — cocok R:R 1:3), 0=win-rate murni (perilaku lama). Nyalakan HANYA setelah shadow-compare membuktikan lift positif konsisten — mengubah veto auto-open live."},
 
     # ── LEARNING ──────────────────────────────────────────────────────────────
     {"group": "learning", "key": "training_window_days", "default": 90, "category": "timing",
