@@ -897,6 +897,14 @@ function ProgressTab({ data, spotData, agentFilter, onClearAgentFilter }: {
               className="ml-1 text-teal-600 hover:text-teal-900 font-black">×</button>
           </span>
         )}
+        {/* Kartu di atas menghitung SELURUH tabel, log hanya memuat N terbaru —
+            tanpa keterangan ini kedua angka tampak saling bertentangan. */}
+        <span className="ml-auto text-[10px] text-neutral-400">
+          Menampilkan {combined.length} aksi terbaru
+          {typeof data?.funnel?.total === "number" || typeof spotData?.funnel?.total === "number"
+            ? ` dari ${(data?.funnel?.total ?? 0) + (spotData?.funnel?.total ?? 0)} total`
+            : ""} — kartu di atas menghitung semua aksi.
+        </span>
       </div>
 
       {/* Log aksi gabungan */}

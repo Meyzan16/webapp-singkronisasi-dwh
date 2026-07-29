@@ -212,6 +212,21 @@ def _target_weight(win_rate_adj: float) -> float:
 # ke atas dan adaptive_score benar-benar bisa mengangkat ranking.
 EXPECTANCY_AWARE_WEIGHTS = False
 
+# BUGFIX zombie-pruning (29 Jul): 1 = bobot kunci canonical yang dikelola
+# predictive_repair / weekly_signal_review TIDAK ditarik balik ke 1.0 tiap run,
+# sehingga hasil repair benar-benar dipakai agent. 0 = perilaku lama (repair
+# terhapus dalam 1 run). Override DB: futures.repair_weights_persist.
+REPAIR_WEIGHTS_PERSIST = True
+
+# Prefix kunci yang TIDAK berasal dari statistik trade (namespace canonical
+# scoring + lane). Sumber pengisinya: predictive_repair, weekly_signal_review.
+_EXTERNAL_KEY_PREFIXES = ("signal_id:", "lane:")
+
+
+def _is_externally_managed(signal_key: str) -> bool:
+    """True bila bobot kunci ini diisi agen repair/review, bukan agregasi trade."""
+    return str(signal_key or "").startswith(_EXTERNAL_KEY_PREFIXES)
+
 
 def _target_weight_expectancy(exp_pct: float) -> float:
     """Target dari expectancy realized (rata-rata PnL% per trade, SEMUA trade).
@@ -363,7 +378,7 @@ async def update_weights() -> int:
     SP2: upgraded with recency decay, Laplace smoothing, step cap, zombie pruning.
     Returns number of rows upserted.
     """
-    global _last_run, _last_error, STEP_CAP, EXPECTANCY_AWARE_WEIGHTS
+    global _last_run, _last_error, STEP_CAP, EXPECTANCY_AWARE_WEIGHTS, REPAIR_WEIGHTS_PERSIST
 
     if not is_db_available():
         return 0
@@ -381,6 +396,9 @@ async def update_weights() -> int:
         # B1: target bobot expectancy-aware — default OFF (perilaku identik lama).
         EXPECTANCY_AWARE_WEIGHTS = bool(await cfg.get(
             "futures", "expectancy_aware_weights", EXPECTANCY_AWARE_WEIGHTS))
+        # Bobot hasil repair bertahan (tidak dinetralkan zombie-pruning).
+        REPAIR_WEIGHTS_PERSIST = bool(await cfg.get(
+            "futures", "repair_weights_persist", REPAIR_WEIGHTS_PERSIST))
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="futures_weight_updater", error=str(exc)[:120])
 
@@ -608,7 +626,24 @@ async def update_weights() -> int:
                 if stale_days > STALE_KEY_MAX_D:
                     await session.delete(row)
                     upserted += 1
-                elif abs(row.weight - 1.0) > 0.01:
+                    continue
+                # BUGFIX 29 Jul 2026 — kunci CANONICAL (`signal_id:*`, `lane:*`)
+                # TIDAK PERNAH muncul di `stats`: stats dibangun dari
+                # _normalize_signal(sinyal trade) yang menghasilkan kunci
+                # natural-language ("wyckoff_markup_awal_masih"), sedangkan
+                # scoring (learning_keys) & predictive_repair memakai canonical.
+                # Dua namespace ini tak pernah beririsan, jadi setiap bobot
+                # canonical selalu dianggap "zombie" dan ditarik +0.10/run ke 1.0
+                # — persis membatalkan repair yang -0.10 dalam SATU run (5 mnt).
+                # Akibatnya SEMUA 49 bobot canonical futures terkunci 1.0 →
+                # factor selalu 1.0 → adaptive_score = raw → seluruh subsistem
+                # repair NIHIL efek (padahal ledger melaporkan "terbukti membaik").
+                # Kunci canonical dikelola sumber non-trade (predictive_repair,
+                # weekly_signal_review) sehingga TIDAK boleh dinetralkan di sini.
+                # Penghapusan stale >45 hari di atas tetap berlaku.
+                if REPAIR_WEIGHTS_PERSIST and _is_externally_managed(row.signal_key):
+                    continue
+                if abs(row.weight - 1.0) > 0.01:
                     row.weight = round(
                         max(1.0, row.weight - STEP_CAP) if row.weight > 1.0
                         else min(1.0, row.weight + STEP_CAP),

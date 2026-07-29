@@ -107,6 +107,8 @@ DEFAULTS: list[dict] = [
     {"group": "futures", "key": "min_tp1_cost_mult", "default": 3.0, "category": "threshold",
      "description": "F2: TP1 minimum sebagai kelipatan cost_floor (fee+slippage+funding) sebelum posisi boleh dibuka"},
     # ── FUTURES — PLAN_ADAPTIVE_ENGINE_BOOST (Fase B1) ───────────────────────
+    {"group": "futures", "key": "repair_weights_persist", "default": 1, "category": "learning",
+     "description": "BUGFIX (DEFAULT 1=ON): bobot kunci canonical hasil Adaptive Learning Engine (predictive_repair/weekly_review) TIDAK ditarik balik ke netral 1.0 oleh zombie-pruning, sehingga saran perbaikan benar-benar dipakai agent. 0 = perilaku lama (repair terhapus dalam 1 run 5 menit)."},
     {"group": "futures", "key": "expectancy_aware_weights", "default": 0, "category": "learning",
      "description": "Fase B1 (DEFAULT 0=OFF): 1=target bobot sinyal berbasis EXPECTANCY realized (reward sinyal profit walau win-rate rendah — cocok R:R 1:3), 0=win-rate murni (perilaku lama). Nyalakan HANYA setelah shadow-compare membuktikan lift positif konsisten — mengubah veto auto-open live."},
 
