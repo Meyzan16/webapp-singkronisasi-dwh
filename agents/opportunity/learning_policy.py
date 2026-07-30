@@ -56,6 +56,17 @@ _SIGNAL_ID_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("masih chasing",), "momentum.chasing_1h"),
     (("early mover",), "momentum.early_mover"),
     (("momentum kuat",), "momentum.strong"),
+    # ── Ditambahkan 30 Jul 2026 ────────────────────────────────────────────
+    # Audit menemukan 3 keluarga sinyal SPOT masih jatuh ke kunci berbasis TEKS
+    # ("Volume 15m 2.3× rata-rata", "Candle 15m +11.0% — breakout candle",
+    # "RSI 84 elevated — wave riding"). Kunci teks rapuh: begitu kalimatnya
+    # diedit, identitas sinyal berubah dan bobot yang sudah dipelajari jadi
+    # yatim (akar bug lama "ganti kalimat = bobot ter-reset").
+    # SENGAJA ditaruh di AKHIR: pencocokan first-match-wins, jadi menambah di
+    # sini tak menggeser satu pun aturan yang sudah ada.
+    (("volume", "rata-rata"), "flow.volume_vs_average"),
+    (("breakout candle",), "tech.breakout_candle"),
+    (("rsi", "elevated"), "tech.rsi_elevated"),
 )
 
 

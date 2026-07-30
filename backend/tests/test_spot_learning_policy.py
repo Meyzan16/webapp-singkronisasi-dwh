@@ -56,7 +56,10 @@ def test_learning_keys_include_alert_and_each_signal() -> None:
 
     assert keys[0] == "alert:bigmover_chase"
     assert "signal_id:tech.ema_alignment" in keys
-    assert "signal:volume_nx_rata-rata" in keys
+    # 30 Jul 2026: "Volume 5x rata-rata" dulu tak punya aturan sehingga jatuh ke
+    # kunci berbasis teks (`signal:volume_nx_rata-rata`) — rapuh, identitasnya
+    # berubah begitu kalimat sinyal diedit. Kini punya ID stabil.
+    assert "signal_id:flow.volume_vs_average" in keys
 
 
 def test_learning_can_veto_but_cannot_promote_auto_open() -> None:
@@ -118,7 +121,8 @@ def test_alert_and_signal_weights_are_combined_without_multiplication() -> None:
         {
             "alert:bigmover_chase": 1.2,
             "signal_id:tech.ema_alignment": 0.8,
-            "signal:volume_nx_rata-rata": 1.0,
+            # dulu `signal:volume_nx_rata-rata` (kunci teks); kini ber-ID stabil
+            "signal_id:flow.volume_vs_average": 1.0,
         },
         set(),
         auto_threshold=72.0,
