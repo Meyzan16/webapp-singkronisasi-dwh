@@ -195,11 +195,18 @@ def test_unknown_signal_falls_back_to_legacy_key():
     assert signal_key(raw).startswith("signal:")
 
 
-def test_legacy_normalize_matches_weight_updater():
-    """Dual-read: fallback key HARUS identik dgn key yang dipakai bobot tersimpan."""
+def test_lookup_key_matches_scoring_key():
+    """Kunci lookup bobot HARUS identik dgn kunci yang dipakai scoring.
+
+    Dulu invariannya `normalize_signal(raw) == normalize_signal_key(raw)` (kunci
+    telanjang). Sejak namespace disatukan (29 Jul), bobot disimpan & dibaca dengan
+    kunci scoring `canonical_signal_key(raw) or signal_key(raw)`. Invarian inilah
+    yang menjaga agar lookup di agent1/2/3 tidak meleset diam-diam ke 1.0.
+    """
     samples = [raw for raw, _ in AGENT1_CASES + AGENT3_CASES + BIGMOVER_CASES]
     for raw in samples:
-        assert normalize_signal(raw) == futures_weight_updater.normalize_signal_key(raw), raw
+        expected = canonical_signal_key(raw) or signal_key(raw)
+        assert futures_weight_updater.normalize_signal_key(raw) == expected, raw
 
 
 # ── Weight math ────────────────────────────────────────────────────────────────

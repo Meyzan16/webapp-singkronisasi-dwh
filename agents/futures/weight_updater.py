@@ -152,7 +152,15 @@ def is_blacklisted(symbol: str, direction: str = "") -> bool:
 
 
 def normalize_signal_key(raw: str) -> str:
-    return _normalize_signal(raw)
+    """Kunci untuk MENCARI/MENYIMPAN bobot sebuah sinyal.
+
+    Dipakai agent1/2/3/bigmover (`weight_cache.get(...)`), predictive blend, dan
+    weekly_signal_review. Wajib mengikuti namespace yang sama dengan isi cache —
+    kalau tidak, lookup selalu meleset dan bobot jadi 1.0 diam-diam (persis bug
+    namespace 29 Jul). Karena itu ia mengikuti UNIFIED_SIGNAL_KEYS, bukan lagi
+    mengembalikan kunci telanjang.
+    """
+    return _scoring_key(raw) if UNIFIED_SIGNAL_KEYS else _normalize_signal(raw)
 
 
 def get_coin_bonus(symbol: str, direction: str = "") -> float:
