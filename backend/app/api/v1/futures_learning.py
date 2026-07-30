@@ -18,6 +18,7 @@ logger = structlog.get_logger(__name__)
 
 # F33/Phase 9: balance now comes from the real wallet; keep shared constants for the
 # conservative-equity baseline and the legacy-row P&L fallback.
+from app.services.agent_registry import FUTURES_AGENTS as _REG_FUTURES_AGENTS
 from app.services.trading_costs import (
     FUTURES_RISK_PCT as RISK_PCT,
     futures_pnl_dollar as _pnl_dollar,
@@ -50,10 +51,8 @@ async def get_learning_stats() -> dict:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style.in_([
-                    "futures_agent1", "futures_agent2", "futures_agent3",
-                    "futures_agent_bigmover",   # Phase 2 BM1
-                ]),
+                # Registry tunggal — lane baru otomatis ikut terhitung.
+                PaperTrade.style.in_(_REG_FUTURES_AGENTS),
             ).order_by(PaperTrade.entry_at)
         )
         all_trades = list(result.scalars().all())

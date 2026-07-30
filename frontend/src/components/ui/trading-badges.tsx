@@ -1,5 +1,7 @@
 "use client";
 
+import { agentLabel } from "@/lib/agents";
+
 export function DirBadge({ dir, size = "sm" }: { dir: "LONG" | "SHORT"; size?: "sm" | "xs" }) {
   const px = size === "xs" ? "px-1 py-0.5 text-[8px]" : "px-1.5 py-0.5 text-[9px]";
   return dir === "LONG"
@@ -7,18 +9,28 @@ export function DirBadge({ dir, size = "sm" }: { dir: "LONG" | "SHORT"; size?: "
     : <span className={`font-black rounded bg-red-100 text-red-700 border border-red-300 ${px}`}>▼ SHORT</span>;
 }
 
+// Dulu rantai ternary dgn "Accum." sebagai fallback — sehingga SETIAP lane yang
+// bukan agent1/agent3 (termasuk BigMover) salah dilabeli "Accum.". Kini memakai
+// registry: lane tak dikenal tampil apa adanya, bukan menyaru jadi lane lain.
+const AGENT_BADGE_STYLE: Record<string, string> = {
+  futures_agent1:         "bg-blue-100 text-blue-700 border-blue-200",
+  futures_agent2:         "bg-purple-100 text-purple-700 border-purple-200",
+  futures_agent3:         "bg-orange-100 text-orange-700 border-orange-200",
+  futures_agent_bigmover: "bg-amber-100 text-amber-700 border-amber-200",
+  opportunity_spot:       "bg-teal-100 text-teal-700 border-teal-200",
+};
+
 export function AgentBadge({ agent }: { agent: string }) {
-  if (agent === "futures_agent1")
-    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 border border-blue-200">Pre-Gainer</span>;
-  if (agent === "futures_agent3")
-    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-200">Momentum</span>;
-  return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 border border-purple-200">Accum.</span>;
+  const cls = AGENT_BADGE_STYLE[agent] ?? "bg-neutral-100 text-neutral-600 border-neutral-200";
+  return (
+    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${cls}`}>
+      {agentLabel(agent)}
+    </span>
+  );
 }
 
 export function AgentName({ agent }: { agent: string }): string {
-  if (agent === "futures_agent1") return "Pre-Gainer";
-  if (agent === "futures_agent3") return "Momentum";
-  return "Accum.";
+  return agentLabel(agent);
 }
 
 export function TypeBadge({ type }: { type: "spot" | "futures" }) {

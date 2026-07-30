@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isFuturesAgent } from "@/lib/agents";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -339,8 +340,8 @@ const AGENT_TABS = [
   { key: "futures_agent_bigmover", label: "BigMover",     color: "text-amber-700",  bg: "bg-amber-100 border-amber-200" },
 ];
 
-/** Semua sinyal FUTURES — prefix-based supaya lane baru ikut terhitung sendiri. */
-const isFuturesAgent = (key: string) => key.startsWith("futures_");
+// `isFuturesAgent` & label agen berasal dari registry bersama (@/lib/agents)
+// supaya definisi "apa itu lane futures" hanya ada di SATU tempat.
 
 // ── Lapisan awam (PLAN_UX_AWAM_SIGNAL_PERFORMANCE) ────────────────────────────
 // Terjemahan Bahasa Indonesia polos di atas data live — info teknis tetap ada.

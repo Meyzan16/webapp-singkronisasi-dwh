@@ -23,10 +23,10 @@ from app.models.spot_model_version import SpotModelVersion
 
 router = APIRouter(tags=["diagnostics"])
 
-_FUTURES_STYLES = [
-    "futures_agent1", "futures_agent2", "futures_agent3",
-    "futures_agent_bigmover",
-]
+# Registry tunggal — lihat app/services/agent_registry.py.
+from app.services.agent_registry import FUTURES_AGENTS as _FUTURES_AGENTS  # noqa: E402
+
+_FUTURES_STYLES = _FUTURES_AGENTS
 
 
 @router.get("/diagnostics/snapshot", dependencies=[Depends(require_db)])

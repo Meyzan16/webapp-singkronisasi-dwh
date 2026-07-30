@@ -21,10 +21,11 @@ router = APIRouter(tags=["futures"])
 logger = structlog.get_logger(__name__)
 
 # P2: all futures lanes share one wallet → dedup & queries are GLOBAL across styles (BUG-L1)
-_ALL_FUTURES_STYLES = [
-    "futures_agent1", "futures_agent2", "futures_agent3",
-    "futures_agent_bigmover",   # Phase 2 BM1
-]
+# Registry tunggal — dedup & query GLOBAL lintas lane bergantung pada daftar ini
+# LENGKAP; lane yang tertinggal akan lolos dedup dan membuka posisi ganda.
+from app.services.agent_registry import FUTURES_AGENTS as _FUTURES_AGENTS  # noqa: E402
+
+_ALL_FUTURES_STYLES = _FUTURES_AGENTS
 
 
 # ── Schema ─────────────────────────────────────────────────────────────────────

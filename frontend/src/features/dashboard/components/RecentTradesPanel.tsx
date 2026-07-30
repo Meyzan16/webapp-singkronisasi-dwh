@@ -3,6 +3,7 @@ import { fmtPrice, fmtRelTime } from "@/lib/format";
 import { DirBadge, TypeBadge } from "@/components/ui/trading-badges";
 import { SectionPanel } from "@/components/ui/section-panel";
 import { EmptyState } from "@/components/ui/feedback";
+import { agentShort as agentShortName } from "@/lib/agents";
 
 export interface RecentTrade {
   id: string; symbol: string; type: "spot" | "fut"; dir: string;
@@ -50,11 +51,11 @@ function StatusPill({ status, reason }: { status: string; reason?: string | null
   );
 }
 
+// Dulu ternary dgn fallback "Accum" sehingga trade BigMover salah dilabeli
+// "Accum". Registry memberi nama yang benar, dan lane baru tampil apa adanya
+// alih-alih menyaru jadi lane lain.
 function agentShort(agent?: string) {
-  if (!agent) return "";
-  if (agent === "futures_agent1") return "Pre";
-  if (agent === "futures_agent3") return "Momo";
-  return "Accum";
+  return agent ? agentShortName(agent) : "";
 }
 
 export function RecentTradesPanel({ trades }: { trades: RecentTrade[] }) {

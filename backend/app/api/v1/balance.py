@@ -29,10 +29,12 @@ STYLE_MAP = {
 }
 
 # Trades are tagged per agent, but they all settle into the single "futures" wallet.
-_FUTURES_AGENT_STYLES = [
-    "futures_agent1", "futures_agent2", "futures_agent3",
-    "futures_agent_bigmover",   # Phase 2 BM1 — shares one wallet
-]
+# Semua lane futures berbagi SATU wallet cross-margin (Phase 2 BM1), jadi daftar
+# ini harus selalu lengkap — diambil dari registry tunggal supaya lane baru tak
+# pernah tertinggal dan salah hitung margin.
+from app.services.agent_registry import FUTURES_AGENTS as _FUTURES_AGENTS  # noqa: E402
+
+_FUTURES_AGENT_STYLES = _FUTURES_AGENTS
 
 
 def _wallet_trade_styles(style_key: str) -> list[str]:

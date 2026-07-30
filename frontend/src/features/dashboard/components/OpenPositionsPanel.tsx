@@ -4,6 +4,7 @@ import { DirBadge, TypeBadge } from "@/components/ui/trading-badges";
 import { SectionPanel } from "@/components/ui/section-panel";
 import { EmptyState } from "@/components/ui/feedback";
 import { laneForSpot, openReason } from "@/lib/lanes";
+import { agentShort as agentShortName } from "@/lib/agents";
 
 interface OppPos {
   id: number; symbol: string; entry: number;
@@ -93,7 +94,9 @@ export function OpenPositionsPanel({ oppOpen, futOpen }: { oppOpen: OppPos[]; fu
             );
           })}
           {futOpen.map(p => {
-            const agentShort = p.agent === "futures_agent1" ? "Pre" : p.agent === "futures_agent3" ? "Momo" : "Accum";
+            // Dulu ternary dgn fallback "Accum" — posisi BigMover ikut terbaca
+            // "Accum" sehingga lane-nya salah di mata pembaca. Kini via registry.
+            const agentShort = agentShortName(p.agent ?? "");
             return (
               <PositionRow key={`f-${p.id}`}
                 symbol={p.symbol}

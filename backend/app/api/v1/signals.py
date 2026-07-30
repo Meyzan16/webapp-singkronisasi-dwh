@@ -26,31 +26,14 @@ from app.models.spot_model_version import SpotModelVersion
 
 router = APIRouter(tags=["signals"])
 
-# BUGFIX 30 Jul 2026: futures_agent_bigmover TIDAK ada di daftar ini, sehingga
-# SELURUH Signal Performance API membuang lane BigMover diam-diam — padahal ia
-# punya 15 baris bobot (14 lolos ambang ≥3 trade, sampel tertinggi 26). Lane itu
-# jadi tak pernah tampil di tab Signals maupun ikut agregasi cross-agent.
-# Catatan: `_FUTURES_AGENT_SET` di file yang sama SUDAH memuatnya sejak dulu —
-# jadi satu file punya dua daftar yang tak sinkron.
-SPOT_AGENTS = ["opportunity_spot"]
-FUTURES_AGENTS = [
-    "futures_agent1",
-    "futures_agent2",
-    "futures_agent3",
-    "futures_agent_bigmover",
-]
-# Agen yang benar-benar men-trade (tanpa cross_agent yang sifatnya turunan).
-TRADING_AGENTS = SPOT_AGENTS + FUTURES_AGENTS
-ALL_AGENTS = TRADING_AGENTS + ["cross_agent"]
-
-AGENT_LABELS = {
-    "opportunity_spot":       "SPOT",
-    "futures_agent1":         "Pre-Gainer",
-    "futures_agent2":         "Accumulation",
-    "futures_agent3":         "Momentum",
-    "futures_agent_bigmover": "BigMover",
-    "cross_agent":            "Cross-Agent",
-}
+# Daftar agen berasal dari registry tunggal — JANGAN menulis literal di sini.
+# Riwayat: daftar lokal di file ini tak memuat futures_agent_bigmover sehingga
+# SELURUH Signal Performance membuang lane itu diam-diam (14 sinyal yang memenuhi
+# ambang tak pernah tampil), padahal `_FUTURES_AGENT_SET` di file yang sama sudah
+# memuatnya. Lihat app/services/agent_registry.py.
+from app.services.agent_registry import (  # noqa: E402
+    ALL_AGENTS, TRADING_AGENTS, AGENT_LABELS,
+)
 
 # TTL cache endpoint adaptive-engine: agregasi ledger puluhan-ribu baris mahal
 # (dulu ~8 dtk -> ECONNRESET). Poll UI berulang dilayani dari cache; recompute
@@ -1214,9 +1197,11 @@ class ApplySuggestionBody(BaseModel):
     label: str = Field(default="", max_length=160)
 
 
-_FUTURES_AGENT_SET = {
-    "futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover",
-}
+# Daftar kedua di file ini dulu ditulis manual dan sempat TAK SINKRON dengan
+# ALL_AGENTS di atas — sumber bug BigMover. Sekarang keduanya dari registry.
+from app.services.agent_registry import FUTURES_AGENTS as _REG_FUTURES_AGENTS  # noqa: E402
+
+_FUTURES_AGENT_SET = set(_REG_FUTURES_AGENTS)
 
 
 @router.post("/signals/recommendations/apply", dependencies=[Depends(require_db)])

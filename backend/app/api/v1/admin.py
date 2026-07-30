@@ -27,8 +27,12 @@ router = APIRouter(tags=["admin"])
 CONFIRM_TOKEN = "RESET_ALL"
 
 
-_FUTURES_STYLES = ["futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover"]
-_SPOT_STYLES    = ["opportunity_spot"]
+# Daftar agen dari registry tunggal (app/services/agent_registry.py) — lane baru
+# cukup didaftarkan sekali di layer agent, tak perlu menyunting file ini lagi.
+from app.services.agent_registry import FUTURES_AGENTS, SPOT_AGENT  # noqa: E402
+
+_FUTURES_STYLES = FUTURES_AGENTS
+_SPOT_STYLES    = [SPOT_AGENT]
 
 
 class ResetBody(BaseModel):
