@@ -26,20 +26,30 @@ from app.models.spot_model_version import SpotModelVersion
 
 router = APIRouter(tags=["signals"])
 
-ALL_AGENTS = [
-    "opportunity_spot",
+# BUGFIX 30 Jul 2026: futures_agent_bigmover TIDAK ada di daftar ini, sehingga
+# SELURUH Signal Performance API membuang lane BigMover diam-diam — padahal ia
+# punya 15 baris bobot (14 lolos ambang ≥3 trade, sampel tertinggi 26). Lane itu
+# jadi tak pernah tampil di tab Signals maupun ikut agregasi cross-agent.
+# Catatan: `_FUTURES_AGENT_SET` di file yang sama SUDAH memuatnya sejak dulu —
+# jadi satu file punya dua daftar yang tak sinkron.
+SPOT_AGENTS = ["opportunity_spot"]
+FUTURES_AGENTS = [
     "futures_agent1",
     "futures_agent2",
     "futures_agent3",
-    "cross_agent",
+    "futures_agent_bigmover",
 ]
+# Agen yang benar-benar men-trade (tanpa cross_agent yang sifatnya turunan).
+TRADING_AGENTS = SPOT_AGENTS + FUTURES_AGENTS
+ALL_AGENTS = TRADING_AGENTS + ["cross_agent"]
 
 AGENT_LABELS = {
-    "opportunity_spot": "SPOT",
-    "futures_agent1":   "Pre-Gainer",
-    "futures_agent2":   "Accumulation",
-    "futures_agent3":   "Momentum",
-    "cross_agent":      "Cross-Agent",
+    "opportunity_spot":       "SPOT",
+    "futures_agent1":         "Pre-Gainer",
+    "futures_agent2":         "Accumulation",
+    "futures_agent3":         "Momentum",
+    "futures_agent_bigmover": "BigMover",
+    "cross_agent":            "Cross-Agent",
 }
 
 # TTL cache endpoint adaptive-engine: agregasi ledger puluhan-ribu baris mahal
@@ -357,7 +367,7 @@ async def get_adaptive_engine_futures() -> dict:
 
 @router.get("/signals/performance", dependencies=[Depends(require_db)])
 async def get_signal_performance(
-    agent:      str = Query("all",      description="all | opportunity_spot | futures_agent1 | futures_agent2 | futures_agent3 | cross_agent"),
+    agent:      str = Query("all",      description="all | opportunity_spot | futures_agent1 | futures_agent2 | futures_agent3 | futures_agent_bigmover | cross_agent"),
     regime:     str = Query("all",      description="all | trending_up | trending_down | ranging | volatile"),
     min_trades: int = Query(3,          description="Minimum raw trade count"),
     sort_by:    str = Query("win_rate", description="win_rate | avg_pnl_pct | total_count | weight"),
@@ -468,7 +478,10 @@ async def get_cross_agent_signals(
             pa_result = await session.execute(
                 select(AgentSignalWeight).where(
                     AgentSignalWeight.signal_key.in_(keys),
-                    AgentSignalWeight.agent.in_(ALL_AGENTS[:-1]),  # exclude cross_agent
+                    # Eksplisit: agen yang men-trade saja. Dulu `ALL_AGENTS[:-1]`
+                    # yang bergantung pada URUTAN daftar — menambah agen baru di
+                    # akhir akan diam-diam mengecualikan agen itu, bukan cross.
+                    AgentSignalWeight.agent.in_(TRADING_AGENTS),
                     AgentSignalWeight.regime == "all",
                 )
             )

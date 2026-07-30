@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -325,12 +325,22 @@ const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
   ],
 };
 
+// Katalog tampilan agen. BUKAN sumber kebenaran daftar agen — lihat
+// `useAgentTabs()` yang menambahkan agen baru dari DATA secara otomatis.
+// Riwayat 30 Jul 2026: daftar ini dulu dipatok tanpa `futures_agent_bigmover`,
+// jadi lane BigMover (14 sinyal lolos ambang) tak punya tab dan tak pernah bisa
+// dilihat pengguna. Agen yang lahir kemudian akan mengalami nasib sama bila
+// daftar ini diperlakukan sebagai final.
 const AGENT_TABS = [
-  { key: "opportunity_spot", label: "SPOT",          color: "text-teal-700",   bg: "bg-teal-100 border-teal-200" },
-  { key: "futures_agent1",   label: "Pre-Gainer",    color: "text-blue-700",   bg: "bg-blue-100 border-blue-200" },
-  { key: "futures_agent2",   label: "Accumulation",  color: "text-purple-700", bg: "bg-purple-100 border-purple-200" },
-  { key: "futures_agent3",   label: "Momentum",      color: "text-orange-700", bg: "bg-orange-100 border-orange-200" },
+  { key: "opportunity_spot",       label: "SPOT",         color: "text-teal-700",   bg: "bg-teal-100 border-teal-200" },
+  { key: "futures_agent1",         label: "Pre-Gainer",   color: "text-blue-700",   bg: "bg-blue-100 border-blue-200" },
+  { key: "futures_agent2",         label: "Accumulation", color: "text-purple-700", bg: "bg-purple-100 border-purple-200" },
+  { key: "futures_agent3",         label: "Momentum",     color: "text-orange-700", bg: "bg-orange-100 border-orange-200" },
+  { key: "futures_agent_bigmover", label: "BigMover",     color: "text-amber-700",  bg: "bg-amber-100 border-amber-200" },
 ];
+
+/** Semua sinyal FUTURES — prefix-based supaya lane baru ikut terhitung sendiri. */
+const isFuturesAgent = (key: string) => key.startsWith("futures_");
 
 // ── Lapisan awam (PLAN_UX_AWAM_SIGNAL_PERFORMANCE) ────────────────────────────
 // Terjemahan Bahasa Indonesia polos di atas data live — info teknis tetap ada.
@@ -2610,9 +2620,45 @@ export default function SignalsPage() {
 
   const allSignals   = useMemo(() => perfData?.signals ?? [], [perfData?.signals]);
   const spotSignals  = useMemo(() => allSignals.filter(s => s.agents["opportunity_spot"]), [allSignals]);
-  const futSignals   = useMemo(() => allSignals.filter(s =>
-    s.agents["futures_agent1"] || s.agents["futures_agent2"] || s.agents["futures_agent3"]
-  ), [allSignals]);
+  // Dulu menyebut agent1/2/3 satu per satu sehingga BigMover (dan lane apa pun
+  // yang lahir kemudian) hilang dari tab FUTURES. Kini berbasis prefix.
+  const futSignals   = useMemo(
+    () => allSignals.filter(s => Object.keys(s.agents).some(isFuturesAgent)),
+    [allSignals]);
+
+  // Tab agen FUTURES = katalog tampilan + agen apa pun yang MUNCUL DI DATA tapi
+  // belum dikatalogkan (mis. lane baru). Dengan begitu pertumbuhan agen otomatis
+  // terlihat, tak perlu menunggu UI di-update.
+  const futAgentTabs = useMemo(() => {
+    const known = AGENT_TABS.filter(a => isFuturesAgent(a.key));
+    const seen  = new Set(known.map(a => a.key));
+    const extra = Array.from(
+      new Set(allSignals.flatMap(s => Object.keys(s.agents).filter(isFuturesAgent)))
+    ).filter(k => !seen.has(k))
+     .map(k => ({ key: k, label: k.replace(/^futures_agent_?/, "") || k,
+                  color: "text-neutral-700", bg: "bg-neutral-100 border-neutral-200" }));
+    return [...known, ...extra];
+  }, [allSignals]);
+
+  // Pilihan awal tab FUTURES dipatok "futures_agent1" — lane yang sering belum
+  // punya sinyal lolos ambang, sehingga tab terbuka KOSONG padahal lane lain
+  // (mis. Momentum / BigMover) penuh data. Sekali saja, saat data pertama tiba
+  // dan lane terpilih memang kosong, lompat ke lane bersinyal terbanyak.
+  // Setelah itu pilihan pengguna dihormati sepenuhnya.
+  const autoPickedAgentRef = useRef(false);
+  useEffect(() => {
+    if (autoPickedAgentRef.current || futSignals.length === 0) return;
+    const counts = new Map<string, number>();
+    for (const s of futSignals) {
+      for (const k of Object.keys(s.agents)) {
+        if (isFuturesAgent(k)) counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+    }
+    autoPickedAgentRef.current = true;
+    if ((counts.get(agentFilter) ?? 0) > 0) return;
+    const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (best) setAgentFilter(best[0]);
+  }, [futSignals, agentFilter]);
   const crossSignals = useMemo(() => crossData?.signals ?? [], [crossData?.signals]);
 
   // P3: peta signal_key → jumlah aksi perbaikan. `target_key` berbentuk
@@ -2885,7 +2931,7 @@ export default function SignalsPage() {
               </div>
               <div className="flex flex-wrap gap-2 items-center">
                 <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
-                  {AGENT_TABS.filter(a => a.key !== "opportunity_spot").map(a => (
+                  {futAgentTabs.map(a => (
                     <button key={a.key} onClick={() => setAgentFilter(a.key)}
                       className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${agentFilter === a.key ? `bg-white shadow-sm ${a.color}` : "text-neutral-500 hover:text-neutral-700"}`}>
                       {a.label}
