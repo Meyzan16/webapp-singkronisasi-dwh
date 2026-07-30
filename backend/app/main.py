@@ -116,10 +116,55 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         set_db_available(False)
         logger.warning("database_unavailable", error=str(exc)[:120])
 
+    # ── DB watchdog ────────────────────────────────────────────────────────────
+    # Flag `_db_available` dulu HANYA diset sekali di atas. Kalau PostgreSQL belum
+    # siap saat uvicorn naik (mesin baru boot / Docker menyusul), flag terkunci
+    # False SELAMANYA: bobot tak termuat (cached_keys=0), learning mati, endpoint
+    # DB balas 503 — dan tak ada yang menyembuhkan sampai restart manual.
+    # Kejadian nyata: 22 Jul 2026 dan lagi 30 Jul 2026 ("WinError 1225 refused"
+    # 18:07, baru ketahuan 21:40). Sejak kini flag mengikuti KENYATAAN: watchdog
+    # menyondek DB berkala, menaikkan flag saat DB kembali (sekaligus menjalankan
+    # schema+seed yang tadi gagal) dan menurunkannya saat DB hilang.
+    async def _db_watchdog() -> None:
+        from app.database import is_db_available, probe_db
+
+        schema_done = is_db_available()
+        while True:
+            await asyncio.sleep(20)
+            try:
+                alive = await probe_db()
+                if alive and not is_db_available():
+                    if not schema_done:
+                        # Startup tadi gagal — selesaikan skema + seed sekarang.
+                        try:
+                            await create_db_schema()
+                            from app.services.agent_config_defaults import seed_agent_config_defaults
+                            await seed_agent_config_defaults()
+                            schema_done = True
+                        except Exception as exc:
+                            logger.warning("db_watchdog_schema_failed", error=str(exc)[:120])
+                            continue
+                    set_db_available(True)
+                    logger.info("db_watchdog_recovered", msg="PostgreSQL kembali — fitur DB aktif lagi")
+                elif not alive and is_db_available():
+                    set_db_available(False)
+                    logger.warning("db_watchdog_lost", msg="PostgreSQL tak menjawab — fitur DB dinonaktifkan sementara")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("db_watchdog_error", error=str(exc)[:120])
+
+    db_watchdog_task = asyncio.create_task(_db_watchdog())
+
     # ── Background agents ─────────────────────────────────────────────────────
     if _AGENTS_STANDALONE:
         logger.info("agents_mode", mode="standalone", msg="agents run in separate container")
         yield
+        db_watchdog_task.cancel()
+        try:
+            await db_watchdog_task
+        except asyncio.CancelledError:
+            pass
         await dispose_engine()
         return
 
@@ -158,6 +203,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _shutdown_tasks = [
         opportunity_task, monitor_task, futures_task, futures_monitor_task,
         bigmover_fastpass_task, ws_big_mover_task, delisting_task, notifier_task,
+        db_watchdog_task,
     ]
     if spot_repair_task is not None:
         _shutdown_tasks.append(spot_repair_task)
