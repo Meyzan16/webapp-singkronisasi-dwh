@@ -197,6 +197,16 @@ async def spot_repair_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
             "applied": status_counts.get("applied", 0),
             "verified": verified_total,
             "improved": status_counts.get("verified_improved", 0),
+            # Bentuk field disamakan dgn futures supaya satu komponen UI bisa
+            # merender dua scope. SPOT TIDAK punya era "tak terukur": kuncinya
+            # sudah canonical sejak awal (weight_updater memakai
+            # canonical_signal_key, sama dgn learning_keys) dan zombie-prune-nya
+            # hanya MENGHAPUS kunci basi >30 hari — tak pernah menyeret bobot
+            # repair kembali ke 1.0 seperti bug futures. Jadi seluruh vonis SPOT
+            # memang terukur.
+            "improved_measured": status_counts.get("verified_improved", 0),
+            "improved_legacy": 0,
+            "effect_epoch": None,
             "no_change": status_counts.get("verified_no_change", 0),
             "reverted": reverted_total,
             "suggested": status_counts.get("suggested", 0),

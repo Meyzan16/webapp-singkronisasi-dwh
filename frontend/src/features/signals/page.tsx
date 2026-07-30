@@ -578,6 +578,15 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
       ...(spotData?.actions ?? []).map(a => ({ a, scope: "spot" as const })),
       ...(data?.actions ?? []).map(a => ({ a, scope: "futures" as const })),
     ];
+    // Vonis "improved" dari era pra-fix (efek bobot sudah terhapus saat diukur)
+    // tak boleh ikut dihitung sebagai keberhasilan agent — lihat effect_epoch.
+    const epochOf = (scope: "spot" | "futures") =>
+      scope === "futures" ? data?.funnel?.effect_epoch : spotData?.funnel?.effect_epoch;
+    const isMeasuredImproved = (a: RepairAction, scope: "spot" | "futures") => {
+      if (a.status !== "verified_improved") return false;
+      const ep = epochOf(scope);
+      return typeof ep !== "number" || (a.verified_at ?? 0) >= ep;
+    };
     const map = new Map<string, AgentStat>();
     for (const { a, scope } of tagged) {
       const key = `${scope}::${a.agent || "unknown"}`;
@@ -590,7 +599,7 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
         ...prev,
         actions_24h:        prev.actions_24h + (a.detected_at && (nowTs - a.detected_at) <= 86400 ? 1 : 0),
         applied:            prev.applied + (a.applied ? 1 : 0),
-        verified_improved:  prev.verified_improved + (a.status === "verified_improved" ? 1 : 0),
+        verified_improved:  prev.verified_improved + (isMeasuredImproved(a, scope) ? 1 : 0),
         verified_no_change: prev.verified_no_change + (a.status === "verified_no_change" ? 1 : 0),
         reverted:           prev.reverted + (a.status === "reverted" || a.status === "reversed" ? 1 : 0),
         pending_verify:     prev.pending_verify + (a.status === "applied" ? 1 : 0),
@@ -946,7 +955,20 @@ function ProgressTab({ data, spotData, agentFilter, onClearAgentFilter }: {
                 </td></tr>
               )}
               {combined.map(a => {
-                const badge = REPAIR_STATUS_BADGE[a.status] ?? { label: a.status, cls: "bg-neutral-100 text-neutral-600" };
+                // Vonis "keputusan benar" dari era SEBELUM efek repair benar-benar
+                // berlaku tidak membuktikan apa pun (bobotnya sudah terhapus saat
+                // diukur) — tampilkan meredup + berlabel jujur supaya tak dibaca
+                // sebagai bukti keberhasilan.
+                const epoch = a._scope === "futures"
+                  ? data?.funnel?.effect_epoch
+                  : spotData?.funnel?.effect_epoch;
+                const isLegacyImproved =
+                  a.status === "verified_improved" &&
+                  typeof epoch === "number" &&
+                  (a.verified_at ?? 0) < epoch;
+                const badge = isLegacyImproved
+                  ? { label: "✓ Keputusan benar (lama · tak terukur)", cls: "bg-neutral-100 text-neutral-500" }
+                  : REPAIR_STATUS_BADGE[a.status] ?? { label: a.status, cls: "bg-neutral-100 text-neutral-600" };
                 const hitBefore = typeof a.before_metric === "number" ? formatMetric(a.before_metric, a.action) : "—";
                 const hitAfter = typeof a.after_metric === "number" ? formatMetric(a.after_metric, a.action) : "—";
                 const evAny = a.evidence as Record<string, unknown> | undefined;
@@ -1027,7 +1049,13 @@ function RepairTodayCard({ fut, spot, onOpen }: {
     return {
       actions24h: sum(f?.actions_24h, p?.actions_24h),
       pending:    sum(f?.applied,     p?.applied),
-      improved:   sum(f?.improved,    p?.improved),
+      // Hanya vonis yang EFEKNYA benar-benar berlaku saat diukur. Sebelumnya
+      // kartu ini memakai `improved` mentah sehingga menampilkan 119 padahal
+      // 116 di antaranya vonis futures era pra-fix yang tak terukur — bentrok
+      // dengan kartu Progress yang sudah jujur.
+      improved:   sum(f?.improved_measured ?? f?.improved,
+                      p?.improved_measured ?? p?.improved),
+      legacy:     sum(f?.improved_legacy,  p?.improved_legacy),
       reverted:   sum(f?.reverted,    p?.reverted),
     };
   }, [fut, spot]);
@@ -1052,7 +1080,8 @@ function RepairTodayCard({ fut, spot, onOpen }: {
           {[
             { label: "Aksi 24 jam",      val: s.actions24h, color: "text-neutral-800", sub: "SPOT + FUTURES" },
             { label: "Menunggu bukti",   val: s.pending,    color: "text-blue-600",    sub: "diukur ulang ≥24 jam" },
-            { label: "Terbukti membaik", val: s.improved,   color: "text-green-600",   sub: "keputusan benar" },
+            { label: "Keputusan benar", val: s.improved, color: "text-green-600",
+              sub: s.legacy > 0 ? `${s.legacy} lama: tak terukur` : "diagnosis terbukti benar" },
             { label: "Di-revert",        val: s.reverted,   color: "text-red-600",     sub: "aksi salah, dibatalkan" },
           ].map(c => (
             <div key={c.label} className="bg-neutral-50 rounded-xl p-3 text-center">
