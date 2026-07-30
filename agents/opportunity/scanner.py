@@ -1463,6 +1463,13 @@ async def _load_learning_weights() -> tuple[dict[str, float], dict[str, float], 
                 for r in own.values()
                 if r.weight < 0.8 and r.total_count >= 10
             }
+            # Laporkan ukuran pembelajaran SPOT supaya /signals/updater/state,
+            # Overview, dan laporan Telegram tak lagi hanya menampilkan FUTURES.
+            try:
+                from agents.opportunity import weight_updater as _spot_wu
+                _spot_wu.note_loaded_keys(len(weights))
+            except Exception:
+                pass
             return weights, probabilities, sample_counts, banned, None
     except Exception as exc:
         error = str(exc)[:120]

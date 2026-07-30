@@ -52,11 +52,27 @@ _last_count: int             = 0
 _update_lock = asyncio.Lock()
 
 
+# Jumlah bobot SPOT yang benar-benar dipakai scan terakhir. SPOT tak menyimpan
+# cache in-memory seperti futures — scanner memuat ulang dari DB tiap siklus
+# (`scanner._load_learning_weights`), jadi angkanya dilaporkan dari sana.
+# Tanpa ini `/signals/updater/state` mengembalikan cached_keys=None untuk SPOT,
+# sehingga Overview & laporan Telegram hanya memperlihatkan sisi FUTURES dan
+# terbaca seolah SPOT tidak belajar apa-apa.
+_loaded_keys: int = 0
+
+
+def note_loaded_keys(n: int) -> None:
+    """Dicatat scanner SPOT tiap kali bobot selesai dimuat."""
+    global _loaded_keys
+    _loaded_keys = int(n)
+
+
 def get_state() -> dict:
     return {
-        "last_run":   _last_run,
-        "last_error": _last_error,
-        "last_count": _last_count,
+        "last_run":    _last_run,
+        "last_error":  _last_error,
+        "last_count":  _last_count,
+        "cached_keys": _loaded_keys,
     }
 
 

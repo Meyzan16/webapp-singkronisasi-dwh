@@ -33,9 +33,20 @@ interface CrossSignalRow {
 }
 
 interface UpdaterState {
-  futures: { last_run?: number; last_error?: string; cached_agents?: string[] };
-  spot:    { last_run?: number; last_error?: string; last_count?: number };
+  futures: { last_run?: number; last_error?: string; cached_agents?: string[]; cached_keys?: number };
+  /** cached_keys SPOT = jumlah bobot yang dimuat scan terakhir (scanner memuat
+   *  ulang dari DB tiap siklus; SPOT tak punya cache in-memory seperti futures). */
+  spot:    { last_run?: number; last_error?: string; last_count?: number; cached_keys?: number };
   cross:   { last_run?: number; last_error?: string; cached_keys?: number };
+}
+
+/** Status scanner SPOT (/api/v1/opportunity/status) — interval & siklusnya
+ *  berbeda dari futures, jadi ringkasan "sistem" butuh keduanya. */
+interface SpotScanStatus {
+  running?: boolean;
+  cycle_count?: number;
+  interval_minutes?: number;
+  next_scan_in_min?: number;
 }
 
 interface PerformanceResponse {
@@ -390,35 +401,61 @@ function GlossaryBox() {
   );
 }
 
-function PlainSummaryBanner({ health, futures }: {
-  health:  AgentHealthData | null;
-  futures: FuturesAdaptiveEngineData | null;
+function PlainSummaryBanner({ health, futures, spot, spotScan, updaterState }: {
+  health:       AgentHealthData | null;
+  futures:      FuturesAdaptiveEngineData | null;
+  /** Engine SPOT — supaya ringkasan mencakup DUA market, bukan futures saja. */
+  spot:         AdaptiveEngineData | null;
+  /** Status scanner SPOT (/opportunity/status) — intervalnya beda dari futures. */
+  spotScan:     SpotScanStatus | null;
+  /** cached_keys per scope — jumlah bobot yang dipelajari SPOT + FUTURES. */
+  updaterState: UpdaterState | null;
 }) {
-  const running     = health?.scan.running ?? false;
+  // health.* HANYA berisi futures (endpoint agent_health memang futures-only),
+  // jadi klaim "sistem" dirakit dari dua sumber agar tidak menyesatkan.
+  const futRunning  = health?.scan.running ?? false;
+  const spotRunning = spotScan?.running ?? false;
+  const bothRunning = futRunning && spotRunning;
   const lastScan    = health?.scan.last_scan_ts;
   const lastScanStr = lastScan ? new Date(lastScan * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "—";
-  const learnedKeys = health?.learning.cached_keys ?? 0;
-  const decisions   = futures?.decision_ledger.total ?? 0;
-  const opened      = futures?.decision_ledger.opened ?? 0;
-  const learnPlain  = futures ? (LEARNING_STATUS_PLAIN[futures.learning_status] ?? futures.learning_status) : "belum ada data";
+
+  const futKeys     = updaterState?.futures?.cached_keys ?? health?.learning.cached_keys ?? 0;
+  const spotKeys    = updaterState?.spot?.cached_keys ?? 0;
+  const learnedKeys = futKeys + spotKeys;
+
+  const futDecisions  = futures?.decision_ledger.total ?? 0;
+  const spotDecisions = spot?.decision_ledger?.total ?? 0;
+  const decisions     = futDecisions + spotDecisions;
+
+  const futOpened  = futures?.decision_ledger.opened ?? 0;
+  const spotOpened = spot?.decision_ledger?.actions?.opened ?? 0;
+  const opened     = futOpened + spotOpened;
+
+  const learnPlain = futures ? (LEARNING_STATUS_PLAIN[futures.learning_status] ?? futures.learning_status) : "belum ada data";
+  const scanDesc   = [
+    spotScan ? `SPOT tiap ${spotScan.interval_minutes ?? "—"} mnt` : null,
+    health   ? `FUTURES tiap ${health.scan.interval_minutes ?? "—"} mnt` : null,
+  ].filter(Boolean).join(" · ");
 
   const cards = [
     {
       q: "Apakah sistem bekerja?",
-      ok: running,
-      a: running
-        ? `Ya. Scanner memeriksa pasar setiap ${health?.scan.interval_minutes ?? "—"} menit tanpa henti (sudah ${health?.scan.cycle_count ?? "—"} putaran, terakhir ${lastScanStr}).`
-        : "Tidak — scanner sedang berhenti. Backend perlu dicek.",
+      ok: bothRunning,
+      a: bothRunning
+        ? `Ya, dua scanner jalan tanpa henti (${scanDesc}). Futures sudah ${health?.scan.cycle_count ?? "—"} putaran, SPOT ${spotScan?.cycle_count ?? "—"} putaran — terakhir ${lastScanStr}.`
+        : !futRunning && !spotRunning
+          ? "Tidak — kedua scanner berhenti. Backend perlu dicek."
+          : `Sebagian: scanner ${futRunning ? "SPOT" : "FUTURES"} sedang berhenti.`,
     },
     {
       q: "Apa yang sudah dipelajari?",
       ok: learnedKeys > 0,
-      a: `Sistem sudah menilai ${learnedKeys} jenis sinyal dari hasil trade nyata dan mencatat ${decisions.toLocaleString("id-ID")} keputusan futures lengkap dengan alasannya. Saat ini ${learnPlain}.`,
+      a: `Sistem sudah menilai ${learnedKeys} jenis sinyal dari hasil trade nyata (${spotKeys} SPOT · ${futKeys} FUTURES) dan mencatat ${decisions.toLocaleString("id-ID")} keputusan lengkap dengan alasannya. Saat ini ${learnPlain}.`,
     },
     {
       q: "Apa output-nya?",
       ok: opened > 0,
-      a: `Sinyal entry lengkap (harga masuk, stop-loss, target profit) yang otomatis jadi paper trade — ${opened} dibuka dari catatan terakhir. Hasil menang/kalahnya bisa dilihat di halaman History.`,
+      a: `Sinyal entry lengkap (harga masuk, stop-loss, target profit) yang otomatis jadi paper trade — ${opened.toLocaleString("id-ID")} posisi dibuka dari seluruh catatan (${spotOpened.toLocaleString("id-ID")} SPOT · ${futOpened.toLocaleString("id-ID")} FUTURES). Hasil menang/kalahnya ada di halaman History.`,
     },
   ];
 
@@ -2396,6 +2433,9 @@ export default function SignalsPage() {
   const [rejectionsData, setRejectionsData] = useState<RejectionRow[] | null>(null);
   const [predictiveData, setPredictiveData] = useState<PredictiveHitRow[] | null>(null);
   const [agentHealth,    setAgentHealth]    = useState<AgentHealthData | null>(null);
+  // agent_health hanya futures — status scanner SPOT diambil terpisah supaya
+  // ringkasan Overview benar-benar mewakili sistem, bukan satu market saja.
+  const [spotScan,       setSpotScan]       = useState<SpotScanStatus | null>(null);
   const [adaptiveEngine, setAdaptiveEngine] = useState<AdaptiveEngineData | null>(null);
   const [futuresEngine,  setFuturesEngine]  = useState<FuturesAdaptiveEngineData | null>(null);
   const [reviewData,     setReviewData]     = useState<ReviewData | null>(null);
@@ -2419,7 +2459,7 @@ export default function SignalsPage() {
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const [perfRes, crossRes, stateRes, catalogRes, healthRes, adaptiveRes, futuresRes] = await Promise.all([
+      const [perfRes, crossRes, stateRes, catalogRes, healthRes, adaptiveRes, futuresRes, spotScanRes] = await Promise.all([
         fetch(`/api/v1/signals/performance?agent=all&regime=all&min_trades=${minTrades}&sort_by=${sortBy}&sort_dir=${sortDir}&limit=50`),
         fetch(`/api/v1/signals/cross_agent?min_trades=5`),
         fetch("/api/v1/signals/updater/state"),
@@ -2427,6 +2467,7 @@ export default function SignalsPage() {
         fetch("/api/v1/signals/agent_health"),
         fetch("/api/v1/signals/adaptive-engine"),
         fetch("/api/v1/signals/adaptive-engine/futures"),
+        fetch("/api/v1/opportunity/status"),
       ]);
       if (perfRes.ok)    setPerfData(await perfRes.json() as PerformanceResponse);
       if (crossRes.ok)   setCrossData(await crossRes.json() as CrossResponse);
@@ -2435,6 +2476,7 @@ export default function SignalsPage() {
       if (healthRes.ok)  setAgentHealth(await healthRes.json() as AgentHealthData);
       if (adaptiveRes.ok) setAdaptiveEngine(await adaptiveRes.json() as AdaptiveEngineData);
       if (futuresRes.ok) setFuturesEngine(await futuresRes.json() as FuturesAdaptiveEngineData);
+      if (spotScanRes.ok) setSpotScan(await spotScanRes.json() as SpotScanStatus);
     } catch { /* stale */ }
     finally { if (!silent) setLoading(false); }
   }, [minTrades, sortBy, sortDir]);
@@ -2687,7 +2729,8 @@ export default function SignalsPage() {
           {subTab === "overview" && (
             <div className="space-y-5">
               {/* U1 — Ringkasan awam: 3 pertanyaan kunci dijawab langsung */}
-              <PlainSummaryBanner health={agentHealth} futures={futuresEngine} />
+              <PlainSummaryBanner health={agentHealth} futures={futuresEngine}
+                spot={adaptiveEngine} spotScan={spotScan} updaterState={updaterState} />
 
               {/* P3 — benang merah ke seksi Improve */}
               <RepairTodayCard fut={repairsData} spot={spotRepairsData}
@@ -2721,7 +2764,10 @@ export default function SignalsPage() {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {[
                   { title: "🎯 Top SPOT Signals",     signals: topSpot,    agentKey: "opportunity_spot" },
-                  { title: "⚡ Top Futures Signals",  signals: topFutures, agentKey: "futures_agent2"  },
+                  // agentKey null = pakai lane futures TERBAIK per sinyal. Dulu
+                  // di-hardcode "futures_agent2" sehingga kolom ini diam-diam
+                  // hanya menampilkan angka satu lane, bukan futures keseluruhan.
+                  { title: "⚡ Top Futures Signals",  signals: topFutures, agentKey: null              },
                   { title: "🔗 Proven Cross-Agent",   signals: topCross,   agentKey: "cross"           },
                 ].map(col => (
                   <div key={col.title} className="bg-white border border-neutral-200 rounded-2xl p-4">
@@ -2745,7 +2791,11 @@ export default function SignalsPage() {
                     ) : (
                       <div className="space-y-2">
                         {(col.signals as SignalRow[]).map(s => {
-                          const d = s.agents[col.agentKey] ?? Object.values(s.agents)[0];
+                          // Kolom futures: ambil lane dgn sampel terbanyak (paling
+                          // representatif), bukan satu lane yang dipatok.
+                          const d = col.agentKey
+                            ? s.agents[col.agentKey] ?? Object.values(s.agents)[0]
+                            : Object.values(s.agents).sort((a, b) => (b?.total ?? 0) - (a?.total ?? 0))[0];
                           if (!d) return null;
                           return (
                             <div key={s.signal_key} className="flex items-center justify-between py-1.5 border-b border-neutral-50 last:border-0">
