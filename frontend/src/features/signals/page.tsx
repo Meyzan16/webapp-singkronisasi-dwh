@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isFuturesAgent, agentLabel as agentLabelOf } from "@/lib/agents";
+import { isFuturesAgent, agentLabel as agentLabelOf, SPOT_AGENT } from "@/lib/agents";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -2664,7 +2664,7 @@ export default function SignalsPage() {
   };
 
   const allSignals   = useMemo(() => perfData?.signals ?? [], [perfData?.signals]);
-  const spotSignals  = useMemo(() => allSignals.filter(s => s.agents["opportunity_spot"]), [allSignals]);
+  const spotSignals  = useMemo(() => allSignals.filter(s => s.agents[SPOT_AGENT]), [allSignals]);
   // Dulu menyebut agent1/2/3 satu per satu sehingga BigMover (dan lane apa pun
   // yang lahir kemudian) hilang dari tab FUTURES. Kini berbasis prefix.
   const futSignals   = useMemo(
@@ -2854,7 +2854,7 @@ export default function SignalsPage() {
               {/* Top signals preview */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {[
-                  { title: "🎯 Top SPOT Signals",     signals: topSpot,    agentKey: "opportunity_spot" },
+                  { title: "🎯 Top SPOT Signals",     signals: topSpot,    agentKey: SPOT_AGENT },
                   // agentKey null = pakai lane futures TERBAIK per sinyal. Dulu
                   // di-hardcode "futures_agent2" sehingga kolom ini diam-diam
                   // hanya menampilkan angka satu lane, bukan futures keseluruhan.
@@ -2954,7 +2954,7 @@ export default function SignalsPage() {
                   ))}
                 </div>
               </div>
-              <SignalTable signals={spotSignals} agentKey="opportunity_spot"
+              <SignalTable signals={spotSignals} agentKey={SPOT_AGENT}
                 sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir}
                 catalog={catalogData}
                 repairedKeys={repairedKeys}

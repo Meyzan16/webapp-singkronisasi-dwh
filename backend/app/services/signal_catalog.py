@@ -4,7 +4,8 @@ Signal Catalog — PLAN_v2 P3.3.
 Maps normalized signal_key prefixes to human-readable metadata:
 label, category, description, which agents use it, and max score contribution.
 
-Keys match the output of agents.futures.weight_updater._normalize_signal().
+Kunci = ID stabil `signal_id:*`, sama persis dengan kunci bobot & scoring.
+(Dulu kunci hasil `_normalize_signal` berbasis teks — lihat _LEGACY_ENTRIES.)
 Since normalization strips numbers (→ N) and takes first 4 words, many TF-specific
 variants collapse to the same key (e.g. "bb_squeeze_nh" covers 1H, 4H, etc.).
 
