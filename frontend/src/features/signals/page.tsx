@@ -257,7 +257,12 @@ interface RepairsResponse {
             improved_legacy?: number;
             effect_epoch?: number;
             no_change: number; reverted: number; suggested: number; actions_24h: number };
-  agent: { last_run?: number | null; checked?: number; actions_last_run?: number; actions_total?: number };
+  agent: {
+    /** false = loop repair dimatikan (mis. SPOT_REPAIR_ENABLED=false), sehingga
+     *  seluruh angka funnel adalah riwayat beku, bukan aktivitas berjalan. */
+    enabled?: boolean;
+    disabled_reason?: string | null;
+    last_run?: number | null; checked?: number; actions_last_run?: number; actions_total?: number };
   verifier: { last_run?: number | null; verified_last_run?: number; reverted_total?: number };
   actions: RepairAction[];
   updated_at: number;
@@ -912,9 +917,17 @@ function ProgressTab({ data, spotData, agentFilter, onClearAgentFilter }: {
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-black text-neutral-800">{s.icon} {s.label}</p>
                 <p className="text-[10px] text-neutral-400">
-                  Agen: {agentLast
-                    ? `run terakhir ${new Date(agentLast * 1000).toLocaleTimeString("id-ID")}`
-                    : "menunggu run pertama"}
+                  {/* Loop repair SPOT dijaga env SPOT_REPAIR_ENABLED (default OFF).
+                      Tanpa penanda ini teksnya berbunyi "menunggu run pertama" —
+                      padahal agen tak menunggu, ia memang tak pernah dijalankan,
+                      dan seluruh angka di kartu ini riwayat beku. */}
+                  Agen: {s.d?.agent?.enabled === false
+                    ? <span className="font-bold text-amber-600">
+                        MATI ({s.d.agent.disabled_reason ?? "dinonaktifkan"}) — angka di bawah riwayat lama
+                      </span>
+                    : agentLast
+                      ? `run terakhir ${new Date(agentLast * 1000).toLocaleTimeString("id-ID")}`
+                      : "menunggu run pertama"}
                   {" · "}Verifier: {s.d?.verifier?.last_run
                     ? `${s.d.verifier.verified_last_run ?? 0} diverifikasi (pass ${new Date(s.d.verifier.last_run * 1000).toLocaleTimeString("id-ID")})`
                     : "belum ada aksi berumur ≥24h"}

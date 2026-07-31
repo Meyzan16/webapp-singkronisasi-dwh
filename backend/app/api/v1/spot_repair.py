@@ -14,6 +14,7 @@ plan Signal Repair Live futures+predictive).
 """
 
 import json
+import os
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -116,7 +117,15 @@ async def spot_repair_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
     reverted_total = status_counts.get("reverted", 0) + status_counts.get("reversed", 0)
 
     agent_state = agent.get_state()
+    # Loop repair SPOT dijaga env `SPOT_REPAIR_ENABLED` (default OFF, lihat
+    # main.py). Tanpa menyebutkannya, UI menampilkan "menunggu run pertama" —
+    # padahal agen TIDAK menunggu, ia memang tak pernah dijalankan, dan seluruh
+    # angka di bawah adalah riwayat beku (aksi terakhir 29 Jul). Kirim status
+    # sebenarnya supaya tak terbaca seolah masih hidup.
+    _enabled = os.getenv("SPOT_REPAIR_ENABLED", "false").lower() == "true"
     agent_status = {
+        "enabled": _enabled,
+        "disabled_reason": None if _enabled else "SPOT_REPAIR_ENABLED=false",
         "last_run": agent_state.get("last_run"),
         "checked": agent_state.get("action_count_24h", 0),
         "actions_last_run": None,

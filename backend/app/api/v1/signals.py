@@ -715,12 +715,10 @@ async def get_agent_health() -> dict:
     gate_state = risk_gate.get_gate_state()
     wu_state   = wu.get_state()
 
-    lane_map = {
-        "pre_gainer":   ("futures_agent1", "Pre-Gainer"),
-        "accumulation": ("futures_agent2", "Accumulation"),
-        "momentum":     ("futures_agent3", "Momentum"),
-        "bigmover":     ("futures_agent_bigmover", "BigMover"),
-    }
+    # Diturunkan dari registry — dulu salinan manual yang harus dijaga sinkron
+    # dengan _RECO_CATEGORIES di file yang sama.
+    from app.services.agent_registry import LANE_AGENT, agent_label
+    lane_map = {lane: (agent, agent_label(agent)) for lane, agent in LANE_AGENT.items()}
     lanes = []
     for lane, (agent, label) in lane_map.items():
         paused_info = gate_state.get("lane_pauses", {}).get(lane, {})
@@ -823,14 +821,17 @@ async def get_rejections(
 
 # ── GET /signals/recommendations ──────────────────────────────────────────────
 
-_RECO_CATEGORIES = [
-    # (agent_key, label, lane_key or None, market)
-    ("opportunity_spot",       "SPOT",         None,           "spot"),
-    ("futures_agent1",         "Pre-Gainer",   "pre_gainer",   "futures"),
-    ("futures_agent2",         "Accumulation", "accumulation", "futures"),
-    ("futures_agent3",         "Momentum",     "momentum",     "futures"),
-    ("futures_agent_bigmover", "BigMover",     "bigmover",     "futures"),
-]
+# Diturunkan dari registry — bukan daftar manual ke-sekian. Lane baru cukup
+# didaftarkan sekali di agent_registry dan otomatis muncul sebagai kategori saran.
+def _reco_categories() -> list[tuple[str, str, str | None, str]]:
+    """(agent_key, label, lane_key|None, market) untuk setiap agen yang men-trade."""
+    from app.services.agent_registry import (
+        TRADING_AGENTS, AGENT_LANE, agent_label, agent_market,
+    )
+    return [
+        (a, agent_label(a), AGENT_LANE.get(a), agent_market(a))
+        for a in TRADING_AGENTS
+    ]
 
 
 @router.get("/signals/recommendations", dependencies=[Depends(require_db)])
@@ -851,7 +852,8 @@ async def get_recommendations() -> dict:
     now = time.time()
     cutoff_7d = now - 7 * 86400
     cutoff_48h = now - 48 * 3600
-    agent_keys = [c[0] for c in _RECO_CATEGORIES]
+    _categories = _reco_categories()
+    agent_keys = [c[0] for c in _categories]
 
     async with AsyncSessionLocal() as session:
         # Trade tertutup 7 hari per style
@@ -925,7 +927,7 @@ async def get_recommendations() -> dict:
         return v * 100 if v <= 1 else v
 
     categories = []
-    for agent_key, label, lane_key, market in _RECO_CATEGORIES:
+    for agent_key, label, lane_key, market in _categories:
         sugg: list[dict] = []
         t = trades.get(agent_key)
         n_ = nearmiss.get(agent_key)

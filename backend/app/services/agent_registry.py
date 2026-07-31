@@ -50,6 +50,26 @@ AGENT_SHORT: dict[str, str] = {
 }
 
 
+#: Agen futures → nama lane di risk-gate / quota. Dipakai untuk membaca status
+#: pause & win-rate per lane. Sempat ditulis ulang di `_RECO_CATEGORIES`
+#: (signals.py) dan `lane_map` (endpoint agent_health) — dua salinan yang harus
+#: dijaga sinkron manual. Sekarang satu sumber.
+AGENT_LANE: dict[str, str] = {
+    "futures_agent1":         "pre_gainer",
+    "futures_agent2":         "accumulation",
+    "futures_agent3":         "momentum",
+    "futures_agent_bigmover": "bigmover",
+}
+
+#: Kebalikannya: lane → agen.
+LANE_AGENT: dict[str, str] = {lane: agent for agent, lane in AGENT_LANE.items()}
+
+
+def agent_market(agent: str) -> str:
+    """"spot" | "futures" — dipakai UI/laporan untuk mengelompokkan per market."""
+    return "futures" if agent.startswith("futures_") else "spot"
+
+
 def is_futures_agent(agent: str) -> bool:
     """Berbasis prefix supaya lane baru ikut terhitung walau belum diberi label."""
     return agent.startswith("futures_")
