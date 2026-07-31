@@ -125,7 +125,9 @@ async def spot_repair_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
     _enabled = os.getenv("SPOT_REPAIR_ENABLED", "false").lower() == "true"
     agent_status = {
         "enabled": _enabled,
-        "disabled_reason": None if _enabled else "SPOT_REPAIR_ENABLED=false",
+        # Kalimat untuk MANUSIA — nama variabel/env tak pernah ditampilkan ke
+        # pengguna; kalau perlu diubah, itu urusan operator lewat konfigurasi.
+        "disabled_reason": None if _enabled else "mesin perbaikan SPOT dimatikan",
         "last_run": agent_state.get("last_run"),
         "checked": agent_state.get("action_count_24h", 0),
         "actions_last_run": None,

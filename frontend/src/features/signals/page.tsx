@@ -389,6 +389,25 @@ const ENGINE_STATUS_PLAIN: Record<string, string> = {
   champion:       "Model AI sudah lulus semua uji dan kini aktif membantu keputusan trading.",
 };
 
+// Label PENDEK untuk badge/subjudul. Peta *_PLAIN di bawah berisi kalimat
+// penjelas; keduanya dipakai di tempat berbeda. Tanpa ini nilai mentah seperti
+// "shadow" / "active" / "canary" tampil apa adanya ke pengguna — nama internal
+// yang tak berarti apa-apa bagi pembaca.
+const ENGINE_STATUS_SHORT: Record<string, string> = {
+  degraded:       "Bermasalah",
+  collecting:     "Kumpul data",
+  ready_to_train: "Siap dilatih",
+  shadow:         "Mengamati",
+  canary:         "Uji terbatas",
+  champion:       "Dipakai penuh",
+};
+
+const LEARNING_STATUS_SHORT: Record<string, string> = {
+  warming:  "pemanasan",
+  active:   "aktif",
+  degraded: "bermasalah",
+};
+
 const LEARNING_STATUS_PLAIN: Record<string, string> = {
   warming:  "pembelajaran masih pemanasan — belum ikut memveto trade",
   active:   "pembelajaran aktif — sinyal yang terbukti jelek otomatis diveto",
@@ -558,7 +577,7 @@ function PipelineLive({ spot, futures, health, updater }: {
     { icon: "🔍", label: "Scan",           sub: "pasar spot, rutin",                                                        state: "live" },
     { icon: "🧾", label: "Catat Keputusan", sub: `${spot.decision_ledger.total.toLocaleString("id-ID")} keputusan`,          state: spot.decision_ledger.total > 0 ? "live" : "wait" },
     { icon: "⏱", label: "Cek Hasil",       sub: `${spot.decision_ledger.outcome_completeness_pct.toFixed(0)}% terlabel`,    state: spot.decision_ledger.labelled_24h > 0 ? "live" : "wait" },
-    { icon: "⚖️", label: "Belajar Bobot",   sub: updater?.spot?.last_count != null ? `${updater.spot.last_count} keys · ${fmtT(updater.spot.last_run)}` : "menunggu", state: updater?.spot?.last_run ? "live" : "wait" },
+    { icon: "⚖️", label: "Belajar Bobot",   sub: updater?.spot?.last_count != null ? `${updater.spot.last_count} sinyal · ${fmtT(updater.spot.last_run)}` : "menunggu", state: updater?.spot?.last_run ? "live" : "wait" },
     { icon: "🤖", label: "Latih Model",     sub: spot.models.length ? `${spot.models[0].training_n} sampel` : `${spot.training.progress_pct.toFixed(0)}% data`, state: spot.models.length ? "live" : "wait" },
     ...lifecycleStages(spot.engine_status),
   ] : [];
@@ -567,7 +586,7 @@ function PipelineLive({ spot, futures, health, updater }: {
     { icon: "🔍", label: "Scan",           sub: health ? `tiap ${health.scan.interval_minutes} mnt · #${health.scan.cycle_count}` : "—", state: health?.scan.running ? "live" : "wait" },
     { icon: "🧾", label: "Catat Keputusan", sub: `${futures.decision_ledger.total.toLocaleString("id-ID")} · ${futures.decision_ledger.opened} dibuka`, state: futures.decision_ledger.total > 0 ? "live" : "wait" },
     { icon: "⏱", label: "Cek Hasil",       sub: `${futures.decision_ledger.outcome_completeness_pct.toFixed(0)}% terlabel (NET biaya)`, state: futures.decision_ledger.labelled_24h > 0 ? "live" : "wait" },
-    { icon: "⚖️", label: "Belajar Bobot",   sub: `${health?.learning.cached_keys ?? 0} sinyal · ${futures.learning_status}`, state: futures.learning_status === "active" ? "live" : futures.learning_status === "warming" ? "current" : "wait" },
+    { icon: "⚖️", label: "Belajar Bobot",   sub: `${health?.learning.cached_keys ?? 0} sinyal · ${LEARNING_STATUS_SHORT[futures.learning_status] ?? futures.learning_status}`, state: futures.learning_status === "active" ? "live" : futures.learning_status === "warming" ? "current" : "wait" },
     { icon: "🤖", label: "Latih Model",     sub: futures.models.length ? `${futures.models[0].training_n} sampel` : `${futures.training.progress_pct.toFixed(0)}% data`, state: futures.models.length ? "live" : "wait" },
     ...lifecycleStages(futures.engine_status),
   ] : [];
@@ -582,10 +601,10 @@ function PipelineLive({ spot, futures, health, updater }: {
         </p>
       </div>
       {spotStages.length > 0
-        ? <PipelineRow title="🎯 SPOT" badge={spot?.engine_status ?? "—"} stages={spotStages} />
+        ? <PipelineRow title="🎯 SPOT" badge={spot ? (ENGINE_STATUS_SHORT[spot.engine_status] ?? spot.engine_status) : "—"} stages={spotStages} />
         : <p className="text-[11px] text-neutral-400">Pipeline SPOT belum tersedia.</p>}
       {futStages.length > 0
-        ? <PipelineRow title="⚡ FUTURES" badge={futures?.engine_status ?? "—"} stages={futStages} />
+        ? <PipelineRow title="⚡ FUTURES" badge={futures ? (ENGINE_STATUS_SHORT[futures.engine_status] ?? futures.engine_status) : "—"} stages={futStages} />
         : <p className="text-[11px] text-neutral-400">Pipeline FUTURES belum tersedia.</p>}
     </div>
   );
@@ -734,7 +753,7 @@ function ImprovementsTab({ data, spotData, health, futures, review, catalog, onA
                 <span className="text-neutral-500 truncate">{_shortKey(a.target_key)}</span>
                 <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded ${
                   REPAIR_STATUS_BADGE[a.status]?.cls ?? "bg-neutral-100 text-neutral-500"
-                }`}>{REPAIR_STATUS_BADGE[a.status]?.label ?? a.status}</span>
+                }`}>{REPAIR_STATUS_BADGE[a.status]?.label ?? a.status.replace(/_/g, " ")}</span>
               </div>
             ))}
             {onAgentClick && (
@@ -923,11 +942,11 @@ function ProgressTab({ data, spotData, agentFilter, onClearAgentFilter }: {
                       dan seluruh angka di kartu ini riwayat beku. */}
                   Agen: {s.d?.agent?.enabled === false
                     ? <span className="font-bold text-amber-600">
-                        MATI ({s.d.agent.disabled_reason ?? "dinonaktifkan"}) — angka di bawah riwayat lama
+                        MATI — {s.d.agent.disabled_reason ?? "dinonaktifkan"}; angka di bawah riwayat lama
                       </span>
                     : agentLast
-                      ? `run terakhir ${new Date(agentLast * 1000).toLocaleTimeString("id-ID")}`
-                      : "menunggu run pertama"}
+                      ? `aksi terakhir ${new Date(agentLast * 1000).toLocaleTimeString("id-ID")}`
+                      : "belum ada aksi"}
                   {" · "}Verifier: {s.d?.verifier?.last_run
                     ? `${s.d.verifier.verified_last_run ?? 0} diverifikasi (pass ${new Date(s.d.verifier.last_run * 1000).toLocaleTimeString("id-ID")})`
                     : "belum ada aksi berumur ≥24h"}
@@ -1565,9 +1584,9 @@ function AgentHealthCards({ health }: { health: AgentHealthData | null }) {
 function LearningLoopStatus({ state, onForce }: { state: UpdaterState | null; onForce: () => void }) {
   const fmt = (ts?: number) => ts ? new Date(ts * 1000).toLocaleTimeString("id-ID") : "—";
   const items = [
-    { label: "SPOT",        last: state?.spot?.last_run,    error: state?.spot?.last_error,    extra: state?.spot?.last_count != null ? `${state.spot.last_count} keys` : "" },
+    { label: "SPOT",        last: state?.spot?.last_run,    error: state?.spot?.last_error,    extra: state?.spot?.last_count != null ? `${state.spot.last_count} sinyal` : "" },
     { label: "Futures",     last: state?.futures?.last_run, error: state?.futures?.last_error, extra: (state?.futures?.cached_agents ?? []).join(", ") || "" },
-    { label: "Cross-Agent", last: state?.cross?.last_run,   error: state?.cross?.last_error,   extra: state?.cross?.cached_keys != null ? `${state.cross.cached_keys} keys` : "" },
+    { label: "Cross-Agent", last: state?.cross?.last_run,   error: state?.cross?.last_error,   extra: state?.cross?.cached_keys != null ? `${state.cross.cached_keys} sinyal` : "" },
   ];
   return (
     <div className="bg-white border border-neutral-200 rounded-2xl p-4">
@@ -1741,7 +1760,7 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
         </div>
         <div className="flex items-center gap-2">
           <span className={`text-[11px] font-bold ${learnMap[data.learning_status] ?? "text-neutral-500"}`}>
-            learning: {data.learning_status}
+            Pembelajaran: {LEARNING_STATUS_SHORT[data.learning_status] ?? data.learning_status}
           </span>
           <span className={`inline-flex items-center gap-2 text-xs font-bold border rounded-full px-3 py-1 ${status.cls}`}>
             <span className={`w-2 h-2 rounded-full ${status.dot}`} />{status.label}

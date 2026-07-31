@@ -1146,6 +1146,17 @@ async def get_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
         agent_status = get_repair_agent_status()
     except Exception:
         agent_status = {}
+    # Status agen hanya hidup DI MEMORI dan hilang tiap restart, sementara loop-nya
+    # baru jalan tiap ~30 menit. Akibatnya UI sempat menulis "menunggu run pertama"
+    # untuk agen yang jelas-jelas aktif (27 aksi dalam 24 jam di DB). Jatuh-balik
+    # ke kenyataan di tabel supaya yang tampil bukan artefak restart.
+    if not agent_status.get("last_run"):
+        async with AsyncSessionLocal() as session:
+            last_seen = await session.scalar(
+                select(func.max(FuturesRepairAction.detected_at)))
+        if last_seen:
+            agent_status = {**agent_status, "last_run": last_seen, "from_db": True}
+    agent_status.setdefault("enabled", True)
     try:
         from agents.learning.repair_verifier import get_verifier_status
         verifier_status = get_verifier_status()
