@@ -680,6 +680,7 @@ def _score_breakout(
     if score < BREAKOUT_MIN_SCORE:
         weight_updater.log_rejection(
             symbol, "breakout", score, BREAKOUT_MIN_SCORE,
+            regime=_detect_spot_regime(tf_data.get("1h")),
             weak_signals=[s for s in signals if not s.startswith("⚠️")][:3])
         return None
     clean_signals = [s for s in signals if not s.startswith("⚠️")]
@@ -871,6 +872,7 @@ def _score_bigmover_chase(
     if score < BIGMOVER_MIN_SCORE:
         weight_updater.log_rejection(
             symbol, "bigmover_chase", score, BIGMOVER_MIN_SCORE,
+            regime=_detect_spot_regime(tf_data.get("1h")),
             weak_signals=[s for s in signals if not s.startswith("⚠")][:3])
         return None
     clean_signals = [s for s in signals if not s.startswith("⚠")]
@@ -1109,6 +1111,10 @@ def _score_symbol(
     score   = 0.0
     signals: list[str] = []
     alert   = "accumulation"
+    # Dihitung di AWAL supaya ikut tercatat saat kandidat GUGUR juga — tanpa ini
+    # seluruh baris rejection ber-regime "all" dan tak bisa menjawab "apakah kita
+    # menolak kandidat bagus justru saat pasar sedang tren?".
+    coin_regime = _detect_spot_regime(tf_data.get("1h"))
     # PLAN-SPOT-GAP: koin dengan weekly momentum kuat dapat keringanan di gate
     # RSI(4h) dan penalty change_24h>20% — sebelumnya kedua gate ini membuang
     # SEMUA top-gainer mingguan tanpa pengecualian (lihat RC-1/RC-2/RC-5).
@@ -1301,7 +1307,7 @@ def _score_symbol(
         # Catat kandidat yang HAMPIR lolos supaya tab Rejections bisa menjawab
         # apakah ambang skor kelewat ketat. Pencatatan murni — tak mengubah alur.
         weight_updater.log_rejection(
-            symbol, "accumulation", score, MIN_SCORE,
+            symbol, "accumulation", score, MIN_SCORE, regime=coin_regime,
             weak_signals=clean_signals[:3],
             reason=("score_below_threshold" if score < MIN_SCORE else "too_few_signals"),
         )
@@ -1328,13 +1334,9 @@ def _score_symbol(
     d1h_ref = tf_data.get("1h")
     ema_bullish_at_entry = bool(d1h_ref and d1h_ref.ema9 > d1h_ref.ema21) if d1h_ref else True
 
-    # Regime per-koin dari OHLCV 1h koin itu sendiri (sama seperti futures,
-    # BUG-L13). Sampai 31 Jul 2026 trade SPOT tak pernah menyimpan regime
-    # (65 trade, 0 berisi) sehingga bobot per-regime SPOT mustahil terbentuk dan
-    # tab Analysis > Regime kosong untuk SPOT. Murni pencatatan — tak dipakai
-    # sebagai gerbang keputusan di sini.
-    coin_regime = _detect_spot_regime(d1h_ref)
-
+    # `coin_regime` sudah dihitung di awal fungsi (dipakai juga saat mencatat
+    # kandidat yang gugur). Regime per-koin dari OHLCV 1h koin itu sendiri, sama
+    # seperti futures (BUG-L13). Murni pencatatan — bukan gerbang keputusan.
     return {
         "symbol":              symbol,
         "current_price":       round(current_price, 8),
