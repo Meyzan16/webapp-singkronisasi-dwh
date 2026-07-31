@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isFuturesAgent } from "@/lib/agents";
+import { isFuturesAgent, agentLabel as agentLabelOf } from "@/lib/agents";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -85,6 +85,11 @@ interface CatalogEntry {
   description:          string;
   agents:               CatalogAgent[];
   score_impact_formula: string;
+  /** Market yang memakai sinyal ini: ["spot"], ["futures"], atau keduanya.
+   *  Diturunkan dari tabel aturan canonical masing-masing market. */
+  markets?:             ("spot" | "futures")[];
+  /** Pola teks yang memetakan ke ID stabil ini (untuk penelusuran). */
+  match_terms?:         string[];
 }
 
 interface CatalogResponse {
@@ -2078,12 +2083,38 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 function FormulasTab({ catalog }: { catalog: CatalogResponse | null }) {
   const [catFilter, setCatFilter] = useState<string>("all");
+  // Filter market — katalog kini menyertakan `markets` per sinyal, jadi bisa
+  // dijawab "sinyal ini dipakai SPOT, FUTURES, atau keduanya".
+  const [mktFilter, setMktFilter] = useState<"all" | "spot" | "futures">("all");
   if (!catalog) return <div className="text-center py-10 text-neutral-400 text-sm">Memuat katalog...</div>;
-  const entries = Object.entries(catalog.catalog);
+  const all = Object.entries(catalog.catalog);
+  const entries = mktFilter === "all"
+    ? all
+    : all.filter(([, e]) => (e.markets ?? []).includes(mktFilter));
   const filtered = catFilter === "all" ? entries : entries.filter(([, e]) => e.category === catFilter);
+  const countBy = (m: "spot" | "futures") =>
+    all.filter(([, e]) => (e.markets ?? []).includes(m)).length;
 
   return (
     <div className="space-y-4">
+      {/* Pemetaan market — pertanyaan pertama yang muncul saat membaca kamus
+          sinyal: "ini punya SPOT atau FUTURES?" */}
+      <div className="flex flex-wrap gap-1.5 items-center">
+        <span className="text-[10px] font-bold text-neutral-400 uppercase mr-1">Market</span>
+        {([
+          { k: "all",     label: `Semua (${all.length})` },
+          { k: "spot",    label: `SPOT (${countBy("spot")})` },
+          { k: "futures", label: `FUTURES (${countBy("futures")})` },
+        ] as const).map(m => (
+          <button key={m.k} onClick={() => setMktFilter(m.k)}
+            className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-all ${
+              mktFilter === m.k
+                ? "bg-neutral-800 text-white border-neutral-800"
+                : "bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400"}`}>
+            {m.label}
+          </button>
+        ))}
+      </div>
       <div className="flex flex-wrap gap-1.5">
         <button onClick={() => setCatFilter("all")}
           className={`px-3 py-1 rounded-full text-[10px] font-bold border transition-all ${catFilter === "all" ? "bg-neutral-800 text-white border-neutral-800" : "bg-white text-neutral-500 border-neutral-200"}`}>
@@ -2106,6 +2137,14 @@ function FormulasTab({ catalog }: { catalog: CatalogResponse | null }) {
                   <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border capitalize ${CATEGORY_COLORS[entry.category] ?? "bg-neutral-50 border-neutral-200 text-neutral-500"}`}>
                     {entry.category.replace(/_/g, " ")}
                   </span>
+                  {(entry.markets ?? []).map(m => (
+                    <span key={m} className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${
+                      m === "spot"
+                        ? "bg-teal-50 text-teal-700 border-teal-200"
+                        : "bg-blue-50 text-blue-700 border-blue-200"}`}>
+                      {m === "spot" ? "SPOT" : "FUT"}
+                    </span>
+                  ))}
                 </div>
                 <code className="text-[9px] text-neutral-400 font-mono">{key}</code>
               </div>
@@ -2162,13 +2201,10 @@ function PredictivePanel({ data }: { data: PredictiveHitRow[] | null }) {
   const overallQuality = avgHit4h >= 55 ? "SANGAT BAIK" : avgHit4h >= 45 ? "BAIK" : avgHit4h >= 35 ? "CUKUP" : "PERLU PERBAIKAN";
   const qualityColor = avgHit4h >= 55 ? "text-green-700 bg-green-50 border-green-200" : avgHit4h >= 45 ? "text-teal-700 bg-teal-50 border-teal-200" : avgHit4h >= 35 ? "text-yellow-700 bg-yellow-50 border-yellow-200" : "text-red-700 bg-red-50 border-red-200";
 
-  // Group by agent label
-  const AGENT_SHORT: Record<string, string> = {
-    "futures_agent1": "Pre-Gainer",
-    "futures_agent2": "Accumulation",
-    "futures_agent3": "Momentum",
-    "futures_agent_bigmover": "BigMover",
-  };
+  // Label agen dari registry bersama. Peta lokal sebelumnya tak memuat
+  // `opportunity_spot`, sehingga baris SPOT (baru ditambahkan ke endpoint)
+  // akan tampil sebagai kunci mentah.
+  const shortOf = (agent: string) => agentLabelOf(agent);
 
   return (
     <div className="space-y-4">
@@ -2186,7 +2222,7 @@ function PredictivePanel({ data }: { data: PredictiveHitRow[] | null }) {
         </div>
         <div className="bg-white border border-neutral-200 rounded-xl px-4 py-3">
           <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1">Best Agent</p>
-          <p className="text-sm font-black text-neutral-800">{AGENT_SHORT[bestRow.agent] ?? bestRow.agent.replace("futures_", "")}</p>
+          <p className="text-sm font-black text-neutral-800">{shortOf(bestRow.agent)}</p>
           <p className="text-[10px] text-green-600 font-semibold mt-0.5">{bestRow.direction} · {bestRow.hit_rate_4h.toFixed(0)}% hit 4h</p>
         </div>
         <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
@@ -2200,12 +2236,20 @@ function PredictivePanel({ data }: { data: PredictiveHitRow[] | null }) {
       <div className="bg-white border border-neutral-200 rounded-xl p-4 space-y-4">
         <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Hit Rate per Agen & Arah</p>
         {data.map(row => {
-          const agentLabel = AGENT_SHORT[row.agent] ?? row.agent.replace("futures_", "");
+          const agentLabel = shortOf(row.agent);
           const dirColor = row.direction === "LONG" ? "text-green-600 bg-green-50 border-green-200" : "text-red-600 bg-red-50 border-red-200";
           return (
             <div key={`${row.agent}-${row.direction}`} className="space-y-2">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-neutral-700 w-28">{agentLabel}</span>
+                {/* Penanda market — tab ini dulu futures-only tanpa menyebutkannya;
+                    kini SPOT ikut (sumbernya spot_decision_events). */}
+                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${
+                  isFuturesAgent(row.agent)
+                    ? "bg-blue-50 text-blue-700 border-blue-200"
+                    : "bg-teal-50 text-teal-700 border-teal-200"}`}>
+                  {isFuturesAgent(row.agent) ? "FUT" : "SPOT"}
+                </span>
                 <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full border ${dirColor}`}>
                   {row.direction}
                 </span>
@@ -3135,6 +3179,8 @@ export default function SignalsPage() {
                   Setiap kandidat dicatat saat scan, lalu 4 jam & 24 jam kemudian dicek: apakah harga
                   benar bergerak sesuai prediksi (minimal 1.5% dalam 4 jam / 3% dalam 24 jam)?
                   Ini menilai SEMUA prediksi — termasuk yang tidak jadi dibuka sebagai trade.
+                  Mencakup <strong>dua market</strong>: FUTURES (dari predictive log) dan SPOT
+                  (dari decision ledger), diukur dengan ambang yang sama agar setara.
                 </p>
                 {/* P3: hit-rate di tab inilah pemicu agen perbaikan — tautkan */}
                 <button

@@ -26,7 +26,15 @@ AGENT_LABELS = {
 
 # Signal catalog — keyed by the normalized signal key (or prefix)
 # Each entry: label, category, description, agents (list of agent+max_pts), score_formula
-SIGNAL_CATALOG: dict[str, dict] = {
+# Deskripsi tulisan-tangan. DULU ini adalah katalog itu sendiri, ber-kunci format
+# LAMA (hasil normalisasi teks, mis. "bb_squeeze_nh"). Sejak identitas sinyal
+# pindah ke ID stabil (`signal_id:tech.bb_squeeze`), kunci-kunci ini TIDAK PERNAH
+# lagi cocok: audit 30 Jul 2026 menemukan 79 kunci sinyal aktif vs 17 entri
+# katalog dengan irisan NOL — tab Formulas praktis yatim dan setiap pencarian
+# label di UI jatuh ke kunci mentah.
+# Sekarang perannya hanya PEMERKAYA deskripsi; katalog aslinya dibangun dinamis
+# dari tabel aturan kedua market (lihat _build_catalog di bawah).
+_LEGACY_ENTRIES: dict[str, dict] = {
     # ── Volatility / Squeeze ──────────────────────────────────────────────────
     "bb_squeeze_nh": {
         "label":       "BB Squeeze (TF)",
@@ -203,7 +211,89 @@ SIGNAL_CATALOG: dict[str, dict] = {
     },
 }
 
-# Reverse map: agent → list of signal keys used
+# ── Katalog dinamis ───────────────────────────────────────────────────────────
+# Dibangun dari tabel aturan canonical KEDUA market, jadi setiap sinyal yang
+# benar-benar bisa muncul otomatis punya entri — termasuk sinyal yang lahir
+# nanti. Tak ada lagi daftar yang harus disunting manual dan bisa ketinggalan.
+
+_CATEGORY_BY_PREFIX = {
+    "tech":     "teknikal",
+    "flow":     "aliran dana",
+    "momentum": "momentum",
+    "mom":      "momentum",
+    "bm":       "big mover",
+    "fund":     "funding",
+    "wyckoff":  "wyckoff",
+    "oi":       "open interest",
+}
+
+
+def _humanize(stable_id: str) -> str:
+    """'tech.bb_squeeze' -> 'BB Squeeze'; dipakai bila tak ada label manual."""
+    tail = stable_id.split(".", 1)[-1]
+    words = tail.replace("_", " ").split()
+    out = []
+    for w in words:
+        out.append(w.upper() if len(w) <= 3 and w.isalpha() else w.capitalize())
+    return " ".join(out)
+
+
+def _legacy_description_map() -> dict[str, dict]:
+    """Petakan deskripsi lama (ber-kunci teks) ke ID stabil.
+
+    Kunci lama adalah hasil normalisasi teks, jadi kata-katanya masih utuh —
+    cukup dijalankan lewat pencocok aturan untuk menemukan ID canonical-nya.
+    """
+    from agents.futures.learning_policy import canonical_signal_key as fut_ck
+    from agents.opportunity.learning_policy import canonical_signal_key as spot_ck
+
+    mapped: dict[str, dict] = {}
+    for old_key, entry in _LEGACY_ENTRIES.items():
+        text = old_key.replace("_", " ")
+        sid = fut_ck(text) or spot_ck(text)
+        if sid:
+            mapped.setdefault(sid, entry)
+    return mapped
+
+
+def _build_catalog() -> dict[str, dict]:
+    from agents.futures.learning_policy import _SIGNAL_ID_RULES as FUT_RULES
+    from agents.opportunity.learning_policy import _SIGNAL_ID_RULES as SPOT_RULES
+
+    desc = _legacy_description_map()
+    out: dict[str, dict] = {}
+
+    for rules, market in ((FUT_RULES, "futures"), (SPOT_RULES, "spot")):
+        for required_parts, stable_id in rules:
+            key = f"signal_id:{stable_id}"
+            entry = out.get(key)
+            if entry is None:
+                legacy = desc.get(key, {})
+                entry = {
+                    "label":       legacy.get("label") or _humanize(stable_id),
+                    "category":    legacy.get("category")
+                                   or _CATEGORY_BY_PREFIX.get(stable_id.split(".")[0], "lainnya"),
+                    "description": legacy.get("description", ""),
+                    "agents":      legacy.get("agents", []),
+                    "score_impact_formula": legacy.get(
+                        "score_impact_formula", "(weight − 1.0) × 7.0 per kemunculan"),
+                    # Pemetaan market — inilah yang membuat Formulas bisa
+                    # menjawab "sinyal ini dipakai SPOT, FUTURES, atau keduanya".
+                    "markets":     [],
+                    "match_terms": [],
+                }
+                out[key] = entry
+            if market not in entry["markets"]:
+                entry["markets"].append(market)
+            entry["match_terms"].append(" + ".join(required_parts))
+    return out
+
+
+#: Katalog aktif — ber-kunci ID stabil, sama dengan kunci bobot & scoring.
+SIGNAL_CATALOG: dict[str, dict] = _build_catalog()
+
+# Peta balik: agen → sinyal yang dipakainya. Dibangun SETELAH katalog ada
+# (dulu di atas, merujuk katalog sebelum terdefinisi).
 AGENT_SIGNAL_MAP: dict[str, list[str]] = {}
 for _sig_key, _entry in SIGNAL_CATALOG.items():
     for _ag in _entry.get("agents", []):
@@ -211,22 +301,19 @@ for _sig_key, _entry in SIGNAL_CATALOG.items():
 
 
 def get_catalog_entry(signal_key: str) -> dict | None:
-    """Return catalog metadata for a normalized signal key.
+    """Metadata untuk sebuah kunci sinyal (ID stabil `signal_id:*`).
 
-    Tries exact match first, then prefix match (first 3 underscore segments).
+    Kunci fallback berbasis teks (`signal:*`) sengaja TIDAK dicocokkan paksa —
+    lebih baik mengembalikan None daripada menautkan penjelasan sinyal yang salah.
     """
-    if signal_key in SIGNAL_CATALOG:
-        return SIGNAL_CATALOG[signal_key]
-    # Prefix match — e.g. "bb_squeeze_nh_nn%" → prefix "bb_squeeze_nh"
-    prefix = "_".join(signal_key.split("_")[:3])
-    return SIGNAL_CATALOG.get(prefix)
+    return SIGNAL_CATALOG.get(signal_key)
 
 
 def get_all_categories() -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for e in SIGNAL_CATALOG.values():
-        c = e.get("category", "other")
+        c = e.get("category", "lainnya")
         if c not in seen:
             seen.add(c)
             out.append(c)

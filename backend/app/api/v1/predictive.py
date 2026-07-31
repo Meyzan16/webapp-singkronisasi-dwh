@@ -80,10 +80,70 @@ async def get_hit_rate(
         s["avg_move_24h"]  = round(s["_sum_24h"] / n, 2)
         del s["_sum_4h"], s["_sum_24h"]
 
+    # ── SPOT ──────────────────────────────────────────────────────────────────
+    # predictive_log HANYA diisi lane futures, sehingga tab Predictive dulu
+    # futures-only tanpa menyebutkannya. Padanan SPOT ada di spot_decision_events
+    # (pnl_4h_pct / pnl_24h_pct). Diukur dgn AMBANG SAMA seperti futures
+    # (>=1.5% dalam 4 jam, >=3% dalam 24 jam — lihat futures/scheduler.py:562)
+    # supaya kedua market bisa dibandingkan setara.
+    spot_stats: dict[str, dict] = {}
+    if not agent or agent == "opportunity_spot":
+        from app.models.spot_decision_event import SpotDecisionEvent
+
+        async with AsyncSessionLocal() as session:
+            sq = select(
+                SpotDecisionEvent.pnl_4h_pct, SpotDecisionEvent.pnl_24h_pct,
+            ).where(
+                SpotDecisionEvent.scan_ts >= cutoff,
+                SpotDecisionEvent.pnl_4h_pct.is_not(None),
+            )
+            if regime:
+                sq = sq.where(SpotDecisionEvent.regime == regime)
+            srows = (await session.execute(sq)).all()
+
+        if srows:
+            # SPOT hanya berarah LONG (tak ada short di spot).
+            s = {
+                "agent": "opportunity_spot", "direction": "LONG",
+                "total": 0, "hits_4h": 0, "hits_24h": 0,
+                "avg_move_4h": 0.0, "avg_move_24h": 0.0,
+            }
+            sum4 = sum24 = 0.0
+            n24 = 0
+            for p4, p24 in srows:
+                s["total"] += 1
+                sum4 += p4 or 0.0
+                if (p4 or 0.0) >= 1.5:
+                    s["hits_4h"] += 1
+                if p24 is not None:
+                    n24 += 1
+                    sum24 += p24
+                    if p24 >= 3.0:
+                        s["hits_24h"] += 1
+            n = s["total"] or 1
+            s["hit_rate_4h"]  = round(s["hits_4h"] / n * 100, 1)
+            # Basis 24h = baris yang sudah punya outcome 24h saja, bukan semua.
+            s["hit_rate_24h"] = round(s["hits_24h"] / (n24 or 1) * 100, 1)
+            s["avg_move_4h"]  = round(sum4 / n, 2)
+            s["avg_move_24h"] = round(sum24 / (n24 or 1), 2)
+            spot_stats["opportunity_spot:LONG"] = s
+
+    by_agent = list(stats.values()) + list(spot_stats.values())
     return {
         "window_hours": hours,
-        "resolved_count": len(rows),
-        "by_agent": list(stats.values()),
+        "resolved_count": len(rows) + sum(s["total"] for s in spot_stats.values()),
+        "by_agent": by_agent,
+        # Ringkasan per market — menjawab "akurasi SPOT vs FUTURES".
+        "by_market": {
+            "futures": {
+                "resolved": len(rows),
+                "agents": sorted({s["agent"] for s in stats.values()}),
+            },
+            "spot": {
+                "resolved": sum(s["total"] for s in spot_stats.values()),
+                "agents": sorted({s["agent"] for s in spot_stats.values()}),
+            },
+        },
     }
 
 
