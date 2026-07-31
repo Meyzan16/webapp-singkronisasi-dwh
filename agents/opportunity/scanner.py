@@ -43,6 +43,7 @@ from app.services.binance_urls import spot
 from app.services.trading_costs import EXECUTION_COST_PCT
 from agents.opportunity.learning_policy import apply_learning_policy
 from agents.opportunity.feature_engineering import extract_technical_features
+from agents.opportunity import weight_updater
 
 logger = structlog.get_logger(__name__)
 
@@ -677,6 +678,9 @@ def _score_breakout(
 
     # ── Filter ────────────────────────────────────────────────────────────────
     if score < BREAKOUT_MIN_SCORE:
+        weight_updater.log_rejection(
+            symbol, "breakout", score, BREAKOUT_MIN_SCORE,
+            weak_signals=[s for s in signals if not s.startswith("⚠️")][:3])
         return None
     clean_signals = [s for s in signals if not s.startswith("⚠️")]
     if len(clean_signals) < 2:
@@ -865,6 +869,9 @@ def _score_bigmover_chase(
 
     # ── Finalize ──────────────────────────────────────────────────────────────
     if score < BIGMOVER_MIN_SCORE:
+        weight_updater.log_rejection(
+            symbol, "bigmover_chase", score, BIGMOVER_MIN_SCORE,
+            weak_signals=[s for s in signals if not s.startswith("⚠")][:3])
         return None
     clean_signals = [s for s in signals if not s.startswith("⚠")]
 
@@ -1036,6 +1043,9 @@ def _score_early_radar(
         # tertingginya supaya terlihat seberapa jauh ambang 70 dari kenyataan.
         if funnel is not None:
             funnel["best_score_rejected"] = max(funnel.get("best_score_rejected", 0.0), round(score, 1))
+        weight_updater.log_rejection(
+            symbol, "early_radar", score, EARLY_RADAR_MIN_SCORE,
+            weak_signals=[s for s in signals if not s.startswith("⚠")][:3])
         return None
 
     clean_signals = [s for s in signals if not s.startswith("⚠")]
@@ -1072,6 +1082,21 @@ def _score_early_radar(
 
 
 # ── Opportunity scoring ────────────────────────────────────────────────────────
+
+def _detect_spot_regime(d1h: Optional[TFData]) -> str:
+    """Regime koin dari OHLCV 1h-nya sendiri; "ranging" bila data kurang.
+
+    Memakai detektor yang SAMA dengan futures agar label regime kedua market
+    sebanding (tak ada gunanya SPOT punya definisi "trending" sendiri).
+    """
+    try:
+        if not d1h or len(d1h.closes) < 50:
+            return "ranging"
+        from agents.futures.regime import detect_from_ohlcv
+        return detect_from_ohlcv(d1h.opens, d1h.highs, d1h.lows, d1h.closes)
+    except Exception:
+        return "ranging"
+
 
 def _score_symbol(
     symbol: str,
@@ -1273,6 +1298,13 @@ def _score_symbol(
     # ── Filter & finalize ─────────────────────────────────────────────────────
     clean_signals = [s for s in signals if not s.startswith("⚠️")]
     if score < MIN_SCORE or len(clean_signals) < 2:
+        # Catat kandidat yang HAMPIR lolos supaya tab Rejections bisa menjawab
+        # apakah ambang skor kelewat ketat. Pencatatan murni — tak mengubah alur.
+        weight_updater.log_rejection(
+            symbol, "accumulation", score, MIN_SCORE,
+            weak_signals=clean_signals[:3],
+            reason=("score_below_threshold" if score < MIN_SCORE else "too_few_signals"),
+        )
         return None
 
     # Dominant alert type
@@ -1296,11 +1328,19 @@ def _score_symbol(
     d1h_ref = tf_data.get("1h")
     ema_bullish_at_entry = bool(d1h_ref and d1h_ref.ema9 > d1h_ref.ema21) if d1h_ref else True
 
+    # Regime per-koin dari OHLCV 1h koin itu sendiri (sama seperti futures,
+    # BUG-L13). Sampai 31 Jul 2026 trade SPOT tak pernah menyimpan regime
+    # (65 trade, 0 berisi) sehingga bobot per-regime SPOT mustahil terbentuk dan
+    # tab Analysis > Regime kosong untuk SPOT. Murni pencatatan — tak dipakai
+    # sebagai gerbang keputusan di sini.
+    coin_regime = _detect_spot_regime(d1h_ref)
+
     return {
         "symbol":              symbol,
         "current_price":       round(current_price, 8),
         "opportunity_score":   display_score,
         "raw_score":           raw_score,
+        "regime":              coin_regime,
         "direction_confirmed": direction_confirmed,
         "auto_open":           auto_open,
         "momentum_fasttrack":  momentum_fasttrack,

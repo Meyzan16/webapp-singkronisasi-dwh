@@ -553,6 +553,9 @@ async def _auto_open_position(coin: dict) -> bool:
             entry_type   = "auto",   # distinguishes from manual opens
             entry_at     = time.time(),
             status       = "open",
+            # Regime saat entry — tanpa ini bobot per-regime SPOT tak pernah
+            # terbentuk (31 Jul 2026: 65 trade SPOT, 0 berisi regime).
+            regime       = coin.get("regime") or "ranging",
             position_size    = sizing["position_size"],
             risk_dollar      = sizing["risk_dollar"],
             balance_snapshot = sizing["balance"],
@@ -753,6 +756,35 @@ async def run_opportunity_loop() -> None:
                         logger.warning("spot_model_auto_rollback", **drift)
             except Exception as exc:
                 logger.warning("post_scan_learning_error", error=str(exc)[:80])
+
+            # Flush rejection log SPOT ke DB (pola sama dgn futures scheduler).
+            # Sampai 31 Jul 2026 hanya futures yang mencatat kandidat gugur,
+            # sehingga tab Rejections tak pernah memuat SPOT sama sekali.
+            try:
+                from agents.opportunity.weight_updater import flush_rejection_queue
+                _rejections = flush_rejection_queue()
+                if _rejections:
+                    from app.database import AsyncSessionLocal, is_db_available
+                    from app.models.rejection_log import RejectionLog
+                    if is_db_available():
+                        async with AsyncSessionLocal() as _rsess:
+                            for _r in _rejections:
+                                _rsess.add(RejectionLog(**_r))
+                            await _rsess.commit()
+                        # Pangkas >7 hari sesekali agar tabel tak membengkak
+                        # (futures memangkas juga — cukup salah satu yang jalan).
+                        if _cycle_count % 100 == 0:
+                            from sqlalchemy import delete as _sql_del
+                            import time as _t
+                            async with AsyncSessionLocal() as _rsess2:
+                                await _rsess2.execute(
+                                    _sql_del(RejectionLog).where(
+                                        RejectionLog.rejected_at < _t.time() - 7 * 86400
+                                    )
+                                )
+                                await _rsess2.commit()
+            except Exception as exc:
+                logger.warning("spot_rejection_flush_failed", error=str(exc)[:80])
 
         except asyncio.CancelledError:
             opp_store.set_scanning(False)

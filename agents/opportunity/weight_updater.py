@@ -45,6 +45,9 @@ MIN_RUN_INTERVAL   = 30 * 60
 TRAINING_WINDOW_D  = 90
 DECAY_HALF_LIFE_D  = 7.0
 STALE_KEY_MAX_D    = 30
+#: Sampel minimum sebelum sebuah REGIME punya bobotnya sendiri. Tanpa gate ini
+#: satu-dua trade bisa langsung menggeser bobot regime (futures memakai 3 juga).
+MIN_SAMPLE_RAW     = 3
 
 _last_run:   Optional[float] = None
 _last_error: Optional[str]   = None
@@ -74,6 +77,61 @@ def get_state() -> dict:
         "last_count":  _last_count,
         "cached_keys": _loaded_keys,
     }
+
+
+# ── Rejection log SPOT ────────────────────────────────────────────────────────
+# Sampai 31 Jul 2026 hanya FUTURES yang mencatat kandidat gugur, sehingga tab
+# Analysis > Rejections tak pernah bisa menjawab "koin SPOT apa yang HAMPIR
+# dibuka" — padahal itu justru yang memberi tahu apakah ambang skor kelewat
+# ketat. Pola disamakan dgn futures (`agents/futures/weight_updater.py:50`):
+# antre di memori (sinkron, aman dipanggil dari jalur scoring), lalu di-flush
+# scheduler seusai scan. Murni pencatatan — TIDAK mengubah keputusan apa pun.
+_rejection_queue: list[dict] = []
+_REJECTION_QUEUE_MAX = 5000
+
+#: Skor sangat rendah tak informatif untuk kalibrasi dan hanya membanjiri tabel.
+REJECTION_MIN_SCORE = 40.0
+
+
+def log_rejection(
+    symbol:       str,
+    lane:         str,
+    score:        float,
+    threshold:    float,
+    regime:       str = "all",
+    weak_signals: list | None = None,
+    reason:       str = "score_below_threshold",
+) -> None:
+    """Antre satu kandidat SPOT yang gugur. Sinkron & tak pernah melempar."""
+    try:
+        if reason == "score_below_threshold" and score < REJECTION_MIN_SCORE:
+            return
+        if len(_rejection_queue) >= _REJECTION_QUEUE_MAX:
+            return
+        import json as _json
+        _rejection_queue.append({
+            "symbol":        symbol,
+            # Kolom `agent` dipakai bersama futures; SPOT mengisinya
+            # "opportunity_spot" dan menaruh lane di reject_reason agar
+            # per-lane tetap bisa dibedakan tanpa mengubah skema.
+            "agent":         "opportunity_spot",
+            "direction":     "LONG",          # SPOT tak punya short
+            "score":         round(float(score), 2),
+            "threshold":     round(float(threshold), 2),
+            "regime":        regime or "all",
+            "reject_reason": f"{lane}:{reason}" if lane else reason,
+            "weak_signals":  _json.dumps(weak_signals or [], ensure_ascii=False),
+            "rejected_at":   time.time(),
+        })
+    except Exception:
+        pass   # pencatatan tak boleh mengganggu scan
+
+
+def flush_rejection_queue() -> list[dict]:
+    """Kembalikan & kosongkan antrean — dipanggil scheduler seusai scan."""
+    global _rejection_queue
+    rows, _rejection_queue = _rejection_queue, []
+    return rows
 
 
 def _normalize_signal(raw: str) -> str:
@@ -139,7 +197,25 @@ async def _update_spot_weights_unlocked() -> int:
         # ── Accumulate decayed win/total per key ──────────────────────────────
         stats: dict[str, dict] = {}
 
+        # Agregasi per-REGIME, terpisah dari `stats` agar jalur "all" yang sudah
+        # berjalan tak berubah sedikit pun. Tanpa ini SPOT tak pernah punya baris
+        # regime<>'all' sehingga tab Analysis > Regime kosong untuk SPOT
+        # (futures sudah punya sejak lama).
+        stats_regime: dict[tuple[str, str], dict] = {}
+        _cur_regime = "all"   # diisi per-trade di loop di bawah
+
         def _add(key: str, is_win: bool, pnl_pct: float, w: float) -> None:
+            if _cur_regime and _cur_regime != "all":
+                rs = stats_regime.setdefault(
+                    (key, _cur_regime),
+                    {"wins": 0.0, "total": 0.0, "pnl_sum": 0.0, "raw_n": 0, "raw_wins": 0},
+                )
+                rs["total"] += w
+                rs["pnl_sum"] += pnl_pct * w
+                rs["raw_n"] += 1
+                if is_win:
+                    rs["wins"] += w
+                    rs["raw_wins"] += 1
             s = stats.setdefault(
                 key,
                 {"wins": 0.0, "total": 0.0, "pnl_sum": 0.0, "raw_n": 0, "raw_wins": 0},
@@ -168,6 +244,10 @@ async def _update_spot_weights_unlocked() -> int:
 
             is_win = is_profitable_outcome(t.pnl_pct)
             decay  = _decay_factor(t.closed_at, now)
+            # Regime trade ini — dibaca `_add` untuk mengisi stats_regime.
+            # Trade lama (sebelum 31 Jul 2026) regime-nya NULL → dilewati, jadi
+            # bobot per-regime hanya tumbuh dari data yang benar-benar berlabel.
+            _cur_regime = (t.regime or "all")
 
             if t.alert_type:
                 _add(f"alert:{t.alert_type}", is_win, float(t.pnl_pct), decay)
@@ -251,6 +331,51 @@ async def _update_spot_weights_unlocked() -> int:
                     snapshot_at=now,
                 ))
                 touched += 1
+
+            # ── Baris per-REGIME ─────────────────────────────────────────────
+            # Ditulis terpisah dari blok "all" di atas supaya perilaku lama utuh.
+            # Butuh sampel minimum agar satu-dua trade tak langsung menggeser
+            # bobot sebuah regime (futures memakai gate serupa).
+            if stats_regime:
+                existing_reg = {
+                    (r.signal_key, r.regime): r
+                    for r in (await session.execute(
+                        select(AgentSignalWeight).where(
+                            AgentSignalWeight.agent  == AGENT_KEY,
+                            AgentSignalWeight.regime != "all",
+                        )
+                    )).scalars().all()
+                }
+                for (key, reg), s in stats_regime.items():
+                    if s["raw_n"] < MIN_SAMPLE_RAW:
+                        continue
+                    n_eff    = s["total"]
+                    win_rate = s["wins"] / n_eff if n_eff > 0 else 0.0
+                    avg_pnl  = s["pnl_sum"] / n_eff if n_eff > 0 else 0.0
+                    desired  = deterministic_weight(s["wins"], n_eff)
+                    row = existing_reg.get((key, reg))
+                    if row is None:
+                        session.add(AgentSignalWeight(
+                            agent       = AGENT_KEY,
+                            signal_key  = key,
+                            weight      = desired,
+                            win_count   = s["raw_wins"],
+                            total_count = s["raw_n"],
+                            win_rate    = round(win_rate, 4),
+                            avg_pnl_pct = round(avg_pnl, 3),
+                            sample_count_raw = s["raw_n"],
+                            regime      = reg,
+                            updated_at  = now,
+                        ))
+                    else:
+                        row.weight      = desired
+                        row.win_count   = s["raw_wins"]
+                        row.total_count = s["raw_n"]
+                        row.win_rate    = round(win_rate, 4)
+                        row.avg_pnl_pct = round(avg_pnl, 3)
+                        row.sample_count_raw = s["raw_n"]
+                        row.updated_at  = now
+                    touched += 1
 
             # §6.1b + §9.4: zombie keys — decay toward neutral, delete when stale
             for key, row in existing_rows.items():
