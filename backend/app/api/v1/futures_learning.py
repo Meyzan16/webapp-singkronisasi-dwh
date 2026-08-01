@@ -400,6 +400,45 @@ async def get_sl_config() -> dict:
     return {"status": "ok", "config": sl_config.snapshot()}
 
 
+# ── M5: penyalaan bertahap (shadow → canary → active) ────────────────────────
+
+@router.get("/futures/exit-rollout", dependencies=[Depends(require_db)])
+async def exit_rollout_status() -> dict:
+    """Semua tahapan penyalaan parameter keluar beserta posisinya."""
+    from agents.learning.exit_rollout import status
+    return await status()
+
+
+@router.post("/futures/exit-rollout/propose", dependencies=[Depends(require_db)])
+async def exit_rollout_propose(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Alirkan usulan mesin belajar ke antrean tahapan. Semua masuk sebagai
+    `shadow` — tak ada yang berlaku."""
+    from agents.learning.exit_rollout import propose_from_recommendations
+    return await propose_from_recommendations(days=days)
+
+
+@router.post("/futures/exit-rollout/{rollout_id}/canary", dependencies=[Depends(require_db)])
+async def exit_rollout_start_canary(rollout_id: int) -> dict:
+    """Berlakukan usulan untuk SATU lane. Ditolak bila baseline belum cukup atau
+    ada canary lain yang sedang berjalan."""
+    from agents.learning.exit_rollout import start_canary
+    return await start_canary(rollout_id)
+
+
+@router.post("/futures/exit-rollout/{rollout_id}/evaluate", dependencies=[Depends(require_db)])
+async def exit_rollout_evaluate(rollout_id: int) -> dict:
+    """Bandingkan hasil sesudah aktivasi dengan baseline, lalu putuskan."""
+    from agents.learning.exit_rollout import evaluate
+    return await evaluate(rollout_id)
+
+
+@router.post("/futures/exit-rollout/{rollout_id}/rollback", dependencies=[Depends(require_db)])
+async def exit_rollout_rollback(rollout_id: int) -> dict:
+    """Kembalikan parameter ke nilai sebelumnya."""
+    from agents.learning.exit_rollout import rollback
+    return await rollback(rollout_id)
+
+
 @router.post("/futures/exit-learning/apply", dependencies=[Depends(require_db)])
 async def exit_learning_apply(days: int = Query(90, ge=1, le=365),
                               dry_run: bool = Query(True)) -> dict:

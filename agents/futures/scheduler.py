@@ -821,6 +821,20 @@ async def run_futures_loop() -> None:
                 except Exception as exc:
                     logger.warning("repair_verifier_failed", error=str(exc)[:160])
 
+                # M5: evaluasi canary parameter KELUAR di irama yang sama dengan
+                # verifier sisi masuk. Hanya MENGEVALUASI dan membalik bila
+                # memburuk — menaikkan shadow→canary tetap butuh perintah
+                # eksplisit, karena itu memberlakukan perubahan ke uang sungguhan.
+                try:
+                    from agents.learning.exit_rollout import advance
+                    _adv = await advance()
+                    for _r in _adv.get("evaluated", []):
+                        if _r.get("stage") in ("active", "rolled_back"):
+                            logger.info("exit_rollout_decided", lane=_r.get("lane"),
+                                        param=_r.get("param"), stage=_r.get("stage"))
+                except Exception as exc:
+                    logger.warning("exit_rollout_advance_failed", error=str(exc)[:160])
+
             # Phase 1 T4: backfill forward-pnl on big_mover_log every 10 cycles (~20 min)
             if _cycle_count % 10 == 0:
                 try:
