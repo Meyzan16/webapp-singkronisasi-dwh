@@ -37,7 +37,8 @@ _EXCLUDE_FEATURES = {
     "shadow_probability",   # F5: prediksi shadow tersimpan di snapshot — bukan fitur
 }
 _DEFAULT_COST_PCT = 0.20   # fallback net-cost bila cost_floor_pct absen di snapshot
-MIN_TRAIN_SAMPLES = 60     # gate data §4
+# Ambang dari app.services.engine_gates — satu sumber dgn panel Engine & SPOT.
+from app.services.engine_gates import MIN_TRAIN_SAMPLES, MIN_TEST_SAMPLES  # noqa: E402
 NEW_EVIDENCE_STEP = 50     # latih ulang hanya setelah +50 sampel baru
 
 
@@ -129,7 +130,7 @@ def train_challenger(samples: list[dict]) -> dict:
         masked_brier = _metrics([predict_row(row, index) for row in test], labels, net_pnls).get("brier")
         ablation.append({"feature": name, "brier_delta_without": round((masked_brier or 0) - (test_metrics.get("brier") or 0), 6)})
     promotion_eligible = bool(
-        test_metrics["n"] >= 20 and test_metrics.get("brier") is not None
+        test_metrics["n"] >= MIN_TEST_SAMPLES and test_metrics.get("brier") is not None
         and baseline.get("brier") is not None and test_metrics["brier"] < baseline["brier"]
         and (test_metrics.get("selected_expectancy_pct") or 0) > 0
         and (test_metrics.get("selected_profit_factor") or 0) >= 1.5

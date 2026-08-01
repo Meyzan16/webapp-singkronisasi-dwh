@@ -34,6 +34,9 @@ router = APIRouter(tags=["signals"])
 from app.services.agent_registry import (  # noqa: E402
     ALL_AGENTS, TRADING_AGENTS, AGENT_LABELS,
 )
+# Ambang gate engine dari satu sumber — supaya tampilan gate di panel Engine
+# TAK PERNAH menyimpang dari syarat promosi yang dipakai logika model.
+from app.services import engine_gates as _gates  # noqa: E402
 
 # TTL cache endpoint adaptive-engine: agregasi ledger puluhan-ribu baris mahal
 # (dulu ~8 dtk -> ECONNRESET). Poll UI berulang dilayani dari cache; recompute
@@ -137,12 +140,12 @@ async def get_adaptive_engine() -> dict:
     outcome_completeness = round(labelled_24h / due_24h * 100, 1) if due_24h else 100.0
     latest_model = model_payload[0] if model_payload else None
     gates = {
-        "training_data": mature_feature_samples >= 60,
+        "training_data": _gates.training_gate(mature_feature_samples),
         "test_samples": bool(
-            latest_model and int((latest_model.get("test") or {}).get("n", 0)) >= 20
+            latest_model and _gates.test_gate(int((latest_model.get("test") or {}).get("n", 0)))
         ),
         "promotion_eligible": bool(latest_model and latest_model.get("promotion_eligible")),
-        "outcome_completeness": outcome_completeness >= 99.0,
+        "outcome_completeness": _gates.completeness_gate(outcome_completeness),
         "data_quality": all(value == 0 for value in quality.values()),
         "champion_exists": any(model.status == "champion" for model in models),
         "rollback_ready": any(model.status == "retired" for model in models),
@@ -167,13 +170,24 @@ async def get_adaptive_engine() -> dict:
         "training": {
             "mature_feature_samples": mature_feature_samples,
             "required_samples": 60,
-            "progress_pct": round(min(100.0, mature_feature_samples / 60 * 100), 1),
+            "progress_pct": round(min(100.0, mature_feature_samples / _gates.MIN_TRAIN_SAMPLES * 100), 1),
         },
         "models": model_payload,
         "walkforward": walkforward,
         "onchain": onchain,
         "weights": weight_state,
         "gates": gates,
+        # Diagnosis tiap gate: nilai sekarang vs syarat + apa yang menghambat.
+        # Tanpa ini "model belum promote" terbaca seperti kerusakan, padahal
+        # sering sekadar "kurang N sampel lagi".
+        "gate_details": _gates.describe_gates(
+            mature_samples=mature_feature_samples,
+            test_n=int(((latest_model or {}).get("test") or {}).get("n", 0)),
+            outcome_completeness_pct=outcome_completeness,
+            quality=quality,
+            promotion_eligible=gates["promotion_eligible"],
+            champion_exists=gates["champion_exists"],
+        ),
         "updated_at": now,
     }
     _ENGINE_CACHE["spot"]["ts"] = time.time()
@@ -292,7 +306,7 @@ async def get_adaptive_engine_futures() -> dict:
     outcome_completeness = round(labelled_24h / due_24h * 100, 1) if due_24h else 100.0
     gates = {
         "training_data": mature_samples >= required,        # ≥60 mature (F3)
-        "outcome_completeness": outcome_completeness >= 99.0,
+        "outcome_completeness": _gates.completeness_gate(outcome_completeness),
         "data_quality": all(v == 0 for v in quality.values()),
         "model_trained": bool(model_payload),                        # F3
         "promotion_eligible": bool(latest_model and latest_model["promotion_eligible"]),
@@ -339,6 +353,16 @@ async def get_adaptive_engine_futures() -> dict:
             "F3_model": True, "F4_walkforward": True, "F5_canary": True,
         },
         "gates": gates,
+        # Diagnosis gate — sama seperti SPOT, supaya kedua market bisa
+        # dibaca dengan cara yang sama.
+        "gate_details": _gates.describe_gates(
+            mature_samples=mature_samples,
+            test_n=int(((latest_model or {}).get("test") or {}).get("n", 0)),
+            outcome_completeness_pct=outcome_completeness,
+            quality=quality,
+            promotion_eligible=gates["promotion_eligible"],
+            champion_exists=gates["champion_exists"],
+        ),
         "updated_at": now,
     }
     _ENGINE_CACHE["futures"]["ts"] = time.time()

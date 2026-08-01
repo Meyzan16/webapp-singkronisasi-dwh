@@ -148,6 +148,9 @@ interface AdaptiveEngineData {
     quality: { duplicate_keys: number; missing_snapshots: number; future_events: number; invalid_closes: number };
   };
   training: { mature_feature_samples: number; required_samples: number; progress_pct: number };
+  /** Diagnosis tiap gate (nilai vs syarat + penghambat). Opsional agar backend
+   *  lama tetap terbaca. */
+  gate_details?: GateDetail[];
   models: Array<{
     version: string; status: string; trained_at: number; promoted_at?: number;
     training_n: number; promotion_eligible: boolean;
@@ -180,6 +183,7 @@ interface FuturesAdaptiveEngineData {
     oldest_scan_ts: number | null; latest_scan_ts: number | null;
   };
   training: { mature_feature_samples: number; required_samples: number; progress_pct: number };
+  gate_details?: GateDetail[];
   models: Array<{
     version: string; status: string; trained_at: number; training_n: number;
     promotion_eligible: boolean; label_horizon: string;
@@ -393,6 +397,93 @@ const ENGINE_STATUS_PLAIN: Record<string, string> = {
 // penjelas; keduanya dipakai di tempat berbeda. Tanpa ini nilai mentah seperti
 // "shadow" / "active" / "canary" tampil apa adanya ke pengguna — nama internal
 // yang tak berarti apa-apa bagi pembaca.
+/** Nama gate untuk pembaca. Angka syaratnya TIDAK ditulis di sini — dikirim
+ *  backend lewat `gate_details.required`, supaya label tak basi saat ambang
+ *  diubah di app/services/engine_gates.py. */
+const gateLabels: Record<string, string> = {
+  training_data:       "Data latih cukup",
+  test_samples:        "Sampel uji cukup",
+  outcome_completeness:"Hasil sudah terlabel",
+  data_quality:        "Kualitas data bersih",
+  promotion_eligible:  "Model lolos uji offline",
+  walkforward_passed:  "Lolos walk-forward + stress",
+  model_trained:       "Model sudah dilatih",
+  canary_active:       "Uji terbatas berjalan",
+  canary_passed:       "Uji terbatas lulus",
+  champion_exists:     "Sudah ada model dipakai",
+  rollback_ready:      "Siap dikembalikan",
+};
+
+/** Diagnosis satu gate — nilai sekarang vs syarat + apa yang menghambat. */
+interface GateDetail {
+  key: string; label: string; passed: boolean;
+  current: number; required: number; progress_pct: number;
+  eta_days?: number | null; blocker?: string | null;
+}
+
+/**
+ * Daftar gate yang MENJELASKAN DIRI.
+ *
+ * Sebelumnya gate hanya "PASS / WAIT" — pembaca tak bisa tahu seberapa jauh dari
+ * lulus atau apa yang menghambat, sehingga "model belum dipromosikan" terbaca
+ * seperti kerusakan padahal sering sekadar kurang sekian sampel. Bar + kalimat
+ * penghambat mengubahnya jadi sesuatu yang bisa ditindaklanjuti.
+ */
+function GateList({ details, fallback }: {
+  details?: GateDetail[];
+  fallback: Record<string, boolean>;
+}) {
+  if (!details?.length) {
+    // Backend lama (belum mengirim gate_details) — tampilkan bentuk sederhana.
+    return (
+      <div className="space-y-1.5">
+        {Object.entries(fallback).map(([key, passed]) => (
+          <div key={key} className="flex items-center justify-between text-[11px]">
+            <span className="text-neutral-600">{gateLabels[key] ?? key.replace(/_/g, " ")}</span>
+            <span className={`font-bold ${passed ? "text-green-600" : "text-neutral-400"}`}>
+              {passed ? "LULUS" : "MENUNGGU"}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  const blocked = details.filter(g => !g.passed);
+  return (
+    <div className="space-y-2">
+      {blocked.length === 0 && (
+        <p className="text-[11px] font-bold text-green-700">Semua syarat terpenuhi.</p>
+      )}
+      {details.map(g => (
+        <div key={g.key} className="space-y-0.5">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className={g.passed ? "text-neutral-500" : "text-neutral-800 font-semibold"}>
+              {g.label}
+            </span>
+            <span className={`font-bold tabular-nums ${g.passed ? "text-green-600" : "text-amber-600"}`}>
+              {g.passed ? "LULUS" : `${g.current} / ${g.required}`}
+            </span>
+          </div>
+          {!g.passed && (
+            <>
+              <div className="h-1 rounded-full bg-neutral-100 overflow-hidden">
+                <div className="h-full rounded-full bg-amber-400"
+                     style={{ width: `${Math.max(2, Math.min(100, g.progress_pct))}%` }} />
+              </div>
+              {g.blocker && (
+                <p className="text-[10px] text-neutral-500 leading-snug">
+                  {g.blocker}
+                  {g.eta_days ? ` · kira-kira ${g.eta_days} hari lagi` : ""}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const ENGINE_STATUS_SHORT: Record<string, string> = {
   degraded:       "Bermasalah",
   collecting:     "Kumpul data",
@@ -1628,11 +1719,6 @@ function AdaptiveEnginePanel({ data, compact = false }: { data: AdaptiveEngineDa
   const status = statusMap[data.engine_status] ?? statusMap.degraded;
   const qualityIssues = Object.values(data.decision_ledger.quality).reduce((sum, value) => sum + value, 0);
   const latestModel = data.models[0];
-  const gateLabels: Record<string, string> = {
-    training_data: "60 mature samples", test_samples: "20 OOS samples",
-    promotion_eligible: "Promotion eligible", outcome_completeness: "Outcome ≥99%",
-    data_quality: "Data quality", champion_exists: "Champion active", rollback_ready: "Rollback ready",
-  };
   return (
     <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
       <div className="p-4 border-b border-neutral-100 flex flex-wrap items-center justify-between gap-3">
@@ -1678,15 +1764,8 @@ function AdaptiveEnginePanel({ data, compact = false }: { data: AdaptiveEngineDa
       {!compact && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4 pt-0">
           <div className="rounded-xl border border-neutral-200 p-3">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Promotion Gates</p>
-            <div className="space-y-1.5">
-              {Object.entries(data.gates).map(([key, passed]) => (
-                <div key={key} className="flex items-center justify-between text-[11px]">
-                  <span className="text-neutral-600">{gateLabels[key] ?? key}</span>
-                  <span className={`font-bold ${passed ? "text-green-600" : "text-neutral-400"}`}>{passed ? "PASS" : "WAIT"}</span>
-                </div>
-              ))}
-            </div>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Syarat Naik Tahap</p>
+            <GateList details={data.gate_details} fallback={data.gates} />
           </div>
           <div className="rounded-xl border border-neutral-200 p-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Model Registry</p>
@@ -1740,12 +1819,6 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
   const phaseLabels: Record<string, string> = {
     F0_policy: "F0 Policy", F1_ledger: "F1 Ledger", F2_integration: "F2 Integrasi",
     F3_model: "F3 Model", F4_walkforward: "F4 Walk-fwd", F5_canary: "F5 Canary",
-  };
-  const gateLabels: Record<string, string> = {
-    training_data: "60 mature samples", outcome_completeness: "Outcome ≥99%",
-    data_quality: "Data quality", model_trained: "Model trained", canary_passed: "Canary passed",
-    promotion_eligible: "Model lolos uji offline", walkforward_passed: "Lolos walk-forward + stress",
-    canary_active: "Uji coba canary berjalan", champion_exists: "Model champion aktif",
   };
   // Reason codes teratas (selain opened/recommendation) — kenapa kandidat tidak dibuka
   const topReasons = Object.entries(data.decision_ledger.reasons)
@@ -1815,14 +1888,7 @@ function FuturesAdaptiveEnginePanel({ data, compact = false }: { data: FuturesAd
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 pt-0">
           <div className="rounded-xl border border-neutral-200 p-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Acceptance Gates</p>
-            <div className="space-y-1.5">
-              {Object.entries(data.gates).map(([key, passed]) => (
-                <div key={key} className="flex items-center justify-between text-[11px]">
-                  <span className="text-neutral-600">{gateLabels[key] ?? key}</span>
-                  <span className={`font-bold ${passed ? "text-green-600" : "text-neutral-400"}`}>{passed ? "PASS" : "WAIT"}</span>
-                </div>
-              ))}
-            </div>
+            <GateList details={data.gate_details} fallback={data.gates} />
           </div>
           <div className="rounded-xl border border-neutral-200 p-3">
             <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Kenapa tidak dibuka (top reasons)</p>

@@ -14,6 +14,13 @@ from app.database import AsyncSessionLocal, is_db_available
 from app.models.spot_decision_event import SpotDecisionEvent
 from app.models.spot_model_version import SpotModelVersion
 from app.services.trading_costs import EXECUTION_COST_PCT
+# Ambang gate engine dari satu sumber — lihat app/services/engine_gates.py.
+# Dulu angka telanjang (60 / 20) yang terpisah dari gate yang ditampilkan panel
+# Engine, sehingga keduanya bisa menyimpang tanpa ketahuan.
+from app.services.engine_gates import (
+    test_gate as _test_gate,
+    MIN_CANARY_OBSERVATIONS as _MIN_CANARY_OBS,
+)
 
 
 def _sigmoid(value: float) -> float:
@@ -55,8 +62,11 @@ def _metrics(probabilities: list[float], labels: list[int], pnls: list[float]) -
 def train_challenger(samples: list[dict]) -> dict:
     """Chronological 60/20/20 training, Platt calibration, and ablation report."""
     ordered = sorted(samples, key=lambda row: row["scan_ts"])
-    if len(ordered) < 60:
-        return {"status": "insufficient_data", "n": len(ordered), "required": 60}
+    # Ambang dari app.services.engine_gates — dulu angka telanjang di sini,
+    # terpisah dari gate yang ditampilkan panel Engine.
+    from app.services.engine_gates import MIN_TRAIN_SAMPLES
+    if len(ordered) < MIN_TRAIN_SAMPLES:
+        return {"status": "insufficient_data", "n": len(ordered), "required": MIN_TRAIN_SAMPLES}
     coverage = Counter(key for row in ordered for key, value in row["features"].items() if isinstance(value, (int, float)))
     names = sorted(key for key, count in coverage.items() if count / len(ordered) >= 0.80)[:40]
     if not names:
@@ -90,7 +100,7 @@ def train_challenger(samples: list[dict]) -> dict:
         masked_brier = _metrics([predict(row, index) for row in test], labels, pnls).get("brier")
         ablation.append({"feature": name, "brier_delta_without": round((masked_brier or 0) - test_metrics["brier"], 6)})
     promotion_eligible = bool(
-        test_metrics["n"] >= 20 and test_metrics["brier"] < baseline["brier"]
+        _test_gate(test_metrics["n"]) and test_metrics["brier"] < baseline["brier"]
         and (test_metrics.get("selected_expectancy_pct") or 0) > 0
         and (test_metrics.get("selected_profit_factor") or 0) >= 1.5
     )
@@ -187,7 +197,7 @@ async def start_canary(version: str) -> dict:
 async def finalize_canary(version: str, observed: dict) -> dict:
     """Promote only after explicit paper-canary evidence meets every gate."""
     eligible = bool(
-        int(observed.get("n", 0)) >= 20
+        int(observed.get("n", 0)) >= _MIN_CANARY_OBS
         and float(observed.get("expectancy_pct", 0)) > 0
         and float(observed.get("profit_factor", 0)) >= 1.5
         and float(observed.get("max_drawdown_pct", 999)) <= 10.0
