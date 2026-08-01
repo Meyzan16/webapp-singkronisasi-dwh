@@ -107,6 +107,10 @@ DEFAULTS: list[dict] = [
     {"group": "futures", "key": "min_tp1_cost_mult", "default": 3.0, "category": "threshold",
      "description": "F2: TP1 minimum sebagai kelipatan cost_floor (fee+slippage+funding) sebelum posisi boleh dibuka"},
     # ── FUTURES — PLAN_ADAPTIVE_ENGINE_BOOST (Fase B1) ───────────────────────
+    {"group": "futures", "key": "expectancy_weighted_training", "default": 0, "category": "learning",
+     "description": "DEFAULT 0=OFF. 1 = tiap sampel latih dibobot |net PnL| sehingga model mengejar EXPECTANCY, bukan win-rate. Label biner net>0 membuat model memilih setup yang sering menang tapi menang KECIL — terbukti slice paling diyakini model justru paling rugi (top 20% exp -1,85% PF 0,35; bottom 20% exp +2,98% PF 6,11). Akar sama dgn temuan bobot sinyal B1."},
+    {"group": "futures", "key": "drop_order_features", "default": 0, "category": "learning",
+     "description": "DEFAULT 0=OFF. 1 = buang fitur parameter ORDER (leverage, risk_pct, rr_ratio, tp1/2/3_pct) dari input model. Parameter itu KITA yang tentukan saat membuka posisi, bukan kondisi pasar — model diminta menebak hasil dari keputusannya sendiri, wajar tak ada sinyal (ablation dampak terbesar cuma 0,0007 vs brier 0,244)."},
     {"group": "futures", "key": "relative_selection_gate", "default": 0, "category": "learning",
      "description": "DEFAULT 0=OFF. 1 = slice 'yang dipilih model' diukur dari kuantil teratas prediksi (relatif), bukan ambang mati 0.55. Ambang absolut mustahil tercapai karena base-rate futures ~44%: terbukti selected_n=0 dari 595 baris uji, sehingga 2 dari 4 syarat promosi gagal permanen apa pun kualitas modelnya. Menyalakan ini membuat syarat promosi BISA dinilai — model tetap harus lolos brier + walk-forward + canary sebelum dipakai."},
     {"group": "futures", "key": "selection_top_frac", "default": 0.20, "category": "learning",

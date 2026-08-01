@@ -46,19 +46,23 @@ def _sigmoid(value: float) -> float:
     return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, value))))
 
 
-def _fit_logistic(x: list[list[float]], y: list[int], epochs: int = 300, lr: float = 0.05) -> tuple[float, list[float]]:
+def _fit_logistic(x: list[list[float]], y: list[int], epochs: int = 300, lr: float = 0.05,
+                  sample_weights: list[float] | None = None) -> tuple[float, list[float]]:
+    """Regresi logistik; `sample_weights` opsional agar sampel ber-PnL besar
+    berbobot lebih. Tanpa bobot (default) perilakunya identik seperti semula."""
     intercept, weights = 0.0, [0.0] * len(x[0])
+    sw = sample_weights or [1.0] * len(x)
+    total_w = sum(sw) or 1.0
     for _ in range(epochs):
         grad_i, grad_w = 0.0, [0.0] * len(weights)
-        for row, target in zip(x, y):
-            error = _sigmoid(intercept + sum(w * v for w, v in zip(weights, row))) - target
+        for row, target, weight in zip(x, y, sw):
+            error = (_sigmoid(intercept + sum(w * v for w, v in zip(weights, row))) - target) * weight
             grad_i += error
             for index, value in enumerate(row):
                 grad_w[index] += error * value
-        n = max(1, len(x))
-        intercept -= lr * grad_i / n
+        intercept -= lr * grad_i / total_w
         for index in range(len(weights)):
-            weights[index] -= lr * (grad_w[index] / n + 0.01 * weights[index])
+            weights[index] -= lr * (grad_w[index] / total_w + 0.01 * weights[index])
     return intercept, weights
 
 
@@ -78,6 +82,43 @@ SELECTION_THRESHOLD_ABS = 0.55
 # futures.relative_selection_gate (nyala/mati) dan futures.selection_top_frac.
 RELATIVE_SELECTION = False
 SELECTION_TOP_FRAC = 0.20          # ambil 20% prediksi tertinggi
+
+# ── Target sadar-EXPECTANCY ───────────────────────────────────────────────────
+# Label saat ini biner `net > 0`, artinya model mengoptimalkan WIN-RATE. Pada
+# strategi R:R 1:3 itu target yang SALAH: menang sering tapi kecil kalah dengan
+# jarang menang tapi besar. Bukti (610 baris uji, 1 Agu 2026): slice paling
+# diyakini model justru paling rugi —
+#     TOP 20%  exp −1,853%  PF 0,346
+#     TENGAH   exp −0,221%  PF 0,854
+#     BOTTOM   exp +2,980%  PF 6,107
+# Gradien monoton terbalik = model memang belajar hal yang keliru, bukan derau.
+# Akar yang SAMA dengan temuan B1 pada bobot sinyal (`_target_weight` win-rate).
+# ON = tiap sampel dibobot |net PnL| (dinormalkan), sehingga trade bernilai besar
+# lebih menentukan daripada scratch-win. Default OFF → identik seperti semula.
+# Override DB: futures.expectancy_weighted_training.
+EXPECTANCY_WEIGHTED_TRAINING = False
+
+# ── Fitur: buang parameter ORDER ──────────────────────────────────────────────
+# Fitur di bawah ini kita SENDIRI yang menentukan saat membuka posisi — bukan
+# kondisi pasar. Model diminta menebak hasil dari keputusan kita sendiri, wajar
+# tak ada sinyal (ablation: dampak terbesar hanya 0,0007 vs brier 0,244).
+# ON = dibuang dari input, menyisakan sinyal pasar pra-entry.
+# Override DB: futures.drop_order_features.
+DROP_ORDER_FEATURES = False
+_ORDER_PARAM_FEATURES = {
+    "leverage", "risk_pct", "rr_ratio", "tp1_pct", "tp2_pct", "tp3_pct",
+}
+
+
+def _expectancy_weights(pnls: list[float]) -> list[float]:
+    """Bobot per sampel dari |net PnL|, dinormalkan ke rata-rata 1.
+
+    Lantai kecil (0.1) supaya trade bernilai ~0 tetap memberi sedikit informasi
+    dan tak membuat gradien mati.
+    """
+    mags = [max(0.1, abs(float(p or 0.0))) for p in pnls]
+    mean = (sum(mags) / len(mags)) if mags else 1.0
+    return [m / mean for m in mags] if mean else [1.0] * len(mags)
 
 
 def _quantile_cutoff(values: list[float], top_frac: float) -> float:
@@ -124,7 +165,10 @@ def train_challenger(samples: list[dict]) -> dict:
         key for row in ordered for key, value in row["features"].items()
         if isinstance(value, (int, float))
     )
-    names = sorted(key for key, count in coverage.items() if count / len(ordered) >= 0.80)[:40]
+    _cand = (key for key, count in coverage.items() if count / len(ordered) >= 0.80)
+    if DROP_ORDER_FEATURES:
+        _cand = (k for k in _cand if k not in _ORDER_PARAM_FEATURES)
+    names = sorted(_cand)[:40]
     if not names:
         return {"status": "no_features", "n": len(ordered)}
     split1, split2 = int(len(ordered) * .60), int(len(ordered) * .80)
@@ -139,7 +183,10 @@ def train_challenger(samples: list[dict]) -> dict:
     vector = lambda row: [(float(row["features"].get(name, 0.0)) - means[i]) / scales[i]
                           for i, name in enumerate(names)]
     x_train, y_train = [vector(row) for row in train], [row["label"] for row in train]
-    intercept, weights = _fit_logistic(x_train, y_train)
+    # Bobot expectancy: trade bernilai besar lebih menentukan daripada scratch-win.
+    _w_train = (_expectancy_weights([row["pnl"] for row in train])
+                if EXPECTANCY_WEIGHTED_TRAINING else None)
+    intercept, weights = _fit_logistic(x_train, y_train, sample_weights=_w_train)
     raw_val = [intercept + sum(w * v for w, v in zip(weights, vector(row))) for row in validation]
     cal_intercept, cal_weights = _fit_logistic(
         [[value] for value in raw_val], [row["label"] for row in validation], epochs=200)
@@ -214,12 +261,17 @@ async def train_and_register() -> dict:
     # Mode seleksi dibaca per-run supaya owner bisa menyalakannya tanpa restart.
     # Default OFF -> perilaku identik dengan sebelumnya.
     global RELATIVE_SELECTION, SELECTION_TOP_FRAC
+    global EXPECTANCY_WEIGHTED_TRAINING, DROP_ORDER_FEATURES
     try:
         from agents.shared.config_reader import cfg
         RELATIVE_SELECTION = bool(await cfg.get(
             "futures", "relative_selection_gate", RELATIVE_SELECTION))
         SELECTION_TOP_FRAC = float(await cfg.get(
             "futures", "selection_top_frac", SELECTION_TOP_FRAC))
+        EXPECTANCY_WEIGHTED_TRAINING = bool(await cfg.get(
+            "futures", "expectancy_weighted_training", EXPECTANCY_WEIGHTED_TRAINING))
+        DROP_ORDER_FEATURES = bool(await cfg.get(
+            "futures", "drop_order_features", DROP_ORDER_FEATURES))
     except Exception as exc:
         logger.warning("selection_gate_config_failed", error=str(exc)[:120])
 
