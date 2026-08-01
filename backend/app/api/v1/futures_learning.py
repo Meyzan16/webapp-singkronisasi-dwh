@@ -385,6 +385,21 @@ async def exit_learning_failfast(days: int = Query(90, ge=1, le=365)) -> dict:
     return await recommend_failfast_params(days=days)
 
 
+@router.get("/futures/exit-learning/sl-width", dependencies=[Depends(require_db)])
+async def exit_learning_sl_width(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Bedah lebar SL per lane: dirancang terhadap volatilitas, atau terhadap harga?"""
+    from agents.learning.exit_learning import analyze_sl_width
+    return await analyze_sl_width(days=days)
+
+
+@router.get("/futures/sl-config", dependencies=[Depends(require_db)])
+async def get_sl_config() -> dict:
+    """Lebar SL per lane yang SEDANG berlaku."""
+    from agents.futures import sl_config
+    await sl_config.refresh()
+    return {"status": "ok", "config": sl_config.snapshot()}
+
+
 @router.post("/futures/exit-learning/apply", dependencies=[Depends(require_db)])
 async def exit_learning_apply(days: int = Query(90, ge=1, le=365),
                               dry_run: bool = Query(True)) -> dict:

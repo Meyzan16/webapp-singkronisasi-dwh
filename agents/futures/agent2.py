@@ -558,7 +558,8 @@ def _score_distribution(
 def _calc_levels(direction: str, tf_map: dict[str, FuturesData], price: float) -> Optional[dict]:
     """Trade level calculator — delegates to Agent 1 to avoid duplication (F3)."""
     from .agent1 import _calc_levels as _a1_levels
-    return _a1_levels(direction, tf_map, price)
+    # M4: lane WAJIB disebut — tanpa ini accumulation memakai tala SL pre_gainer.
+    return _a1_levels(direction, tf_map, price, lane="accumulation")
 
 
 # ── Main scan ─────────────────────────────────────────────────────────────────

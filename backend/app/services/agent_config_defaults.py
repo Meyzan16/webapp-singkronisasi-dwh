@@ -245,6 +245,28 @@ def _monitor_lane_defaults() -> list[dict]:
                             "di-force-close. Gerbang keluar paling keras."),
         })
 
+    # M4 — lebar SL per lane. Tadinya konstanta di tiga file agen berbeda dan
+    # tak satu pun bisa ditala; akibatnya 61% posisi bigmover SL-nya mentok
+    # plafon tanpa ada yang bisa melihat, apalagi mengubahnya.
+    from agents.futures import sl_config
+    _SL_LABEL = {
+        "swing_buffer_atr":   "jarak tambahan di bawah/atas swing (kelipatan ATR); 0 = lane ini tak pakai swing",
+        "max_pct":            "batas lebar SL (% harga). Lane swing: pemicu hitung-ulang pakai ATR. BigMover: plafon keras",
+        "fallback_atr_mult":  "kelipatan ATR saat SL swing terlalu lebar (lane swing) atau rumus utama (BigMover)",
+        "floor_pct":          "SL tak boleh lebih sempit dari ini (% harga)",
+        "floor_atr_mult":     "lantai kedua: SL tak boleh lebih sempit dari ATR x ini; 0 = tak berlaku",
+        "quiet_fallback_pct": "SL tetap untuk koin terlalu sepi; 0 = tak berlaku",
+        "quiet_atr_pct":      "ambang koin terlalu sepi (ATR%); 0 = tak berlaku",
+    }
+    for lane in sl_config.tunable_lanes():
+        base = sl_config._FROZEN.get(lane, sl_config.SL_DEFAULTS)
+        for param in sl_config.PARAM_NAMES:
+            rows.append({
+                "group": "futures", "key": sl_config.sl_key(param, lane),
+                "default": base[param], "category": "risk",
+                "description": f"Lane {lane}: {_SL_LABEL[param]}",
+            })
+
     # Tangga kunci profit — tiap anak tangga satu pasang baris, jumlahnya ikut
     # panjang tangga sehingga menambah/mengurangi tier tak perlu edit di sini.
     for i, (peak, keep) in enumerate(mcfg._FROZEN["PROFIT_LOCK_TIERS"], start=1):

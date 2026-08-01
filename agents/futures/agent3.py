@@ -34,6 +34,7 @@ from typing import Optional
 import structlog
 
 from .data import FuturesData
+from .sl_config import params as _sl_params
 from .agent1 import (
     _rsi, _swing_lows, _swing_highs, _round_price,
     _ema, _atr,
@@ -466,20 +467,22 @@ def _calc_levels(
     atr     = _atr(ref.highs, ref.lows, ref.closes, 14)
     atr_pct = atr / price * 100 if price > 0 else 0
     rp      = _round_price
+    # M4: lebar SL dari satu sumber per lane, bukan konstanta tersebar.
+    _slp    = _sl_params('momentum')
 
     if direction == "LONG":
         # SL: just below the most recent swing low (or 1.2× ATR below entry if no swing)
         s_lows  = _swing_lows(ref.lows, lookback=4)
         below   = [s for s in s_lows if s < price * 0.999]
         swing_sl = max(below) if below else min(ref.lows[-15:])
-        sl       = swing_sl - atr * 0.5    # PLAN_v11 B1: buffer lebih lebar (was 0.25) — kurangi noise stop-out
+        sl       = swing_sl - atr * _slp['swing_buffer_atr']    # PLAN_v11 B1: buffer lebih lebar (was 0.25) — kurangi noise stop-out
         risk     = price - sl
         risk_pct = risk / price * 100
 
         # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
-        min_sl_pct = max(MIN_SL_PCT, atr_pct * 1.0)   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
-        if risk_pct > 7.0:
-            sl       = price - atr * 1.2
+        min_sl_pct = max(_slp['floor_pct'], atr_pct * _slp['floor_atr_mult'])   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
+        if risk_pct > _slp['max_pct']:
+            sl       = price - atr * _slp['fallback_atr_mult']
             risk     = price - sl
             risk_pct = risk / price * 100
         if risk_pct < min_sl_pct:
@@ -505,14 +508,14 @@ def _calc_levels(
         s_highs  = _swing_highs(ref.highs, lookback=4)
         above    = [h for h in s_highs if h > price * 1.001]
         swing_sl = min(above) if above else max(ref.highs[-15:])
-        sl       = swing_sl + atr * 0.5    # PLAN_v11 B1: buffer lebih lebar (was 0.25)
+        sl       = swing_sl + atr * _slp['swing_buffer_atr']    # PLAN_v11 B1: buffer lebih lebar (was 0.25)
         risk     = sl - price
         risk_pct = risk / price * 100
 
         # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
-        min_sl_pct = max(MIN_SL_PCT, atr_pct * 1.0)   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
-        if risk_pct > 7.0:
-            sl       = price + atr * 1.2
+        min_sl_pct = max(_slp['floor_pct'], atr_pct * _slp['floor_atr_mult'])   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
+        if risk_pct > _slp['max_pct']:
+            sl       = price + atr * _slp['fallback_atr_mult']
             risk     = sl - price
             risk_pct = risk / price * 100
         if risk_pct < min_sl_pct:

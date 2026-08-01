@@ -30,6 +30,7 @@ from typing import Optional
 import structlog
 
 from .data import FuturesData
+from .sl_config import params as _sl_params
 from .utils import (
     _ema, _atr,                # F112: shared TA helpers (agent2 re-imports from here)
     cap_leverage_by_lane,      # PLAN_v2 P1.2/P1.3 — single source for sizing caps
@@ -636,11 +637,17 @@ def _calc_levels(
     direction: str,
     tf_map:    dict[str, FuturesData],
     price:     float,
+    lane:      str = "pre_gainer",
 ) -> Optional[dict]:
     """
     Trade levels for LONG or SHORT.
     LONG:  SL below swing low, TP at resistance.
     SHORT: SL above swing high, TP at support.
+
+    `lane` M4: agent2 (accumulation) memakai ULANG fungsi ini. Sebelum lebar SL
+    bisa ditala per lane, itu tak berdampak — konstantanya sama. Sekarang lane
+    HARUS ikut disebut, kalau tidak accumulation diam-diam memakai tala milik
+    pre_gainer dan tak ada satu pun error yang muncul.
     """
     d1h = tf_map.get("1h")
     d4h = tf_map.get("4h")
@@ -650,19 +657,21 @@ def _calc_levels(
     atr     = _atr(d1h.highs, d1h.lows, d1h.closes, 14)
     atr_pct = atr / price * 100 if price > 0 else 0
     rp      = _round_price
+    # M4: lebar SL dari satu sumber per lane, bukan konstanta tersebar.
+    _slp    = _sl_params(lane)
 
     if direction == "LONG":
         s_lows   = _swing_lows(d1h.lows, lookback=5)
         below    = [s for s in s_lows if s < price * 0.999]
         swing_sl = max(below) if below else min(d1h.lows[-20:])
-        sl       = swing_sl - atr * 0.3
+        sl       = swing_sl - atr * _slp['swing_buffer_atr']
         risk     = price - sl
         risk_pct = risk / price * 100
 
         # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
-        min_sl_pct = max(MIN_SL_PCT, atr_pct * 1.0)   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
-        if risk_pct > 8.0:
-            sl       = price - atr * 1.5
+        min_sl_pct = max(_slp['floor_pct'], atr_pct * _slp['floor_atr_mult'])   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
+        if risk_pct > _slp['max_pct']:
+            sl       = price - atr * _slp['fallback_atr_mult']
             risk     = price - sl
             risk_pct = risk / price * 100
         if risk_pct < min_sl_pct:
@@ -689,14 +698,14 @@ def _calc_levels(
         s_highs  = _swing_highs(d1h.highs, lookback=5)
         above    = [h for h in s_highs if h > price * 1.001]
         swing_sl = min(above) if above else max(d1h.highs[-20:])
-        sl       = swing_sl + atr * 0.3
+        sl       = swing_sl + atr * _slp['swing_buffer_atr']
         risk     = sl - price
         risk_pct = risk / price * 100
 
         # BUG-L3/L5: SL floor — too-tight stops get hit by noise; too-wide → ATR fallback.
-        min_sl_pct = max(MIN_SL_PCT, atr_pct * 1.0)   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
-        if risk_pct > 8.0:
-            sl       = price + atr * 1.5
+        min_sl_pct = max(_slp['floor_pct'], atr_pct * _slp['floor_atr_mult'])   # PLAN_v11 B1: lebih lebar — leverage bikin SL ketat kena noise
+        if risk_pct > _slp['max_pct']:
+            sl       = price + atr * _slp['fallback_atr_mult']
             risk     = sl - price
             risk_pct = risk / price * 100
         if risk_pct < min_sl_pct:

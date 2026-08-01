@@ -613,6 +613,16 @@ async def run_futures_loop() -> None:
             except Exception as exc:
                 logger.warning("agent_config_pull_failed", scope="futures_scheduler", error=str(exc)[:120])
 
+            # M4: lebar SL per lane. Ditarik SEBELUM scan supaya setiap level yang
+            # disusun siklus ini memakai tala yang sama — bukan campuran nilai
+            # lama dan baru di tengah jalan.
+            try:
+                from agents.futures import sl_config
+                await sl_config.refresh()
+            except Exception as exc:
+                logger.warning("sl_config_pull_failed", scope="futures_scheduler",
+                               error=str(exc)[:120])
+
             futures_store.set_scanning(True)
             result = await _run_scan()
 

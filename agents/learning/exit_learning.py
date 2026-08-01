@@ -380,6 +380,107 @@ async def recommend_failfast_params(days: int = 90) -> dict:
             "max_gap": MAX_SUGGESTED_GAP}
 
 
+# ── M4: apakah lebar SL memang dirancang, atau kebetulan? ─────────────────────
+
+#: Selisih relatif yang masih dianggap "mentok" pada batas — pembulatan harga
+#: membuat perbandingan persis mustahil.
+PINNED_TOLERANCE = 0.02
+
+
+def _cv(values: list[float]) -> float | None:
+    """Koefisien variasi — sebaran relatif terhadap rata-rata. Dipakai untuk
+    membandingkan konsistensi dua satuan yang skalanya berbeda jauh."""
+    if len(values) < 2:
+        return None
+    mean = sum(values) / len(values)
+    if mean == 0:
+        return None
+    var = sum((v - mean) ** 2 for v in values) / len(values)
+    return round(var ** 0.5 / mean, 3)
+
+
+async def analyze_sl_width(days: int = 90) -> dict:
+    """Bedah lebar SL per lane: dirancang terhadap volatilitas, atau terhadap harga?
+
+    Dua pertanyaan yang dijawab di sini:
+
+    1. **Satuan mana yang sebenarnya dipakai?** Bila sebaran SL dalam harga%
+       lebih rapat daripada dalam kelipatan ATR, berarti SL disusun terhadap
+       HARGA — dan perbedaan kelipatan ATR antar lane hanyalah efek samping dari
+       koin yang diperdagangkan, bukan keputusan.
+    2. **Berapa sering SL mentok batas?** SL yang mentok plafon berarti rumus
+       sadar-volatilitas yang dimaksudkan tidak pernah benar-benar berlaku.
+
+    Keduanya penting karena setiap gerbang yang diskalakan ke `risk_pct`
+    (time-stop, fail-fast) ikut bergeser tanpa disadari.
+    """
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+    from agents.futures import sl_config
+
+    cutoff = time.time() - days * 86400
+    async with AsyncSessionLocal() as session:
+        rows = list((await session.execute(
+            select(FuturesExitEvent).where(FuturesExitEvent.closed_at >= cutoff)
+        )).scalars().all())
+
+    by_lane: dict[str, list] = {}
+    for r in rows:
+        if r.sl_dist_atr and r.atr_pct:
+            by_lane.setdefault(r.lane or "-", []).append(r)
+
+    out, all_pct, all_atr = [], [], []
+    for lane, group in sorted(by_lane.items(), key=lambda kv: -len(kv[1])):
+        sl_pct = [r.sl_dist_atr * r.atr_pct for r in group]     # kembali ke harga%
+        sl_atr = [r.sl_dist_atr for r in group]
+        mfe = [r.mfe_atr for r in group if r.mfe_atr is not None]
+        pnl = [r.pnl_pct for r in group if r.pnl_pct is not None]
+        all_pct += sl_pct
+        all_atr += sl_atr
+
+        p = sl_config.params(lane)
+        cap, floor = p["max_pct"], p["floor_pct"]
+        pinned_max = sum(1 for v in sl_pct if cap > 0 and abs(v - cap) / cap <= PINNED_TOLERANCE)
+        pinned_min = sum(1 for v in sl_pct if floor > 0 and abs(v - floor) / floor <= PINNED_TOLERANCE)
+
+        out.append({
+            "lane": lane, "n": len(group),
+            "atr_pct_median": round(median([r.atr_pct for r in group]), 3),
+            "sl_pct_median": round(median(sl_pct), 3),
+            "sl_atr_median": round(median(sl_atr), 3),
+            "cv_sl_pct": _cv(sl_pct),
+            "cv_sl_atr": _cv(sl_atr),
+            "configured_max_pct": cap,
+            "configured_floor_pct": floor,
+            "pinned_at_max_frac": round(pinned_max / len(group), 3),
+            "pinned_at_floor_frac": round(pinned_min / len(group), 3),
+            # SL berapa kali lebih jauh daripada gerak untung terjauh yang nyata:
+            # angka besar = posisi mempertaruhkan jauh lebih banyak daripada yang
+            # pernah bergerak ke arah kita.
+            "sl_vs_mfe": (round(median(sl_atr) / median(mfe), 2)
+                          if mfe and median(mfe) > 0 else None),
+            "win_rate": (round(100.0 * sum(1 for v in pnl if v > 0) / len(pnl), 1)
+                         if pnl else None),
+            "expectancy_pct": round(sum(pnl) / len(pnl), 3) if pnl else None,
+        })
+
+    cv_pct, cv_atr = _cv(all_pct), _cv(all_atr)
+    verdict = None
+    if cv_pct is not None and cv_atr is not None:
+        verdict = ("sl_disusun_terhadap_harga" if cv_pct < cv_atr
+                   else "sl_disusun_terhadap_volatilitas")
+
+    return {
+        "status": "ok", "window_days": days, "n": len(rows),
+        "lanes": out,
+        "cv_sl_pct_all": cv_pct, "cv_sl_atr_all": cv_atr,
+        "verdict": verdict,
+        "note": ("Sebaran yang lebih rapat menunjukkan satuan mana yang sebenarnya "
+                 "mengendalikan lebar SL. Bila harga% lebih rapat daripada kelipatan "
+                 "ATR, rancangan sadar-volatilitas tidak benar-benar berlaku."),
+    }
+
+
 # ── Penerapan ─────────────────────────────────────────────────────────────────
 
 async def apply_exit_recommendations(days: int = 90, dry_run: bool = True) -> dict:

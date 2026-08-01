@@ -49,14 +49,13 @@ MIN_CHANGE_24H   = 15.0        # ±15% minimum to qualify
 MAX_CHANGE_24H     = 300.0
 EXTREME_CHANGE_24H = 150.0     # ≥ this → extreme tier: size ½ (time-stop 90m already on)
 
-# SL/TP bracket
-SL_ATR_MULT      = 1.5
+# SL/TP bracket. M4: angka penyusun SL (kelipatan ATR, lantai, plafon, fallback
+# koin sepi) pindah ke `sl_config.py` — satu sumber untuk semua lane, bisa ditala
+# tanpa deploy. Yang tersisa di sini hanya kelipatan TP milik lane ini.
 TP1_ATR_MULT     = 2.0
 TP2_ATR_MULT     = 4.0
 TP3_ATR_MULT     = 6.0
-SL_FLOOR_PCT     = 2.5
-SL_CEILING_PCT   = 8.0
-SL_FALLBACK_PCT  = 4.0         # if ATR < 0.5% — coin too quiet, use fixed
+from .sl_config import params as _sl_params
 
 # Fixed leverage — A1-A3 mature ATR-based, BM coins too volatile
 FIXED_LEVERAGE   = 3
@@ -301,11 +300,18 @@ def _calc_levels(
     atr_pct = atr / price * 100 if price > 0 else 0.0
     rp      = _round_price
 
-    # SL fallback kalau ATR terlalu kecil
-    if atr_pct < 0.5:
-        sl_pct = SL_FALLBACK_PCT
+    # M4: lebar SL dari satu sumber per lane (sl_config), bukan konstanta lokal.
+    # CATATAN dari ledger: 61% posisi lane ini SL-nya MENTOK plafon `max_pct`,
+    # jadi `atr_pct × fallback_atr_mult` yang dimaksudkan justru jarang berlaku —
+    # di lane paling bergejolak, rancangan sadar-volatilitas mati diam-diam.
+    _slp    = _sl_params("bigmover")
+    _quiet  = _slp["quiet_atr_pct"]
+    _use_quiet = _quiet > 0 and atr_pct < _quiet
+    if _use_quiet:
+        sl_pct = _slp["quiet_fallback_pct"]
     else:
-        sl_pct = max(SL_FLOOR_PCT, min(SL_CEILING_PCT, atr_pct * SL_ATR_MULT))
+        sl_pct = max(_slp["floor_pct"],
+                     min(_slp["max_pct"], atr_pct * _slp["fallback_atr_mult"]))
 
     risk = price * (sl_pct / 100)
     if risk <= 0:
@@ -313,17 +319,17 @@ def _calc_levels(
 
     if direction == "LONG":
         sl  = price - risk
-        tp1 = price + atr * TP1_ATR_MULT if atr_pct >= 0.5 else price * (1 + sl_pct * TP1_ATR_MULT / 100 / SL_ATR_MULT)
-        tp2 = price + atr * TP2_ATR_MULT if atr_pct >= 0.5 else price * (1 + sl_pct * TP2_ATR_MULT / 100 / SL_ATR_MULT)
-        tp3 = price + atr * TP3_ATR_MULT if atr_pct >= 0.5 else price * (1 + sl_pct * TP3_ATR_MULT / 100 / SL_ATR_MULT)
+        tp1 = price + atr * TP1_ATR_MULT if not _use_quiet else price * (1 + sl_pct * TP1_ATR_MULT / 100 / _slp['fallback_atr_mult'])
+        tp2 = price + atr * TP2_ATR_MULT if not _use_quiet else price * (1 + sl_pct * TP2_ATR_MULT / 100 / _slp['fallback_atr_mult'])
+        tp3 = price + atr * TP3_ATR_MULT if not _use_quiet else price * (1 + sl_pct * TP3_ATR_MULT / 100 / _slp['fallback_atr_mult'])
         tp1_pct = (tp1 - price) / price * 100
         tp2_pct = (tp2 - price) / price * 100
         tp3_pct = (tp3 - price) / price * 100
     else:
         sl  = price + risk
-        tp1 = price - atr * TP1_ATR_MULT if atr_pct >= 0.5 else price * (1 - sl_pct * TP1_ATR_MULT / 100 / SL_ATR_MULT)
-        tp2 = price - atr * TP2_ATR_MULT if atr_pct >= 0.5 else price * (1 - sl_pct * TP2_ATR_MULT / 100 / SL_ATR_MULT)
-        tp3 = price - atr * TP3_ATR_MULT if atr_pct >= 0.5 else price * (1 - sl_pct * TP3_ATR_MULT / 100 / SL_ATR_MULT)
+        tp1 = price - atr * TP1_ATR_MULT if not _use_quiet else price * (1 - sl_pct * TP1_ATR_MULT / 100 / _slp['fallback_atr_mult'])
+        tp2 = price - atr * TP2_ATR_MULT if not _use_quiet else price * (1 - sl_pct * TP2_ATR_MULT / 100 / _slp['fallback_atr_mult'])
+        tp3 = price - atr * TP3_ATR_MULT if not _use_quiet else price * (1 - sl_pct * TP3_ATR_MULT / 100 / _slp['fallback_atr_mult'])
         tp1_pct = (price - tp1) / price * 100
         tp2_pct = (price - tp2) / price * 100
         tp3_pct = (price - tp3) / price * 100
