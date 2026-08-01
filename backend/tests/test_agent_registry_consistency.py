@@ -49,6 +49,25 @@ def test_semua_konsumen_backend_memakai_daftar_yang_sama():
     assert futures_scanner._ALL_FUTURES_STYLES == reg.FUTURES_AGENTS
 
 
+def test_konsumen_lain_juga_memakai_registry():
+    """Sapuan 1 Agu menemukan SALINAN daftar/label agen yang masih tersisa:
+    `predictive.py` (daftar futures ke-6) dan `signal_catalog.py` (label ke-3).
+    Test ini menjaga keduanya tetap terikat ke registry."""
+    from app.api.v1 import predictive
+    from app.services import signal_catalog
+
+    assert list(predictive._FUTURES_AGENTS) == reg.FUTURES_AGENTS
+    assert signal_catalog.AGENT_LABELS is reg.AGENT_LABELS
+
+
+def test_pemetaan_lane_konsisten_dua_arah():
+    """AGENT_LANE dan LANE_AGENT harus saling membalik — dipakai kategori saran
+    dan panel kesehatan agen; dulu ditulis DUA KALI di file yang sama."""
+    for agent, lane in reg.AGENT_LANE.items():
+        assert reg.LANE_AGENT[lane] == agent
+    assert set(reg.AGENT_LANE) <= set(reg.FUTURES_AGENTS)
+
+
 def test_setiap_agen_punya_label():
     """Agen terdaftar wajib punya nama panjang & pendek — supaya UI tak pernah
     menampilkan kunci mentah untuk lane yang sudah resmi ada."""

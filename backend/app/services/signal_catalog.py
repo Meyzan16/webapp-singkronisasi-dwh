@@ -16,14 +16,8 @@ Usage:
 
 from __future__ import annotations
 
-AGENT_LABELS = {
-    "futures_agent1":        "Pre-Gainer",
-    "futures_agent2":        "Accumulation",
-    "futures_agent3":        "Momentum",
-    "futures_agent_bigmover":"BigMover",
-    "opportunity_spot":      "SPOT",
-    "cross_agent":           "Cross-Agent",
-}
+# Label agen dari registry tunggal (dulu salinan ke-3 di repo).
+from app.services.agent_registry import AGENT_LABELS  # noqa: E402,F401
 
 # Signal catalog — keyed by the normalized signal key (or prefix)
 # Each entry: label, category, description, agents (list of agent+max_pts), score_formula

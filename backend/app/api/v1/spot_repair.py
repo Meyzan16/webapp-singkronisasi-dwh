@@ -17,6 +17,8 @@ import json
 import os
 import time
 
+from app.services.agent_registry import SPOT_AGENT
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -184,7 +186,7 @@ async def spot_repair_repairs(limit: int = Query(100, ge=1, le=300)) -> dict:
             "detected_at": r.detected_at,
             "source": r.source,
             "target_key": r.target_key,
-            "agent": "opportunity_spot",
+            "agent": SPOT_AGENT,
             "issue": _issue_of(r),
             "action": _action_verb(r),
             "delta": delta,

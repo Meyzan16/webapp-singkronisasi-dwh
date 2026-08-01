@@ -18,9 +18,10 @@ from app.models.predictive_log import PredictiveLog
 
 router = APIRouter(tags=["predictive"])
 
-_FUTURES_AGENTS = [
-    "futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover",
-]
+# Daftar agen dari registry tunggal — dulu salinan manual (yang ke-6 di repo).
+from app.services.agent_registry import (  # noqa: E402
+    FUTURES_AGENTS as _FUTURES_AGENTS, SPOT_AGENT,
+)
 
 # Minimum move for a hit (4h: 1.5%, 24h: 3%)
 _HIT_4H_PCT  = 1.5
@@ -87,7 +88,7 @@ async def get_hit_rate(
     # (>=1.5% dalam 4 jam, >=3% dalam 24 jam — lihat futures/scheduler.py:562)
     # supaya kedua market bisa dibandingkan setara.
     spot_stats: dict[str, dict] = {}
-    if not agent or agent == "opportunity_spot":
+    if not agent or agent == SPOT_AGENT:
         from app.models.spot_decision_event import SpotDecisionEvent
 
         async with AsyncSessionLocal() as session:
@@ -104,7 +105,7 @@ async def get_hit_rate(
         if srows:
             # SPOT hanya berarah LONG (tak ada short di spot).
             s = {
-                "agent": "opportunity_spot", "direction": "LONG",
+                "agent": SPOT_AGENT, "direction": "LONG",
                 "total": 0, "hits_4h": 0, "hits_24h": 0,
                 "avg_move_4h": 0.0, "avg_move_24h": 0.0,
             }
@@ -126,7 +127,7 @@ async def get_hit_rate(
             s["hit_rate_24h"] = round(s["hits_24h"] / (n24 or 1) * 100, 1)
             s["avg_move_4h"]  = round(sum4 / n, 2)
             s["avg_move_24h"] = round(sum24 / (n24 or 1), 2)
-            spot_stats["opportunity_spot:LONG"] = s
+            spot_stats[f"{SPOT_AGENT}:LONG"] = s
 
     by_agent = list(stats.values()) + list(spot_stats.values())
     return {
