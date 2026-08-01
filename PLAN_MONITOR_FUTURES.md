@@ -36,18 +36,28 @@ tidak bisa dibebankan ke sana. Sebabnya ada di konstruksi keluar.
 - Batas TP **per lane** di balik `monitor_exit_learning_enabled`, default MATI.
 - 5 endpoint `/api/v1/futures/exit-learning/*`.
 
-### M2 — Sambungkan monitor.py ke monitor_config ⬅ **BERIKUTNYA**
-**Temuan:** `monitor_config.refresh()` dipanggil tiap siklus, tapi `monitor.py`
-**tak pernah membaca hasilnya** — 20 ambang masih dibaca dari konstanta lokal di
-`monitor.py` baris 56–110. Jadi M0 baru separuh nyata: ambangnya terkumpul, tapi
-yang dipakai monitor masih salinan lama. Menala dari UI saat ini **tidak
-berpengaruh** untuk 20 dari 21 ambang (hanya batas TP yang benar-benar tersambung).
+### M2 — Sambungkan monitor.py ke monitor_config ✅ `b0a59f0`
+**Temuan:** `monitor_config.refresh()` dipanggil tiap siklus sejak M0, tapi
+`monitor.py` **tak pernah membaca hasilnya** — 20 dari 21 ambang masih dari
+konstanta lokalnya sendiri, sehingga menala dari UI tidak berpengaruh apa pun.
+M0 ternyata baru dekorasi; M2 yang menyambungkan kabelnya.
 
-Kerja: ganti titik keputusan ke `mcfg.X`, hapus definisi duplikat, hapus pull
-`failfast_atr_mult` manual. Nilai default sudah diverifikasi identik satu per
-satu → **nol perubahan perilaku**, murni menyambungkan kabel.
+Hasil:
+- 24 konstanta keputusan dihapus dari `monitor.py`; semua titik keputusan
+  membaca `mcfg.X`. Default dibandingkan satu per satu → **nol perubahan perilaku**.
+- Ambang yang belum tersentral ikut masuk: time-stop per lane, lane fail-fast,
+  tangga kunci profit, jendela rug-pull, dan 3 ambang eskalasi fast-loop yang
+  sebelumnya angka telanjang di tengah fungsi.
+- `MAX_LOSS_PCT_OF_MARGIN_BY_LANE` — gerbang keluar paling keras (force-close) —
+  ternyata **satu-satunya yang sama sekali tak bisa ditala dari DB**. Kini bisa.
+- Baris config per-lane **dibangkitkan dari registry**, bukan diketik tangan.
+- Default dibaca dari salinan **beku** supaya satu override tak menjadi
+  "default" permanen.
 
-### M3 — Perbaiki `fail_fast`
+Verifikasi live: 4 jalur tala diubah lewat DB → keputusan ikut berubah → pulih
+saat dikembalikan. 176 test lulus.
+
+### M3 — Perbaiki `fail_fast` ⬅ **BERIKUTNYA**
 Bukti 8 trade `fail_fast` (0% WR, expectancy −3,595% — terburuk dari semua
 alasan close):
 
