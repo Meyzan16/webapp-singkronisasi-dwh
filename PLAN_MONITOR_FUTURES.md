@@ -133,9 +133,33 @@ hanya **mengevaluasi dan membalik**; menaikkan ke canary tetap perintah eksplisi
 
 **Belum ada yang dinyalakan.** `monitor_exit_learning_enabled` masih 0.
 
-### M6 — Tab MONITOR di Adaptive Learning Engine ⬅ **BERIKUTNYA**
-Analisa keluar sudah punya endpoint tapi belum punya halaman. Menyusul setelah
-angkanya terbukti stabil.
+### M6 — Seksi EXIT di Signal Performance ✅ `7d7e4d7`
+Seluruh pekerjaan M0–M5 sebelumnya **hanya bisa dilihat lewat endpoint API** —
+tak satu pun komponen frontend memanggilnya. Seksi baru **🚪 Exit** di
+`/signals`, dengan 4 sub-tab berurut sebab→akibat:
+
+| Sub-tab | Menjawab |
+|---|---|
+| 1· Alasan Tutup | Alasan mana yang menguntungkan, mana yang merugikan? |
+| 2· Pemicu Dini | Pemicu ini menyelamatkan, atau justru merugikan? |
+| 3· Lebar SL | SL disusun terhadap harga atau volatilitas? |
+| 4· Penyalaan | Apa yang sedang diuji, dan terbukti membaik tidak? |
+
+**Dimensi market dipasang di awal.** Saat ini hanya MONITOR FUTURES yang punya
+ledger keluar; tab SPOT ada tapi menyatakan terus terang apa yang belum ada.
+Menambah SPOT nanti = mengisi `endpoints` di satu peta `MARKETS`. Ini sengaja:
+pola berulang di repo ini adalah SPOT ditempelkan belakangan lalu berperilaku
+beda diam-diam (katalog Formulas dan Predictive dua-duanya sempat futures-only).
+
+**Batas verifikasi:** browser dalam aplikasi tak meng-hydrate Next, jadi
+klik-per-klik tak bisa diuji dari sini. Yang diverifikasi: `tsc` & `eslint` 0
+error, `next build` sukses, dan payload keempat endpoint dicocokkan
+field-per-field dengan kontrak TypeScript komponen (0 field hilang).
+
+### M7 — MONITOR SPOT ⬅ **BERIKUTNYA**
+Yang dibutuhkan agar tab SPOT hidup: tabel setara `futures_exit_events` untuk
+posisi spot, ditulis monitor spot saat posisi ditutup, lalu endpoint dengan
+bentuk respons yang sama. Kerangka UI-nya sudah menunggu.
 
 ---
 
