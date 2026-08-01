@@ -81,12 +81,36 @@ Hasil:
 **Belum diusulkan otomatis:** kedua lane baru punya n=4, di bawah ambang 5 sampel.
 Ambangnya sengaja tidak diturunkan agar cocok dengan data.
 
-### M4 — Lebar SL per lane ⬅ **BERIKUTNYA**
-Temuan sampingan M3: SL bigmover 1,5× ATR vs momentum 5–6× ATR. Selisih 4×
-membuat setiap gate yang diskalakan ke `risk_pct` (time-stop, fail-fast progress)
-berperilaku sangat berbeda antar lane tanpa itu pernah diniatkan.
+### M4 — Lebar SL per lane ✅ `b44acaa`
+Dugaan awal "SL momentum kelewat lebar" **ternyata salah arah**. Sebaran SL dalam
+harga% jauh lebih rapat (CV **0,231**) daripada dalam kelipatan ATR (CV **0,724**):
+lebar SL sebenarnya disusun terhadap **harga**, bukan volatilitas. Perbedaan
+1,3× vs 4,0× ATR antar lane adalah **efek samping** dari koin yang diperdagangkan.
 
-### M5 — Nyalakan bertahap
+| Lane | n | ATR% | SL harga% | SL/ATR | Mentok plafon | SL/MFE |
+|---|---|---|---|---|---|---|
+| bigmover | 28 | 6,07 | 7,99 | 1,32 | **61%** | 3,41 |
+| momentum | 13 | 1,54 | 6,29 | 4,00 | 8% | 4,86 |
+| accumulation | 2 | 1,18 | 4,20 | 3,60 | 0% | 1,21 |
+| pre_gainer | 2 | 2,13 | 6,06 | 3,26 | 0% | 4,12 |
+
+**61% posisi bigmover SL-nya mentok plafon 8%** — `ATR × 1,5` yang dimaksudkan
+jarang berlaku. Di lane paling bergejolak, rancangan sadar-volatilitas mati diam-diam.
+
+Hasil: `sl_config.py` (7 parameter × per lane, dibangkitkan dari registry),
+`analyze_sl_width()`, 2 endpoint. **Nol perubahan perilaku** — dibuktikan terhadap
+kode sebelum perubahan, 7.605 kasus, 0 beda.
+
+Jebakan yang ditutup: `agent2` memakai ulang fungsi level `agent1`, jadi tanpa
+meneruskan lane, accumulation akan memakai tala pre_gainer tanpa satu pun error.
+
+### M4b — SL/MFE 3,4–4,9× (belum dikerjakan)
+Temuan lanjutan yang belum ditindaklanjuti: SL dipasang 3–5× lebih jauh daripada
+gerak untung terjauh yang benar-benar terjadi. Posisi mempertaruhkan jauh lebih
+banyak daripada yang pernah bergerak ke arah kita — ini sisi lain dari
+[[M0]] "TP tak terjangkau", dan menyentuhnya berarti menyentuh sizing.
+
+### M5 — Nyalakan bertahap ⬅ **BERIKUTNYA**
 Ledger tumbuh → verifikasi rekomendasi → nyalakan satu lane dulu (bigmover,
 sampel terbanyak), amati, baru lanjut. Bukan menyalakan semua sekaligus.
 
