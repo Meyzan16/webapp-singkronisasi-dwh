@@ -110,11 +110,30 @@ gerak untung terjauh yang benar-benar terjadi. Posisi mempertaruhkan jauh lebih
 banyak daripada yang pernah bergerak ke arah kita — ini sisi lain dari
 [[M0]] "TP tak terjangkau", dan menyentuhnya berarti menyentuh sizing.
 
-### M5 — Nyalakan bertahap ⬅ **BERIKUTNYA**
-Ledger tumbuh → verifikasi rekomendasi → nyalakan satu lane dulu (bigmover,
-sampel terbanyak), amati, baru lanjut. Bukan menyalakan semua sekaligus.
+### M5 — Nyalakan bertahap ✅ `5d0e18f`
+Sisi MASUK sudah lama punya `shadow → canary → champion`. Sisi KELUAR tidak punya
+padanannya — menyalakan berarti satu saklar biner untuk semua lane, tanpa
+pembanding dan tanpa jalan pulang. M5 memberinya bentuk yang sama, per
+**(lane × parameter)**:
 
-### M6 — Tab MONITOR di Adaptive Learning Engine
+```
+shadow → canary (1 lane) → active | rolled_back
+```
+
+Tiga disiplin yang membuatnya bukan sekadar tombol:
+1. **Baseline direkam sebelum angka berlaku** — pelajaran dari "116 terbukti
+   membaik" yang ternyata menyesatkan.
+2. **Satu lane canary pada satu waktu** — dua sekaligus membuat hasilnya mustahil
+   ditafsirkan.
+3. **Hanya exit sesudah aktivasi yang dihitung** — posisi yang sudah terbuka masih
+   memakai parameter lama.
+
+`advance()` berjalan di irama yang sama dengan `repair_verifier` sisi masuk, tapi
+hanya **mengevaluasi dan membalik**; menaikkan ke canary tetap perintah eksplisit.
+
+**Belum ada yang dinyalakan.** `monitor_exit_learning_enabled` masih 0.
+
+### M6 — Tab MONITOR di Adaptive Learning Engine ⬅ **BERIKUTNYA**
 Analisa keluar sudah punya endpoint tapi belum punya halaman. Menyusul setelah
 angkanya terbukti stabil.
 
