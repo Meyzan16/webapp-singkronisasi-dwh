@@ -34,10 +34,24 @@ ROTATION_SCORE_GAP = 10.0          # kandidat pengganti harus unggul minimal seg
 TIME_STOP_PROGRESS_FRAC = 0.5      # harus capai ≥0.5×risk untuk lolos time-stop
 TIME_STOP_LOSS_GUARD_FRAC = 0.5    # bila ≤ −0.5×risk, serahkan ke SL (jangan scratch)
 
+#: Menit sebelum time-stop berlaku, per lane. Lane cepat (momentum/bigmover)
+#: harus selesai jauh lebih cepat daripada lane yang memang butuh waktu matang.
+#: Lane yang tak terdaftar memakai `TIME_STOP_DEFAULT_MIN` — lane baru tidak
+#: diam-diam mewarisi angka lane lain.
+TIME_STOP_DEFAULT_MIN = 360.0
+TIME_STOP_MIN_BY_LANE: dict[str, float] = {
+    "momentum":     90.0,
+    "bigmover":     90.0,
+    "pre_gainer":   360.0,
+    "pre_move":     360.0,          # alias lama
+    "accumulation": 360.0,
+}
+
 # ── Rug-pull / flash dump ─────────────────────────────────────────────────────
 RUGPULL_BASE_PCT = 5.0             # ambang minimum gerak melawan
 RUGPULL_MIN_HOLD_MIN = 10.0        # hindari panic-exit di derau pembukaan posisi
 RUGPULL_CONFIRM_MULT = 1.2         # gerak harus 1.2× ambang → flash asli
+RUGPULL_CANDLES = 5                # jendela deteksi: 5 × candle 1m
 
 # ── Fail-fast ─────────────────────────────────────────────────────────────────
 FAILFAST_MIN_HOLD_MIN = 10.0
@@ -45,6 +59,33 @@ FAILFAST_MAX_HOLD_MIN = 45.0       # sesudah ini time-stop yang berwenang
 FAILFAST_ATR_MULT = 1.0
 FAILFAST_PROGRESS_FRAC = 0.3       # tak pernah capai +0.3×risk = tesis tak jalan
 FAILFAST_CONFIRM_FRAC = 0.8        # candle sebelumnya harus ikut melawan (bukan 1 wick)
+
+#: Lane mana yang tunduk pada fail-fast. Dulu satu literal `{"momentum",
+#: "bigmover"}` di monitor — lane baru mustahil ikut tanpa mengedit kode.
+#: Kini per-lane, dibaca dari registry: `monitor_failfast_enabled_{lane}`.
+FAILFAST_LANE_DEFAULTS: dict[str, float] = {"momentum": 1.0, "bigmover": 1.0}
+FAILFAST_LANES: set[str] = {lane for lane, on in FAILFAST_LANE_DEFAULTS.items() if on > 0}
+
+# ── Kunci profit absolut (G5b) ────────────────────────────────────────────────
+# Makin tinggi puncak profit, makin sedikit yang boleh dikembalikan ke pasar.
+# Diurut dari puncak tertinggi supaya tier paling ketat yang menang.
+# Tiap tier bisa ditala terpisah: `monitor_profit_lock_peak_t{i}` dan
+# `monitor_profit_lock_keep_t{i}` (i mulai dari 1 = tier tertinggi).
+PROFIT_LOCK_TIERS: list[tuple[float, float]] = [
+    (300.0, 0.90),   # puncak ≥300% margin: kembalikan maksimal 10%
+    (100.0, 0.85),
+    (40.0,  0.75),
+    (25.0,  0.70),
+    (15.0,  0.60),
+]
+
+# ── Eskalasi fast-loop (cek 30 detik) ─────────────────────────────────────────
+# Posisi berisiko tinggi dipindah ke loop cepat supaya SL tak terlewat di celah
+# 2 menit. Ambangnya dulu tiga angka telanjang di tengah fungsi — tak terlihat,
+# tak bisa ditala, padahal ia yang menentukan posisi mana yang dijaga ketat.
+FAST_LOOP_LEVERAGE_MIN = 10.0      # leverage ≥ segini = otomatis dijaga ketat
+FAST_LOOP_MARGIN_LOSS_PCT = 30.0   # rugi ≥ 30% margin = dijaga ketat
+FAST_LOOP_LIQ_DIST_PCT = 10.0      # jarak ke likuidasi < 10% = dijaga ketat
 
 # ── Bank profit & biaya ───────────────────────────────────────────────────────
 MIN_BANK_COST_MULT = 3.0           # dilarang bank profit sukarela < 3× cost floor
@@ -100,6 +141,18 @@ def tp_lane_key(lane: str) -> str:
     return f"{TP_LANE_KEY_PREFIX}{lane}"
 
 
+def tunable_lanes() -> list[str]:
+    """Lane yang wajib punya baris config sendiri.
+
+    Gabungan lane registry dengan lane yang sudah punya nilai bawaan di modul
+    ini — supaya alias lama tak hilang saat registry belum mencatatnya, dan lane
+    baru cukup didaftarkan sekali di registry untuk ikut ditala.
+    """
+    return sorted(set(_known_lanes())
+                  | set(_FROZEN["TIME_STOP_MIN_BY_LANE"])
+                  | set(FAILFAST_LANE_DEFAULTS))
+
+
 def _known_lanes() -> list[str]:
     """Lane futures dari registry — bukan salinan literal."""
     try:
@@ -133,9 +186,30 @@ _KEYS: dict[str, str] = {
     "BM_HALF_PARTIAL_FRAC":      "monitor_bm_half_partial_frac",
     "TP_MAX_ATR_MULT":           "monitor_tp_max_atr_mult",
     "EXIT_LEARNING_ENABLED":     "monitor_exit_learning_enabled",
+    "RUGPULL_CANDLES":           "monitor_rugpull_candles",
+    "TIME_STOP_DEFAULT_MIN":     "monitor_time_stop_default_min",
+    "FAST_LOOP_LEVERAGE_MIN":    "monitor_fast_loop_leverage_min",
+    "FAST_LOOP_MARGIN_LOSS_PCT": "monitor_fast_loop_margin_loss_pct",
+    "FAST_LOOP_LIQ_DIST_PCT":    "monitor_fast_loop_liq_dist_pct",
 }
 
-_INT_KEYS = {"MAX_AGE_EXTENSIONS"}
+_INT_KEYS = {"MAX_AGE_EXTENSIONS", "RUGPULL_CANDLES"}
+
+#: Salinan BEKU nilai bawaan, diambil saat impor. `refresh()` menimpa variabel
+#: modul, jadi kalau default dibaca dari variabel itu sendiri, nilai bawaan akan
+#: hanyut: override sekali → jadi "default" selamanya, dan menghapus baris config
+#: tak lagi mengembalikan perilaku asli. Semua default WAJIB dibaca dari sini.
+_FROZEN: dict = {
+    "TIME_STOP_MIN_BY_LANE": dict(TIME_STOP_MIN_BY_LANE),
+    "PROFIT_LOCK_TIERS":     list(PROFIT_LOCK_TIERS),
+}
+
+#: Ambang yang punya satu baris config PER LANE. Nilai default per lane ada di
+#: dict masing-masing; lane yang belum punya entri memakai fallback yang tertera.
+_PER_LANE_KEYS: dict[str, tuple[str, str, float]] = {
+    # nama variabel  -> (prefix kunci, nama fallback, fallback bila tak dikenal)
+    "TIME_STOP_MIN_BY_LANE": ("monitor_time_stop_min_", "TIME_STOP_DEFAULT_MIN", 360.0),
+}
 
 
 async def refresh() -> None:
@@ -153,6 +227,36 @@ async def refresh() -> None:
             for lane in _known_lanes()
             if (mult := await cfg.get("futures", tp_lane_key(lane), 0.0)) > 0
         }
+
+        # Lane yang dikenal = lane registry + lane yang sudah punya default.
+        # Union-nya dipakai supaya alias lama (`pre_move`) tak hilang saat
+        # registry belum mencatatnya, dan lane baru tetap ikut terbaca.
+        for var, (prefix, fallback_var, hard_fallback) in _PER_LANE_KEYS.items():
+            defaults: dict[str, float] = _FROZEN[var]
+            fallback = float(globs.get(fallback_var, hard_fallback))
+            globs[var] = {
+                lane: await cfg.get("futures", f"{prefix}{lane}",
+                                    defaults.get(lane, fallback))
+                for lane in set(_known_lanes()) | set(defaults)
+            }
+
+        # Lane mana yang tunduk fail-fast — per lane, bukan literal di kode.
+        globs["FAILFAST_LANES"] = {
+            lane
+            for lane in set(_known_lanes()) | set(FAILFAST_LANE_DEFAULTS)
+            if await cfg.get("futures", f"monitor_failfast_enabled_{lane}",
+                             FAILFAST_LANE_DEFAULTS.get(lane, 0.0)) > 0
+        }
+
+        # Tangga kunci profit — tiap anak tangga bisa ditala sendiri, lalu
+        # diurut ulang supaya tier paling ketat tetap menang walau nilainya
+        # diubah operator ke urutan yang tidak monoton.
+        tiers = [
+            (await cfg.get("futures", f"monitor_profit_lock_peak_t{i}", peak),
+             await cfg.get("futures", f"monitor_profit_lock_keep_t{i}", keep))
+            for i, (peak, keep) in enumerate(_FROZEN["PROFIT_LOCK_TIERS"], start=1)
+        ]
+        globs["PROFIT_LOCK_TIERS"] = sorted(tiers, key=lambda t: -t[0])
     except Exception as exc:
         logger.warning("monitor_config_refresh_failed", error=str(exc)[:120])
 
@@ -197,5 +301,8 @@ def snapshot() -> dict:
     """Nilai ambang yang sedang berlaku — untuk endpoint/diagnostik."""
     globs = globals()
     snap = {key: globs[var] for var, key in _KEYS.items()}
-    snap["tp_atr_mult_by_lane"] = dict(TP_ATR_BY_LANE)
+    snap["tp_atr_mult_by_lane"]  = dict(TP_ATR_BY_LANE)
+    snap["time_stop_min_by_lane"] = dict(TIME_STOP_MIN_BY_LANE)
+    snap["failfast_lanes"]        = sorted(FAILFAST_LANES)
+    snap["profit_lock_tiers"]     = [list(t) for t in PROFIT_LOCK_TIERS]
     return snap

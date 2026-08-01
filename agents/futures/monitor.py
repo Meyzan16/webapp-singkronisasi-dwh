@@ -33,6 +33,12 @@ from app.services.trading_costs import (
     FUTURES_BALANCE_STATUSES, futures_notional,   # Phase 9: fallback notional for legacy rows
     FUTURES_SL_SLIPPAGE_PCT,                      # PLAN_v16 F1: stop-market fill slippage
 )
+#: SEMUA ambang keputusan keluar (umur, rotasi, time-stop, rug-pull, fail-fast,
+#: biaya, kunci profit, batas TP) dibaca lewat `mcfg.X` — bukan disalin ke
+#: konstanta lokal. Nilainya di-refresh sekali per siklus, dan karena Python
+#: menyelesaikan atribut saat DIPANGGIL, setiap titik keputusan otomatis melihat
+#: nilai terbaru tanpa perlu dialirkan lewat argumen.
+from agents.futures import monitor_config as mcfg
 from agents.futures.utils import (
     MAX_LOSS_PCT_OF_MARGIN_BY_LANE, DEFAULT_MAX_LOSS_PCT,
     MAX_SL_MARGIN_PCT_BY_LANE,     DEFAULT_LANE_CAP,
@@ -48,52 +54,18 @@ STARTUP_DELAY = 60    # start after main scanner
 TAKER_FEE     = 0.0005   # 0.05% per side
 ROUND_TRIP    = TAKER_FEE * 2  # 0.10% total
 
-# Max position age in days — close stalled futures positions
-MAX_AGE_DAYS       = 3   # futures positions should resolve faster than spot
-MAX_AGE_EXTENSIONS = 2   # G11: max 2 × 1-day extensions → 5 days total for winners
+#: Salinan BEKU batas per-lane bawaan. Dict aslinya di `utils.py` di-mutasi di
+#: tempat tiap siklus (dibagi lewat referensi ke importer lain), jadi kalau
+#: default dibaca dari dict itu sendiri, satu override akan menjadi "default"
+#: permanen dan menghapus baris config tak lagi memulihkan nilai asli.
+_LANE_CAP_DEFAULTS  = dict(MAX_SL_MARGIN_PCT_BY_LANE)
+_MAX_LOSS_DEFAULTS  = dict(MAX_LOSS_PCT_OF_MARGIN_BY_LANE)
 
-# G3: rotation constants
-FUTURES_ROTATION_MIN_DAYS  = 1.0   # start checking after 1 day
-FUTURES_ROTATION_DRIFT_PCT = 3.0   # ≤3% from entry = stagnant
-FUTURES_ROTATION_SCORE_GAP = 10    # candidate must outscore by at least 10
-
-# PLAN_v6 P1c: momentum time-stop (scratch exit) — a trade that hasn't reached
-# +0.5×risk within N minutes AND never hit TP1 is a failed thesis; close at market
-# (small loss/scratch) instead of bleeding to full SL over hours (AMAT held 21.6h → SL).
-TIME_STOP_MIN_BY_LANE: dict[str, float] = {
-    "momentum":     90.0,
-    "bigmover":     90.0,
-    "pre_gainer":   360.0,   # 6h
-    "pre_move":     360.0,   # legacy alias
-    "accumulation": 360.0,   # 6h — needs room to develop
-}
-TIME_STOP_PROGRESS_FRAC = 0.5   # must reach ≥ 0.5×risk favorable to survive time-stop
-# PLAN_v11 B2: "scratch" hanya untuk trade STAGNAN (dekat breakeven). Kalau sudah
-# rugi ≥ 0.5×risk, JANGAN scratch — biarkan SL asli yang eksekusi. Bug lama:
-# AERGO ditutup −13% berlabel "time_stop_scratch" (realisasi loser besar dini).
-TIME_STOP_LOSS_GUARD_FRAC = 0.5   # jika _fav ≤ −0.5×risk → skip scratch, serahkan ke SL
-
-# G4: rugpull detection constants
-RUGPULL_CANDLES       = 5     # 5×1m candles = 5-minute window
-RUGPULL_BASE_PCT      = 5.0   # minimum adverse-move threshold
-RUGPULL_MIN_HOLD_MIN  = 10.0  # PLAN_v11 B3: 5→10 min — hindari panic-exit di noise buka posisi
-RUGPULL_CONFIRM_MULT  = 1.2   # PLAN_v11 B3: adverse move harus 1.2× ambang (bukan pas-pasan) → flash asli
-
-# PLAN_v15 P9: fail-fast exit — momentum/bigmover entries that move ≥1×ATR AGAINST
-# the position early on and never showed progress are a failed thesis; cut at ≈−ATR
-# instead of bleeding to full SL (July-4 sl_hits averaged −$11 with peaks ≤ +3%).
-FAILFAST_LANES         = {"momentum", "bigmover"}
-FAILFAST_MIN_HOLD_MIN  = 10.0   # align with RUGPULL_MIN_HOLD_MIN — skip open noise
-FAILFAST_MAX_HOLD_MIN  = 45.0   # after this, time-stop (90m) becomes the authority
-FAILFAST_ATR_MULT      = 1.0    # DB-overridable: futures.failfast_atr_mult
-FAILFAST_PROGRESS_FRAC = 0.3    # never reached +0.3×risk favorable = no thesis progress
-FAILFAST_CONFIRM_FRAC  = 0.8    # prior 1m CLOSE must also be ≥0.8× threshold adverse (not one wick)
-
-# PLAN_v15 P4: bigmover breakeven-arm absolute floor — TP1 = ATR×2 on a volatile coin
-# can sit 6-12% away, so the 40%-of-TP1 arm was rarely reached (loser peaks were +1-3%).
-# A +1.5% favorable move now always arms breakeven for the bigmover lane.
-BM_BE_ARM_ABS_PCT      = 1.5
-BM_HALF_PARTIAL_FRAC   = 0.5    # PLAN_v15 P4: bigmover de-risk 50% at halfway-to-TP1 (=1×ATR)
+# CATATAN: ambang KEPUTUSAN keluar (umur, rotasi, time-stop, rug-pull, fail-fast,
+# kunci profit, gerbang biaya, batas TP) TIDAK lagi didefinisikan di file ini —
+# semuanya di `monitor_config.py` dan dibaca lewat `mcfg.X`. Yang tersisa di sini
+# hanya konstanta STRUKTURAL (interval loop, fee, jendela candle) yang bukan
+# keputusan dan tak masuk akal ditala per-lane.
 
 # ── PLAN_v16 F1/F3 — true-cost accounting & anti-churn exits ──────────────────
 # Diagnosa: 77% close = churn scratch/breakeven yang bayar RT fee $0.28-0.30 untuk
@@ -107,7 +79,6 @@ _STOP_MARKET_REASONS = {
     "offline_reconcile_sl",
     "emergency_close_circuit_breaker",
 }
-MIN_BANK_COST_MULT = 3.0   # F3: dilarang bank profit sukarela < 3× cost floor
 
 
 def _true_close_costs(meta: dict, close_reason: str) -> tuple[float, float]:
@@ -141,21 +112,8 @@ def _protective_sl(entry: float, direction: str, cost_pct: float, above: bool) -
         return entry * (1 + off) if above else entry * (1 - off)
     return entry * (1 - off) if above else entry * (1 + off)
 
-# G5b: absolute profit lock — tier thresholds (peak_pnl → lock if drop below fraction)
-# PLAN_v11 P3: tier tinggi (100%/300% margin) untuk pump besar — 1000% tak boleh menguap.
-# Urut tertinggi dulu supaya lock paling ketat yang berlaku.
-_PROFIT_LOCK_TIERS = [
-    (300.0, 0.90),  # peak ≥ 300%: beri balik maks 10%
-    (100.0, 0.85),  # peak ≥ 100%: beri balik maks 15%
-    (40.0, 0.75),   # peak ≥ 40%: lock at 75% of peak
-    (25.0, 0.70),   # peak ≥ 25%: lock at 70% of peak
-    (15.0, 0.60),   # peak ≥ 15%: lock at 60% of peak
-]
-
 # G6: funding cost tracker
 FUNDING_WINDOW_SEC     = 8 * 3600   # Binance funds every 8h
-COST_TO_PROFIT_GATE    = 0.30       # close if cumulative cost > 30% of unrealized profit
-COST_ABS_LOSS_GATE_PCT = 0.003      # B5.3: close losing trade if cost > 0.3% of notional
 
 # BUG-L8: wick detection — 1m candles checked per cycle so TP/SL touches BETWEEN the
 # 2-min polls aren't missed (spot monitor already does this; futures did not → a wick that
@@ -323,19 +281,19 @@ def _liq_guard_pct(leverage: int) -> float:
 
 def _rugpull_threshold(atr_pct: float) -> float:
     """B5.2: adaptive rugpull threshold = max(5%, ATR × 2)."""
-    return max(RUGPULL_BASE_PCT, atr_pct * 2.0)
+    return max(mcfg.RUGPULL_BASE_PCT, atr_pct * 2.0)
 
 
 def _flash_adverse_pct(klines_1m: list, direction: str) -> float:
     """
-    Compute the maximum adverse move in the last RUGPULL_CANDLES 1m candles.
+    Compute the maximum adverse move in the last mcfg.RUGPULL_CANDLES 1m candles.
     LONG: (high of first candle − min low across window) / high of first candle
     SHORT: (max high across window − low of first candle) / low of first candle
     Returns 0.0 if data insufficient.
     """
-    if len(klines_1m) < RUGPULL_CANDLES:
+    if len(klines_1m) < mcfg.RUGPULL_CANDLES:
         return 0.0
-    last5 = klines_1m[-RUGPULL_CANDLES:]
+    last5 = klines_1m[-mcfg.RUGPULL_CANDLES:]
     try:
         if direction == "LONG":
             ref  = float(last5[0][2])   # high of oldest candle in window
@@ -371,7 +329,7 @@ def _futures_has_better_candidate(
             if c.get("symbol") == exclude_symbol:
                 continue
             c_score = c.get("score", 0)
-            if c_score >= capped + FUTURES_ROTATION_SCORE_GAP:
+            if c_score >= capped + mcfg.ROTATION_SCORE_GAP:
                 return True
     except Exception:
         pass
@@ -539,7 +497,7 @@ def _compute_trail(
         # PLAN_v15 P4: bigmover — absolute arm floor: +1.5% favorable always arms
         # breakeven, even when TP1 (ATR×2 on a volatile coin) sits far away.
         if setup_type == "bigmover":
-            halfway_to_tp1 = min(halfway_to_tp1, entry * (1 + BM_BE_ARM_ABS_PCT / 100))
+            halfway_to_tp1 = min(halfway_to_tp1, entry * (1 + mcfg.BM_BE_ARM_ABS_PCT / 100))
         sl_after_tp1     = entry + (tp1 - entry) * 0.75
 
         # F77: after TP1 hit (trail_active), when 50% toward TP2, advance SL to TP1
@@ -561,7 +519,7 @@ def _compute_trail(
         halfway_to_tp1   = entry - (entry - tp1) * be_frac
         # PLAN_v15 P4: bigmover absolute arm floor (mirror of LONG above)
         if setup_type == "bigmover":
-            halfway_to_tp1 = max(halfway_to_tp1, entry * (1 - BM_BE_ARM_ABS_PCT / 100))
+            halfway_to_tp1 = max(halfway_to_tp1, entry * (1 - mcfg.BM_BE_ARM_ABS_PCT / 100))
         sl_after_tp1     = entry - (entry - tp1) * 0.75
 
         # F77: after TP1 hit (trail_active), when 50% toward TP2, advance SL to TP1
@@ -801,8 +759,7 @@ async def check_futures_positions() -> tuple[int, int]:
             # Saat dinyalakan, target hanya bisa MENDEKAT, tak pernah menjauh —
             # dengan batas per-lane hasil belajar bila lane itu sudah punya.
             try:
-                from agents.futures import monitor_config as _mcfg
-                _tp_eff, _tp_compressed = _mcfg.effective_take_profit(
+                _tp_eff, _tp_compressed = mcfg.effective_take_profit(
                     entry, tp2, float(meta.get("atr_pct") or 0.0), trade.direction,
                     lane=lane)
                 if _tp_compressed:
@@ -856,12 +813,12 @@ async def check_futures_positions() -> tuple[int, int]:
             # Detects sudden 5-minute violent moves that SL may not catch in time.
             # Guard: skip if P1.1 max-loss gate already closed this trade.
             _hold_mins_g4 = (time.time() - (trade.entry_at or time.time())) / 60
-            if not new_status and _hold_mins_g4 >= RUGPULL_MIN_HOLD_MIN:
+            if not new_status and _hold_mins_g4 >= mcfg.RUGPULL_MIN_HOLD_MIN:
                 _k1m_g4      = klines_1m.get(trade.symbol, [])
                 _atr_pct_g4  = float(meta.get("atr_pct", 0.0) or 0.0)
                 _rp_thresh   = _rugpull_threshold(_atr_pct_g4)
                 _adverse_pct = _flash_adverse_pct(_k1m_g4, direction)
-                if _adverse_pct > _rp_thresh * RUGPULL_CONFIRM_MULT:   # PLAN_v11 B3: butuh konfirmasi jelas
+                if _adverse_pct > _rp_thresh * mcfg.RUGPULL_CONFIRM_MULT:   # PLAN_v11 B3: butuh konfirmasi jelas
                     new_status   = "sl"
                     close_price  = round(price, 8)
                     close_reason = "flash_dump_exit" if direction == "LONG" else "flash_pump_exit"
@@ -976,7 +933,7 @@ async def check_futures_positions() -> tuple[int, int]:
                 meta["peak_pnl_pct"] = _peak_pnl
                 trade.signals_json   = json.dumps(meta, ensure_ascii=False)
                 updated += 1
-            for _peak_thresh, _lock_frac in _PROFIT_LOCK_TIERS:
+            for _peak_thresh, _lock_frac in mcfg.PROFIT_LOCK_TIERS:
                 if not new_status and _peak_pnl >= _peak_thresh and _pnl_now_pct <= _peak_pnl * _lock_frac:
                     new_status   = "tp"
                     close_price  = round(price, 8)
@@ -994,18 +951,18 @@ async def check_futures_positions() -> tuple[int, int]:
             # favorable quickly. ≥1×ATR against us in the first 10-45 min with no
             # progress ever (peak < 0.3×risk) = failed thesis → cut at ≈−ATR now
             # instead of riding to full SL (July-4 sl_hits: avg −$11, peaks ≤ +3%).
-            if not new_status and not trail_active and lane in FAILFAST_LANES:
+            if not new_status and not trail_active and lane in mcfg.FAILFAST_LANES:
                 _hold_ff = (time.time() - (trade.entry_at or time.time())) / 60
-                if FAILFAST_MIN_HOLD_MIN <= _hold_ff <= FAILFAST_MAX_HOLD_MIN:
+                if mcfg.FAILFAST_MIN_HOLD_MIN <= _hold_ff <= mcfg.FAILFAST_MAX_HOLD_MIN:
                     _atr_pct_ff  = float(meta.get("atr_pct", 0.0) or 0.0)
                     _risk_pct_ff = abs(entry - (trade.stop_loss or entry)) / entry * 100 if entry > 0 else 0.0
                     # Legacy rows without atr_pct: fall back to 0.6× SL distance
-                    _thresh_ff = FAILFAST_ATR_MULT * _atr_pct_ff if _atr_pct_ff > 0 \
+                    _thresh_ff = mcfg.FAILFAST_ATR_MULT * _atr_pct_ff if _atr_pct_ff > 0 \
                                  else 0.6 * _risk_pct_ff
                     _adverse_now = -_pnl_now_pct   # positive when losing
                     if (_thresh_ff > 0
                             and _adverse_now >= _thresh_ff
-                            and _peak_pnl < FAILFAST_PROGRESS_FRAC * _risk_pct_ff):
+                            and _peak_pnl < mcfg.FAILFAST_PROGRESS_FRAC * _risk_pct_ff):
                         # Anti-noise: previous 1m CLOSE must confirm the adverse move
                         # (a single wick that already snapped back must not exit).
                         _k_ff = klines_1m.get(trade.symbol, [])
@@ -1017,7 +974,7 @@ async def check_futures_positions() -> tuple[int, int]:
                                     (entry - _prev_close) / entry * 100 if direction == "LONG"
                                     else (_prev_close - entry) / entry * 100
                                 ) if entry > 0 else 0.0
-                                _confirm_ff = _prev_adverse >= _thresh_ff * FAILFAST_CONFIRM_FRAC
+                                _confirm_ff = _prev_adverse >= _thresh_ff * mcfg.FAILFAST_CONFIRM_FRAC
                             except (IndexError, ValueError):
                                 _confirm_ff = False
                         if _confirm_ff:
@@ -1043,13 +1000,13 @@ async def check_futures_positions() -> tuple[int, int]:
             # ── 0. Max age check (G11: adaptive — extend for profitable trailing) ──
             age_days = (time.time() - (trade.entry_at or 0)) / 86400
             _age_ext  = int(meta.get("age_extensions", 0))
-            _max_age  = MAX_AGE_DAYS + min(_age_ext, MAX_AGE_EXTENSIONS)
+            _max_age  = mcfg.MAX_AGE_DAYS + min(_age_ext, mcfg.MAX_AGE_EXTENSIONS)
             # G11 + B6.3: grant 1-day extension when at boundary, in profit, trailing,
             # and 1h momentum still aligned (proxied by pnl ≥ 5%).
             if (not new_status
                     and trail_active
                     and _pnl_now_pct >= 5.0
-                    and _age_ext < MAX_AGE_EXTENSIONS
+                    and _age_ext < mcfg.MAX_AGE_EXTENSIONS
                     and age_days >= (_max_age - 0.1)):   # within ~2.4 h of expiry
                 _last_ext = float(meta.get("age_last_extended_at", 0.0))
                 if (time.time() - _last_ext) >= 20 * 3600:   # one extension per day
@@ -1058,7 +1015,7 @@ async def check_futures_positions() -> tuple[int, int]:
                     trade.signals_json           = json.dumps(meta, ensure_ascii=False)
                     updated    += 1
                     _age_ext   += 1
-                    _max_age    = MAX_AGE_DAYS + _age_ext
+                    _max_age    = mcfg.MAX_AGE_DAYS + _age_ext
                     logger.info("age_extended_g11", symbol=trade.symbol,
                                 extensions=_age_ext, pnl=round(_pnl_now_pct, 2))
             if not new_status and age_days > _max_age:
@@ -1071,7 +1028,7 @@ async def check_futures_positions() -> tuple[int, int]:
             # ≥0.5×risk in our favour within the lane's time budget, the thesis
             # failed — scratch it at market instead of waiting for full SL.
             if not new_status and not trail_active:
-                _ts_min = TIME_STOP_MIN_BY_LANE.get(lane)
+                _ts_min = mcfg.TIME_STOP_MIN_BY_LANE.get(lane)
                 if _ts_min:
                     _hold_min = (time.time() - (trade.entry_at or time.time())) / 60
                     if _hold_min >= _ts_min:
@@ -1081,8 +1038,8 @@ async def check_futures_positions() -> tuple[int, int]:
                         # dan +0.5×risk). Loser lebih dalam → biar SL asli, jangan
                         # realisasi loss besar berlabel "scratch".
                         _stagnant = (_risk_dist > 0
-                                     and _fav < TIME_STOP_PROGRESS_FRAC * _risk_dist
-                                     and _fav > -TIME_STOP_LOSS_GUARD_FRAC * _risk_dist)
+                                     and _fav < mcfg.TIME_STOP_PROGRESS_FRAC * _risk_dist
+                                     and _fav > -mcfg.TIME_STOP_LOSS_GUARD_FRAC * _risk_dist)
                         # PLAN_v16 F3 (anti-churn): JANGAN market-close posisi stagnan —
                         # itu 14× churn @ −$0.28 fee untuk bank ≈$0 (77% dari semua close).
                         # Ganti: tighten SL ke entry − cost_floor (biar market yang
@@ -1448,12 +1405,12 @@ async def check_futures_positions() -> tuple[int, int]:
                     _bm_net      = _bm_pnl_pct - Decimal(str(ROUND_TRIP * 100 * 0.5))
                     _notional_bm = trade.position_size or futures_notional(meta.get("risk_pct") or 2.0)
                     _bm_dollar   = float(round(
-                        _bm_net / 100 * Decimal(str(_notional_bm)) * Decimal(str(BM_HALF_PARTIAL_FRAC)), 2
+                        _bm_net / 100 * Decimal(str(_notional_bm)) * Decimal(str(mcfg.BM_HALF_PARTIAL_FRAC)), 2
                     ))
                     meta["bm_half_partial_done"]       = True
                     meta["bm_half_partial_pnl_dollar"] = _bm_dollar
                     trade.pnl_dollar    = (trade.pnl_dollar or 0.0) + _bm_dollar
-                    trade.position_size = round(_notional_bm * (1 - BM_HALF_PARTIAL_FRAC), 2)
+                    trade.position_size = round(_notional_bm * (1 - mcfg.BM_HALF_PARTIAL_FRAC), 2)
                     _append_trade_event(meta, "bm_half_partial", {
                         "mid":            round(_bm_mid, 8),
                         "partial_dollar": _bm_dollar,
@@ -1556,8 +1513,8 @@ async def check_futures_positions() -> tuple[int, int]:
                     # PLAN_v16 F3 bank-gate: exit sukarela hanya boleh BANK profit bila
                     # net ≥ 3× cost_floor — di bawah itu, tighten SL ke entry+cost
                     # (net-nol terkunci) dan biarkan posisi cari profit yang layak.
-                    _bank_ok = _pnl_now_pct >= MIN_BANK_COST_MULT * _cost_floor_pct(meta)
-                    if _pnl_dollar_now > 0 and _cum_cost > _pnl_dollar_now * COST_TO_PROFIT_GATE:
+                    _bank_ok = _pnl_now_pct >= mcfg.MIN_BANK_COST_MULT * _cost_floor_pct(meta)
+                    if _pnl_dollar_now > 0 and _cum_cost > _pnl_dollar_now * mcfg.COST_TO_PROFIT_GATE:
                         if _bank_ok:
                             # Profitable but costs eating >30% of unrealized → exit now
                             new_status   = "tp"
@@ -1585,7 +1542,7 @@ async def check_futures_positions() -> tuple[int, int]:
                                 updated += 1
                                 logger.info("anti_churn_tighten", symbol=trade.symbol,
                                             source="cost_gate", new_sl=round(_prot_cg, 6))
-                    elif _pnl_dollar_now <= 0 and _cum_cost > _notional_g6 * COST_ABS_LOSS_GATE_PCT:
+                    elif _pnl_dollar_now <= 0 and _cum_cost > _notional_g6 * mcfg.COST_ABS_LOSS_GATE_PCT:
                         # B5.3: losing AND paying significant funding → too expensive to hold
                         new_status   = "sl"
                         close_price  = round(price, 8)
@@ -1613,7 +1570,7 @@ async def check_futures_positions() -> tuple[int, int]:
                                 # PLAN_v16 F3 bank-gate: profit tipis < 3× cost_floor
                                 # tidak layak dibayar 1 round-trip fee — tahan posisi
                                 # (funding 1 window lebih murah dari churn close+reopen).
-                                and _pnl_now_pct >= MIN_BANK_COST_MULT * _cost_floor_pct(meta)
+                                and _pnl_now_pct >= mcfg.MIN_BANK_COST_MULT * _cost_floor_pct(meta)
                             )
                             if _fund_too_costly:
                                 if direction == "LONG" and _cur_fr > 0.1:
@@ -1645,20 +1602,20 @@ async def check_futures_positions() -> tuple[int, int]:
             if not new_status:
                 _age_g3    = (time.time() - (trade.entry_at or 0)) / 86400
                 _drift_pct = abs(price - entry) / entry * 100 if entry > 0 else 99.0
-                if _age_g3 >= FUTURES_ROTATION_MIN_DAYS:
+                if _age_g3 >= mcfg.ROTATION_MIN_DAYS:
                     # B5.1: trail_active stuck since TP1 for 48h+ is also rotate-eligible
                     _tp1_done_at = float(meta.get("tp1_done_at", 0.0))
                     _trail_stagnant_post_tp1 = (
                         trail_active
                         and _tp1_done_at > 0
                         and (time.time() - _tp1_done_at) > 48 * 3600
-                        and _drift_pct <= FUTURES_ROTATION_DRIFT_PCT
+                        and _drift_pct <= mcfg.ROTATION_DRIFT_PCT
                     )
                     # PLAN_v16 F3: posisi yang di-tighten time-stop tetap rotate-eligible
                     # (trail_active-nya protektif, bukan tanda TP1 tercapai).
                     _plain_stagnant = (
                         (not trail_active or meta.get("time_stop_tightened"))
-                        and _drift_pct <= FUTURES_ROTATION_DRIFT_PCT
+                        and _drift_pct <= mcfg.ROTATION_DRIFT_PCT
                     )
                     if _plain_stagnant or _trail_stagnant_post_tp1:
                         _cur_score_g3 = trade.probability or 60
@@ -1755,11 +1712,11 @@ async def check_futures_positions() -> tuple[int, int]:
             # ── P5.4: flag high-risk trades for fast loop (30s checks) ──────────
             _margin_loss_pct_now = abs(_pnl_now_pct) * max(leverage, 1) if _pnl_now_pct < 0 else 0.0
             _is_high_risk = (
-                leverage >= 10 or
-                _margin_loss_pct_now >= 30.0 or
+                leverage >= mcfg.FAST_LOOP_LEVERAGE_MIN or
+                _margin_loss_pct_now >= mcfg.FAST_LOOP_MARGIN_LOSS_PCT or
                 (not new_status and _liq_dist_pct(price, _calc_liq_price(entry, leverage, direction,
                     position_size=trade.position_size or 0.0,
-                    wallet_equity=_wallet_equity), direction) < 10.0)
+                    wallet_equity=_wallet_equity), direction) < mcfg.FAST_LOOP_LIQ_DIST_PCT)
             )
             if _is_high_risk and not new_status:
                 _fast_loop_trade_ids.add(trade.id)
@@ -2097,26 +2054,27 @@ async def run_futures_monitor() -> None:
             # monitor_config.py. Dulu ~40 konstanta terkunci di kode: tak bisa
             # ditala tanpa deploy dan tak bisa disentuh Adaptive Engine.
             try:
-                from agents.futures import monitor_config as mcfg
                 await mcfg.refresh()
             except Exception as exc:
                 logger.warning("monitor_config_pull_failed", error=str(exc)[:120])
 
             try:
                 from agents.shared.config_reader import cfg
-                # PLAN_v15 P9: fail-fast threshold is DB-tunable
-                global FAILFAST_ATR_MULT
-                FAILFAST_ATR_MULT = await cfg.get(
-                    "futures", "failfast_atr_mult", FAILFAST_ATR_MULT)
-                MAX_SL_MARGIN_PCT_BY_LANE["accumulation"] = await cfg.get(
-                    "futures", "lane_cap_accumulation", MAX_SL_MARGIN_PCT_BY_LANE["accumulation"])
-                MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"] = await cfg.get(
-                    "futures", "lane_cap_pre_gainer", MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"])
-                MAX_SL_MARGIN_PCT_BY_LANE["pre_move"] = MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"]  # legacy alias
-                MAX_SL_MARGIN_PCT_BY_LANE["momentum"] = await cfg.get(
-                    "futures", "lane_cap_momentum", MAX_SL_MARGIN_PCT_BY_LANE["momentum"])
-                MAX_SL_MARGIN_PCT_BY_LANE["bigmover"] = await cfg.get(
-                    "futures", "lane_cap_bigmover", MAX_SL_MARGIN_PCT_BY_LANE["bigmover"])
+                # Batas SL per lane. Dulu 4 baris dengan nama lane ditulis tangan —
+                # lane ke-5 otomatis terlewat tanpa satu pun error. Kini iterasi
+                # lane dari registry, jadi lane baru langsung punya baris config.
+                for _lane in mcfg.tunable_lanes():
+                    MAX_SL_MARGIN_PCT_BY_LANE[_lane] = await cfg.get(
+                        "futures", f"lane_cap_{_lane}",
+                        _LANE_CAP_DEFAULTS.get(_lane, DEFAULT_LANE_CAP))
+                    # Gerbang max-loss per trade: keputusan keluar paling keras
+                    # (force-close), tapi selama ini SATU-SATUNYA yang sama sekali
+                    # tak bisa ditala dari DB — angkanya terkunci di utils.py.
+                    MAX_LOSS_PCT_OF_MARGIN_BY_LANE[_lane] = await cfg.get(
+                        "futures", f"monitor_max_loss_pct_{_lane}",
+                        _MAX_LOSS_DEFAULTS.get(_lane, DEFAULT_MAX_LOSS_PCT))
+                MAX_SL_MARGIN_PCT_BY_LANE["pre_move"] = \
+                    MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"]      # alias lama
             except Exception as exc:
                 logger.warning("agent_config_pull_failed", scope="futures_monitor", error=str(exc)[:120])
 

@@ -222,9 +222,12 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         WEAK_LANE_FLOOR        = int(await cfg.get("futures", "weak_lane_floor", WEAK_LANE_FLOOR))
         # LANE_QUOTAS is a dict shared by reference with importers — mutate in
         # place so `from auto_trader import LANE_QUOTAS` bindings elsewhere stay in sync.
-        LANE_QUOTAS["momentum"]     = int(await cfg.get("futures", "lane_quota_momentum", LANE_QUOTAS["momentum"]))
-        LANE_QUOTAS["pre_gainer"]   = int(await cfg.get("futures", "lane_quota_pre_gainer", LANE_QUOTAS["pre_gainer"]))
-        LANE_QUOTAS["accumulation"] = int(await cfg.get("futures", "lane_quota_accumulation", LANE_QUOTAS["accumulation"]))
+        # Iterasi lane, bukan tiga baris bernama — lane yang ditambahkan ke
+        # LANE_QUOTAS langsung ikut bisa ditala, tanpa perlu diingat menambah
+        # baris di sini (kelalaian seperti itu tak memunculkan error apa pun).
+        for _lane in list(LANE_QUOTAS):
+            LANE_QUOTAS[_lane] = int(await cfg.get(
+                "futures", f"lane_quota_{_lane}", LANE_QUOTAS[_lane]))
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="auto_trader", error=str(exc)[:120])
 

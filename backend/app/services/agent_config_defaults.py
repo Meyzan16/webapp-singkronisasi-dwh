@@ -72,14 +72,9 @@ DEFAULTS: list[dict] = [
      "description": "Jam cooldown sebelum re-entry simbol yang baru SL"},
     {"group": "futures", "key": "max_wallet_margin_pct", "default": 70.0, "category": "risk",
      "description": "Cap utilisasi margin wallet cross-margin (%%)"},
-    {"group": "futures", "key": "lane_cap_accumulation", "default": 15.0, "category": "risk",
-     "description": "Max margin loss %% untuk lane accumulation sebelum force-close"},
-    {"group": "futures", "key": "lane_cap_pre_gainer", "default": 18.0, "category": "risk",
-     "description": "Max margin loss %% untuk lane pre_gainer sebelum force-close"},
-    {"group": "futures", "key": "lane_cap_momentum", "default": 25.0, "category": "risk",
-     "description": "Max margin loss %% untuk lane momentum sebelum force-close"},
-    {"group": "futures", "key": "lane_cap_bigmover", "default": 20.0, "category": "risk",
-     "description": "Max margin loss %% untuk lane bigmover sebelum force-close"},
+    # CATATAN: baris `lane_cap_*` TIDAK ditulis di sini — dibangkitkan per lane
+    # oleh `_monitor_lane_defaults()` di bawah, supaya lane baru tak bisa lahir
+    # tanpa baris config-nya.
     # NOTE: dd_hard_stop_pct/dd_recover_pct SENGAJA tidak ada di sini —
     # risk_gate._scaled_dd_threshold() menghitungnya otomatis dari ukuran wallet
     # (4 tier: <$500, $500-750, $750-1500, ≥$1500) dan akan menimpa override
@@ -163,6 +158,16 @@ DEFAULTS: list[dict] = [
      "description": "BigMover: porsi posisi yang di-de-risk di separuh jalan ke TP1"},
     {"group": "futures", "key": "monitor_tp_max_atr_mult", "default": 0.0, "category": "monitor",
      "description": "PRIORITAS 1 (DEFAULT 0=MATI): batasi jarak TP ke sekian kali ATR. Temuan 1 Agu: TP terpasang 4-13x ATR sementara gerak untung terjauh bermedian 0,41x ATR, sehingga TP tersentuh hanya 1 dari 44 trade. Simulasi: TP 0,5x ATR akan tersentuh 48%, 1x ATR 27%. CATATAN: memperpendek TP saja belum tentu untung karena SL ada di ~1,5x ATR - uji dulu."},
+    {"group": "futures", "key": "monitor_rugpull_candles", "default": 5, "category": "monitor",
+     "description": "Jumlah candle 1m yang dipindai untuk mendeteksi rug-pull / flash dump"},
+    {"group": "futures", "key": "monitor_time_stop_default_min", "default": 360.0, "category": "monitor",
+     "description": "Menit time-stop untuk lane yang belum punya angka sendiri (lane baru tidak mewarisi angka lane lain)"},
+    {"group": "futures", "key": "monitor_fast_loop_leverage_min", "default": 10.0, "category": "monitor",
+     "description": "Leverage minimum yang membuat posisi dipindah ke loop cepat 30 detik"},
+    {"group": "futures", "key": "monitor_fast_loop_margin_loss_pct", "default": 30.0, "category": "monitor",
+     "description": "Rugi (% margin) yang membuat posisi dipindah ke loop cepat 30 detik"},
+    {"group": "futures", "key": "monitor_fast_loop_liq_dist_pct", "default": 10.0, "category": "monitor",
+     "description": "Jarak ke harga likuidasi (%) yang membuat posisi dipindah ke loop cepat 30 detik"},
     {"group": "futures", "key": "monitor_exit_learning_enabled", "default": 0.0, "category": "monitor",
      "description": "PRIORITAS 2 (DEFAULT 0=MATI): izinkan monitor memakai batas TP per-lane hasil belajar dari ledger keluar (monitor_tp_atr_mult_lane_*). Selama 0, angka hasil belajar boleh ditulis dan diamati tapi tidak mempengaruhi satu pun keputusan tutup posisi."},
 
@@ -176,6 +181,85 @@ DEFAULTS: list[dict] = [
     {"group": "learning", "key": "cross_blend", "default": 0.30, "category": "threshold",
      "description": "Porsi pengaruh cross-agent pada weight sinyal final"},
 ]
+
+
+def _monitor_lane_defaults() -> list[dict]:
+    """Baris config MONITOR yang jumlahnya ikut jumlah lane.
+
+    Ditulis sebagai fungsi, bukan daftar literal, supaya **lane baru otomatis
+    dapat barisnya sendiri**. Sebelumnya nama lane diketik tangan empat kali per
+    ambang; lane `bigmover` sempat lahir tanpa sebagian barisnya dan tak ada satu
+    pun error yang muncul — kegagalannya senyap.
+
+    Nilai bawaannya diambil dari `monitor_config` (sumber yang sama yang dibaca
+    monitor saat berjalan), jadi mustahil keduanya berbeda diam-diam.
+    """
+    from agents.futures import monitor_config as mcfg
+    from agents.futures.monitor import _LANE_CAP_DEFAULTS, _MAX_LOSS_DEFAULTS
+    from agents.futures.utils import DEFAULT_LANE_CAP, DEFAULT_MAX_LOSS_PCT
+
+    rows: list[dict] = []
+    ts_defaults = mcfg._FROZEN["TIME_STOP_MIN_BY_LANE"]
+    for lane in mcfg.tunable_lanes():
+        rows.append({
+            "group": "futures", "key": f"monitor_time_stop_min_{lane}",
+            "default": ts_defaults.get(lane, mcfg.TIME_STOP_DEFAULT_MIN),
+            "category": "monitor",
+            "description": f"Lane {lane}: menit tahan sebelum time-stop menilai tesis gagal",
+        })
+        rows.append({
+            "group": "futures", "key": f"monitor_failfast_enabled_{lane}",
+            "default": mcfg.FAILFAST_LANE_DEFAULTS.get(lane, 0.0),
+            "category": "monitor",
+            "description": (f"Lane {lane}: 1=tunduk fail-fast, 0=tidak. Bukti 1 Agu: "
+                            "fail-fast 0% menang di lane ber-SL sempit (bigmover) "
+                            "karena pemicunya nyaris berimpit dengan SL."),
+        })
+        rows.append({
+            "group": "futures", "key": mcfg.tp_lane_key(lane),
+            "default": 0.0, "category": "monitor",
+            "description": (f"Lane {lane}: batas TP dalam kelipatan ATR hasil belajar. "
+                            "0 = belum ada, pakai batas global. Hanya berlaku bila "
+                            "monitor_exit_learning_enabled menyala."),
+        })
+        rows.append({
+            "group": "futures", "key": f"lane_cap_{lane}",
+            "default": _LANE_CAP_DEFAULTS.get(lane, DEFAULT_LANE_CAP),
+            "category": "risk",
+            "description": f"Lane {lane}: batas maksimum jarak SL terhadap margin (%)",
+        })
+        rows.append({
+            "group": "futures", "key": f"monitor_max_loss_pct_{lane}",
+            "default": _MAX_LOSS_DEFAULTS.get(lane, DEFAULT_MAX_LOSS_PCT),
+            "category": "risk",
+            "description": (f"Lane {lane}: rugi maksimum (% margin) sebelum posisi "
+                            "di-force-close. Gerbang keluar paling keras."),
+        })
+
+    # Tangga kunci profit — tiap anak tangga satu pasang baris, jumlahnya ikut
+    # panjang tangga sehingga menambah/mengurangi tier tak perlu edit di sini.
+    for i, (peak, keep) in enumerate(mcfg._FROZEN["PROFIT_LOCK_TIERS"], start=1):
+        rows.append({
+            "group": "futures", "key": f"monitor_profit_lock_peak_t{i}",
+            "default": peak, "category": "monitor",
+            "description": f"Kunci profit tier {i}: puncak P&L (% margin) yang memicu tier ini",
+        })
+        rows.append({
+            "group": "futures", "key": f"monitor_profit_lock_keep_t{i}",
+            "default": keep, "category": "monitor",
+            "description": (f"Kunci profit tier {i}: porsi puncak yang wajib dipertahankan "
+                            f"(0.90 = boleh dikembalikan 10%)"),
+        })
+    return rows
+
+
+def all_defaults() -> list[dict]:
+    """Seluruh baris config bawaan — yang statis maupun yang tumbuh per lane/tier.
+
+    Pakai ini, bukan `DEFAULTS` langsung: `DEFAULTS` saja tidak memuat baris
+    per-lane sehingga apa pun yang membacanya akan melihat gambaran yang kurang.
+    """
+    return DEFAULTS + _monitor_lane_defaults()
 
 
 async def seed_agent_config_defaults() -> int:
@@ -193,7 +277,8 @@ async def seed_agent_config_defaults() -> int:
         existing = await session.execute(select(AgentConfig.agent_group, AgentConfig.key))
         existing_keys = {(g, k) for g, k in existing.all()}
 
-        for d in DEFAULTS:
+        # Baris statis + baris yang tumbuh mengikuti jumlah lane / tier.
+        for d in all_defaults():
             if (d["group"], d["key"]) in existing_keys:
                 continue
             session.add(AgentConfig(

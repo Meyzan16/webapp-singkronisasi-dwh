@@ -13,10 +13,16 @@ from agents.futures import monitor_config as mcfg
 @pytest.fixture(autouse=True)
 def _restore():
     """Kembalikan state modul — nilainya global, bocor antar test bila dibiarkan."""
-    saved = (mcfg.TP_MAX_ATR_MULT, mcfg.EXIT_LEARNING_ENABLED, dict(mcfg.TP_ATR_BY_LANE))
+    saved = {v: getattr(mcfg, v) for v in mcfg._KEYS}
+    saved_maps = {
+        "TP_ATR_BY_LANE":        dict(mcfg.TP_ATR_BY_LANE),
+        "TIME_STOP_MIN_BY_LANE": dict(mcfg.TIME_STOP_MIN_BY_LANE),
+        "FAILFAST_LANES":        set(mcfg.FAILFAST_LANES),
+        "PROFIT_LOCK_TIERS":     list(mcfg.PROFIT_LOCK_TIERS),
+    }
     yield
-    mcfg.TP_MAX_ATR_MULT, mcfg.EXIT_LEARNING_ENABLED, mcfg.TP_ATR_BY_LANE = (
-        saved[0], saved[1], saved[2])
+    for name, value in {**saved, **saved_maps}.items():
+        setattr(mcfg, name, value)
 
 
 def test_default_tanpa_efek():
@@ -69,6 +75,98 @@ def test_kunci_config_per_lane_ikut_registry():
 
 def test_saklar_terdaftar_di_config_defaults():
     """Saklar wajib punya baris default, kalau tidak ia tak muncul di UI Settings."""
-    from app.services.agent_config_defaults import DEFAULTS
-    keys = {d["key"] for d in DEFAULTS if d["group"] == "futures"}
+    from app.services.agent_config_defaults import all_defaults
+    keys = {d["key"] for d in all_defaults() if d["group"] == "futures"}
     assert "monitor_exit_learning_enabled" in keys
+
+
+# ── M2: monitor.py wajib membaca monitor_config, bukan salinan lokal ──────────
+
+def test_monitor_tak_punya_salinan_ambang_keputusan():
+    """Akar masalah M2: `refresh()` dipanggil tiap siklus tapi monitor memakai
+    konstanta lokalnya sendiri, sehingga menala dari UI tak berpengaruh apa pun.
+    Test ini gagal bila ada yang menyalin ambang keputusan kembali ke monitor.py."""
+    import agents.futures.monitor as mon
+    bocor = [v for v in mcfg._KEYS if hasattr(mon, v)]
+    assert not bocor, f"ambang ini disalin ulang di monitor.py: {bocor}"
+    for v in ("TIME_STOP_MIN_BY_LANE", "FAILFAST_LANES", "PROFIT_LOCK_TIERS",
+              "_PROFIT_LOCK_TIERS", "FUTURES_ROTATION_MIN_DAYS"):
+        assert not hasattr(mon, v), f"{v} masih hidup di monitor.py"
+
+
+def test_refresh_tanpa_override_tak_mengubah_apa_pun(monkeypatch):
+    """Menyambungkan kabel tak boleh mengubah perilaku: tanpa satu pun baris DB,
+    nilai sesudah refresh harus persis sama dengan nilai bawaan."""
+    import asyncio
+    from agents.shared.config_reader import cfg
+
+    async def _no_override(group, key, default):
+        return default
+
+    monkeypatch.setattr(cfg, "get", _no_override)
+    before = mcfg.snapshot()
+    asyncio.run(mcfg.refresh())
+    assert mcfg.snapshot() == before
+
+
+def test_default_tak_hanyut_setelah_override(monkeypatch):
+    """Default WAJIB dibaca dari salinan beku. Kalau dibaca dari variabel modul
+    yang baru saja ditimpa, satu override akan jadi 'default' selamanya dan
+    menghapus baris config tak lagi memulihkan perilaku asli."""
+    import asyncio
+    from agents.shared.config_reader import cfg
+
+    async def _override_bigmover(group, key, default):
+        return 5.0 if key == "monitor_time_stop_min_bigmover" else default
+
+    monkeypatch.setattr(cfg, "get", _override_bigmover)
+    asyncio.run(mcfg.refresh())
+    assert mcfg.TIME_STOP_MIN_BY_LANE["bigmover"] == 5.0
+
+    async def _no_override(group, key, default):
+        return default
+
+    monkeypatch.setattr(cfg, "get", _no_override)
+    asyncio.run(mcfg.refresh())
+    assert mcfg.TIME_STOP_MIN_BY_LANE["bigmover"] == 90.0   # pulih, bukan 5.0
+
+
+def test_setiap_lane_punya_baris_config_lengkap():
+    """Pertumbuhan: lane baru harus otomatis dapat SEMUA baris config-nya.
+    Lane `bigmover` dulu lahir dengan sebagian baris hilang tanpa satu pun error."""
+    from app.services.agent_config_defaults import all_defaults
+    keys = {d["key"] for d in all_defaults() if d["group"] == "futures"}
+    for lane in mcfg.tunable_lanes():
+        for prefix in ("monitor_time_stop_min_", "monitor_failfast_enabled_",
+                       "monitor_tp_atr_mult_lane_", "lane_cap_"):
+            assert f"{prefix}{lane}" in keys, f"lane {lane} kehilangan {prefix}*"
+
+
+def test_default_baris_config_sama_dengan_nilai_runtime():
+    """Baris config yang default-nya beda dari nilai kode = jebakan senyap:
+    menyimpan nilai lewat UI akan menggeser perilaku walau operator merasa tak
+    mengubah apa-apa."""
+    from app.services.agent_config_defaults import all_defaults
+    from agents.futures.monitor import _LANE_CAP_DEFAULTS, _MAX_LOSS_DEFAULTS
+
+    by_key = {d["key"]: d["default"] for d in all_defaults() if d["group"] == "futures"}
+    for var, key in mcfg._KEYS.items():
+        assert by_key[key] == getattr(mcfg, var), f"{key} default tak cocok"
+    for lane in mcfg.tunable_lanes():
+        assert by_key[f"lane_cap_{lane}"] == _LANE_CAP_DEFAULTS[lane]
+        assert by_key[f"monitor_max_loss_pct_{lane}"] == _MAX_LOSS_DEFAULTS[lane]
+
+
+def test_tangga_kunci_profit_tetap_urut_walau_ditala_terbalik(monkeypatch):
+    """Tier paling ketat harus tetap menang walau operator mengisi urutan acak —
+    kalau tidak, tier rendah akan menutup posisi lebih dulu dan tier tinggi mati."""
+    import asyncio
+    from agents.shared.config_reader import cfg
+
+    async def _flip(group, key, default):
+        return 500.0 if key == "monitor_profit_lock_peak_t5" else default
+
+    monkeypatch.setattr(cfg, "get", _flip)
+    asyncio.run(mcfg.refresh())
+    peaks = [p for p, _ in mcfg.PROFIT_LOCK_TIERS]
+    assert peaks == sorted(peaks, reverse=True)
