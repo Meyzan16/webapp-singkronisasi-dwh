@@ -367,6 +367,24 @@ async def exit_learning_recommendations(days: int = Query(90, ge=1, le=365)) -> 
     return await recommend_exit_params(days=days)
 
 
+@router.get("/futures/exit-learning/triggers", dependencies=[Depends(require_db)])
+async def exit_learning_triggers(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Adili tiap pemicu exit dini per lane: menyelamatkan, atau justru merugikan?
+
+    Ukurannya perbandingan terhadap alternatifnya — kerugian yang direalisasi vs
+    jarak SL yang akan kena bila posisi dibiarkan.
+    """
+    from agents.learning.exit_learning import analyze_exit_triggers
+    return await analyze_exit_triggers(days=days)
+
+
+@router.get("/futures/exit-learning/failfast", dependencies=[Depends(require_db)])
+async def exit_learning_failfast(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Usulan gap fail-fast per lane, diturunkan dari ledger keluar."""
+    from agents.learning.exit_learning import recommend_failfast_params
+    return await recommend_failfast_params(days=days)
+
+
 @router.post("/futures/exit-learning/apply", dependencies=[Depends(require_db)])
 async def exit_learning_apply(days: int = Query(90, ge=1, le=365),
                               dry_run: bool = Query(True)) -> dict:

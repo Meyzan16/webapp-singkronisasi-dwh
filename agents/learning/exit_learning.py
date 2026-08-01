@@ -251,6 +251,135 @@ async def recommend_exit_params(days: int = 90) -> dict:
             "premature_threshold_atr": PREMATURE_MFE_ATR}
 
 
+# ── M3: apakah pemicu exit dini benar-benar mengalahkan SL? ───────────────────
+
+#: Alasan close yang merupakan pemotongan DINI sukarela — monitor memilih keluar
+#: lebih awal padahal SL belum tersentuh. Hanya alasan seperti ini yang layak
+#: diadili dengan pertanyaan "apakah lebih baik daripada membiarkan SL bekerja?".
+#: Prefiks `hist:` ikut dikenali supaya baris hasil backfill tak terbuang.
+EARLY_EXIT_REASONS = {"fail_fast", "time_stop_scratch", "rugpull_exit",
+                      "flash_dump_exit", "flash_pump_exit"}
+
+#: Sampel minimum sebelum sebuah (lane × pemicu) boleh menghasilkan usulan.
+MIN_SAMPLES_PER_TRIGGER = 5
+
+#: Batas aman: gap yang diusulkan tak boleh melampaui ini, supaya satu lane
+#: bervolatilitas aneh tak menghasilkan angka yang mematikan pemicu di mana-mana.
+MAX_SUGGESTED_GAP = 6.0
+
+
+def _strip_hist(reason: str) -> str:
+    """Buang penanda `hist:` — alasan hasil tebakan backfill tetap dianalisa,
+    tapi asal-usulnya dilaporkan terpisah supaya tak dikira data langsung."""
+    return reason[5:] if reason.startswith("hist:") else reason
+
+
+async def analyze_exit_triggers(days: int = 90) -> dict:
+    """Adili tiap pemicu exit dini per lane: menyelamatkan, atau justru merugikan?
+
+    Ukurannya bukan untung/rugi mentah, melainkan perbandingan terhadap
+    **alternatifnya**: kalau posisi dibiarkan, kerugian terburuknya adalah jarak
+    SL. Pemotongan dini yang merealisasi kerugian sebesar — atau lebih besar
+    dari — jarak SL berarti tidak menyelamatkan apa pun.
+
+    `sl_gap` = jarak SL ÷ ambang pemicu. Gap kecil berarti pemicu nyaris berimpit
+    dengan SL; di sana memotong dini hampir tak ada gunanya tapi membuang seluruh
+    peluang harga berbalik.
+    """
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+    cutoff = time.time() - days * 86400
+
+    async with AsyncSessionLocal() as session:
+        rows = list((await session.execute(
+            select(FuturesExitEvent).where(FuturesExitEvent.closed_at >= cutoff)
+        )).scalars().all())
+
+    buckets: dict[tuple[str, str], list] = {}
+    for r in rows:
+        reason = _strip_hist(r.close_reason or "")
+        if reason in EARLY_EXIT_REASONS:
+            buckets.setdefault((r.lane or "-", reason), []).append(r)
+
+    out = []
+    for (lane, reason), group in sorted(buckets.items(), key=lambda kv: -len(kv[1])):
+        realized = [abs(r.realized_atr) for r in group
+                    if r.realized_atr is not None and r.realized_atr < 0]
+        sl_dists = [r.sl_dist_atr for r in group if r.sl_dist_atr]
+        pnls = [r.pnl_pct for r in group if r.pnl_pct is not None]
+        wins = [p for p in pnls if p > 0]
+        # Gap nyata tiap trade: seberapa jauh SL dibanding titik potong.
+        gaps = [round(r.sl_dist_atr / abs(r.realized_atr), 3)
+                for r in group
+                if r.sl_dist_atr and r.realized_atr and r.realized_atr < 0]
+        # Berapa banyak yang justru merugi SEBESAR atau LEBIH dari jarak SL —
+        # di situ pemotongan dini benar-benar tak menyelamatkan apa pun.
+        no_saving = sum(1 for r in group
+                        if r.sl_dist_atr and r.realized_atr
+                        and abs(r.realized_atr) >= r.sl_dist_atr)
+        out.append({
+            "lane": lane, "trigger": reason, "n": len(group),
+            "win_rate": round(100.0 * len(wins) / len(pnls), 1) if pnls else None,
+            "expectancy_pct": round(sum(pnls) / len(pnls), 3) if pnls else None,
+            "realized_atr_median": round(median(realized), 3) if realized else None,
+            "sl_dist_atr_median": round(median(sl_dists), 3) if sl_dists else None,
+            "sl_gap_median": round(median(gaps), 3) if gaps else None,
+            "no_saving_frac": round(no_saving / len(group), 3) if group else None,
+            "from_backfill": all((r.close_reason or "").startswith("hist:") for r in group),
+        })
+
+    return {"status": "ok", "window_days": days, "n": len(rows), "triggers": out,
+            "min_samples": MIN_SAMPLES_PER_TRIGGER}
+
+
+async def recommend_failfast_params(days: int = 90) -> dict:
+    """Usulan gap fail-fast per lane, diturunkan dari ledger.
+
+    Logikanya sederhana dan bisa diperiksa: bila di sebuah lane fail-fast belum
+    pernah menang DAN sebagian besar exit-nya tak menyelamatkan apa pun, usulkan
+    gap tepat di atas gap yang selama ini terjadi — sehingga pemotongan dini
+    padam di lane itu, tapi tetap hidup di lane yang SL-nya memang jauh.
+    """
+    trig = await analyze_exit_triggers(days=days)
+    if trig.get("status") != "ok":
+        return trig
+
+    recs = []
+    for row in trig["triggers"]:
+        if row["trigger"] != "fail_fast":
+            continue
+        lane, n = row["lane"], row["n"]
+        if n < MIN_SAMPLES_PER_TRIGGER:
+            recs.append({"lane": lane, "n": n, "status": "sampel_kurang",
+                         "required": MIN_SAMPLES_PER_TRIGGER})
+            continue
+        merugikan = (row["win_rate"] == 0.0
+                     and (row["no_saving_frac"] or 0.0) >= 0.5)
+        gap_med = row["sl_gap_median"]
+        if not merugikan or not gap_med:
+            recs.append({"lane": lane, "n": n, "status": "biarkan",
+                         "win_rate": row["win_rate"],
+                         "sl_gap_median": gap_med,
+                         "note": "pemicu ini belum terbukti merugikan di lane ini"})
+            continue
+        suggested = min(round(gap_med + 0.25, 2), MAX_SUGGESTED_GAP)
+        recs.append({
+            "lane": lane, "n": n, "status": "ok",
+            "suggested_gap": suggested,
+            "sl_gap_median": gap_med,
+            "win_rate": row["win_rate"],
+            "no_saving_frac": row["no_saving_frac"],
+            "expectancy_pct": row["expectancy_pct"],
+            "note": (f"fail-fast di lane ini menutup {n} posisi tanpa satu pun menang, "
+                     f"dan {row['no_saving_frac']:.0%} di antaranya rugi sebesar atau "
+                     f"lebih dari jarak SL — memotong dini tak menyelamatkan apa pun. "
+                     f"Gap {suggested} memadamkannya di sini tanpa menyentuh lane lain."),
+        })
+
+    return {"status": "ok", "window_days": days, "recommendations": recs,
+            "max_gap": MAX_SUGGESTED_GAP}
+
+
 # ── Penerapan ─────────────────────────────────────────────────────────────────
 
 async def apply_exit_recommendations(days: int = 90, dry_run: bool = True) -> dict:
@@ -272,26 +401,42 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True) -> di
     mengusulkan, penyalaan tetap keputusan pemilik.
     """
     from app.models.agent_config import AgentConfig
-    from agents.futures.monitor_config import tp_lane_key
+    from agents.futures.monitor_config import tp_lane_key, failfast_gap_key
 
     reco = await recommend_exit_params(days=days)
     if reco.get("status") != "ok":
         return reco
 
     planned, skipped = [], []
+
+    # M3 — gap fail-fast per lane. Dipasang lewat jalur yang sama supaya satu
+    # tombol menerapkan seluruh hasil belajar sisi keluar, bukan tersebar.
+    ff = await recommend_failfast_params(days=days)
+    for rec in ff.get("recommendations", []):
+        lane = rec["lane"]
+        if rec.get("status") != "ok":
+            skipped.append({"lane": lane, "target": "failfast_gap",
+                            "reason": rec.get("status"), "n": rec.get("n")})
+            continue
+        planned.append({"lane": lane, "key": failfast_gap_key(lane),
+                        "value": rec["suggested_gap"], "target": "failfast_gap",
+                        "n": rec["n"], "note": rec["note"]})
+
     for rec in reco["recommendations"]:
         lane = rec["lane"]
         if rec.get("status") != "ok":
-            skipped.append({"lane": lane, "reason": "sampel_kurang", "n": rec.get("n")})
+            skipped.append({"lane": lane, "target": "tp_atr",
+                            "reason": "sampel_kurang", "n": rec.get("n")})
             continue
         if rec.get("premature_frac", 0.0) >= 0.5:
-            skipped.append({"lane": lane, "reason": "mayoritas_exit_prematur",
+            skipped.append({"lane": lane, "target": "tp_atr",
+                            "reason": "mayoritas_exit_prematur",
                             "premature_frac": rec["premature_frac"]})
             continue
         if not rec.get("suggested_tp_atr"):
-            skipped.append({"lane": lane, "reason": "usulan_kosong"})
+            skipped.append({"lane": lane, "target": "tp_atr", "reason": "usulan_kosong"})
             continue
-        planned.append({"lane": lane, "key": tp_lane_key(lane),
+        planned.append({"lane": lane, "key": tp_lane_key(lane), "target": "tp_atr",
                         "value": rec["suggested_tp_atr"],
                         "current_tp_atr": rec.get("current_tp_atr"),
                         "would_be_reached_pct": rec.get("would_be_reached_pct"),
@@ -312,9 +457,8 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True) -> di
                 session.add(AgentConfig(
                     agent_group="futures", key=item["key"],
                     value_num=item["value"], default_num=0.0,
-                    description=(f"Batas TP lane {item['lane']} dalam kelipatan ATR, "
-                                 f"dipelajari dari {item['n']} exit nyata. "
-                                 "0 = pakai batas global."),
+                    description=(f"Lane {item['lane']}: {item['target']} hasil belajar "
+                                 f"dari {item['n']} exit nyata. 0 = pakai nilai global."),
                     category="monitor", updated_by="exit_learning",
                 ))
             else:

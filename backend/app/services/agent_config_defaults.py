@@ -168,6 +168,8 @@ DEFAULTS: list[dict] = [
      "description": "Rugi (% margin) yang membuat posisi dipindah ke loop cepat 30 detik"},
     {"group": "futures", "key": "monitor_fast_loop_liq_dist_pct", "default": 10.0, "category": "monitor",
      "description": "Jarak ke harga likuidasi (%) yang membuat posisi dipindah ke loop cepat 30 detik"},
+    {"group": "futures", "key": "monitor_failfast_min_sl_gap", "default": 0.0, "category": "monitor",
+     "description": "M3 (DEFAULT 0=MATI): fail-fast hanya boleh memotong dini bila jarak SL minimal sekian kali ambang fail-fast. Bukti 1 Agu: di lane ber-SL sempit (bigmover, SL 1,5x ATR vs pemicu 1,0x ATR) pemotongan dini tak menyelamatkan apa pun - 8 exit, 0 menang, satu di antaranya malah rugi lebih besar daripada bila SL dibiarkan bekerja."},
     {"group": "futures", "key": "monitor_exit_learning_enabled", "default": 0.0, "category": "monitor",
      "description": "PRIORITAS 2 (DEFAULT 0=MATI): izinkan monitor memakai batas TP per-lane hasil belajar dari ledger keluar (monitor_tp_atr_mult_lane_*). Selama 0, angka hasil belajar boleh ditulis dan diamati tapi tidak mempengaruhi satu pun keputusan tutup posisi."},
 
@@ -220,6 +222,13 @@ def _monitor_lane_defaults() -> list[dict]:
             "default": 0.0, "category": "monitor",
             "description": (f"Lane {lane}: batas TP dalam kelipatan ATR hasil belajar. "
                             "0 = belum ada, pakai batas global. Hanya berlaku bila "
+                            "monitor_exit_learning_enabled menyala."),
+        })
+        rows.append({
+            "group": "futures", "key": mcfg.failfast_gap_key(lane),
+            "default": 0.0, "category": "monitor",
+            "description": (f"Lane {lane}: gap SL minimum untuk fail-fast, hasil belajar. "
+                            "0 = belum ada, pakai gap global. Hanya berlaku bila "
                             "monitor_exit_learning_enabled menyala."),
         })
         rows.append({

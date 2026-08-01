@@ -18,6 +18,7 @@ def _restore():
         "TP_ATR_BY_LANE":        dict(mcfg.TP_ATR_BY_LANE),
         "TIME_STOP_MIN_BY_LANE": dict(mcfg.TIME_STOP_MIN_BY_LANE),
         "FAILFAST_LANES":        set(mcfg.FAILFAST_LANES),
+        "FAILFAST_SL_GAP_BY_LANE": dict(mcfg.FAILFAST_SL_GAP_BY_LANE),
         "PROFIT_LOCK_TIERS":     list(mcfg.PROFIT_LOCK_TIERS),
     }
     yield
@@ -155,6 +156,67 @@ def test_default_baris_config_sama_dengan_nilai_runtime():
     for lane in mcfg.tunable_lanes():
         assert by_key[f"lane_cap_{lane}"] == _LANE_CAP_DEFAULTS[lane]
         assert by_key[f"monitor_max_loss_pct_{lane}"] == _MAX_LOSS_DEFAULTS[lane]
+
+
+# ── M3: fail-fast wajib unggul jelas atas SL ─────────────────────────────────
+
+def test_failfast_default_tak_mengubah_perilaku():
+    """Tanpa gap, semua pemotongan dini tetap diizinkan seperti sebelumnya."""
+    assert mcfg.FAILFAST_MIN_SL_GAP == 0.0
+    allowed, gap = mcfg.failfast_allowed("bigmover", sl_dist_pct=1.5, threshold_pct=1.0)
+    assert allowed and gap == 1.5
+
+
+def test_failfast_padam_saat_sl_nyaris_berimpit():
+    """Kasus bigmover: SL 1,5×ATR vs pemicu 1,0×ATR → gap 1,5, di bawah syarat 2,0.
+    Memotong di sini nyaris tak menyelamatkan apa pun."""
+    mcfg.FAILFAST_MIN_SL_GAP = 2.0
+    allowed, gap = mcfg.failfast_allowed("bigmover", sl_dist_pct=1.5, threshold_pct=1.0)
+    assert not allowed and gap == 1.5
+
+
+def test_failfast_tetap_hidup_saat_sl_jauh():
+    """Kasus momentum: SL ~5,4×ATR vs pemicu ~1,7×ATR → gap 3,2, lolos syarat 2,0.
+    Satu ambang yang sama harus bisa memadamkan satu lane tanpa menyentuh lane lain."""
+    mcfg.FAILFAST_MIN_SL_GAP = 2.0
+    allowed, gap = mcfg.failfast_allowed("momentum", sl_dist_pct=5.4, threshold_pct=1.7)
+    assert allowed and gap > 3.0
+
+
+def test_gap_belajar_diabaikan_saat_saklar_mati():
+    mcfg.FAILFAST_SL_GAP_BY_LANE = {"bigmover": 2.0}
+    mcfg.EXIT_LEARNING_ENABLED = 0.0
+    assert mcfg.failfast_sl_gap("bigmover") == mcfg.FAILFAST_MIN_SL_GAP
+
+
+def test_gap_belajar_hanya_untuk_lane_pemiliknya():
+    mcfg.EXIT_LEARNING_ENABLED = 1.0
+    mcfg.FAILFAST_MIN_SL_GAP = 0.0
+    mcfg.FAILFAST_SL_GAP_BY_LANE = {"bigmover": 2.0}
+    assert mcfg.failfast_sl_gap("bigmover") == 2.0
+    assert mcfg.failfast_sl_gap("momentum") == 0.0     # tak meminjam angka lane lain
+
+
+def test_ambang_nol_tak_pernah_memblokir():
+    """Baris lama tanpa atr_pct bisa memberi ambang 0 — jangan sampai pembagian
+    itu memblokir semua pemotongan dini secara diam-diam."""
+    mcfg.FAILFAST_MIN_SL_GAP = 99.0
+    allowed, gap = mcfg.failfast_allowed("bigmover", sl_dist_pct=1.5, threshold_pct=0.0)
+    assert allowed and gap == 0.0
+
+
+def test_monitor_mencatat_pemotongan_yang_ditolak():
+    """Penjaga yang menolak dalam diam mustahil diaudit — wajib ada pencacahnya."""
+    import agents.futures.monitor as mon
+    assert "fail_fast_suppressed" in mon.get_state()
+
+
+def test_gap_failfast_punya_baris_config_tiap_lane():
+    from app.services.agent_config_defaults import all_defaults
+    keys = {d["key"] for d in all_defaults() if d["group"] == "futures"}
+    assert "monitor_failfast_min_sl_gap" in keys
+    for lane in mcfg.tunable_lanes():
+        assert mcfg.failfast_gap_key(lane) in keys
 
 
 def test_tangga_kunci_profit_tetap_urut_walau_ditala_terbalik(monkeypatch):

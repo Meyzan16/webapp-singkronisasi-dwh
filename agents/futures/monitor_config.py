@@ -66,6 +66,65 @@ FAILFAST_CONFIRM_FRAC = 0.8        # candle sebelumnya harus ikut melawan (bukan
 FAILFAST_LANE_DEFAULTS: dict[str, float] = {"momentum": 1.0, "bigmover": 1.0}
 FAILFAST_LANES: set[str] = {lane for lane, on in FAILFAST_LANE_DEFAULTS.items() if on > 0}
 
+# ── M3: fail-fast wajib unggul jelas atas SL ──────────────────────────────────
+# BUKTI (8 exit fail_fast, 0% menang, expectancy −3,595% — terburuk dari semua
+# alasan close):
+#
+#   lane      SL terpasang    fail-fast memicu di   realisasi
+#   bigmover  1,5× ATR        1,0× ATR              −1,17 s/d −2,27× ATR
+#   momentum  5,3–6,5× ATR    ~1,7× ATR             −1,42 s/d −1,79× ATR
+#
+# Di bigmover pemicunya nyaris BERIMPIT dengan SL: memotong di 1,0× ATR saat SL
+# ada di 1,5× ATR hampir tak menyelamatkan apa pun, tapi membuang seluruh peluang
+# harga berbalik. Satu trade (ARXUSDT) bahkan realisasi −2,27× ATR — LEBIH BURUK
+# daripada membiarkan SL bekerja. Di momentum sebaliknya: SL 5–6× ATR, jadi
+# fail-fast benar-benar memotong lebih dini dan berguna.
+#
+# `FAILFAST_MIN_SL_GAP` mensyaratkan SL cukup jauh dari ambang fail-fast sebelum
+# pemotongan dini diizinkan: `jarak_SL ≥ gap × ambang_failfast`. Contoh gap 2,0
+# berarti "hanya potong dini bila SL setidaknya 2× lebih jauh" — di bigmover
+# (1,5/1,0 = 1,5×) fail-fast padam, di momentum (≈3,5×) tetap jalan.
+#
+# DEFAULT 0 = MATI (perilaku lama persis). Sampelnya baru 8 — angka ini
+# disediakan agar bisa DIUJI dengan data, bukan diklaim sebagai solusi.
+FAILFAST_MIN_SL_GAP = 0.0
+
+#: Gap per lane hasil belajar dari ledger keluar. Kosong = pakai gap global.
+FAILFAST_SL_GAP_BY_LANE: dict[str, float] = {}
+FAILFAST_GAP_KEY_PREFIX = "monitor_failfast_min_sl_gap_"
+
+
+def failfast_gap_key(lane: str) -> str:
+    """Kunci `agent_config` untuk gap fail-fast sebuah lane."""
+    return f"{FAILFAST_GAP_KEY_PREFIX}{lane}"
+
+
+def failfast_sl_gap(lane: str = "") -> float:
+    """Gap yang berlaku untuk sebuah lane.
+
+    Sama seperti batas TP: angka hasil belajar hanya dipakai bila saklar belajar
+    menyala, dan lane tanpa angka sendiri jatuh ke gap global — tidak meminjam
+    angka lane lain.
+    """
+    if EXIT_LEARNING_ENABLED > 0 and lane:
+        learned = FAILFAST_SL_GAP_BY_LANE.get(lane, 0.0)
+        if learned > 0:
+            return learned
+    return FAILFAST_MIN_SL_GAP
+
+
+def failfast_allowed(lane: str, sl_dist_pct: float, threshold_pct: float) -> tuple[bool, float]:
+    """Boleh memotong dini? Return `(boleh, gap_nyata)`.
+
+    `gap_nyata` = berapa kali lipat SL lebih jauh dari ambang fail-fast; dikembalikan
+    supaya monitor bisa MENCATAT alasan penolakan, bukan diam-diam tak bertindak.
+    """
+    if threshold_pct <= 0:
+        return True, 0.0
+    actual = sl_dist_pct / threshold_pct
+    required = failfast_sl_gap(lane)
+    return (actual >= required if required > 0 else True), round(actual, 3)
+
 # ── Kunci profit absolut (G5b) ────────────────────────────────────────────────
 # Makin tinggi puncak profit, makin sedikit yang boleh dikembalikan ke pasar.
 # Diurut dari puncak tertinggi supaya tier paling ketat yang menang.
@@ -191,6 +250,7 @@ _KEYS: dict[str, str] = {
     "FAST_LOOP_LEVERAGE_MIN":    "monitor_fast_loop_leverage_min",
     "FAST_LOOP_MARGIN_LOSS_PCT": "monitor_fast_loop_margin_loss_pct",
     "FAST_LOOP_LIQ_DIST_PCT":    "monitor_fast_loop_liq_dist_pct",
+    "FAILFAST_MIN_SL_GAP":       "monitor_failfast_min_sl_gap",
 }
 
 _INT_KEYS = {"MAX_AGE_EXTENSIONS", "RUGPULL_CANDLES"}
@@ -226,6 +286,11 @@ async def refresh() -> None:
             lane: mult
             for lane in _known_lanes()
             if (mult := await cfg.get("futures", tp_lane_key(lane), 0.0)) > 0
+        }
+        globs["FAILFAST_SL_GAP_BY_LANE"] = {
+            lane: gap
+            for lane in tunable_lanes()
+            if (gap := await cfg.get("futures", failfast_gap_key(lane), 0.0)) > 0
         }
 
         # Lane yang dikenal = lane registry + lane yang sudah punya default.
@@ -304,5 +369,6 @@ def snapshot() -> dict:
     snap["tp_atr_mult_by_lane"]  = dict(TP_ATR_BY_LANE)
     snap["time_stop_min_by_lane"] = dict(TIME_STOP_MIN_BY_LANE)
     snap["failfast_lanes"]        = sorted(FAILFAST_LANES)
+    snap["failfast_sl_gap_by_lane"] = dict(FAILFAST_SL_GAP_BY_LANE)
     snap["profit_lock_tiers"]     = [list(t) for t in PROFIT_LOCK_TIERS]
     return snap

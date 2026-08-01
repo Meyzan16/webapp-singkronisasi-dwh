@@ -132,6 +132,9 @@ _liq_guards        = 0   # positions closed by liquidation guard
 _tp_extended       = 0   # positions with TP extended
 _max_loss_closes   = 0   # PLAN_v2 P1.1 — positions closed by hard max-loss-per-trade gate
 _derisk_partials   = 0   # PLAN_v2 P1.5 — F79 widening triggered partial de-risk
+# M3: pemotongan dini yang DITOLAK karena SL terlalu dekat dengan ambang fail-fast.
+# Dihitung supaya penjaga baru ini terlihat kerjanya, bukan bekerja dalam diam.
+_ff_suppressed     = 0
 _today: Optional[str] = None  # F61: track date for daily closed_today reset
 
 # P5.4: fast loop — trade IDs identified as high-risk in the last main cycle
@@ -159,6 +162,7 @@ def get_state() -> dict:
         "tp_extended":     _tp_extended,
         "max_loss_closes": _max_loss_closes,    # PLAN_v2 P1.1
         "derisk_partials": _derisk_partials,    # PLAN_v2 P1.5
+        "fail_fast_suppressed": _ff_suppressed,  # M3
     }
 
 
@@ -598,7 +602,7 @@ async def check_futures_positions() -> tuple[int, int]:
       3. Trail SL: breakeven + TP1 trail
       4. TP extension: if position is profitable + score stays high → extend to TP3
     """
-    global _liq_guards, _tp_extended, _max_loss_closes, _derisk_partials
+    global _liq_guards, _tp_extended, _max_loss_closes, _derisk_partials, _ff_suppressed
 
     if not is_db_available():
         return 0, 0   # B3: tuple — caller unpacks (closed, updated)
@@ -977,7 +981,27 @@ async def check_futures_positions() -> tuple[int, int]:
                                 _confirm_ff = _prev_adverse >= _thresh_ff * mcfg.FAILFAST_CONFIRM_FRAC
                             except (IndexError, ValueError):
                                 _confirm_ff = False
-                        if _confirm_ff:
+                        # M3: pemotongan dini hanya masuk akal bila SL memang jauh.
+                        # Kalau SL cuma sedikit lebih jauh dari ambang fail-fast,
+                        # memotong sekarang nyaris tak menyelamatkan apa pun tapi
+                        # membuang seluruh peluang harga berbalik.
+                        _gap_ok, _gap_actual = mcfg.failfast_allowed(
+                            lane, _risk_pct_ff, _thresh_ff)
+                        if _confirm_ff and not _gap_ok:
+                            # Ditolak, TAPI dicatat — supaya bisa diukur berapa
+                            # sering ini terjadi dan bagaimana akhirnya posisi itu.
+                            _ff_suppressed += 1
+                            _append_trade_event(meta, "fail_fast_suppressed", {
+                                "lane":       lane,
+                                "sl_gap":     _gap_actual,
+                                "gap_needed": mcfg.failfast_sl_gap(lane),
+                                "pnl_pct":    round(_pnl_now_pct, 3),
+                            })
+                            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                            logger.info("fail_fast_suppressed", symbol=trade.symbol,
+                                        lane=lane, sl_gap=_gap_actual,
+                                        gap_needed=mcfg.failfast_sl_gap(lane))
+                        if _confirm_ff and _gap_ok:
                             new_status   = "sl"
                             close_price  = round(price, 8)
                             close_reason = "fail_fast"
@@ -987,6 +1011,10 @@ async def check_futures_positions() -> tuple[int, int]:
                                 "pnl_pct":    round(_pnl_now_pct, 3),
                                 "threshold":  round(_thresh_ff, 3),
                                 "peak_pnl":   round(_peak_pnl, 3),
+                                # M3: berapa kali lipat SL lebih jauh dari ambang —
+                                # inilah angka yang membedakan potong-dini berguna
+                                # (SL jauh) dari yang sia-sia (SL nyaris berimpit).
+                                "sl_gap":     _gap_actual,
                             })
                             trade.signals_json = json.dumps(meta, ensure_ascii=False)
                             logger.warning(
