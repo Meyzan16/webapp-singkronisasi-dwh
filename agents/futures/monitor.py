@@ -209,6 +209,51 @@ def get_state() -> dict:
 _EVENT_LOG_CAP = 30
 
 
+async def _log_exit_event(session, trade, meta: dict, *, lane: str, close_reason: str,
+                          status: str, pnl_net: float, pnl_dollar: float) -> None:
+    """Catat satu keputusan KELUAR ke `futures_exit_events`.
+
+    Semua jarak dinormalkan ke kelipatan ATR supaya lintas-koin sebanding — koin
+    ber-ATR 6% dan 1% tak bisa dibandingkan dalam persen mentah. Dibungkus
+    try/except: kegagalan pencatatan TIDAK BOLEH menggagalkan penutupan posisi.
+    """
+    try:
+        from app.models.futures_exit_event import FuturesExitEvent
+
+        entry = float(trade.entry_price or 0.0)
+        atr_pct = float(meta.get("atr_pct") or 0.0)
+        atr_abs = entry * (atr_pct / 100.0) if (entry and atr_pct) else 0.0
+        peak = float(meta.get("peak_pnl_pct") or 0.0)     # gerak favorable terjauh (%)
+
+        def _atr_units(pct_move: float) -> float | None:
+            return round(pct_move / atr_pct, 4) if atr_pct else None
+
+        tp_dist = abs(float(trade.take_profit) - entry) / entry * 100 if (entry and trade.take_profit) else None
+        sl_dist = abs(entry - float(trade.stop_loss)) / entry * 100 if (entry and trade.stop_loss) else None
+        entry_at = float(trade.entry_at or 0.0)
+        closed_at = float(trade.closed_at or time.time())
+
+        session.add(FuturesExitEvent(
+            trade_id=trade.id, symbol=trade.symbol, agent=trade.style,
+            lane=lane or "", direction=trade.direction, regime=trade.regime,
+            close_reason=close_reason, status=status,
+            entry_at=entry_at, closed_at=closed_at,
+            held_hours=round(max(0.0, (closed_at - entry_at) / 3600.0), 3),
+            pnl_pct=round(float(pnl_net), 4), pnl_dollar=pnl_dollar,
+            atr_pct=atr_pct or None,
+            mfe_atr=_atr_units(peak),
+            tp_dist_atr=_atr_units(tp_dist) if tp_dist is not None else None,
+            sl_dist_atr=_atr_units(sl_dist) if sl_dist is not None else None,
+            realized_atr=_atr_units(float(pnl_net)),
+            tp_compressed=bool(meta.get("tp_compressed")),
+            trail_active=bool(trade.trail_active),
+            leverage=trade.leverage, score=meta.get("score"),
+        ))
+    except Exception as exc:
+        logger.warning("exit_event_log_failed", symbol=getattr(trade, "symbol", "?"),
+                       error=str(exc)[:120])
+
+
 def _append_trade_event(meta: dict, kind: str, payload: dict | None = None) -> None:
     """Append an event to signals_json.events[] (FIFO-capped). Used by monitor to
     build a per-trade timeline visible from the UI."""
@@ -747,6 +792,19 @@ async def check_futures_positions() -> tuple[int, int]:
 
             entry        = trade.entry_price
             tp2          = trade.take_profit
+            # PRIORITAS 1 — batasi jarak TP ke kelipatan ATR yang realistis.
+            # Default MATI (monitor_tp_max_atr_mult = 0) sehingga TP apa adanya
+            # dan perilaku identik seperti sebelumnya. Saat dinyalakan, target
+            # hanya bisa MENDEKAT, tak pernah menjauh.
+            try:
+                from agents.futures import monitor_config as _mcfg
+                _tp_eff, _tp_compressed = _mcfg.effective_take_profit(
+                    entry, tp2, float(meta.get("atr_pct") or 0.0), trade.direction)
+                if _tp_compressed:
+                    tp2 = _tp_eff
+                    meta["tp_compressed"] = True
+            except Exception:
+                pass   # pencatatan/penyesuaian opsional — jangan ganggu monitor
             tp3          = meta.get("tp3")
             direction    = trade.direction
             leverage     = trade.leverage or meta.get("leverage", 5)
@@ -1300,6 +1358,16 @@ async def check_futures_positions() -> tuple[int, int]:
                     pnl_net=round(pnl_net, 2),
                     pnl_dollar=_total_pnl,
                     agent=trade.style,
+                )
+                # Ledger KELUAR — bahan belajar Adaptive Engine untuk MONITOR.
+                # Sebelumnya keputusan exit hanya menempel di signals_json.events[]
+                # (dibatasi 30 entri, tak bisa di-query/diagregasi), sehingga
+                # pertanyaan "alasan close mana yang menguntungkan / berapa jarak
+                # TP realistis" tak pernah bisa dijawab. Dinormalkan ke ATR agar
+                # koin ber-volatilitas beda tetap sebanding.
+                await _log_exit_event(
+                    session, trade, meta, lane=lane, close_reason=close_reason,
+                    status=new_status, pnl_net=pnl_net, pnl_dollar=_total_pnl,
                 )
                 continue
 
@@ -2023,6 +2091,16 @@ async def run_futures_monitor() -> None:
             # utils.py as a shared dict — mutate values IN PLACE (not rebind the
             # name) so `from utils import MAX_SL_MARGIN_PCT_BY_LANE` here and
             # anywhere else that imported it keep pointing at the same object.
+            # Ambang KEPUTUSAN monitor (umur, rotasi, fail-fast, rug-pull, biaya,
+            # dan batas TP relatif-ATR) ditarik dari satu sumber — lihat
+            # monitor_config.py. Dulu ~40 konstanta terkunci di kode: tak bisa
+            # ditala tanpa deploy dan tak bisa disentuh Adaptive Engine.
+            try:
+                from agents.futures import monitor_config as mcfg
+                await mcfg.refresh()
+            except Exception as exc:
+                logger.warning("monitor_config_pull_failed", error=str(exc)[:120])
+
             try:
                 from agents.shared.config_reader import cfg
                 # PLAN_v15 P9: fail-fast threshold is DB-tunable

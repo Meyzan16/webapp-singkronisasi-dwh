@@ -1,0 +1,69 @@
+"""Ledger keputusan KELUAR futures — bahan belajar Adaptive Engine untuk MONITOR.
+
+Latar (audit 1 Agu 2026): keputusan MASUK sudah punya ledger lengkap
+(`futures_decision_events`) sehingga engine bisa belajar dari entry. Keputusan
+KELUAR — yang justru menentukan hasil akhir — tidak punya apa pun: monitor hanya
+menempel event ke `signals_json.events[]` yang dibatasi 30 entri di dalam JSON
+per-trade, tak bisa di-query, tak bisa diagregasi, tak bisa dilatih.
+
+Akibatnya pertanyaan paling penting tak terjawab: alasan close mana yang
+menguntungkan? Kapan trailing terlalu cepat? Berapa jarak TP yang realistis per
+lane/regime? Tabel ini menyediakan datanya, dinormalkan terhadap ATR supaya
+antar-koin sebanding (koin ber-ATR 6% dan 1% tak bisa dibandingkan dalam %).
+"""
+
+from sqlalchemy import Boolean, Float, Index, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.database import Base
+
+
+class FuturesExitEvent(Base):
+    __tablename__ = "futures_exit_events"
+    __table_args__ = (
+        Index("ix_fee_closed_at", "closed_at"),
+        Index("ix_fee_reason", "close_reason", "closed_at"),
+        Index("ix_fee_lane", "lane", "closed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    #: Tautan ke posisi yang ditutup (paper_trades.id).
+    trade_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    symbol:   Mapped[str] = mapped_column(String(30), nullable=False)
+    agent:    Mapped[str] = mapped_column(String(40), nullable=False)
+    lane:     Mapped[str] = mapped_column(String(30), nullable=False, default="")
+    direction: Mapped[str] = mapped_column(String(5), nullable=False)
+    regime:   Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    #: Alasan penutupan (taksonomi monitor: tp2_hit, sl_hit, sl_plus, fail_fast, …).
+    close_reason: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    status:       Mapped[str] = mapped_column(String(10), nullable=False)   # tp | sl
+
+    entry_at:  Mapped[float] = mapped_column(Float, nullable=False)
+    closed_at: Mapped[float] = mapped_column(Float, nullable=False)
+    held_hours: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    #: Hasil (NET biaya bila tersedia).
+    pnl_pct:    Mapped[float | None] = mapped_column(Float, nullable=True)
+    pnl_dollar: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # ── Normalisasi terhadap volatilitas ─────────────────────────────────────
+    # Inilah yang membuat data bisa dibandingkan lintas koin & jadi fitur model.
+    atr_pct:        Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Gerak menguntungkan TERJAUH selama posisi hidup, dalam kelipatan ATR.
+    mfe_atr:        Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Jarak TP yang DIPASANG saat entry, dalam kelipatan ATR.
+    tp_dist_atr:    Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Jarak SL yang dipasang saat entry, dalam kelipatan ATR.
+    sl_dist_atr:    Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Hasil akhir dalam kelipatan ATR (bisa negatif).
+    realized_atr:   Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    #: Apakah TP efektif sempat dikompresi oleh aturan ATR (PRIORITAS 1).
+    tp_compressed:  Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: Apakah trailing stop sempat aktif sebelum ditutup.
+    trail_active:   Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    leverage: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score:    Mapped[float | None] = mapped_column(Float, nullable=True)
