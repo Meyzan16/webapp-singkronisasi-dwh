@@ -62,3 +62,31 @@ export const agentShort = (agent: string): string =>
   SHORT[agent] ?? (agent.replace("futures_agent_", "").replace("futures_agent", "A") || agent);
 
 export const agentColor = (agent: string): string => COLORS[agent] ?? "text-neutral-700";
+
+/**
+ * Lane futures → agen pemiliknya. Cermin `AGENT_LANE` di
+ * `backend/app/services/agent_registry.py` (arah terbalik).
+ *
+ * Dipakai supaya label lane tidak ditulis ulang: nama tetap datang dari `LABELS`
+ * di atas, jadi mengganti nama sebuah lane cukup di satu tempat.
+ */
+const LANE_AGENT: Record<string, string> = {
+  pre_gainer:   "futures_agent1",
+  accumulation: "futures_agent2",
+  momentum:     "futures_agent3",
+  bigmover:     "futures_agent_bigmover",
+  pre_move:     "futures_agent1",   // alias lama
+};
+
+/**
+ * Nama ramah untuk sebuah lane futures. Lane yang belum dikatalogkan
+ * mengembalikan kunci mentahnya — sengaja, karena salah nama lebih berbahaya
+ * daripada nama teknis (pelajaran BigMover→"Accum").
+ */
+export const futuresLaneLabel = (lane: string): string => {
+  const agent = LANE_AGENT[lane];
+  return agent ? agentLabel(agent) : lane;
+};
+
+export const futuresLaneColor = (lane: string): string =>
+  agentColor(LANE_AGENT[lane] ?? "");

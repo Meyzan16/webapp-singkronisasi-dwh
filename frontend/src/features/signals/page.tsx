@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isFuturesAgent, agentLabel as agentLabelOf, SPOT_AGENT } from "@/lib/agents";
+import { ExitSection, type ExitSubTab } from "./components/ExitSection";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -241,7 +242,9 @@ interface RecoResponse {
   generated_at: number;
 }
 
-type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "progress" | "improvements" | "suggestions" | "regime" | "formulas" | "rejections" | "predictive";
+type SubTab = "overview" | "adaptive" | "spot" | "futures" | "cross" | "progress" | "improvements" | "suggestions" | "regime" | "formulas" | "rejections" | "predictive"
+  // M6 — sisi KELUAR. Lima seksi lain semuanya tentang keputusan MASUK.
+  | ExitSubTab;
 
 // PLAN_SIGNAL_REPAIR_LIVE R4/R5 — kontrak GET /signals/repairs
 interface RepairAction {
@@ -287,7 +290,7 @@ type SortBy = "win_rate" | "avg_pnl_pct" | "total_count" | "weight";
 
 // ── Navigasi 2-level: 5 seksi ber-scope (PLAN_SIGNAL_REPAIR_LIVE R5:
 // Perbaikan + Saran diangkat dari Analysis menjadi seksi Improve sendiri) ──────
-type Section = "overview" | "engine" | "signals" | "analysis" | "improve";
+type Section = "overview" | "engine" | "signals" | "analysis" | "improve" | "exit";
 
 const SECTION_OF: Record<SubTab, Section> = {
   overview: "overview",
@@ -295,6 +298,7 @@ const SECTION_OF: Record<SubTab, Section> = {
   spot: "signals", futures: "signals", cross: "signals",
   regime: "analysis", formulas: "analysis", rejections: "analysis", predictive: "analysis",
   progress: "improve", improvements: "improve", suggestions: "improve",
+  exit_reasons: "exit", exit_triggers: "exit", exit_sl: "exit", exit_rollout: "exit",
 };
 
 // Tab default saat sebuah seksi dibuka.
@@ -302,7 +306,7 @@ const SECTION_OF: Record<SubTab, Section> = {
 // (akhir cerita) seperti sebelumnya.
 const SECTION_DEFAULT: Record<Section, SubTab> = {
   overview: "overview", engine: "adaptive", signals: "spot",
-  analysis: "regime", improve: "suggestions",
+  analysis: "regime", improve: "suggestions", exit: "exit_reasons",
 };
 
 // P2 — urutan naratif: tiap seksi menjawab SATU pertanyaan awam, berurut
@@ -313,6 +317,7 @@ const SECTIONS: { key: Section; icon: string; label: string; desc: string }[] = 
   { key: "signals",  icon: "🎯", label: "Signals",   desc: "Apa yang sudah dipelajari agent? (bobot per market)" },
   { key: "analysis", icon: "🔬", label: "Analysis",  desc: "Di mana letak salahnya? (regime · rumus · tolakan · prediksi)" },
   { key: "improve",  icon: "🔧", label: "Improve",   desc: "Apa yang diperbaiki, dan terbukti membaik tidak?" },
+  { key: "exit",     icon: "🚪", label: "Exit",      desc: "Kenapa posisi ditutup, dan apakah keputusannya benar?" },
   { key: "engine",   icon: "🧠", label: "Engine",    desc: "Mesin di baliknya — bagian teknis lanjutan" },
 ];
 
@@ -337,6 +342,14 @@ const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
     { key: "suggestions",  label: "1· 💡 Saran" },
     { key: "improvements", label: "2· 🔧 Perbaikan Live" },
     { key: "progress",     label: "3· 📈 Progress" },
+  ],
+  // M6 — urut sebab→akibat: apa yang terjadi → pemicunya → lebar risikonya →
+  // apa yang sedang diuji untuk memperbaikinya.
+  exit: [
+    { key: "exit_reasons",  label: "1· 🚪 Alasan Tutup" },
+    { key: "exit_triggers", label: "2· ⚡ Pemicu Dini" },
+    { key: "exit_sl",       label: "3· 📏 Lebar SL" },
+    { key: "exit_rollout",  label: "4· 🚦 Penyalaan" },
   ],
 };
 
@@ -2828,7 +2841,7 @@ export default function SignalsPage() {
   const nav = (
     <div className="space-y-3">
       {/* Level 1 — seksi utama (kartu ber-ikon + deskripsi) */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
         {SECTIONS.map(s => {
           const active = s.key === activeSection;
           return (
@@ -2907,7 +2920,12 @@ export default function SignalsPage() {
         </div>
       )}
 
-      {loading ? (
+      {/* M6: seksi EXIT memuat datanya sendiri dari endpoint monitor, jadi ia
+          TIDAK boleh menunggu 8 fetch sisi MASUK selesai — satu respons lambat
+          di sisi masuk akan membuat seluruh sisi keluar tampak menggantung. */}
+      {activeSection === "exit" ? (
+        <ExitSection subTab={subTab as ExitSubTab} />
+      ) : loading ? (
         <div className="flex items-center justify-center py-16 text-neutral-400 gap-2">
           <div className="w-5 h-5 border-2 border-teal-400 border-t-transparent rounded-full animate-spin" />
           Memuat data sinyal...
