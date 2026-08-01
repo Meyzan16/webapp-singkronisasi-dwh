@@ -72,6 +72,43 @@ BM_HALF_PARTIAL_FRAC = 0.5         # de-risk 50% di separuh jalan ke TP1
 # timpang. Angka ini disediakan agar bisa diuji, bukan diklaim sebagai solusi.
 TP_MAX_ATR_MULT = 0.0
 
+# ── PRIORITAS 2: batas TP hasil BELAJAR, per lane ─────────────────────────────
+# `TP_MAX_ATR_MULT` di atas satu angka untuk semua lane. Padahal ledger keluar
+# menunjukkan lane bergerak sangat berbeda (MFE/ATR median: bigmover 0,37 ·
+# momentum 0,82 · accumulation 2,97) — satu angka pasti terlalu ketat untuk yang
+# satu dan terlalu longgar untuk yang lain.
+#
+# `agents/learning/exit_learning.py` menurunkan angka per lane dari sebaran MFE
+# NYATA lane itu, lalu menuliskannya ke `agent_config` sebagai
+# `monitor_tp_atr_mult_lane_{lane}`. Monitor membacanya di sini.
+#
+# DUA saklar, dua-duanya default MATI:
+#   • EXIT_LEARNING_ENABLED = 0 → angka hasil belajar DIABAIKAN sepenuhnya.
+#   • angka per-lane yang belum ditulis (0.0) → lane itu jatuh ke TP_MAX_ATR_MULT.
+# Jadi menulis rekomendasi ke DB TIDAK mengubah perilaku apa pun sampai saklar
+# ini dinyalakan — rekomendasi bisa diamati lebih dulu sebelum dipercaya.
+EXIT_LEARNING_ENABLED = 0.0
+TP_ATR_BY_LANE: dict[str, float] = {}
+
+#: Prefix kunci config per lane. Lane-nya sendiri tidak ditulis di sini —
+#: diambil dari registry, supaya lane baru ikut terbaca tanpa mengubah file ini.
+TP_LANE_KEY_PREFIX = "monitor_tp_atr_mult_lane_"
+
+
+def tp_lane_key(lane: str) -> str:
+    """Kunci `agent_config` untuk batas TP hasil belajar sebuah lane."""
+    return f"{TP_LANE_KEY_PREFIX}{lane}"
+
+
+def _known_lanes() -> list[str]:
+    """Lane futures dari registry — bukan salinan literal."""
+    try:
+        from app.services.agent_registry import LANE_AGENT
+        return list(LANE_AGENT.keys())
+    except Exception:
+        return []
+
+
 _KEYS: dict[str, str] = {
     # nama variabel modul -> kunci config (grup "futures")
     "MAX_AGE_DAYS":              "monitor_max_age_days",
@@ -95,6 +132,7 @@ _KEYS: dict[str, str] = {
     "BM_BE_ARM_ABS_PCT":         "monitor_bm_be_arm_abs_pct",
     "BM_HALF_PARTIAL_FRAC":      "monitor_bm_half_partial_frac",
     "TP_MAX_ATR_MULT":           "monitor_tp_max_atr_mult",
+    "EXIT_LEARNING_ENABLED":     "monitor_exit_learning_enabled",
 }
 
 _INT_KEYS = {"MAX_AGE_EXTENSIONS"}
@@ -109,21 +147,45 @@ async def refresh() -> None:
         for var, key in _KEYS.items():
             value = await cfg.get("futures", key, globs[var])
             globs[var] = int(value) if var in _INT_KEYS else float(value)
+        # Batas TP hasil belajar per lane — 0 berarti "belum ada", bukan "nol jarak".
+        globs["TP_ATR_BY_LANE"] = {
+            lane: mult
+            for lane in _known_lanes()
+            if (mult := await cfg.get("futures", tp_lane_key(lane), 0.0)) > 0
+        }
     except Exception as exc:
         logger.warning("monitor_config_refresh_failed", error=str(exc)[:120])
 
 
-def effective_take_profit(entry: float, take_profit: float, atr_pct: float,
-                          direction: str) -> tuple[float, bool]:
-    """TP efektif setelah dibatasi kelipatan ATR (PRIORITAS 1).
+def tp_atr_limit(lane: str = "") -> float:
+    """Batas TP (kelipatan ATR) yang berlaku untuk sebuah lane.
 
-    Return `(tp, dikompresi)`. Saat `TP_MAX_ATR_MULT` = 0 (default) TP dikembalikan
-    apa adanya sehingga perilaku identik dengan sebelumnya. Kompresi HANYA
-    mendekatkan target — tak pernah menjauhkannya, supaya tak memperburuk R:R.
+    Urutan: angka hasil belajar lane tsb (hanya bila saklar belajar menyala) →
+    batas global → 0 (mati). Lane yang belum punya angka belajar TIDAK diam-diam
+    memakai angka lane lain.
     """
-    if TP_MAX_ATR_MULT <= 0 or atr_pct <= 0 or entry <= 0 or not take_profit:
+    if EXIT_LEARNING_ENABLED > 0 and lane:
+        learned = TP_ATR_BY_LANE.get(lane, 0.0)
+        if learned > 0:
+            return learned
+    return TP_MAX_ATR_MULT
+
+
+def effective_take_profit(entry: float, take_profit: float, atr_pct: float,
+                          direction: str, lane: str = "") -> tuple[float, bool]:
+    """TP efektif setelah dibatasi kelipatan ATR (PRIORITAS 1 + 2).
+
+    Return `(tp, dikompresi)`. Saat batas = 0 (default) TP dikembalikan apa adanya
+    sehingga perilaku identik dengan sebelumnya. Kompresi HANYA mendekatkan
+    target — tak pernah menjauhkannya, supaya tak memperburuk R:R.
+
+    `lane` menentukan apakah batas hasil belajar lane itu yang dipakai; tanpa
+    lane, hanya batas global yang berlaku.
+    """
+    limit = tp_atr_limit(lane)
+    if limit <= 0 or atr_pct <= 0 or entry <= 0 or not take_profit:
         return take_profit, False
-    max_dist = entry * (atr_pct / 100.0) * TP_MAX_ATR_MULT
+    max_dist = entry * (atr_pct / 100.0) * limit
     cur_dist = abs(take_profit - entry)
     if cur_dist <= max_dist:
         return take_profit, False
@@ -134,4 +196,6 @@ def effective_take_profit(entry: float, take_profit: float, atr_pct: float,
 def snapshot() -> dict:
     """Nilai ambang yang sedang berlaku — untuk endpoint/diagnostik."""
     globs = globals()
-    return {key: globs[var] for var, key in _KEYS.items()}
+    snap = {key: globs[var] for var, key in _KEYS.items()}
+    snap["tp_atr_mult_by_lane"] = dict(TP_ATR_BY_LANE)
+    return snap

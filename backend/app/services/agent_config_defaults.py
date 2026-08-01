@@ -163,6 +163,8 @@ DEFAULTS: list[dict] = [
      "description": "BigMover: porsi posisi yang di-de-risk di separuh jalan ke TP1"},
     {"group": "futures", "key": "monitor_tp_max_atr_mult", "default": 0.0, "category": "monitor",
      "description": "PRIORITAS 1 (DEFAULT 0=MATI): batasi jarak TP ke sekian kali ATR. Temuan 1 Agu: TP terpasang 4-13x ATR sementara gerak untung terjauh bermedian 0,41x ATR, sehingga TP tersentuh hanya 1 dari 44 trade. Simulasi: TP 0,5x ATR akan tersentuh 48%, 1x ATR 27%. CATATAN: memperpendek TP saja belum tentu untung karena SL ada di ~1,5x ATR - uji dulu."},
+    {"group": "futures", "key": "monitor_exit_learning_enabled", "default": 0.0, "category": "monitor",
+     "description": "PRIORITAS 2 (DEFAULT 0=MATI): izinkan monitor memakai batas TP per-lane hasil belajar dari ledger keluar (monitor_tp_atr_mult_lane_*). Selama 0, angka hasil belajar boleh ditulis dan diamati tapi tidak mempengaruhi satu pun keputusan tutup posisi."},
 
     # ── LEARNING ──────────────────────────────────────────────────────────────
     {"group": "learning", "key": "training_window_days", "default": 90, "category": "timing",

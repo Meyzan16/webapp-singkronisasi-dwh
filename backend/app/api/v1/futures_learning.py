@@ -10,8 +10,10 @@ import json
 import time
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
+
+from app.database import require_db
 
 router = APIRouter(tags=["futures-learning"])
 logger = structlog.get_logger(__name__)
@@ -337,3 +339,49 @@ async def force_weight_update() -> dict:
     regime  = await fetch_regime()
     updated = await update_weights()
     return {"updated_rows": updated, "regime": regime, "ts": time.time()}
+
+
+# ── Exit Learning (MONITOR) ───────────────────────────────────────────────────
+# Lapisan learning selama ini hanya menyetel keputusan MASUK. Endpoint di bawah
+# membuka lapisan KELUAR: ledger exit, agregasi per alasan/lane/regime, dan usulan
+# jarak TP realistis yang diturunkan dari sebaran gerak NYATA (MFE), bukan tebakan.
+
+@router.post("/futures/exit-learning/backfill", dependencies=[Depends(require_db)])
+async def exit_learning_backfill() -> dict:
+    """Isi ledger keluar dari posisi futures yang sudah tertutup. Idempoten."""
+    from agents.learning.exit_learning import backfill_exit_events
+    return await backfill_exit_events()
+
+
+@router.get("/futures/exit-learning/analysis", dependencies=[Depends(require_db)])
+async def exit_learning_analysis(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Agregasi keputusan keluar: per alasan close, per lane, per regime."""
+    from agents.learning.exit_learning import analyze_exits
+    return await analyze_exits(days=days)
+
+
+@router.get("/futures/exit-learning/recommendations", dependencies=[Depends(require_db)])
+async def exit_learning_recommendations(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Usulan parameter keluar per lane (TP realistis + tanda exit prematur)."""
+    from agents.learning.exit_learning import recommend_exit_params
+    return await recommend_exit_params(days=days)
+
+
+@router.post("/futures/exit-learning/apply", dependencies=[Depends(require_db)])
+async def exit_learning_apply(days: int = Query(90, ge=1, le=365),
+                              dry_run: bool = Query(True)) -> dict:
+    """Tulis usulan batas TP per lane ke config. `dry_run=true` hanya melapor.
+
+    Menulis pun tidak mengubah keputusan apa pun sampai
+    `futures.monitor_exit_learning_enabled` dinyalakan.
+    """
+    from agents.learning.exit_learning import apply_exit_recommendations
+    return await apply_exit_recommendations(days=days, dry_run=dry_run)
+
+
+@router.get("/futures/exit-learning/config", dependencies=[Depends(require_db)])
+async def exit_learning_config() -> dict:
+    """Ambang monitor yang SEDANG berlaku, termasuk batas TP per lane."""
+    from agents.futures import monitor_config as mcfg
+    await mcfg.refresh()
+    return {"status": "ok", "config": mcfg.snapshot()}

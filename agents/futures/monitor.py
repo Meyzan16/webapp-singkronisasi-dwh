@@ -792,14 +792,19 @@ async def check_futures_positions() -> tuple[int, int]:
 
             entry        = trade.entry_price
             tp2          = trade.take_profit
-            # PRIORITAS 1 — batasi jarak TP ke kelipatan ATR yang realistis.
-            # Default MATI (monitor_tp_max_atr_mult = 0) sehingga TP apa adanya
-            # dan perilaku identik seperti sebelumnya. Saat dinyalakan, target
-            # hanya bisa MENDEKAT, tak pernah menjauh.
+            # PLAN_v2 P1.1/P1.3/P1.5 — lane lookup (denormalised on the trade if
+            # available, else derived from style). All per-lane gates read this.
+            lane = trade.setup_type or meta.get("setup_type") or lane_for_style(trade.style)
+            # PRIORITAS 1+2 — batasi jarak TP ke kelipatan ATR yang realistis.
+            # Default MATI (monitor_tp_max_atr_mult = 0 dan saklar belajar mati)
+            # sehingga TP apa adanya dan perilaku identik seperti sebelumnya.
+            # Saat dinyalakan, target hanya bisa MENDEKAT, tak pernah menjauh —
+            # dengan batas per-lane hasil belajar bila lane itu sudah punya.
             try:
                 from agents.futures import monitor_config as _mcfg
                 _tp_eff, _tp_compressed = _mcfg.effective_take_profit(
-                    entry, tp2, float(meta.get("atr_pct") or 0.0), trade.direction)
+                    entry, tp2, float(meta.get("atr_pct") or 0.0), trade.direction,
+                    lane=lane)
                 if _tp_compressed:
                     tp2 = _tp_eff
                     meta["tp_compressed"] = True
@@ -809,10 +814,6 @@ async def check_futures_positions() -> tuple[int, int]:
             direction    = trade.direction
             leverage     = trade.leverage or meta.get("leverage", 5)
             trail_active = bool(trade.trail_active)
-
-            # PLAN_v2 P1.1/P1.3/P1.5 — lane lookup (denormalised on the trade if
-            # available, else derived from style). All per-lane gates read this.
-            lane = trade.setup_type or meta.get("setup_type") or lane_for_style(trade.style)
 
             new_status:   Optional[str]   = None
             close_price:  Optional[float] = None
