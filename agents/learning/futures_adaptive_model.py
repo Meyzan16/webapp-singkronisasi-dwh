@@ -62,6 +62,33 @@ def _fit_logistic(x: list[list[float]], y: list[int], epochs: int = 300, lr: flo
     return intercept, weights
 
 
+# Ambang seleksi ABSOLUT untuk menghitung "slice yang dipilih model".
+# CACAT (diagnosis 1 Agu 2026): base-rate futures ~44% (1340/3049 pnl_4h>0), jadi
+# model yang terkalibrasi Platt mengumpul di sekitar 0.44 dan NYARIS TAK PERNAH
+# menyentuh 0.55 — terbukti `selected_n = 0` dari 595 baris uji pada SEMUA model
+# terlatih. Akibatnya `selected_expectancy_pct` & `selected_profit_factor` selalu
+# None sehingga DUA dari empat syarat promosi gagal permanen, apa pun kualitas
+# modelnya. Ambang 0.55 masuk akal untuk masalah seimbang, bukan base-rate 44%.
+SELECTION_THRESHOLD_ABS = 0.55
+
+# Mode RELATIF: pilih kuantil teratas dari sebaran prediksi model itu sendiri,
+# sehingga selalu ada slice untuk dinilai dan pertanyaannya jadi tepat —
+# "kalau kita hanya mengambil kandidat peringkat teratas model, apakah untung?".
+# Default OFF: perilaku identik dengan sebelumnya. Override DB:
+# futures.relative_selection_gate (nyala/mati) dan futures.selection_top_frac.
+RELATIVE_SELECTION = False
+SELECTION_TOP_FRAC = 0.20          # ambil 20% prediksi tertinggi
+
+
+def _quantile_cutoff(values: list[float], top_frac: float) -> float:
+    """Nilai batas agar kira-kira `top_frac` bagian teratas terpilih."""
+    if not values:
+        return SELECTION_THRESHOLD_ABS
+    ordered = sorted(values)
+    idx = int(len(ordered) * (1.0 - max(0.01, min(0.99, top_frac))))
+    return ordered[min(idx, len(ordered) - 1)]
+
+
 def _metrics(probabilities: list[float], labels: list[int], net_pnls: list[float]) -> dict:
     """net_pnls sudah NET biaya — selected expectancy tak mengurangi biaya lagi."""
     if not labels:
@@ -70,11 +97,17 @@ def _metrics(probabilities: list[float], labels: list[int], net_pnls: list[float
     brier = sum((p - y) ** 2 for p, y in zip(probabilities, labels)) / len(labels)
     logloss = -sum(y * math.log(max(eps, p)) + (1 - y) * math.log(max(eps, 1 - p))
                    for p, y in zip(probabilities, labels)) / len(labels)
-    selected = [pnl for p, pnl in zip(probabilities, net_pnls) if p >= 0.55]
+    cutoff = (_quantile_cutoff(probabilities, SELECTION_TOP_FRAC) if RELATIVE_SELECTION
+              else SELECTION_THRESHOLD_ABS)
+    selected = [pnl for p, pnl in zip(probabilities, net_pnls) if p >= cutoff]
     wins = sum(v for v in selected if v > 0)
     losses = abs(sum(v for v in selected if v < 0))
     return {
         "n": len(labels), "brier": round(brier, 5), "log_loss": round(logloss, 5),
+        # Batas & mode ikut dilaporkan supaya angka di panel Engine bisa ditelusuri
+        # (tanpa ini "selected_n=0" tampak misterius).
+        "selection_mode": "relative" if RELATIVE_SELECTION else "absolute",
+        "selection_cutoff": round(cutoff, 4),
         "selected_n": len(selected),
         "selected_expectancy_pct": round(sum(selected) / len(selected), 4) if selected else None,
         "selected_profit_factor": round(wins / losses, 3) if losses > 0 else None,
@@ -178,6 +211,18 @@ async def train_and_register() -> dict:
     Model baru selalu berstatus 'shadow' (tak memengaruhi keputusan sampai F5)."""
     if not is_db_available():
         return {"status": "db_unavailable"}
+    # Mode seleksi dibaca per-run supaya owner bisa menyalakannya tanpa restart.
+    # Default OFF -> perilaku identik dengan sebelumnya.
+    global RELATIVE_SELECTION, SELECTION_TOP_FRAC
+    try:
+        from agents.shared.config_reader import cfg
+        RELATIVE_SELECTION = bool(await cfg.get(
+            "futures", "relative_selection_gate", RELATIVE_SELECTION))
+        SELECTION_TOP_FRAC = float(await cfg.get(
+            "futures", "selection_top_frac", SELECTION_TOP_FRAC))
+    except Exception as exc:
+        logger.warning("selection_gate_config_failed", error=str(exc)[:120])
+
     async with AsyncSessionLocal() as session:
         events = list((await session.execute(
             select(FuturesDecisionEvent).where(

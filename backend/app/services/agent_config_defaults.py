@@ -107,6 +107,10 @@ DEFAULTS: list[dict] = [
     {"group": "futures", "key": "min_tp1_cost_mult", "default": 3.0, "category": "threshold",
      "description": "F2: TP1 minimum sebagai kelipatan cost_floor (fee+slippage+funding) sebelum posisi boleh dibuka"},
     # ── FUTURES — PLAN_ADAPTIVE_ENGINE_BOOST (Fase B1) ───────────────────────
+    {"group": "futures", "key": "relative_selection_gate", "default": 0, "category": "learning",
+     "description": "DEFAULT 0=OFF. 1 = slice 'yang dipilih model' diukur dari kuantil teratas prediksi (relatif), bukan ambang mati 0.55. Ambang absolut mustahil tercapai karena base-rate futures ~44%: terbukti selected_n=0 dari 595 baris uji, sehingga 2 dari 4 syarat promosi gagal permanen apa pun kualitas modelnya. Menyalakan ini membuat syarat promosi BISA dinilai — model tetap harus lolos brier + walk-forward + canary sebelum dipakai."},
+    {"group": "futures", "key": "selection_top_frac", "default": 0.20, "category": "learning",
+     "description": "Porsi prediksi TERATAS yang dianggap 'dipilih model' saat mode relatif menyala (0.20 = 20% teratas). Hanya berlaku bila relative_selection_gate=1."},
     {"group": "futures", "key": "unified_signal_keys", "default": 1, "category": "learning",
      "description": "BUGFIX (DEFAULT 1=ON): bobot hasil belajar dari trade disimpan memakai kunci SCORING (canonical signal_id:*) sehingga benar-benar dibaca saat menilai kandidat. 0 = perilaku lama (kunci telanjang → bobot tak pernah terpakai, factor selalu 1.0)."},
     {"group": "futures", "key": "repair_weights_persist", "default": 1, "category": "learning",
