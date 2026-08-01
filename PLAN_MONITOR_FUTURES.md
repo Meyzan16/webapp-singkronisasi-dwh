@@ -57,25 +57,31 @@ Hasil:
 Verifikasi live: 4 jalur tala diubah lewat DB → keputusan ikut berubah → pulih
 saat dikembalikan. 176 test lulus.
 
-### M3 — Perbaiki `fail_fast` ⬅ **BERIKUTNYA**
-Bukti 8 trade `fail_fast` (0% WR, expectancy −3,595% — terburuk dari semua
-alasan close):
+### M3 — Perbaiki `fail_fast` ✅ `d63dbf2`
+Bukti dari ledger (8 exit `fail_fast`, 0% menang):
 
-| Lane | SL terpasang | fail-fast memicu di | Realisasi |
-|---|---|---|---|
-| bigmover (4) | **1,5× ATR** | 1,0× ATR | −1,17 s/d −2,27× ATR |
-| momentum (4) | **5,3–6,5× ATR** | ~1,7× ATR | −1,42 s/d −1,79× ATR |
+| Lane | SL | Realisasi | `sl_gap` | Tanpa-selamat |
+|---|---|---|---|---|
+| bigmover (4) | 1,504× ATR | 1,299× ATR | **1,15** | 25% |
+| momentum (4) | 5,412× ATR | 1,742× ATR | **3,05** | 0% |
 
-Di **bigmover** pemicunya nyaris berimpit dengan SL — memotong di 1,0× ATR saat
-SL ada di 1,5× ATR hampir tak menyelamatkan apa pun, tapi membuang seluruh
-peluang harga berbalik. ARXUSDT bahkan realisasi −2,27× ATR, **lebih buruk
-daripada membiarkan SL bekerja**. Di **momentum** justru sebaliknya: SL 5–6×
-ATR, jadi fail-fast benar-benar protektif.
+Pemicu yang **sama** menyelamatkan ~3,7× ATR di momentum tapi cuma ~0,2× ATR di
+bigmover — dan di bigmover seperempatnya rugi sebesar atau lebih dari jarak SL.
+Pembedanya persis satu angka: `sl_gap` = jarak SL ÷ ambang pemicu.
 
-Kerja: syaratkan jarak SL harus cukup jauh dari ambang fail-fast sebelum boleh
-memicu, lewat config. Sampel masih 8 — ini indikasi kuat, bukan vonis.
+Hasil:
+- `failfast_allowed()` — syarat `jarak_SL ≥ gap × ambang`. Gap global + gap per
+  lane hasil belajar, dua-duanya **default MATI**.
+- Pemotongan yang **ditolak dicatat** (`fail_fast_suppressed` + pencacah), supaya
+  penjaga ini bisa diaudit, bukan bekerja dalam diam.
+- `analyze_exit_triggers()` — mengadili tiap pemicu exit dini dengan membandingkan
+  kerugian yang direalisasi terhadap **alternatifnya** (jarak SL), bukan
+  untung/rugi mentah.
 
-### M4 — Lebar SL per lane
+**Belum diusulkan otomatis:** kedua lane baru punya n=4, di bawah ambang 5 sampel.
+Ambangnya sengaja tidak diturunkan agar cocok dengan data.
+
+### M4 — Lebar SL per lane ⬅ **BERIKUTNYA**
 Temuan sampingan M3: SL bigmover 1,5× ATR vs momentum 5–6× ATR. Selisih 4×
 membuat setiap gate yang diskalakan ke `risk_pct` (time-stop, fail-fast progress)
 berperilaku sangat berbeda antar lane tanpa itu pernah diniatkan.
