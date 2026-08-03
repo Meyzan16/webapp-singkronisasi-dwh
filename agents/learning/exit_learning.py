@@ -133,6 +133,7 @@ async def backfill_exit_events(limit: int = 5000, market: str = "futures") -> di
                 return round(pct / atr_pct, 4) if (pct is not None and atr_pct) else None
 
             peak = meta.get("peak_pnl_pct")
+            trough = meta.get("trough_pnl_pct")
             tp_dist = (abs(float(t.take_profit) - entry) / entry * 100) if t.take_profit else None
             sl_dist = (abs(entry - float(t.stop_loss)) / entry * 100) if t.stop_loss else None
             entry_at = float(t.entry_at or 0.0)
@@ -162,6 +163,7 @@ async def backfill_exit_events(limit: int = 5000, market: str = "futures") -> di
                 pnl_pct=t.pnl_pct, pnl_dollar=t.pnl_dollar,
                 atr_pct=atr_pct or None,
                 mfe_atr=_atr(float(peak)) if peak is not None else None,
+                mae_atr=_atr(abs(float(trough))) if trough is not None else None,
                 tp_dist_atr=_atr(tp_dist), sl_dist_atr=_atr(sl_dist),
                 realized_atr=_atr(t.pnl_pct),
                 tp_compressed=bool(meta.get("tp_compressed")),
@@ -440,6 +442,9 @@ async def recommend_failfast_params(days: int = 90, market: str = "futures") -> 
 #: membuat perbandingan persis mustahil.
 PINNED_TOLERANCE = 0.02
 
+#: Sampel MAE minimum sebelum lebar SL boleh dinilai sama sekali.
+MAE_MIN_SAMPLES = 30
+
 
 def _cv(values: list[float]) -> float | None:
     """Koefisien variasi — sebaran relatif terhadap rata-rata. Dipakai untuk
@@ -490,14 +495,16 @@ async def analyze_sl_width(days: int = 90, market: str = "futures") -> dict:
         if r.sl_dist_atr and r.atr_pct:
             by_lane.setdefault(r.lane or "-", []).append(r)
 
-    out, all_pct, all_atr = [], [], []
+    out, all_pct, all_atr, all_mae = [], [], [], []
     for lane, group in sorted(by_lane.items(), key=lambda kv: -len(kv[1])):
         sl_pct = [r.sl_dist_atr * r.atr_pct for r in group]     # kembali ke harga%
         sl_atr = [r.sl_dist_atr for r in group]
         mfe = [r.mfe_atr for r in group if r.mfe_atr is not None]
+        mae = [r.mae_atr for r in group if r.mae_atr is not None]
         pnl = [r.pnl_pct for r in group if r.pnl_pct is not None]
         all_pct += sl_pct
         all_atr += sl_atr
+        all_mae += mae
 
         p = sl_params(lane) if sl_params else None
         cap = p["max_pct"] if p else None
@@ -525,6 +532,13 @@ async def analyze_sl_width(days: int = 90, market: str = "futures") -> dict:
             # pernah bergerak ke arah kita.
             "sl_vs_mfe": (round(median(sl_atr) / median(mfe), 2)
                           if mfe and median(mfe) > 0 else None),
+            # M4b: gerak MERUGIKAN terjauh, dan berapa PERSEN jarak SL yang
+            # benar-benar terpakai. Inilah angka yang menentukan apakah SL boleh
+            # dipersempit — bukan MFE. `null` = belum ada datanya.
+            "mae_atr_median": round(median(mae), 3) if mae else None,
+            "sl_utilization": (round(median(mae) / median(sl_atr), 3)
+                               if mae and median(sl_atr) > 0 else None),
+            "mae_n": len(mae),
             "win_rate": (round(100.0 * sum(1 for v in pnl if v > 0) / len(pnl), 1)
                          if pnl else None),
             "expectancy_pct": round(sum(pnl) / len(pnl), 3) if pnl else None,
@@ -536,11 +550,27 @@ async def analyze_sl_width(days: int = 90, market: str = "futures") -> dict:
         verdict = ("sl_disusun_terhadap_harga" if cv_pct < cv_atr
                    else "sl_disusun_terhadap_volatilitas")
 
+    # M4b: rekomendasi lebar SL SENGAJA tidak diterbitkan sampai MAE matang.
+    # Mempersempit SL berdasarkan MFE saja adalah kekeliruan yang mahal: MFE
+    # bercerita seberapa jauh harga sempat MENGUNTUNGKAN, bukan seberapa dalam ia
+    # sempat MELAWAN sebelum berbalik. SL yang dipersempit tanpa melihat MAE akan
+    # memotong posisi yang sebenarnya akan menang.
+    mae_ready = len(all_mae) >= MAE_MIN_SAMPLES
     return {
         "status": "ok", "window_days": days, "n": len(rows),
         "lanes": out,
         "cv_sl_pct_all": cv_pct, "cv_sl_atr_all": cv_atr,
         "verdict": verdict,
+        "mae_n": len(all_mae),
+        "mae_required": MAE_MIN_SAMPLES,
+        "sl_recommendation_ready": mae_ready,
+        "sl_recommendation_note": (
+            "MAE sudah cukup — lebar SL bisa dinilai terhadap seberapa dalam harga "
+            "benar-benar melawan." if mae_ready else
+            "Rekomendasi lebar SL BELUM diterbitkan: gerak merugikan terjauh (MAE) "
+            "baru mulai direkam 2 Agu 2026. Mempersempit SL hanya berdasarkan MFE "
+            "akan memotong posisi yang sebenarnya akan menang — angka utilisasi di "
+            "bawah baru bermakna setelah MAE terkumpul."),
         "note": ("Sebaran yang lebih rapat menunjukkan satuan mana yang sebenarnya "
                  "mengendalikan lebar SL. Bila harga% lebih rapat daripada kelipatan "
                  "ATR, rancangan sadar-volatilitas tidak benar-benar berlaku."),

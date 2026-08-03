@@ -70,6 +70,11 @@ class FuturesExitEvent(Base):
     atr_pct:        Mapped[float | None] = mapped_column(Float, nullable=True)
     #: Gerak menguntungkan TERJAUH selama posisi hidup, dalam kelipatan ATR.
     mfe_atr:        Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Gerak MERUGIKAN terjauh (MAE), dalam kelipatan ATR — nilai positif.
+    #: M4b: pasangan wajib dari MFE. Tanpa ini tak ada cara tahu berapa banyak
+    #: jarak SL yang benar-benar terpakai, sehingga mempersempit SL akan jadi
+    #: tebakan yang bisa mengubah pemenang jadi pecundang.
+    mae_atr:        Mapped[float | None] = mapped_column(Float, nullable=True)
     #: Jarak TP yang DIPASANG saat entry, dalam kelipatan ATR.
     tp_dist_atr:    Mapped[float | None] = mapped_column(Float, nullable=True)
     #: Jarak SL yang dipasang saat entry, dalam kelipatan ATR.

@@ -87,3 +87,29 @@ def test_endpoint_tersedia_untuk_kedua_market(market):
     paths = {r.path for r in router.routes}
     for suffix in ("analysis", "triggers", "sl-width", "backfill"):
         assert f"/{market}/exit-learning/{suffix}" in paths
+
+
+# ── M4b: gerak merugikan terjauh (MAE) ───────────────────────────────────────
+
+def test_kedua_monitor_merekam_gerak_merugikan_terjauh():
+    """Tanpa MAE, "berapa jarak SL yang terpakai" tak terjawab — dan mempersempit
+    SL jadi tebakan yang bisa mengubah pemenang jadi pecundang."""
+    import agents.futures.monitor as fut_mon
+    import agents.opportunity.monitor as spot_mon
+    assert "trough_pnl_pct" in inspect.getsource(fut_mon.check_futures_positions)
+    assert "trough_pnl_pct" in inspect.getsource(spot_mon._process_trade)
+
+
+def test_mae_disimpan_positif_agar_sebanding_dengan_jarak_sl():
+    from agents.shared import exit_ledger
+    src = inspect.getsource(exit_ledger.log_exit)
+    assert "abs(trough)" in src
+
+
+def test_rekomendasi_sl_ditahan_sampai_mae_cukup():
+    """Menerbitkan rekomendasi lebar SL dari MFE saja adalah kekeliruan mahal —
+    penjaga ini memastikan penahannya tidak hilang tanpa sengaja."""
+    src = inspect.getsource(el.analyze_sl_width)
+    assert "MAE_MIN_SAMPLES" in src
+    assert "sl_recommendation_ready" in src
+    assert el.MAE_MIN_SAMPLES >= 30

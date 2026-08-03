@@ -904,6 +904,14 @@ async def check_futures_positions() -> tuple[int, int]:
                 meta["peak_pnl_pct"] = _peak_pnl
                 trade.signals_json   = json.dumps(meta, ensure_ascii=False)
                 updated += 1
+            # M4b: gerak MERUGIKAN terjauh (MAE). Selama ini hanya sisi untung
+            # yang direkam, sehingga pertanyaan "berapa banyak jarak SL yang
+            # benar-benar terpakai" tak pernah bisa dijawab — dan tanpa jawaban
+            # itu, mempersempit SL berisiko mengubah pemenang jadi pecundang.
+            _trough_pnl = float(meta.get("trough_pnl_pct", 0.0))
+            if _pnl_now_pct < _trough_pnl:
+                meta["trough_pnl_pct"] = round(_pnl_now_pct, 3)
+                trade.signals_json    = json.dumps(meta, ensure_ascii=False)
             for _peak_thresh, _lock_frac in mcfg.PROFIT_LOCK_TIERS:
                 if not new_status and _peak_pnl >= _peak_thresh and _pnl_now_pct <= _peak_pnl * _lock_frac:
                     new_status   = "tp"

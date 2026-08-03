@@ -143,6 +143,9 @@ interface SlLaneRow {
   pinned_at_max_frac: number | null;
   pinned_at_floor_frac: number | null;
   sl_vs_mfe: number | null;
+  /** M4b — gerak MERUGIKAN terjauh & porsi jarak SL yang benar-benar terpakai. */
+  mae_atr_median: number | null;
+  sl_utilization: number | null;
   win_rate: number | null;
   expectancy_pct: number | null;
 }
@@ -154,6 +157,10 @@ interface SlWidthResponse {
   cv_sl_atr_all?: number | null;
   verdict?: string | null;
   note?: string;
+  mae_n?: number;
+  mae_required?: number;
+  sl_recommendation_ready?: boolean;
+  sl_recommendation_note?: string;
 }
 
 interface RolloutRow {
@@ -573,9 +580,22 @@ function ExitSlWidth({ data, market }: { data: SlWidthResponse | null; market: M
         )}
       </Panel>
 
+      {data.sl_recommendation_note && (
+        <div className={`rounded-xl border p-3 text-[11px] leading-relaxed ${
+          data.sl_recommendation_ready
+            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+            : "bg-amber-50 border-amber-200 text-amber-800"}`}>
+          <span className="font-bold">
+            {data.sl_recommendation_ready ? "✓ Lebar SL bisa dinilai" : "⏳ Lebar SL belum bisa dinilai"}
+          </span>
+          {" — "}{data.sl_recommendation_note}
+          {" "}({data.mae_n}/{data.mae_required} sampel MAE)
+        </div>
+      )}
+
       <Panel
         title="Per lane"
-        sub={'"Mentok plafon" = porsi posisi yang SL-nya dibatasi plafon, bukan hasil rumus ATR. Angka tinggi berarti rumus sadar-volatilitas jarang benar-benar berlaku. "SL/MFE" = SL berapa kali lebih jauh daripada gerak untung terjauh yang nyata.'}>
+        sub={'"Mentok plafon" = porsi posisi yang SL-nya dibatasi plafon, bukan hasil rumus ATR. "SL/MFE" = SL berapa kali lebih jauh daripada gerak UNTUNG terjauh. "MAE" = gerak MERUGIKAN terjauh, dan "Pakai SL" = berapa persen jarak SL yang benar-benar terpakai — inilah angka yang menentukan apakah SL boleh dipersempit, bukan SL/MFE.'}>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -588,6 +608,8 @@ function ExitSlWidth({ data, market }: { data: SlWidthResponse | null; market: M
                 <th className="text-right font-semibold">Plafon</th>
                 <th className="text-right font-semibold">Mentok</th>
                 <th className="text-right font-semibold">SL/MFE</th>
+                <th className="text-right font-semibold">MAE</th>
+                <th className="text-right font-semibold">Pakai SL</th>
                 <th className="text-right font-semibold">Win rate</th>
               </tr>
             </thead>
@@ -608,6 +630,8 @@ function ExitSlWidth({ data, market }: { data: SlWidthResponse | null; market: M
                     l.sl_vs_mfe !== null && l.sl_vs_mfe >= SOROT.slJauhDariMfe ? "text-amber-600 font-bold" : ""}`}>
                     {num(l.sl_vs_mfe, 2)}×
                   </td>
+                  <td className="text-right tabular-nums">{num(l.mae_atr_median)}×</td>
+                  <td className="text-right tabular-nums">{frac(l.sl_utilization)}</td>
                   <td className="text-right tabular-nums">{l.win_rate === null ? "—" : `${l.win_rate}%`}</td>
                 </tr>
               ))}

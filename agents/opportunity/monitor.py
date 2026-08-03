@@ -759,6 +759,12 @@ async def _process_trade(
         _peak_pnl_spot = round(_pnl_now_spot, 3)
         meta["peak_pnl_pct"] = _peak_pnl_spot
         trade.signals_json   = json.dumps(meta, ensure_ascii=False)
+    # M4b: gerak MERUGIKAN terjauh (MAE) — pasangan dari peak di atas. Tanpa ini
+    # tak ada cara tahu berapa banyak jarak SL yang benar-benar terpakai.
+    _trough_pnl_spot = float(meta.get("trough_pnl_pct", 0.0))
+    if _pnl_now_spot < _trough_pnl_spot:
+        meta["trough_pnl_pct"] = round(_pnl_now_spot, 3)
+        trade.signals_json     = json.dumps(meta, ensure_ascii=False)
     for _pt, _lf in _PROFIT_LOCK_TIERS_SPOT:
         if _peak_pnl_spot >= _pt and _pnl_now_spot <= _peak_pnl_spot * _lf:
             pnl_pct, pnl_dollar = _final_pnl(entry, price, trade.position_size or 0.0, meta)

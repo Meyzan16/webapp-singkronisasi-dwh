@@ -37,7 +37,8 @@ async def log_exit(session, trade, meta: dict, *, market: str, lane: str,
 
         entry = float(trade.entry_price or 0.0)
         atr_pct = float(meta.get("atr_pct") or 0.0)
-        peak = float(meta.get("peak_pnl_pct") or 0.0)   # gerak favorable terjauh (%)
+        peak = float(meta.get("peak_pnl_pct") or 0.0)    # gerak favorable terjauh (%)
+        trough = float(meta.get("trough_pnl_pct") or 0.0)  # gerak adverse terjauh (%)
 
         def _atr_units(pct_move: float | None) -> float | None:
             if pct_move is None or not atr_pct:
@@ -65,6 +66,9 @@ async def log_exit(session, trade, meta: dict, *, market: str, lane: str,
             pnl_pct=round(float(pnl_net), 4), pnl_dollar=pnl_dollar,
             atr_pct=atr_pct or None,
             mfe_atr=_atr_units(peak) if peak else None,
+            # Disimpan sebagai nilai POSITIF supaya sebanding langsung dengan
+            # sl_dist_atr ("berapa jauh harga sempat melawan").
+            mae_atr=_atr_units(abs(trough)) if trough else None,
             tp_dist_atr=_atr_units(tp_dist),
             sl_dist_atr=_atr_units(sl_dist),
             realized_atr=_atr_units(float(pnl_net)),
