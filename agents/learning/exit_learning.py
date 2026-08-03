@@ -1,10 +1,15 @@
-"""Adaptive Learning untuk keputusan KELUAR — khusus MONITOR futures.
+"""Adaptive Learning untuk keputusan KELUAR — MONITOR futures DAN spot.
 
 Sampai 1 Agu 2026 seluruh lapisan learning hanya menyetel keputusan MASUK (bobot
 sinyal, veto entry). Padahal bukti menunjukkan masalah futures ada di KELUAR:
 TP tersentuh 1 dari 44 trade, R:R realisasi 0,81 (menang +2,78% vs kalah −3,45%).
 
-Modul ini belajar dari `futures_exit_events` — ledger keputusan keluar — dan
+M7: modul ini sadar-market. Setiap fungsi menerima `market` ("futures" | "spot")
+dan hanya membaca baris market itu. Sengaja SATU modul, bukan salinan untuk spot:
+sisi SPOT di proyek ini berulang kali dibangun sebagai salinan lalu menyimpang
+diam-diam. Satu jalur kode membuat penyimpangan mustahil terjadi tanpa terlihat.
+
+Modul ini belajar dari `exit_events` — ledger keputusan keluar — dan
 menjawab pertanyaan yang selama ini tak terjawab:
   1. Alasan close mana yang menguntungkan, mana yang merugikan?
   2. Berapa jarak TP yang REALISTIS per lane/regime (dari sebaran MFE nyata)?
@@ -28,7 +33,7 @@ import structlog
 from sqlalchemy import select
 
 from app.database import AsyncSessionLocal, is_db_available
-from app.models.futures_exit_event import FuturesExitEvent
+from app.models.futures_exit_event import ExitEvent
 from app.models.paper_trade import PaperTrade
 
 logger = structlog.get_logger(__name__)
@@ -76,18 +81,27 @@ def _reason_from_history(meta: dict, status: str, last_tick_event: str | None) -
     return "hist:tp" if status == "tp" else "hist:sl"
 
 
-async def backfill_exit_events(limit: int = 5000) -> dict:
-    """Isi ledger dari trade futures yang SUDAH tertutup. Idempoten — trade yang
-    sudah punya baris dilewati, jadi aman dipanggil berulang."""
+#: Gaya trade (`paper_trades.style`) milik tiap market. Diturunkan dari registry
+#: supaya lane futures baru ikut terbaca tanpa mengubah modul ini.
+def _style_filter(market: str):
+    from app.services.agent_registry import SPOT_AGENT
+    if market == "spot":
+        return PaperTrade.style == SPOT_AGENT
+    return PaperTrade.style.like("futures%")
+
+
+async def backfill_exit_events(limit: int = 5000, market: str = "futures") -> dict:
+    """Isi ledger dari trade yang SUDAH tertutup. Idempoten — trade yang sudah
+    punya baris dilewati, jadi aman dipanggil berulang."""
     if not is_db_available():
         return {"status": "db_unavailable"}
 
     async with AsyncSessionLocal() as session:
         existing = {row for row in (await session.execute(
-            select(FuturesExitEvent.trade_id))).scalars().all()}
+            select(ExitEvent.trade_id).where(ExitEvent.market == market))).scalars().all()}
         trades = list((await session.execute(
             select(PaperTrade).where(
-                PaperTrade.style.like("futures%"),
+                _style_filter(market),
                 PaperTrade.status.in_(["tp", "sl"]),
             ).order_by(PaperTrade.closed_at).limit(limit)
         )).scalars().all())
@@ -106,10 +120,15 @@ async def backfill_exit_events(limit: int = 5000) -> dict:
 
             entry = float(t.entry_price or 0.0)
             atr_pct = float(meta.get("atr_pct") or 0.0)
-            if not entry or not atr_pct:
-                skipped += 1          # tanpa ATR baris tak bisa dinormalkan
+            if not entry:
+                skipped += 1          # tanpa harga entry tak ada yang bisa dihitung
                 continue
 
+            # Tanpa ATR, kolom ber-ATR dibiarkan KOSONG — bukan diisi angka yang
+            # seolah-olah sebanding. Barisnya tetap masuk karena `close_reason`,
+            # P&L, dan lama tahan tetap bernilai untuk dipelajari. (Posisi SPOT
+            # sebelum 2 Agu 2026 tak menyimpan ATR: analyzer menghitungnya tapi
+            # nilainya dibuang saat trade dibuat.)
             def _atr(pct: float | None) -> float | None:
                 return round(pct / atr_pct, 4) if (pct is not None and atr_pct) else None
 
@@ -119,16 +138,29 @@ async def backfill_exit_events(limit: int = 5000) -> dict:
             entry_at = float(t.entry_at or 0.0)
             closed_at = float(t.closed_at or entry_at)
 
-            session.add(FuturesExitEvent(
+            session.add(ExitEvent(
+                market=market,
                 trade_id=t.id, symbol=t.symbol, agent=t.style,
-                lane=t.setup_type or meta.get("setup_type") or "",
-                direction=t.direction, regime=t.regime,
-                close_reason=_reason_from_history(meta, t.status, t.last_tick_event),
+                # Kunci lane berbeda per market: futures memakai `setup_type`,
+                # spot memakai `lane` (ditulis saat open, sengaja tak pernah
+                # dimutasi monitor — `entry_mode` berubah di TP2/TP3 sehingga
+                # tak layak jadi kunci analitik). Keduanya dicoba supaya satu
+                # jalur kode melayani dua market tanpa cabang khusus.
+                lane=(t.setup_type or meta.get("setup_type")
+                      or meta.get("lane") or t.alert_type or ""),
+                # SPOT selalu LONG; kolomnya tetap diisi supaya query lintas
+                # market tak perlu memperlakukan spot sebagai kasus khusus.
+                direction=t.direction or "LONG", regime=t.regime,
+                # Alasan asli bila trade memang menyimpannya (SPOT mencatatnya
+                # 100%); baru menebak dari riwayat bila tidak ada. Tebakan diberi
+                # awalan `hist:` supaya tak pernah tercampur dengan yang asli.
+                close_reason=(meta.get("close_reason")
+                              or _reason_from_history(meta, t.status, t.last_tick_event)),
                 status=t.status,
                 entry_at=entry_at, closed_at=closed_at,
                 held_hours=round(max(0.0, (closed_at - entry_at) / 3600.0), 3),
                 pnl_pct=t.pnl_pct, pnl_dollar=t.pnl_dollar,
-                atr_pct=atr_pct,
+                atr_pct=atr_pct or None,
                 mfe_atr=_atr(float(peak)) if peak is not None else None,
                 tp_dist_atr=_atr(tp_dist), sl_dist_atr=_atr(sl_dist),
                 realized_atr=_atr(t.pnl_pct),
@@ -139,13 +171,14 @@ async def backfill_exit_events(limit: int = 5000) -> dict:
             added += 1
         await session.commit()
 
-    logger.info("exit_ledger_backfilled", added=added, skipped=skipped)
-    return {"status": "ok", "added": added, "skipped": skipped, "scanned": len(trades)}
+    logger.info("exit_ledger_backfilled", market=market, added=added, skipped=skipped)
+    return {"status": "ok", "market": market, "added": added, "skipped": skipped,
+            "scanned": len(trades)}
 
 
 # ── Analisa ───────────────────────────────────────────────────────────────────
 
-def _bucket_stats(rows: list[FuturesExitEvent]) -> dict:
+def _bucket_stats(rows: list[ExitEvent]) -> dict:
     pnls = [r.pnl_pct for r in rows if r.pnl_pct is not None]
     mfes = [r.mfe_atr for r in rows if r.mfe_atr is not None]
     wins = [p for p in pnls if p > 0]
@@ -164,7 +197,7 @@ def _bucket_stats(rows: list[FuturesExitEvent]) -> dict:
     }
 
 
-async def analyze_exits(days: int = 90) -> dict:
+async def analyze_exits(days: int = 90, market: str = "futures") -> dict:
     """Agregasi ledger keluar: per alasan close, per lane, per regime."""
     if not is_db_available():
         return {"status": "db_unavailable"}
@@ -172,7 +205,8 @@ async def analyze_exits(days: int = 90) -> dict:
 
     async with AsyncSessionLocal() as session:
         rows = list((await session.execute(
-            select(FuturesExitEvent).where(FuturesExitEvent.closed_at >= cutoff)
+            select(ExitEvent).where(ExitEvent.closed_at >= cutoff,
+                                    ExitEvent.market == market)
         )).scalars().all())
 
     if not rows:
@@ -196,7 +230,7 @@ async def analyze_exits(days: int = 90) -> dict:
     }
 
 
-async def recommend_exit_params(days: int = 90) -> dict:
+async def recommend_exit_params(days: int = 90, market: str = "futures") -> dict:
     """Usulan parameter keluar per lane — TP realistis + tanda exit prematur.
 
     Usulan TP diambil dari sebaran MFE NYATA lane tersebut, bukan angka pilihan.
@@ -210,7 +244,8 @@ async def recommend_exit_params(days: int = 90) -> dict:
 
     async with AsyncSessionLocal() as session:
         rows = list((await session.execute(
-            select(FuturesExitEvent).where(FuturesExitEvent.closed_at >= cutoff)
+            select(ExitEvent).where(ExitEvent.closed_at >= cutoff,
+                                    ExitEvent.market == market)
         )).scalars().all())
 
     by_lane: dict[str, list] = {}
@@ -257,8 +292,25 @@ async def recommend_exit_params(days: int = 90) -> dict:
 #: lebih awal padahal SL belum tersentuh. Hanya alasan seperti ini yang layak
 #: diadili dengan pertanyaan "apakah lebih baik daripada membiarkan SL bekerja?".
 #: Prefiks `hist:` ikut dikenali supaya baris hasil backfill tak terbuang.
-EARLY_EXIT_REASONS = {"fail_fast", "time_stop_scratch", "rugpull_exit",
-                      "flash_dump_exit", "flash_pump_exit"}
+#:
+#: Taksonominya BERBEDA per market karena monitornya memang berbeda — memaksa
+#: istilah futures ke spot akan menghasilkan tabel kosong yang terbaca seolah
+#: "spot tak pernah keluar dini", padahal justru mayoritas exit-nya begitu.
+EARLY_EXIT_REASONS_BY_MARKET: dict[str, set[str]] = {
+    "futures": {"fail_fast", "time_stop_scratch", "rugpull_exit",
+                "flash_dump_exit", "flash_pump_exit"},
+    # SPOT tak punya fail-fast; penutupan dininya berupa rotasi ke kandidat lain,
+    # pembacaan tren berbalik, penguncian profit, dan penyesuaian risiko.
+    "spot": {"urgent_rotation", "stagnant_rotation", "trend_reversal",
+             "risk_adjusted", "profit_protection", "tp1_breakeven"},
+}
+
+
+def early_exit_reasons(market: str) -> set[str]:
+    """Alasan keluar dini milik sebuah market. Market tak dikenal mengembalikan
+    himpunan kosong — lebih baik tabelnya kosong dan jelas daripada mencampur
+    taksonomi dua monitor yang berbeda."""
+    return EARLY_EXIT_REASONS_BY_MARKET.get(market, set())
 
 #: Sampel minimum sebelum sebuah (lane × pemicu) boleh menghasilkan usulan.
 MIN_SAMPLES_PER_TRIGGER = 5
@@ -274,7 +326,7 @@ def _strip_hist(reason: str) -> str:
     return reason[5:] if reason.startswith("hist:") else reason
 
 
-async def analyze_exit_triggers(days: int = 90) -> dict:
+async def analyze_exit_triggers(days: int = 90, market: str = "futures") -> dict:
     """Adili tiap pemicu exit dini per lane: menyelamatkan, atau justru merugikan?
 
     Ukurannya bukan untung/rugi mentah, melainkan perbandingan terhadap
@@ -292,13 +344,15 @@ async def analyze_exit_triggers(days: int = 90) -> dict:
 
     async with AsyncSessionLocal() as session:
         rows = list((await session.execute(
-            select(FuturesExitEvent).where(FuturesExitEvent.closed_at >= cutoff)
+            select(ExitEvent).where(ExitEvent.closed_at >= cutoff,
+                                    ExitEvent.market == market)
         )).scalars().all())
 
+    dini = early_exit_reasons(market)
     buckets: dict[tuple[str, str], list] = {}
     for r in rows:
         reason = _strip_hist(r.close_reason or "")
-        if reason in EARLY_EXIT_REASONS:
+        if reason in dini:
             buckets.setdefault((r.lane or "-", reason), []).append(r)
 
     out = []
@@ -332,7 +386,7 @@ async def analyze_exit_triggers(days: int = 90) -> dict:
             "min_samples": MIN_SAMPLES_PER_TRIGGER}
 
 
-async def recommend_failfast_params(days: int = 90) -> dict:
+async def recommend_failfast_params(days: int = 90, market: str = "futures") -> dict:
     """Usulan gap fail-fast per lane, diturunkan dari ledger.
 
     Logikanya sederhana dan bisa diperiksa: bila di sebuah lane fail-fast belum
@@ -340,7 +394,7 @@ async def recommend_failfast_params(days: int = 90) -> dict:
     gap tepat di atas gap yang selama ini terjadi — sehingga pemotongan dini
     padam di lane itu, tapi tetap hidup di lane yang SL-nya memang jauh.
     """
-    trig = await analyze_exit_triggers(days=days)
+    trig = await analyze_exit_triggers(days=days, market=market)
     if trig.get("status") != "ok":
         return trig
 
@@ -399,7 +453,7 @@ def _cv(values: list[float]) -> float | None:
     return round(var ** 0.5 / mean, 3)
 
 
-async def analyze_sl_width(days: int = 90) -> dict:
+async def analyze_sl_width(days: int = 90, market: str = "futures") -> dict:
     """Bedah lebar SL per lane: dirancang terhadap volatilitas, atau terhadap harga?
 
     Dua pertanyaan yang dijawab di sini:
@@ -416,12 +470,19 @@ async def analyze_sl_width(days: int = 90) -> dict:
     """
     if not is_db_available():
         return {"status": "db_unavailable"}
-    from agents.futures import sl_config
+    # Batas SL yang dikonfigurasi baru ada untuk FUTURES (`sl_config`). Untuk
+    # market lain kolom "plafon/lantai/mentok" DIKOSONGKAN — meminjam angka
+    # futures akan menghasilkan vonis "mentok plafon" yang sepenuhnya karangan.
+    sl_params = None
+    if market == "futures":
+        from agents.futures import sl_config
+        sl_params = sl_config.params
 
     cutoff = time.time() - days * 86400
     async with AsyncSessionLocal() as session:
         rows = list((await session.execute(
-            select(FuturesExitEvent).where(FuturesExitEvent.closed_at >= cutoff)
+            select(ExitEvent).where(ExitEvent.closed_at >= cutoff,
+                                    ExitEvent.market == market)
         )).scalars().all())
 
     by_lane: dict[str, list] = {}
@@ -438,10 +499,13 @@ async def analyze_sl_width(days: int = 90) -> dict:
         all_pct += sl_pct
         all_atr += sl_atr
 
-        p = sl_config.params(lane)
-        cap, floor = p["max_pct"], p["floor_pct"]
-        pinned_max = sum(1 for v in sl_pct if cap > 0 and abs(v - cap) / cap <= PINNED_TOLERANCE)
-        pinned_min = sum(1 for v in sl_pct if floor > 0 and abs(v - floor) / floor <= PINNED_TOLERANCE)
+        p = sl_params(lane) if sl_params else None
+        cap = p["max_pct"] if p else None
+        floor = p["floor_pct"] if p else None
+        pinned_max = (sum(1 for v in sl_pct if abs(v - cap) / cap <= PINNED_TOLERANCE)
+                      if cap else None)
+        pinned_min = (sum(1 for v in sl_pct if abs(v - floor) / floor <= PINNED_TOLERANCE)
+                      if floor else None)
 
         out.append({
             "lane": lane, "n": len(group),
@@ -452,8 +516,10 @@ async def analyze_sl_width(days: int = 90) -> dict:
             "cv_sl_atr": _cv(sl_atr),
             "configured_max_pct": cap,
             "configured_floor_pct": floor,
-            "pinned_at_max_frac": round(pinned_max / len(group), 3),
-            "pinned_at_floor_frac": round(pinned_min / len(group), 3),
+            "pinned_at_max_frac": (round(pinned_max / len(group), 3)
+                                   if pinned_max is not None else None),
+            "pinned_at_floor_frac": (round(pinned_min / len(group), 3)
+                                     if pinned_min is not None else None),
             # SL berapa kali lebih jauh daripada gerak untung terjauh yang nyata:
             # angka besar = posisi mempertaruhkan jauh lebih banyak daripada yang
             # pernah bergerak ke arah kita.
@@ -483,7 +549,8 @@ async def analyze_sl_width(days: int = 90) -> dict:
 
 # ── Penerapan ─────────────────────────────────────────────────────────────────
 
-async def apply_exit_recommendations(days: int = 90, dry_run: bool = True) -> dict:
+async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
+                                     market: str = "futures") -> dict:
     """Tulis usulan batas TP per lane ke `agent_config` (PRIORITAS 2).
 
     Ini satu-satunya jalan hasil belajar EXIT menyentuh keputusan monitor, dan
@@ -504,7 +571,7 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True) -> di
     from app.models.agent_config import AgentConfig
     from agents.futures.monitor_config import tp_lane_key, failfast_gap_key
 
-    reco = await recommend_exit_params(days=days)
+    reco = await recommend_exit_params(days=days, market=market)
     if reco.get("status") != "ok":
         return reco
 
@@ -512,7 +579,7 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True) -> di
 
     # M3 — gap fail-fast per lane. Dipasang lewat jalur yang sama supaya satu
     # tombol menerapkan seluruh hasil belajar sisi keluar, bukan tersebar.
-    ff = await recommend_failfast_params(days=days)
+    ff = await recommend_failfast_params(days=days, market=market)
     for rec in ff.get("recommendations", []):
         lane = rec["lane"]
         if rec.get("status") != "ok":

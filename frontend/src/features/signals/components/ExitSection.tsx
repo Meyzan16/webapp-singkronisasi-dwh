@@ -20,22 +20,22 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { futuresLaneLabel } from "@/lib/agents";
-import { LANES as SPOT_LANES } from "@/lib/lanes";
+import { laneForSpot } from "@/lib/lanes";
 
 export type ExitSubTab = "exit_reasons" | "exit_triggers" | "exit_sl" | "exit_rollout";
 
 // ── Dimensi MARKET ────────────────────────────────────────────────────────────
-// Saat ini hanya MONITOR FUTURES yang punya ledger keluar. MONITOR SPOT menyusul.
+// FUTURES dan SPOT dilayani komponen yang SAMA, dibedakan hanya oleh peta di
+// bawah. Endpoint-nya pun berbagi implementasi di backend (argumen `market`),
+// jadi perbaikan pada analisa otomatis berlaku untuk keduanya.
 //
-// Dimensi ini dipasang SEKARANG, bukan nanti: kalau seksi ini dibangun
-// futures-only lalu SPOT ditambahkan belakangan, seluruh komponen harus dibongkar
-// ulang — dan pengalaman di repo ini menunjukkan yang lebih sering terjadi adalah
-// SPOT ditempelkan seadanya lalu berperilaku beda diam-diam (lihat katalog
-// Formulas yang sempat futures-only, dan Predictive yang sempat futures-only).
+// Ini disengaja: sisi SPOT di proyek ini berulang kali dibangun sebagai salinan
+// terpisah lalu menyimpang diam-diam — katalog Formulas dan tab Predictive
+// dua-duanya sempat futures-only tanpa satu pun error muncul.
 //
-// Menambahkan SPOT nanti = mengisi `endpoints` di bawah. Tak ada tempat lain
-// yang perlu disentuh: label lane, tabel, dan status kosong semuanya sudah
-// membaca dari peta ini.
+// `null` pada sebuah endpoint = kemampuan itu memang belum ada untuk market
+// tersebut, dan UI menyatakannya terus terang alih-alih meminjam angka market
+// lain.
 
 export type ExitMarket = "futures" | "spot";
 
@@ -69,15 +69,20 @@ const MARKETS: MarketSpec[] = [
   },
   {
     key: "spot", label: "SPOT", icon: "🎯",
-    endpoints: { analysis: null, triggers: null, slWidth: null, rollout: null },
-    // Lane SPOT sudah punya katalognya sendiri — dipakai supaya begitu ledger
-    // SPOT ada, labelnya langsung benar tanpa menulis peta baru.
-    laneLabel: (lane) => SPOT_LANES[lane]?.label ?? lane,
-    pending:
-      "MONITOR SPOT belum punya ledger keputusan keluar. Yang dibutuhkan: tabel " +
-      "setara `futures_exit_events` untuk posisi spot, ditulis dari monitor spot " +
-      "saat posisi ditutup. Sampai itu ada, halaman ini sengaja kosong — angka " +
-      "futures TIDAK dipinjamkan ke sini.",
+    endpoints: {
+      analysis: "/api/v1/spot/exit-learning/analysis",
+      triggers: "/api/v1/spot/exit-learning/triggers",
+      slWidth:  "/api/v1/spot/exit-learning/sl-width",
+      // Tahapan penyalaan menyetel parameter monitor FUTURES; SPOT belum punya
+      // parameter keluar yang bisa ditala, jadi sengaja kosong daripada
+      // menampilkan tahapan milik market lain.
+      rollout:  null,
+    },
+    // Nilai lane SPOT di ledger berupa alert_type mentah (`squeeze`,
+    // `bigmover_chase`, `breakout_pump`, …). `laneForSpot` sudah jadi pemetanya
+    // di seluruh UI — dipakai ulang di sini supaya nama lane SPOT tak pernah
+    // punya dua versi yang bisa berbeda.
+    laneLabel: (lane) => laneForSpot(lane).label,
   },
 ];
 
@@ -132,10 +137,11 @@ interface SlLaneRow {
   sl_atr_median: number;
   cv_sl_pct: number | null;
   cv_sl_atr: number | null;
-  configured_max_pct: number;
-  configured_floor_pct: number;
-  pinned_at_max_frac: number;
-  pinned_at_floor_frac: number;
+  /** null bila market ini belum punya batas SL yang dikonfigurasi. */
+  configured_max_pct: number | null;
+  configured_floor_pct: number | null;
+  pinned_at_max_frac: number | null;
+  pinned_at_floor_frac: number | null;
   sl_vs_mfe: number | null;
   win_rate: number | null;
   expectancy_pct: number | null;
@@ -595,7 +601,7 @@ function ExitSlWidth({ data, market }: { data: SlWidthResponse | null; market: M
                   <td className="text-right tabular-nums">{num(l.sl_atr_median)}×</td>
                   <td className="text-right tabular-nums text-neutral-400">{pct(l.configured_max_pct, 1)}</td>
                   <td className={`text-right tabular-nums font-bold ${
-                    l.pinned_at_max_frac >= SOROT.seringMentok ? "text-rose-600" : "text-neutral-700"}`}>
+                    (l.pinned_at_max_frac ?? 0) >= SOROT.seringMentok ? "text-rose-600" : "text-neutral-700"}`}>
                     {frac(l.pinned_at_max_frac)}
                   </td>
                   <td className={`text-right tabular-nums ${
@@ -630,6 +636,21 @@ function StageBadge({ stage }: { stage: string }) {
 }
 
 function ExitRollout({ data, market, onRefresh }: { data: RolloutResponse | null; market: MarketSpec; onRefresh: () => void }) {
+  if (!market.endpoints.rollout) {
+    return (
+      <div className="bg-white border border-neutral-200 rounded-2xl p-5 text-center">
+        <p className="text-sm font-black text-neutral-800">
+          {market.icon} {market.label} — belum ada parameter keluar yang bisa ditala
+        </p>
+        <p className="text-[11px] text-neutral-500 mt-2 leading-relaxed max-w-xl mx-auto">
+          Tahapan penyalaan menyetel parameter monitor yang sudah terpusat dan
+          bisa di-override dari DB. Sisi {market.label} belum punya padanannya,
+          jadi halaman ini sengaja kosong — tahapan milik market lain TIDAK
+          ditampilkan di sini.
+        </p>
+      </div>
+    );
+  }
   if (!data || data.status !== "ok") {
     return <Empty>Tahapan penyalaan belum bisa dibaca.</Empty>;
   }

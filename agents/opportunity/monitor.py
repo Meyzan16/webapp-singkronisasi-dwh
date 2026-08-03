@@ -1000,6 +1000,18 @@ async def _process_trade(
         trade.pnl_dollar   = pnl_dollar
         trade.signals_json = json.dumps(meta, ensure_ascii=False)
 
+        # M7: catat keputusan keluar ke ledger bersama. Sisi futures sudah punya
+        # ini sejak M0; SPOT selama ini menutup 65 posisi tanpa satu pun tercatat
+        # dalam bentuk yang bisa di-query, sehingga Adaptive Engine tak punya
+        # bahan belajar untuk keputusan keluar spot.
+        from agents.shared.exit_ledger import log_exit
+        await log_exit(
+            session, trade, meta, market="spot",
+            lane=(meta.get("lane") or trade.alert_type or ""),
+            close_reason=close_reason or "", status=new_status,
+            pnl_net=pnl_pct, pnl_dollar=pnl_dollar,
+        )
+
         logger.info("opportunity_position_closed",
                     symbol=trade.symbol, status=new_status, reason=close_reason,
                     entry=entry, close=close_price,

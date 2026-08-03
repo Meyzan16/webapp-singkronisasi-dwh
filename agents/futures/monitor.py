@@ -173,47 +173,14 @@ _EVENT_LOG_CAP = 30
 
 async def _log_exit_event(session, trade, meta: dict, *, lane: str, close_reason: str,
                           status: str, pnl_net: float, pnl_dollar: float) -> None:
-    """Catat satu keputusan KELUAR ke `futures_exit_events`.
+    """Catat satu keputusan KELUAR. M7: implementasinya bersama dengan monitor
+    SPOT (`agents/shared/exit_ledger.py`) supaya kedua market mustahil menyimpang
+    diam-diam. Pembungkus tipis ini dipertahankan agar pemanggil tak berubah."""
+    from agents.shared.exit_ledger import log_exit
 
-    Semua jarak dinormalkan ke kelipatan ATR supaya lintas-koin sebanding — koin
-    ber-ATR 6% dan 1% tak bisa dibandingkan dalam persen mentah. Dibungkus
-    try/except: kegagalan pencatatan TIDAK BOLEH menggagalkan penutupan posisi.
-    """
-    try:
-        from app.models.futures_exit_event import FuturesExitEvent
-
-        entry = float(trade.entry_price or 0.0)
-        atr_pct = float(meta.get("atr_pct") or 0.0)
-        atr_abs = entry * (atr_pct / 100.0) if (entry and atr_pct) else 0.0
-        peak = float(meta.get("peak_pnl_pct") or 0.0)     # gerak favorable terjauh (%)
-
-        def _atr_units(pct_move: float) -> float | None:
-            return round(pct_move / atr_pct, 4) if atr_pct else None
-
-        tp_dist = abs(float(trade.take_profit) - entry) / entry * 100 if (entry and trade.take_profit) else None
-        sl_dist = abs(entry - float(trade.stop_loss)) / entry * 100 if (entry and trade.stop_loss) else None
-        entry_at = float(trade.entry_at or 0.0)
-        closed_at = float(trade.closed_at or time.time())
-
-        session.add(FuturesExitEvent(
-            trade_id=trade.id, symbol=trade.symbol, agent=trade.style,
-            lane=lane or "", direction=trade.direction, regime=trade.regime,
-            close_reason=close_reason, status=status,
-            entry_at=entry_at, closed_at=closed_at,
-            held_hours=round(max(0.0, (closed_at - entry_at) / 3600.0), 3),
-            pnl_pct=round(float(pnl_net), 4), pnl_dollar=pnl_dollar,
-            atr_pct=atr_pct or None,
-            mfe_atr=_atr_units(peak),
-            tp_dist_atr=_atr_units(tp_dist) if tp_dist is not None else None,
-            sl_dist_atr=_atr_units(sl_dist) if sl_dist is not None else None,
-            realized_atr=_atr_units(float(pnl_net)),
-            tp_compressed=bool(meta.get("tp_compressed")),
-            trail_active=bool(trade.trail_active),
-            leverage=trade.leverage, score=meta.get("score"),
-        ))
-    except Exception as exc:
-        logger.warning("exit_event_log_failed", symbol=getattr(trade, "symbol", "?"),
-                       error=str(exc)[:120])
+    await log_exit(session, trade, meta, market="futures", lane=lane,
+                   close_reason=close_reason, status=status,
+                   pnl_net=pnl_net, pnl_dollar=pnl_dollar)
 
 
 def _append_trade_event(meta: dict, kind: str, payload: dict | None = None) -> None:

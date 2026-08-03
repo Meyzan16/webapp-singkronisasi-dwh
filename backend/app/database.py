@@ -1,10 +1,13 @@
 from collections.abc import AsyncGenerator
 
+import structlog
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import get_settings
+
+logger = structlog.get_logger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -86,8 +89,34 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 async def create_db_schema() -> None:
     """Create all registered tables and apply additive column migrations."""
     async with engine.begin() as connection:
+        await _pre_create_migrations(connection)
         await connection.run_sync(Base.metadata.create_all)
         await _migrate_columns(connection)
+
+
+async def _pre_create_migrations(connection) -> None:
+    """Migrasi yang WAJIB berjalan sebelum `create_all`.
+
+    Rename tabel harus di sini: `create_all` akan lebih dulu membuat tabel baru
+    yang kosong, dan sesudah itu rename pasti gagal karena namanya sudah dipakai —
+    diam-diam meninggalkan data lama di tabel bernama usang.
+    """
+    from sqlalchemy import text
+
+    migrations = [
+        # M7: ledger keluar kini menampung SPOT dan FUTURES, jadi nama lamanya
+        # (`futures_exit_events`) menyesatkan. Baris SPOT di tabel bernama
+        # "futures" persis jenis jebakan yang berulang kali memakan waktu di
+        # proyek ini. `IF EXISTS` membuatnya aman dijalankan berulang: sesudah
+        # rename pertama, perintah ini tak melakukan apa-apa.
+        "ALTER TABLE IF EXISTS futures_exit_events RENAME TO exit_events",
+    ]
+    for sql in migrations:
+        try:
+            await connection.execute(text(sql))
+        except Exception as exc:      # noqa: BLE001 — skema tak boleh menghentikan boot
+            logger.warning("pre_create_migration_skipped", sql=sql[:80],
+                           error=str(exc)[:120])
 
 
 async def _migrate_columns(connection) -> None:
@@ -143,6 +172,11 @@ async def _migrate_columns(connection) -> None:
         "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS outcome_attempts INTEGER DEFAULT 0",
         "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS outcome_error VARCHAR(120)",
         "ALTER TABLE spot_decision_events ADD COLUMN IF NOT EXISTS review_json TEXT",
+        # M7: ledger keluar jadi dua-market. Baris warisan seluruhnya futures,
+        # jadi default-nya benar apa adanya — tak ada baris yang perlu ditebak.
+        "ALTER TABLE exit_events ADD COLUMN IF NOT EXISTS market VARCHAR(10) "
+        "NOT NULL DEFAULT 'futures'",
+        "CREATE INDEX IF NOT EXISTS ix_fee_market ON exit_events (market, closed_at)",
         # Safety-net: create tables that may be missing if backend started before these models were added.
         "CREATE TABLE IF NOT EXISTS app_settings ("
         "  key VARCHAR(100) PRIMARY KEY,"

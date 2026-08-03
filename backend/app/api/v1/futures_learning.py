@@ -451,6 +451,46 @@ async def exit_learning_apply(days: int = Query(90, ge=1, le=365),
     return await apply_exit_recommendations(days=days, dry_run=dry_run)
 
 
+# ── M7: sisi SPOT ─────────────────────────────────────────────────────────────
+# Endpoint terpisah, IMPLEMENTASI SAMA. Yang berbeda hanya argumen `market`, jadi
+# perbaikan pada analisa otomatis berlaku untuk kedua market — tak ada salinan
+# kedua yang bisa menyimpang diam-diam.
+
+@router.post("/spot/exit-learning/backfill", dependencies=[Depends(require_db)])
+async def spot_exit_learning_backfill() -> dict:
+    """Isi ledger keluar dari posisi SPOT yang sudah tertutup. Idempoten."""
+    from agents.learning.exit_learning import backfill_exit_events
+    return await backfill_exit_events(market="spot")
+
+
+@router.get("/spot/exit-learning/analysis", dependencies=[Depends(require_db)])
+async def spot_exit_learning_analysis(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Agregasi keputusan keluar SPOT: per alasan close, per lane, per regime."""
+    from agents.learning.exit_learning import analyze_exits
+    return await analyze_exits(days=days, market="spot")
+
+
+@router.get("/spot/exit-learning/triggers", dependencies=[Depends(require_db)])
+async def spot_exit_learning_triggers(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Adili tiap pemicu exit dini SPOT terhadap alternatifnya (jarak SL)."""
+    from agents.learning.exit_learning import analyze_exit_triggers
+    return await analyze_exit_triggers(days=days, market="spot")
+
+
+@router.get("/spot/exit-learning/sl-width", dependencies=[Depends(require_db)])
+async def spot_exit_learning_sl_width(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Bedah lebar SL SPOT per lane."""
+    from agents.learning.exit_learning import analyze_sl_width
+    return await analyze_sl_width(days=days, market="spot")
+
+
+@router.get("/spot/exit-learning/recommendations", dependencies=[Depends(require_db)])
+async def spot_exit_learning_recommendations(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Usulan parameter keluar SPOT per lane."""
+    from agents.learning.exit_learning import recommend_exit_params
+    return await recommend_exit_params(days=days, market="spot")
+
+
 @router.get("/futures/exit-learning/config", dependencies=[Depends(require_db)])
 async def exit_learning_config() -> dict:
     """Ambang monitor yang SEDANG berlaku, termasuk batas TP per lane."""

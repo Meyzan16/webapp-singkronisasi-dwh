@@ -1,4 +1,10 @@
-"""Ledger keputusan KELUAR futures — bahan belajar Adaptive Engine untuk MONITOR.
+"""Ledger keputusan KELUAR — bahan belajar Adaptive Engine untuk MONITOR.
+
+M7 (2 Agu 2026): tabel ini semula futures-only (`futures_exit_events`) dan kini
+menampung SPOT juga, dibedakan kolom `market`. Satu tabel, bukan dua: sisi SPOT
+di proyek ini berulang kali dibangun sebagai salinan terpisah lalu menyimpang
+diam-diam (katalog Formulas dan tab Predictive dua-duanya sempat futures-only).
+Satu skema membuat penyimpangan itu mustahil terjadi tanpa terlihat.
 
 Latar (audit 1 Agu 2026): keputusan MASUK sudah punya ledger lengkap
 (`futures_decision_events`) sehingga engine bisa belajar dari entry. Keputusan
@@ -19,16 +25,27 @@ from app.database import Base
 
 
 class FuturesExitEvent(Base):
-    __tablename__ = "futures_exit_events"
+    """Satu baris = satu penutupan posisi, SPOT maupun FUTURES.
+
+    Nama kelasnya dipertahankan agar impor lama tak patah; `ExitEvent` adalah
+    alias yang sebaiknya dipakai kode baru.
+    """
+
+    __tablename__ = "exit_events"
     __table_args__ = (
         Index("ix_fee_closed_at", "closed_at"),
         Index("ix_fee_reason", "close_reason", "closed_at"),
         Index("ix_fee_lane", "lane", "closed_at"),
+        Index("ix_fee_market", "market", "closed_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     #: Tautan ke posisi yang ditutup (paper_trades.id).
+    #: "futures" | "spot". Default "futures" supaya 44 baris warisan — yang
+    #: seluruhnya futures — tetap benar tanpa perlu ditulis ulang.
+    market:   Mapped[str] = mapped_column(String(10), nullable=False, default="futures")
+
     trade_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     symbol:   Mapped[str] = mapped_column(String(30), nullable=False)
     agent:    Mapped[str] = mapped_column(String(40), nullable=False)
@@ -67,3 +84,7 @@ class FuturesExitEvent(Base):
 
     leverage: Mapped[int | None] = mapped_column(Integer, nullable=True)
     score:    Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+#: Nama yang seharusnya dipakai kode baru — tabelnya bukan lagi milik futures saja.
+ExitEvent = FuturesExitEvent

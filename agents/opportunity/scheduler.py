@@ -526,6 +526,13 @@ async def _auto_open_position(coin: dict) -> bool:
             # TP2/TP3 tersentuh, jadi ia tak bisa dipakai untuk atribusi lane.
             "lane":              lane_of({}, coin.get("alert_type")),
             "change_7d":         coin.get("change_7d", 0.0),
+            # M7: ATR saat entry, dalam PERSEN harga. Analyzer sudah menghitung
+            # ATR (absolut) tapi selama ini dibuang saat trade dibuat — akibatnya
+            # 65 posisi spot tertutup tak satu pun bisa dinormalkan terhadap
+            # volatilitas, dan perbandingan antar koin jadi mustahil. Sisi futures
+            # sudah menyimpannya sejak awal; ini menyamakan keduanya.
+            "atr_pct":           (round(float(coin["atr"]) / entry * 100, 4)
+                                  if coin.get("atr") and entry else None),
             # P1 / B4.1: slippage info for analytics
             "entry_slippage_pct": round(_slip_pct, 4),
             "entry_session":      _sess(),
