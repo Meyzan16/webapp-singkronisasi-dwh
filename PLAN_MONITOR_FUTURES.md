@@ -1,4 +1,4 @@
-# PLAN — MONITOR FUTURES
+# PLAN — MONITOR (FUTURES + SPOT)
 
 Agen MONITOR adalah penentu **alasan tutup posisi** (TP / SL / SL+ / trail /
 fail-fast / rotasi / umur). Fokus rencana ini: membuat keputusan keluar bisa
@@ -104,11 +104,20 @@ kode sebelum perubahan, 7.605 kasus, 0 beda.
 Jebakan yang ditutup: `agent2` memakai ulang fungsi level `agent1`, jadi tanpa
 meneruskan lane, accumulation akan memakai tala pre_gainer tanpa satu pun error.
 
-### M4b — SL/MFE 3,4–4,9× (belum dikerjakan)
-Temuan lanjutan yang belum ditindaklanjuti: SL dipasang 3–5× lebih jauh daripada
-gerak untung terjauh yang benar-benar terjadi. Posisi mempertaruhkan jauh lebih
-banyak daripada yang pernah bergerak ke arah kita — ini sisi lain dari
-[[M0]] "TP tak terjangkau", dan menyentuhnya berarti menyentuh sizing.
+### M4b — Rekam gerak merugikan terjauh (MAE) ✅ `cd153b7`
+M4 mencatat SL/MFE 3,4–4,9× sebagai kandidat mempersempit SL. Saat hendak
+dikerjakan, **datanya ternyata tidak cukup untuk kesimpulan itu**.
+
+MFE menjawab "seberapa jauh harga sempat menguntungkan". Yang menentukan boleh
+tidaknya SL dipersempit adalah pertanyaan **lain**: seberapa dalam harga sempat
+**melawan** sebelum berbalik. Sistem tak pernah merekamnya. Mempersempit SL dari
+MFE saja akan memotong posisi yang sebenarnya akan menang.
+
+Hasil: kedua monitor merekam MAE, kolom `mae_atr` di ledger, dan
+`sl_utilization` (berapa persen jarak SL yang benar-benar terpakai).
+**Rekomendasi lebar SL ditahan** sampai 30 sampel MAE terkumpul — alasannya
+tertulis di respons API dan di UI, bukan disembunyikan. Murni perekaman; tak satu
+pun keputusan trading berubah.
 
 ### M5 — Nyalakan bertahap ✅ `5d0e18f`
 Sisi MASUK sudah lama punya `shadow → canary → champion`. Sisi KELUAR tidak punya
@@ -156,10 +165,42 @@ klik-per-klik tak bisa diuji dari sini. Yang diverifikasi: `tsc` & `eslint` 0
 error, `next build` sukses, dan payload keempat endpoint dicocokkan
 field-per-field dengan kontrak TypeScript komponen (0 field hilang).
 
-### M7 — MONITOR SPOT ⬅ **BERIKUTNYA**
-Yang dibutuhkan agar tab SPOT hidup: tabel setara `futures_exit_events` untuk
-posisi spot, ditulis monitor spot saat posisi ditutup, lalu endpoint dengan
-bentuk respons yang sama. Kerangka UI-nya sudah menunggu.
+### M7 — MONITOR SPOT ✅ `19cd213`
+SPOT sudah menutup 65 posisi tanpa satu pun tercatat dalam bentuk yang bisa
+di-query. **Satu tabel, satu jalur kode** — bukan salinan untuk spot:
+
+- `futures_exit_events` → `exit_events` + kolom `market`. Rename dijalankan di
+  tahap **pra-`create_all`** yang baru; kalau tidak, `create_all` lebih dulu
+  membuat tabel kosong bernama baru dan rename pasti gagal, diam-diam
+  meninggalkan 45 baris di tabel bernama usang.
+- `agents/shared/exit_ledger.py` dipakai kedua monitor; `exit_learning` menerima
+  argumen `market`; endpoint `/spot/exit-learning/*` memanggil fungsi yang sama.
+
+**Tiga temuan saat mengerjakan:**
+1. `atr_pct` **dibuang** saat trade spot dibuat — analyzer menghitungnya tapi
+   nilainya tak pernah masuk meta, sehingga 65 posisi tertutup tak satu pun bisa
+   dinormalkan terhadap volatilitas. Kini disimpan.
+2. Alasan close SPOT tercatat **100%** (futures harus ditebak dari riwayat).
+   Backfill memakai alasan asli bila ada; awalan `hist:` hanya untuk tebakan.
+3. **Taksonomi keluar dini berbeda per market.** Memaksa istilah futures ke spot
+   menghasilkan tabel kosong yang terbaca seolah "spot tak pernah keluar dini",
+   padahal justru mayoritas exit-nya begitu.
+
+Angka SPOT (65 exit): expectancy **+0,25%**, PF **1,159** — berlawanan dengan
+futures (−0,76%, PF 0,612).
+
+| Alasan close | n | Expectancy | WR |
+|---|---|---|---|
+| urgent_rotation | 18 | +1,876% | 61,1% |
+| sl_hit | 16 | −4,978% | 0% |
+| trend_reversal | 10 | −1,191% | 10,0% |
+| tp1_breakeven | 9 | +3,863% | 100% |
+| profit_protection | 5 | +6,778% | 100% |
+
+### Sisa
+Tak ada fase terbuka. Yang menunggu waktu, bukan pekerjaan: MAE terkumpul (M4b),
+sampel `fail_fast` mencapai ambang (M3), dan keputusan pemilik untuk menyalakan
+canary pertama (M5).
 
 ---
 
