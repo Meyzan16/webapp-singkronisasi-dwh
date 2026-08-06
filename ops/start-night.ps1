@@ -90,6 +90,10 @@ if (Test-Path $PidFile) {
         Log "backend sudah jalan (PID $old) - lewati start, kirim laporan status"
         try { & (Join-Path $Repo 'ops\report-telegram.ps1') 'Startup (backend sudah jalan)' | Out-Null; Log "laporan dikirim" }
         catch { Log "laporan gagal: $($_.Exception.Message)" }
+        # Penanda tuntas WAJIB ada juga di jalur keluar-awal ini. Tanpa itu,
+        # kondisi normal "backend sudah jalan" terlihat SAMA PERSIS dengan skrip
+        # yang mati di tengah jalan — dan penandanya jadi tak bisa dipercaya.
+        Log "=== START-NIGHT SELESAI (backend sudah jalan) ==="
         return
     }
 }
