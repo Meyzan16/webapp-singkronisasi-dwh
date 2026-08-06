@@ -745,6 +745,11 @@ async def run_futures_loop() -> None:
             except Exception as exc:
                 logger.warning("rejection_log_flush_failed", error=str(exc)[:80])
 
+            # Ditegaskan per siklus: blok outcome di bawah hanya jalan tiap ~10
+            # cycle, jadi tanpa nilai awal ini siklus lain akan menabrak NameError
+            # saat memeriksanya.
+            _outcomes_baru = False
+
             # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F1: outcome pass tiap ~10 cycle
             # (offset +5 dari backfill big_mover supaya beban API tidak menumpuk).
             if _cycle_count % 10 == 5:
@@ -760,13 +765,32 @@ async def run_futures_loop() -> None:
                     if _n_lbl or _n_lnk:
                         logger.info("futures_outcome_pass",
                                     price_labels=_n_lbl, trade_links=_n_lnk)
+                        # Ada bukti baru → coba latih. Lihat catatan di blok
+                        # training di bawah: memicu HANYA dari `_cycle_count`
+                        # membuat training futures hilang tiap kali backend
+                        # restart. Sisi SPOT sudah lama dipicu dari kedatangan
+                        # outcome; ini menyamakannya.
+                        _outcomes_baru = True
                 except Exception as exc:
                     logger.warning("futures_outcome_tracker_failed", error=str(exc)[:200])
 
-            # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F3: coba latih challenger tiap ~100
-            # cycle (~3-4 jam). Self-gating: no-op sampai ≥60 sampel 4h-matang &
-            # +50 evidence baru. Model baru selalu 'shadow' — tak memengaruhi keputusan.
-            if _cycle_count % 100 == 50:
+            # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F3: coba latih challenger.
+            # Self-gating: no-op sampai ≥60 sampel 4h-matang & +50 evidence baru.
+            # Model baru selalu 'shadow' — tak memengaruhi keputusan.
+            #
+            # TEMUAN 6 Agu 2026: pemicunya dulu HANYA `_cycle_count % 100 == 50`,
+            # padahal `_cycle_count` adalah variabel di memori yang KEMBALI NOL
+            # setiap backend restart. Dengan stop/start harian 07:00–19:00 plus
+            # dua malam START-NIGHT gagal, scanner futures nyaris tak pernah
+            # menyelesaikan 100 menit berturut-turut pada fase yang tepat —
+            # akibatnya model futures tak dilatih ulang selama 91,8 jam meski
+            # sudah ada 411 keputusan baru yang memenuhi syarat.
+            #
+            # Sisi SPOT tak pernah kena masalah ini karena dipicu dari kedatangan
+            # outcome (`if outcomes_updated:`), bukan dari counter. Di bawah kini
+            # sama: counter dipertahankan sebagai jaring pengaman berkala, tapi
+            # kedatangan bukti baru sudah cukup untuk memicu.
+            if _outcomes_baru or _cycle_count % 100 == 50:
                 try:
                     from agents.learning.futures_adaptive_model import train_and_register
                     _mres = await train_and_register()
