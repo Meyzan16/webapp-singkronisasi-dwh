@@ -484,6 +484,29 @@ async def spot_exit_learning_sl_width(days: int = Query(90, ge=1, le=365)) -> di
     return await analyze_sl_width(days=days, market="spot")
 
 
+@router.get("/spot/exit-rollout", dependencies=[Depends(require_db)])
+async def spot_exit_rollout_status() -> dict:
+    """Tahapan penyalaan parameter keluar. Ledger-nya satu untuk dua market —
+    daftar yang dikembalikan sudah memuat kolom `market` per baris."""
+    from agents.learning.exit_rollout import status
+    return await status()
+
+
+@router.post("/spot/exit-rollout/propose", dependencies=[Depends(require_db)])
+async def spot_exit_rollout_propose(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Alirkan usulan keluar SPOT ke antrean tahapan. Semua masuk sebagai shadow."""
+    from agents.learning.exit_rollout import propose_from_recommendations
+    return await propose_from_recommendations(days=days, market="spot")
+
+
+@router.get("/spot/monitor-config", dependencies=[Depends(require_db)])
+async def spot_monitor_config() -> dict:
+    """Ambang keputusan keluar SPOT yang SEDANG berlaku."""
+    from agents.opportunity import monitor_config as scfg
+    await scfg.refresh()
+    return {"status": "ok", "config": scfg.snapshot()}
+
+
 @router.get("/spot/exit-learning/recommendations", dependencies=[Depends(require_db)])
 async def spot_exit_learning_recommendations(days: int = Query(90, ge=1, le=365)) -> dict:
     """Usulan parameter keluar SPOT per lane."""

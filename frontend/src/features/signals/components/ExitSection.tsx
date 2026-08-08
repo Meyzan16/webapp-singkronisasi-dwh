@@ -73,10 +73,7 @@ const MARKETS: MarketSpec[] = [
       analysis: "/api/v1/spot/exit-learning/analysis",
       triggers: "/api/v1/spot/exit-learning/triggers",
       slWidth:  "/api/v1/spot/exit-learning/sl-width",
-      // Tahapan penyalaan menyetel parameter monitor FUTURES; SPOT belum punya
-      // parameter keluar yang bisa ditala, jadi sengaja kosong daripada
-      // menampilkan tahapan milik market lain.
-      rollout:  null,
+      rollout:  "/api/v1/spot/exit-rollout",
     },
     // Nilai lane SPOT di ledger berupa alert_type mentah (`squeeze`,
     // `bigmover_chase`, `breakout_pump`, …). `laneForSpot` sudah jadi pemetanya
@@ -180,7 +177,8 @@ interface RolloutRow {
 
 interface RolloutResponse {
   status: string;
-  learning_enabled?: boolean;
+  /** Saklar belajar TERPISAH per market — satu market menyala tak berarti dua-duanya. */
+  learning_enabled?: { futures: boolean; spot: boolean };
   note?: string;
   gates?: Record<string, number>;
   rollouts?: RolloutRow[];
@@ -350,12 +348,16 @@ export function ExitSection({ subTab }: { subTab: ExitSubTab }) {
 
   // Saklar belajar berlaku untuk SEMUA sub-tab: selama mati, tak satu pun angka
   // hasil belajar di halaman ini memengaruhi keputusan monitor.
+  // Saklar dibaca PER MARKET: menampilkan status futures saat membuka tab SPOT
+  // akan membuat orang mengira hasil belajar SPOT sudah aktif padahal belum.
+  const learningOn = rollout?.learning_enabled?.[marketKey] ?? false;
   const banner = rollout?.status === "ok" && (
-    <div className={`rounded-xl border p-3 text-[11px] leading-relaxed ${rollout.learning_enabled
+    <div className={`rounded-xl border p-3 text-[11px] leading-relaxed ${learningOn
       ? "bg-emerald-50 border-emerald-200 text-emerald-800"
       : "bg-neutral-50 border-neutral-200 text-neutral-600"}`}>
       <span className="font-bold">
-        {rollout.learning_enabled ? "🟢 Hasil belajar AKTIF" : "⚪ Hasil belajar belum dinyalakan"}
+        {learningOn ? `🟢 Hasil belajar ${market.label} AKTIF`
+                    : `⚪ Hasil belajar ${market.label} belum dinyalakan`}
       </span>
       {" — "}{rollout.note}
     </div>

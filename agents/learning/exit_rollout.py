@@ -43,16 +43,36 @@ logger = structlog.get_logger(__name__)
 #: Parameter keluar yang boleh melewati tahapan ini, dipetakan ke kunci config
 #: masing-masing. Fungsi, bukan dict literal, supaya kunci per-lane selalu
 #: diturunkan dari sumber yang sama dengan yang dibaca monitor.
-def param_config_key(param: str, lane: str) -> str:
+def param_config_key(param: str, lane: str, market: str = "futures") -> tuple[str, str]:
+    """Return `(grup_config, kunci)` untuk sebuah parameter keluar.
+
+    Grup ikut dikembalikan karena SPOT dan FUTURES menyimpan ambangnya di grup
+    `agent_config` yang berbeda — menulis ke grup yang salah akan "berhasil"
+    tanpa error tapi tak pernah dibaca monitor mana pun.
+    """
+    if market == "spot":
+        from agents.opportunity import monitor_config as scfg
+        if param == "tp_atr_mult":
+            return "spot", scfg.tp_lane_key(lane)
+        raise ValueError(f"parameter keluar SPOT tak dikenal: {param}")
+
     from agents.futures import monitor_config as mcfg
     if param == "tp_atr_mult":
-        return mcfg.tp_lane_key(lane)
+        return "futures", mcfg.tp_lane_key(lane)
     if param == "failfast_min_sl_gap":
-        return mcfg.failfast_gap_key(lane)
+        return "futures", mcfg.failfast_gap_key(lane)
     raise ValueError(f"parameter keluar tak dikenal: {param}")
 
 
-SUPPORTED_PARAMS: tuple[str, ...] = ("tp_atr_mult", "failfast_min_sl_gap")
+#: Parameter yang boleh melewati tahapan, per market. SPOT belum punya padanan
+#: fail-fast — monitornya memakai pemicu lain (rotasi, trend_reversal), dan
+#: memaksakan parameter futures ke sana akan menulis kunci yang tak pernah dibaca.
+SUPPORTED_PARAMS_BY_MARKET: dict[str, tuple[str, ...]] = {
+    "futures": ("tp_atr_mult", "failfast_min_sl_gap"),
+    "spot": ("tp_atr_mult",),
+}
+
+SUPPORTED_PARAMS: tuple[str, ...] = SUPPORTED_PARAMS_BY_MARKET["futures"]
 
 #: Exit minimum sesudah aktivasi sebelum canary boleh diputuskan. Di bawah ini
 #: hasilnya belum bisa dibedakan dari kebetulan.
@@ -77,9 +97,11 @@ def _stats(rows: list[FuturesExitEvent]) -> tuple[int, float | None, float | Non
             round(100.0 * wins / len(pnls), 1))
 
 
-async def _lane_exits(session, lane: str, since: float | None = None,
+async def _lane_exits(session, lane: str, market: str = "futures",
+                      since: float | None = None,
                       until: float | None = None, limit: int = 500) -> list:
-    q = select(FuturesExitEvent).where(FuturesExitEvent.lane == lane)
+    q = select(FuturesExitEvent).where(FuturesExitEvent.lane == lane,
+                                       FuturesExitEvent.market == market)
     if since is not None:
         q = q.where(FuturesExitEvent.closed_at >= since)
     if until is not None:
@@ -88,30 +110,35 @@ async def _lane_exits(session, lane: str, since: float | None = None,
     return list((await session.execute(q)).scalars().all())
 
 
-async def _config_value(session, key: str) -> tuple[AgentConfig | None, float]:
+async def _config_value(session, group: str, key: str) -> tuple[AgentConfig | None, float]:
+    """Baris config + nilainya. `group` WAJIB disebut — SPOT dan FUTURES memakai
+    grup berbeda, dan salah grup berarti menulis ambang yang tak pernah dibaca."""
     row = (await session.execute(select(AgentConfig).where(
-        AgentConfig.agent_group == "futures", AgentConfig.key == key,
+        AgentConfig.agent_group == group, AgentConfig.key == key,
     ))).scalar_one_or_none()
     return row, (row.value_num if row else 0.0)
 
 
 # ── Tahap 1: catat usulan sebagai shadow ──────────────────────────────────────
 
-async def propose(lane: str, param: str, value: float, reason: str = "") -> dict:
+async def propose(lane: str, param: str, value: float, reason: str = "",
+                  market: str = "futures") -> dict:
     """Catat usulan sebagai `shadow` beserta baseline lane saat ini.
 
     Baseline diambil SEKARANG — sebelum angka berlaku — karena itulah satu-satunya
     saat pembanding masih bersih.
     """
-    if param not in SUPPORTED_PARAMS:
-        return {"status": "param_tak_dikenal", "param": param,
-                "supported": list(SUPPORTED_PARAMS)}
+    didukung = SUPPORTED_PARAMS_BY_MARKET.get(market, ())
+    if param not in didukung:
+        return {"status": "param_tak_dikenal", "param": param, "market": market,
+                "supported": list(didukung)}
     if not is_db_available():
         return {"status": "db_unavailable"}
 
-    key = param_config_key(param, lane)
+    group, key = param_config_key(param, lane, market)
     async with AsyncSessionLocal() as session:
         existing = (await session.execute(select(FuturesExitRollout).where(
+            FuturesExitRollout.market == market,
             FuturesExitRollout.lane == lane, FuturesExitRollout.param == param,
             FuturesExitRollout.stage.in_(["shadow", "canary", "active"]),
         ))).scalars().first()
@@ -119,10 +146,10 @@ async def propose(lane: str, param: str, value: float, reason: str = "") -> dict
             return {"status": "sudah_ada", "stage": existing.stage,
                     "id": existing.id, "proposed_value": existing.proposed_value}
 
-        _, current = await _config_value(session, key)
-        n, exp, wr = _stats(await _lane_exits(session, lane))
+        _, current = await _config_value(session, group, key)
+        n, exp, wr = _stats(await _lane_exits(session, lane, market))
         row = FuturesExitRollout(
-            lane=lane, param=param, stage="shadow",
+            market=market, lane=lane, param=param, stage="shadow",
             proposed_value=value, previous_value=current,
             baseline_n=n, baseline_expectancy=exp, baseline_win_rate=wr,
             reason=reason or "usulan dari ledger keluar",
@@ -131,8 +158,9 @@ async def propose(lane: str, param: str, value: float, reason: str = "") -> dict
         await session.commit()
         rid = row.id
 
-    logger.info("exit_rollout_proposed", lane=lane, param=param, value=value, id=rid)
-    return {"status": "ok", "id": rid, "stage": "shadow", "lane": lane,
+    logger.info("exit_rollout_proposed", market=market, lane=lane, param=param,
+                value=value, id=rid)
+    return {"status": "ok", "id": rid, "stage": "shadow", "market": market, "lane": lane,
             "param": param, "proposed_value": value, "previous_value": current,
             "baseline": {"n": n, "expectancy_pct": exp, "win_rate": wr}}
 
@@ -166,8 +194,8 @@ async def start_canary(rollout_id: int) -> dict:
                     "reason": "satu lane pada satu waktu — kalau dua dinyalakan "
                               "bersama, tak ada cara tahu mana penyebabnya"}
 
-        key = param_config_key(row.param, row.lane)
-        cfg_row, current = await _config_value(session, key)
+        group, key = param_config_key(row.param, row.lane, row.market)
+        cfg_row, current = await _config_value(session, group, key)
         if cfg_row is None:
             return {"status": "baris_config_hilang", "key": key}
         row.previous_value = current
@@ -180,11 +208,12 @@ async def start_canary(rollout_id: int) -> dict:
                       f"baseline n={row.baseline_n} "
                       f"expectancy={row.baseline_expectancy}")
         await session.commit()
-        out = {"status": "ok", "stage": "canary", "id": row.id, "lane": row.lane,
+        out = {"status": "ok", "stage": "canary", "id": row.id,
+               "market": row.market, "lane": row.lane,
                "param": row.param, "key": key, "from": current,
                "to": row.proposed_value,
                "note": ("nilai sudah tertulis, TAPI monitor baru memakainya bila "
-                        "futures.monitor_exit_learning_enabled menyala")}
+                        f"{row.market}.monitor_exit_learning_enabled menyala")}
 
     logger.info("exit_rollout_canary_started", **{k: out[k] for k in ("lane", "param", "to")})
     return out
@@ -209,7 +238,8 @@ async def evaluate(rollout_id: int) -> dict:
         if row.stage != "canary":
             return {"status": "bukan_canary", "stage": row.stage}
 
-        after = await _lane_exits(session, row.lane, since=row.activated_at or 0.0)
+        after = await _lane_exits(session, row.lane, row.market,
+                                  since=row.activated_at or 0.0)
         n, exp, wr = _stats(after)
         row.observed_n, row.observed_expectancy, row.observed_win_rate = n, exp, wr
 
@@ -227,8 +257,8 @@ async def evaluate(rollout_id: int) -> dict:
             row.reason = (f"lulus: expectancy {exp} vs baseline {base} "
                           f"(toleransi {CANARY_TOLERANCE_PCT}), n={n}")
         else:
-            key = param_config_key(row.param, row.lane)
-            cfg_row, _ = await _config_value(session, key)
+            group, key = param_config_key(row.param, row.lane, row.market)
+            cfg_row, _ = await _config_value(session, group, key)
             if cfg_row is not None:
                 cfg_row.value_num = row.previous_value
                 cfg_row.updated_at = time.time()
@@ -239,7 +269,8 @@ async def evaluate(rollout_id: int) -> dict:
                           f"{key} dikembalikan ke {row.previous_value}")
 
         await session.commit()
-        out = {"status": "ok", "stage": row.stage, "id": row.id, "lane": row.lane,
+        out = {"status": "ok", "stage": row.stage, "id": row.id,
+               "market": row.market, "lane": row.lane,
                "param": row.param, "reason": row.reason,
                "baseline": {"n": row.baseline_n, "expectancy_pct": base,
                             "win_rate": row.baseline_win_rate},
@@ -266,8 +297,8 @@ async def rollback(rollout_id: int, reason: str = "dibalik manual") -> dict:
         if row.stage not in ("canary", "active"):
             return {"status": "tak_bisa_dibalik", "stage": row.stage}
 
-        key = param_config_key(row.param, row.lane)
-        cfg_row, _ = await _config_value(session, key)
+        group, key = param_config_key(row.param, row.lane, row.market)
+        cfg_row, _ = await _config_value(session, group, key)
         if cfg_row is not None:
             cfg_row.value_num = row.previous_value
             cfg_row.updated_at = time.time()
@@ -277,13 +308,13 @@ async def rollback(rollout_id: int, reason: str = "dibalik manual") -> dict:
         row.reason = f"{reason}; {key} dikembalikan ke {row.previous_value}"
         await session.commit()
         out = {"status": "ok", "stage": "rolled_back", "id": row.id,
-               "lane": row.lane, "param": row.param, "key": key,
+               "market": row.market, "lane": row.lane, "param": row.param, "key": key,
                "restored_to": row.previous_value}
     logger.info("exit_rollout_rolled_back", lane=out["lane"], param=out["param"])
     return out
 
 
-async def propose_from_recommendations(days: int = 90) -> dict:
+async def propose_from_recommendations(days: int = 90, market: str = "futures") -> dict:
     """Alirkan usulan mesin belajar ke antrean tahapan ini.
 
     Inilah sambungan antara `exit_learning` (yang menghitung angka) dan tahapan
@@ -298,7 +329,8 @@ async def propose_from_recommendations(days: int = 90) -> dict:
 
     hasil, dilewati = [], []
 
-    tp = await recommend_exit_params(days=days)
+    didukung = SUPPORTED_PARAMS_BY_MARKET.get(market, ())
+    tp = await recommend_exit_params(days=days, market=market)
     for rec in tp.get("recommendations", []):
         if rec.get("status") != "ok" or not rec.get("suggested_tp_atr"):
             dilewati.append({"lane": rec.get("lane"), "param": "tp_atr_mult",
@@ -309,21 +341,26 @@ async def propose_from_recommendations(days: int = 90) -> dict:
                              "reason": "mayoritas_exit_prematur"})
             continue
         hasil.append(await propose(
-            rec["lane"], "tp_atr_mult", rec["suggested_tp_atr"],
+            rec["lane"], "tp_atr_mult", rec["suggested_tp_atr"], market=market,
             reason=f"TP realistis dari {rec['n']} exit; "
                    f"akan tersentuh ~{rec.get('would_be_reached_pct')}%"))
 
-    ff = await recommend_failfast_params(days=days)
+    # Fail-fast hanya ada di futures; melewatinya untuk market lain lebih jujur
+    # daripada menulis kunci yang tak pernah dibaca monitornya.
+    if "failfast_min_sl_gap" not in didukung:
+        return {"status": "ok", "market": market, "diusulkan": hasil, "dilewati": dilewati}
+
+    ff = await recommend_failfast_params(days=days, market=market)
     for rec in ff.get("recommendations", []):
         if rec.get("status") != "ok":
             dilewati.append({"lane": rec.get("lane"), "param": "failfast_min_sl_gap",
                              "reason": rec.get("status")})
             continue
         hasil.append(await propose(
-            rec["lane"], "failfast_min_sl_gap", rec["suggested_gap"],
+            rec["lane"], "failfast_min_sl_gap", rec["suggested_gap"], market=market,
             reason=rec.get("note", "")))
 
-    return {"status": "ok", "diusulkan": hasil, "dilewati": dilewati}
+    return {"status": "ok", "market": market, "diusulkan": hasil, "dilewati": dilewati}
 
 
 # ── Loop: maju sendiri sejauh yang aman ───────────────────────────────────────
@@ -349,18 +386,22 @@ async def status() -> dict:
     async with AsyncSessionLocal() as session:
         rows = list((await session.execute(select(FuturesExitRollout).order_by(
             FuturesExitRollout.created_at.desc()).limit(100))).scalars().all())
-        _, learning_on = await _config_value(session, "monitor_exit_learning_enabled")
+        # Saklar belajar TERPISAH per market — dilaporkan keduanya supaya tak ada
+        # yang mengira menyalakan satu berarti menyalakan dua-duanya.
+        _, fut_on = await _config_value(session, "futures", "monitor_exit_learning_enabled")
+        _, spot_on = await _config_value(session, "spot", "monitor_exit_learning_enabled")
 
     return {
         "status": "ok",
-        "learning_enabled": learning_on > 0,
+        "learning_enabled": {"futures": fut_on > 0, "spot": spot_on > 0},
         "note": ("Selama monitor_exit_learning_enabled masih 0, angka per-lane "
                  "tersimpan dan tercatat tapi TIDAK dipakai satu pun keputusan."),
         "gates": {"canary_min_outcomes": CANARY_MIN_OUTCOMES,
                   "baseline_min_outcomes": BASELINE_MIN_OUTCOMES,
                   "canary_tolerance_pct": CANARY_TOLERANCE_PCT},
         "rollouts": [{
-            "id": r.id, "lane": r.lane, "param": r.param, "stage": r.stage,
+            "id": r.id, "market": r.market, "lane": r.lane, "param": r.param,
+            "stage": r.stage,
             "proposed_value": r.proposed_value, "previous_value": r.previous_value,
             "baseline": {"n": r.baseline_n, "expectancy_pct": r.baseline_expectancy,
                          "win_rate": r.baseline_win_rate},

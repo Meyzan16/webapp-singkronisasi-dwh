@@ -13,7 +13,7 @@ Runs every 60s. For each open opportunity_spot trade:
     - TP3/TP2 touched → close "tp"
     - TP1 touched → PARTIAL SELL 50% (profit locked), SL → entry + 50% of TP1 gain
 
-  Layer 2 — Risk-adjusted closes (only after MIN_HOLD_MINUTES):
+  Layer 2 — Risk-adjusted closes (only after scfg.MIN_HOLD_MINUTES):
     - Profit-protecting exits (trend_reversal / profit_protection / flow_reversal)
       only fire when pnl_net ≥ 50% of the distance to TP2 — never clip small
       winners (§12.2: scanner demands 1:3.5 asymmetry, monitor must not destroy it)
@@ -42,12 +42,15 @@ from app.models.paper_balance import PaperBalance
 from app.models.paper_trade import PaperTrade
 from app.services.binance_urls import spot
 from app.services.trading_costs import EXECUTION_COST_PCT, SL_SLIPPAGE_PCT
+#: SEMUA ambang keputusan keluar dibaca lewat `scfg.X` — bukan disalin ke
+#: konstanta lokal. Sebelum 8 Agu 2026 monitor ini punya NOL titik baca config,
+#: sehingga hasil belajar sisi keluar SPOT tak punya jalan untuk sampai ke sini.
+from agents.opportunity import monitor_config as scfg
 
 logger = structlog.get_logger(__name__)
 
 INTERVAL_SEC       = 60
 STARTUP_DELAY      = 45
-MIN_HOLD_MINUTES   = 30
 
 # G5b: absolute profit lock tiers — same as futures monitor
 # PLAN_v10 P3 — tiers ordered HIGHEST peak first so the tightest applicable
@@ -74,31 +77,16 @@ LADDER_FRAC_TP2     = 0.20    # jual 20% di TP2 (dulu tutup 100% — INI cap lam
 LADDER_FRAC_TP3     = 0.15    # jual 15% di TP3, sisanya jadi runner trailing
 DYN_RUNG_FRAC       = 0.05    # jual 5% tiap rung dinamis TP4..n
 RUNNER_MIN_FRACTION = 0.15    # jangan pernah jual runner di bawah ini via rung dinamis
-DYN_RUNG_ATR_MULT   = 1.0     # jarak ke rung berikut = 1×ATR14(1h)
-DYN_RUNG_STEP_PCT   = 8.0     # floor jarak rung bila ATR terlalu kecil (% dari entry)
-GATE_MIN_SCORE      = 50      # skor live minimal agar dianggap "masih kuat"
-GATE_MIN_TAKER      = 0.50    # taker buy ratio — pembeli masih dominan
-GATE_MIN_VOL_RATIO  = 1.2     # volume belum sepi
 # BM7: per entry_mode — accumulation needs more time, failed momentum exits faster
-MAX_AGE_DAYS_FRESH_SETUP    = 10   # akumulasi butuh waktu lebih lama untuk resolve
-MAX_AGE_DAYS_MOMENTUM_CHASE = 5    # momentum yang gagal bergerak = capital idle, exit lebih cepat
 # PLAN_SPOT_LANES B-Fix 3: BigMover mengejar gelombang yang sedang berjalan — kalau
 # 3 hari belum resolve, gelombangnya sudah lewat. Sebelumnya lane ini diam-diam
 # mewarisi 10 hari milik akumulasi karena monitor tidak mengenal entry_mode-nya.
-MAX_AGE_DAYS_BIGMOVER       = 3
 WICK_LOOKBACK_MIN  = 3            # 1m candles checked per cycle (covers restarts)
 WEIGHT_UPDATE_SEC  = 30 * 60      # time-based (§1.12), not cycle-based
 
 # Stagnant rotation — free capital from idle positions when better momentum exists
-STAGNANT_CHECK_DAYS = 2     # start checking from day 2 (give position initial runway)
-STAGNANT_DRIFT_PCT  = 3.0   # ±3% from entry = coin is not moving
-STAGNANT_SCORE_GAP  = 10    # candidate must score ≥ current_score + 10 AND ≥ 85
-URGENT_ROTATION_DAYS = 1.0  # urgent: rotate after 1 day if candidate is much better
-URGENT_SCORE_GAP     = 25   # candidate must outscore by ≥ 25 (clear opportunity cost)
-URGENT_SCORE_MIN     = 90   # minimum candidate score for urgent rotation
 # PLAN_SPOT_LANES B-Fix 4: lantai P&L bersih agar rotasi (stagnant MAUPUN urgent)
 # tidak membukukan kerugian hanya karena ada kandidat lebih menarik.
-ROTATION_MIN_PNL_PCT = -0.5
 
 _running      = False
 _cycle_count  = 0
@@ -152,7 +140,11 @@ def lane_of(meta: dict, alert_type: str | None) -> str:
 def _has_better_candidate(
     current_score: float,
     exclude_symbol: str,
-    min_gap: float = STAGNANT_SCORE_GAP,
+    # JANGAN memakai `scfg.X` sebagai nilai default argumen: Python mengevaluasi
+    # default SEKALI saat impor, jadi nilainya membeku dan tak pernah ikut
+    # `refresh()` — menala dari DB akan terlihat tak berpengaruh, persis penyakit
+    # yang lapisan ini dibuat untuk menyembuhkan. `None` = pakai nilai saat DIPANGGIL.
+    min_gap: float | None = None,
     min_score: float = 85,
 ) -> bool:
     """
@@ -161,6 +153,8 @@ def _has_better_candidate(
     Requires: candidate.score >= current_score + min_gap AND >= min_score.
     PLAN_v8 P4: refuses to signal on a stale scan cache (fail-safe = no rotation).
     """
+    if min_gap is None:
+        min_gap = scfg.STAGNANT_SCORE_GAP
     from agents.opportunity import store as opp_store
     cached = opp_store.get_result()
     if not cached:
@@ -392,9 +386,9 @@ def describe_monitor_state(
     # ── age budget ─────────────────────────────────────────────────────────
     max_age = (
         0.25 if mode == "momentum_entry"
-        else MAX_AGE_DAYS_BIGMOVER if lane == "bigmover"
-        else MAX_AGE_DAYS_MOMENTUM_CHASE if mode == "momentum_chase"
-        else MAX_AGE_DAYS_FRESH_SETUP
+        else scfg.MAX_AGE_DAYS_BIGMOVER if lane == "bigmover"
+        else scfg.MAX_AGE_DAYS_MOMENTUM_CHASE if mode == "momentum_chase"
+        else scfg.MAX_AGE_DAYS_FRESH_SETUP
     )
     age_days = (
         round((time.time() - entry_at) / 86400, 2)
@@ -449,14 +443,14 @@ def _still_strong_gate(symbol: str, klines_1h: list) -> tuple[bool, str]:
     merah = berhenti buat rung baru, biar trailing SL yang urus exit.
     """
     score = _get_current_spot_score(symbol)
-    if score < GATE_MIN_SCORE:
-        return False, f"score {score:.0f}<{GATE_MIN_SCORE}"
+    if score < scfg.GATE_MIN_SCORE:
+        return False, f"score {score:.0f}<{scfg.GATE_MIN_SCORE}"
     if klines_1h:
         taker = _taker_ratio(klines_1h)
-        if taker < GATE_MIN_TAKER:
+        if taker < scfg.GATE_MIN_TAKER:
             return False, f"taker {taker:.2f}"
         vr = _vol_ratio([float(k[5]) for k in klines_1h])
-        if vr < GATE_MIN_VOL_RATIO:
+        if vr < scfg.GATE_MIN_VOL_RATIO:
             return False, f"vol {vr:.2f}"
     return True, "strong"
 
@@ -518,7 +512,7 @@ def _risk_signal(
     profit_protection and flow_reversal still require pnl_net ≥ 50% of TP2 (§12.2).
     Loss-cutting "risk_adjusted" keeps firing early.
     """
-    if hold_minutes < MIN_HOLD_MINUTES or len(klines) < 15:
+    if hold_minutes < scfg.MIN_HOLD_MINUTES or len(klines) < 15:
         return None
 
     closes = [float(k[4]) for k in klines]
@@ -804,11 +798,11 @@ async def _process_trade(
     elif _lane == "bigmover":
         # B-Fix 3: budget umur sendiri — dulu lane ini jatuh ke cabang `else`
         # dan mewarisi 10 hari milik akumulasi (ADAUSDT tertahan 4.9 hari lalu SL).
-        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > MAX_AGE_DAYS_BIGMOVER
+        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > scfg.MAX_AGE_DAYS_BIGMOVER
     elif _entry_mode == "momentum_chase":
-        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > MAX_AGE_DAYS_MOMENTUM_CHASE
+        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > scfg.MAX_AGE_DAYS_MOMENTUM_CHASE
     else:
-        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > MAX_AGE_DAYS_FRESH_SETUP
+        _age_expired = entry_at_valid and hold_minutes / (60 * 24) > scfg.MAX_AGE_DAYS_FRESH_SETUP
     if _age_expired:
         pnl_now = (price - entry) / entry * 100
         new_status   = "tp" if pnl_now > EXECUTION_COST_PCT else "sl"
@@ -842,7 +836,7 @@ async def _process_trade(
         _atr1h     = _atr(k1h)
         _remaining = meta.get("remaining_fraction", 1.0)
         _last_rung = meta.get("last_rung_price") or tp3 or tp2 or tp1 or entry
-        _rung_gap  = max(_atr1h * DYN_RUNG_ATR_MULT, DYN_RUNG_STEP_PCT / 100 * entry)
+        _rung_gap  = max(_atr1h * scfg.DYN_RUNG_ATR_MULT, scfg.DYN_RUNG_STEP_PCT / 100 * entry)
         _next_rung = _last_rung + _rung_gap
         _gate_ok, _gate_why = _still_strong_gate(trade.symbol, k1h)
         if (eff_high >= _next_rung and _gate_ok
@@ -956,12 +950,12 @@ async def _process_trade(
 
         _rotate     = False
         _rotate_why = "stagnant_rotation"
-        if hold_days >= STAGNANT_CHECK_DAYS and drift_pct <= STAGNANT_DRIFT_PCT:
+        if hold_days >= scfg.STAGNANT_CHECK_DAYS and drift_pct <= scfg.STAGNANT_DRIFT_PCT:
             if _has_better_candidate(capped_score, trade.symbol):
                 _rotate = True
-        elif hold_days >= URGENT_ROTATION_DAYS:
+        elif hold_days >= scfg.URGENT_ROTATION_DAYS:
             if _has_better_candidate(capped_score, trade.symbol,
-                                     min_gap=URGENT_SCORE_GAP, min_score=URGENT_SCORE_MIN):
+                                     min_gap=scfg.URGENT_SCORE_GAP, min_score=scfg.URGENT_SCORE_MIN):
                 _rotate     = True
                 _rotate_why = "urgent_rotation"
 
@@ -972,11 +966,11 @@ async def _process_trade(
         # biarkan SL/TP-nya sendiri yang memutuskan — struktur yang benar-benar
         # patah sudah punya jalan keluarnya sendiri lewat `trend_reversal`.
         _rotate_pnl_net = (price - entry) / entry * 100 - EXECUTION_COST_PCT
-        if _rotate and _rotate_pnl_net < ROTATION_MIN_PNL_PCT:
+        if _rotate and _rotate_pnl_net < scfg.ROTATION_MIN_PNL_PCT:
             logger.info("rotation_skipped_in_drawdown",
                         symbol=trade.symbol, why=_rotate_why,
                         pnl_net=round(_rotate_pnl_net, 2),
-                        floor=ROTATION_MIN_PNL_PCT)
+                        floor=scfg.ROTATION_MIN_PNL_PCT)
             _rotate = False
 
         if _rotate:
@@ -1080,13 +1074,18 @@ async def run_opportunity_monitor() -> None:
     _running = True
     logger.info("opportunity_monitor_started",
                 interval_sec=INTERVAL_SEC,
-                max_age_fresh=MAX_AGE_DAYS_FRESH_SETUP,
-                max_age_momentum=MAX_AGE_DAYS_MOMENTUM_CHASE,
+                max_age_fresh=scfg.MAX_AGE_DAYS_FRESH_SETUP,
+                max_age_momentum=scfg.MAX_AGE_DAYS_MOMENTUM_CHASE,
                 execution_cost_pct=EXECUTION_COST_PCT)
     await asyncio.sleep(STARTUP_DELAY)
 
     while True:
         try:
+            # Ambang keputusan keluar ditarik SEBELUM posisi dievaluasi, supaya
+            # satu siklus memakai satu set nilai — bukan campuran lama dan baru.
+            # Gagal baca = diam & pakai nilai terakhir; monitor tak boleh berhenti
+            # hanya karena config tak terbaca.
+            await scfg.refresh()
             n = await check_positions()
             _last_check = time.time()
             _last_error = None

@@ -267,6 +267,46 @@ def _monitor_lane_defaults() -> list[dict]:
                 "description": f"Lane {lane}: {_SL_LABEL[param]}",
             })
 
+    # ── MONITOR SPOT ──────────────────────────────────────────────────────────
+    # Sampai 8 Agu 2026 monitor SPOT punya NOL titik baca config: 16 ambang
+    # keputusan keluar terkunci di kode, jadi hasil belajar sisi keluar SPOT tak
+    # punya jalan untuk sampai ke agen yang membuat keputusan itu.
+    from agents.opportunity import monitor_config as scfg
+    _SPOT_LABEL = {
+        "monitor_stagnant_check_days":     "hari sebelum posisi dinilai stagnan",
+        "monitor_stagnant_drift_pct":      "±% dari entry yang dianggap tak bergerak",
+        "monitor_stagnant_score_gap":      "keunggulan skor kandidat untuk rotasi stagnan",
+        "monitor_urgent_rotation_days":    "hari minimum sebelum rotasi mendesak boleh",
+        "monitor_urgent_score_gap":        "keunggulan skor untuk rotasi mendesak",
+        "monitor_urgent_score_min":        "skor minimum kandidat rotasi mendesak",
+        "monitor_rotation_min_pnl_pct":    "lantai P&L: rotasi tak boleh membukukan rugi di bawah ini",
+        "monitor_max_age_fresh_setup":     "umur maksimum posisi fresh_setup (hari)",
+        "monitor_max_age_momentum_chase":  "umur maksimum posisi momentum_chase (hari)",
+        "monitor_max_age_bigmover":        "umur maksimum posisi bigmover (hari)",
+        "monitor_gate_min_score":          "skor live minimum agar posisi dianggap masih kuat",
+        "monitor_gate_min_taker":          "rasio taker-buy minimum agar dianggap masih kuat",
+        "monitor_gate_min_vol_ratio":      "rasio volume minimum agar dianggap masih kuat",
+        "monitor_dyn_rung_atr_mult":       "jarak rung dinamis berikutnya (kelipatan ATR)",
+        "monitor_dyn_rung_step_pct":       "lantai jarak rung bila ATR terlalu kecil (%)",
+        "monitor_min_hold_minutes":        "menit tahan minimum sebelum exit risk-adjusted boleh",
+        "monitor_exit_learning_enabled":   ("DEFAULT 0=MATI: izinkan monitor SPOT memakai batas TP "
+                                            "per-lane hasil belajar. Saklar TERPISAH dari futures — "
+                                            "satu perubahan diuji di satu tempat."),
+    }
+    for var, key in scfg._KEYS.items():
+        rows.append({
+            "group": "spot", "key": key, "default": getattr(scfg, var),
+            "category": "monitor", "description": _SPOT_LABEL[key],
+        })
+    for lane in scfg.tunable_lanes():
+        rows.append({
+            "group": "spot", "key": scfg.tp_lane_key(lane),
+            "default": 0.0, "category": "monitor",
+            "description": (f"Lane {lane}: batas TP dalam kelipatan ATR hasil belajar. "
+                            "0 = belum ada. Hanya berlaku bila spot."
+                            "monitor_exit_learning_enabled menyala."),
+        })
+
     # Tangga kunci profit — tiap anak tangga satu pasang baris, jumlahnya ikut
     # panjang tangga sehingga menambah/mengurangi tier tak perlu edit di sini.
     for i, (peak, keep) in enumerate(mcfg._FROZEN["PROFIT_LOCK_TIERS"], start=1):

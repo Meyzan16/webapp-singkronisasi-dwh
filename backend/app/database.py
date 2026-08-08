@@ -179,6 +179,9 @@ async def _migrate_columns(connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_fee_market ON exit_events (market, closed_at)",
         # M4b: gerak merugikan terjauh — pasangan dari mfe_atr.
         "ALTER TABLE exit_events ADD COLUMN IF NOT EXISTS mae_atr FLOAT",
+        # Tahapan penyalaan kini melayani SPOT juga; baris warisan seluruhnya futures.
+        "ALTER TABLE futures_exit_rollouts ADD COLUMN IF NOT EXISTS market VARCHAR(10) "
+        "NOT NULL DEFAULT 'futures'",
         # Safety-net: create tables that may be missing if backend started before these models were added.
         "CREATE TABLE IF NOT EXISTS app_settings ("
         "  key VARCHAR(100) PRIMARY KEY,"

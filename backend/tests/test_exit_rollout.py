@@ -15,9 +15,42 @@ def test_parameter_dipetakan_ke_kunci_config_yang_dibaca_monitor():
     """Kunci diturunkan dari monitor_config, bukan ditulis ulang — kalau ditulis
     ulang, ledger dan monitor bisa menunjuk kunci berbeda tanpa error."""
     from agents.futures import monitor_config as mcfg
-    assert roll.param_config_key("tp_atr_mult", "bigmover") == mcfg.tp_lane_key("bigmover")
+    assert roll.param_config_key("tp_atr_mult", "bigmover") == \
+        ("futures", mcfg.tp_lane_key("bigmover"))
     assert roll.param_config_key("failfast_min_sl_gap", "momentum") == \
-        mcfg.failfast_gap_key("momentum")
+        ("futures", mcfg.failfast_gap_key("momentum"))
+
+
+def test_grup_config_ikut_dikembalikan_per_market():
+    """SPOT dan FUTURES menyimpan ambang di GRUP berbeda. Menulis ke grup yang
+    salah "berhasil" tanpa error tapi tak pernah dibaca monitor mana pun — jadi
+    grup wajib ikut dikembalikan, bukan diasumsikan pemanggil."""
+    from agents.opportunity import monitor_config as scfg
+    grup, kunci = roll.param_config_key("tp_atr_mult", "bigmover", market="spot")
+    assert grup == "spot"
+    assert kunci == scfg.tp_lane_key("bigmover")
+    # Lane `bigmover` ada di KEDUA market — grupnya yang membedakan, bukan namanya.
+    assert roll.param_config_key("tp_atr_mult", "bigmover")[0] == "futures"
+
+
+def test_failfast_tak_ditawarkan_ke_spot():
+    """Monitor SPOT tak punya fail-fast; menawarkannya berarti menulis kunci yang
+    tak pernah dibaca monitornya."""
+    assert "failfast_min_sl_gap" in roll.SUPPORTED_PARAMS_BY_MARKET["futures"]
+    assert "failfast_min_sl_gap" not in roll.SUPPORTED_PARAMS_BY_MARKET["spot"]
+    with pytest.raises(ValueError):
+        roll.param_config_key("failfast_min_sl_gap", "bigmover", market="spot")
+
+
+def test_market_disimpan_eksplisit_bukan_ditebak_dari_lane():
+    """Lane `accumulation` dan `bigmover` ada di kedua market, jadi market mustahil
+    ditebak dari nama lane — menebak salah berarti menulis ke monitor yang salah."""
+    from app.models.futures_exit_rollout import FuturesExitRollout
+    from agents.futures import monitor_config as mcfg
+    from agents.opportunity import monitor_config as scfg
+    assert hasattr(FuturesExitRollout, "market")
+    assert set(mcfg.tunable_lanes()) & set(scfg.tunable_lanes()), \
+        "uji ini kehilangan maknanya bila tak ada lane yang beririsan"
 
 
 def test_parameter_tak_dikenal_ditolak():
