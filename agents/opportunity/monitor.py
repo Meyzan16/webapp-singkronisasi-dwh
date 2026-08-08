@@ -1007,7 +1007,11 @@ async def _process_trade(
         from agents.shared.exit_ledger import log_exit
         await log_exit(
             session, trade, meta, market="spot",
-            lane=(meta.get("lane") or trade.alert_type or ""),
+            # `lane_of()` — fungsi yang SAMA yang dipakai untuk keputusan. Menulis
+            # `alert_type` mentah di sini membuat ledger memakai kosakata berbeda
+            # (`squeeze`) dari config (`accumulation`), sehingga hasil belajar
+            # mendarat di kunci yang tak pernah dibaca monitor mana pun.
+            lane=lane_of(meta, trade.alert_type),
             close_reason=close_reason or "", status=new_status,
             pnl_net=pnl_pct, pnl_dollar=pnl_dollar,
         )

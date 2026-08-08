@@ -74,11 +74,15 @@ def test_alasan_asli_tak_diberi_awalan_hist():
 
 
 def test_lane_dibaca_dari_kunci_kedua_market():
-    """futures memakai `setup_type`, spot memakai `lane`/`alert_type`. Satu kunci
-    saja membuat separuh baris kehilangan lane dan menumpuk di bucket '-'."""
-    src = inspect.getsource(el.backfill_exit_events)
-    for key in ("setup_type", "lane", "alert_type"):
-        assert key in src
+    """futures memakai `setup_type`, spot menurunkannya lewat `lane_of`. Satu
+    kunci saja membuat separuh baris kehilangan lane dan menumpuk di bucket '-'.
+
+    Logikanya kini di `_lane_for` (bukan lagi inline di backfill) supaya monitor
+    dan backfill mustahil memakai aturan yang berbeda.
+    """
+    src = inspect.getsource(el._lane_for)
+    assert "setup_type" in src, "jalur futures hilang"
+    assert "lane_of" in src, "jalur spot tak memakai pemeta monitor"
 
 
 @pytest.mark.parametrize("market", ["futures", "spot"])
@@ -140,3 +144,28 @@ def test_scheduler_spot_membaca_atr_pct_bukan_atr():
     src = inspect.getsource(scheduler)
     assert 'coin.get("atr_pct")' in src
     assert 'coin.get("atr")' not in src, "membaca `atr` lagi = mengulang bug lama"
+
+
+def test_lane_ledger_memakai_kosakata_monitor():
+    """Ledger, config, dan keputusan HARUS memakai nama lane yang sama.
+
+    Terukur 8 Agu 2026: ledger SPOT menyimpan `squeeze`/`bigmover_chase` (nilai
+    alert_type mentah) sementara monitor & config memakai `accumulation`/
+    `bigmover`. Usulan TP mendarat di `monitor_tp_atr_mult_lane_squeeze` yang tak
+    pernah ada — hasil belajar tersimpan rapi di kunci yang tak dibaca siapa pun.
+    """
+    from agents.opportunity.monitor import lane_of
+    from agents.opportunity import monitor_config as scfg
+    kosakata = set(scfg.tunable_lanes())
+    for alert in ("squeeze", "bigmover_chase", "breakout_pump", "early_radar", None):
+        assert lane_of({}, alert) in kosakata, f"{alert} keluar dari kosakata config"
+
+
+def test_backfill_dan_monitor_memakai_pemeta_lane_yang_sama():
+    """Dua jalur menulis ledger (backfill & monitor saat menutup). Keduanya harus
+    memakai `lane_of`, kalau tidak baris lama dan baru memakai kosakata berbeda."""
+    import inspect
+    from agents.learning import exit_learning
+    from agents.opportunity import monitor as spot_mon
+    assert "lane_of" in inspect.getsource(exit_learning._lane_for)
+    assert "lane_of(meta, trade.alert_type)" in inspect.getsource(spot_mon._process_trade)

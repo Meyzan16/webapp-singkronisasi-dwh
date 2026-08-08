@@ -484,6 +484,17 @@ async def spot_exit_learning_sl_width(days: int = Query(90, ge=1, le=365)) -> di
     return await analyze_sl_width(days=days, market="spot")
 
 
+@router.post("/spot/exit-learning/backfill-atr", dependencies=[Depends(require_db)])
+async def spot_backfill_atr(limit: int = Query(500, ge=1, le=2000)) -> dict:
+    """Isi mundur `atr_pct` trade SPOT lama dari klines Binance. Idempoten.
+
+    Tanpa ATR, ledger keluar SPOT tak bisa dinormalkan terhadap volatilitas dan
+    mesin belajar tak punya bahan untuk mengusulkan jarak TP.
+    """
+    from agents.learning.exit_learning import backfill_spot_atr
+    return await backfill_spot_atr(limit=limit)
+
+
 @router.get("/spot/exit-rollout", dependencies=[Depends(require_db)])
 async def spot_exit_rollout_status() -> dict:
     """Tahapan penyalaan parameter keluar. Ledger-nya satu untuk dua market —

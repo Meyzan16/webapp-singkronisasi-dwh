@@ -25,6 +25,7 @@ dan 1% tak bisa dibandingkan langsung.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from statistics import median
@@ -90,6 +91,20 @@ def _style_filter(market: str):
     return PaperTrade.style.like("futures%")
 
 
+def _lane_for(market: str, trade, meta: dict) -> str:
+    """Lane sebuah trade, dalam kosakata yang SAMA dengan monitornya.
+
+    SPOT memakai `lane_of()` — fungsi yang sama yang dipakai monitor saat
+    memutuskan — supaya nama lane di ledger, di config, dan di keputusan tak
+    pernah punya tiga versi berbeda. FUTURES memakai `setup_type` yang memang
+    sudah didenormalisasi ke baris trade.
+    """
+    if market == "spot":
+        from agents.opportunity.monitor import lane_of
+        return lane_of(meta, trade.alert_type)
+    return trade.setup_type or meta.get("setup_type") or ""
+
+
 async def backfill_exit_events(limit: int = 5000, market: str = "futures") -> dict:
     """Isi ledger dari trade yang SUDAH tertutup. Idempoten — trade yang sudah
     punya baris dilewati, jadi aman dipanggil berulang."""
@@ -142,13 +157,13 @@ async def backfill_exit_events(limit: int = 5000, market: str = "futures") -> di
             session.add(ExitEvent(
                 market=market,
                 trade_id=t.id, symbol=t.symbol, agent=t.style,
-                # Kunci lane berbeda per market: futures memakai `setup_type`,
-                # spot memakai `lane` (ditulis saat open, sengaja tak pernah
-                # dimutasi monitor — `entry_mode` berubah di TP2/TP3 sehingga
-                # tak layak jadi kunci analitik). Keduanya dicoba supaya satu
-                # jalur kode melayani dua market tanpa cabang khusus.
-                lane=(t.setup_type or meta.get("setup_type")
-                      or meta.get("lane") or t.alert_type or ""),
+                # Lane WAJIB memakai kosakata yang sama dengan monitor, kalau
+                # tidak seluruh hasil belajar menulis ke kunci config yang tak
+                # pernah dibaca. Terukur 8 Agu 2026: ledger SPOT menyimpan
+                # `squeeze`/`bigmover_chase` (nilai alert_type mentah) sementara
+                # monitor & config memakai `accumulation`/`bigmover` — usulan TP
+                # mendarat di `monitor_tp_atr_mult_lane_squeeze` yang tak ada.
+                lane=_lane_for(market, t, meta),
                 # SPOT selalu LONG; kolomnya tetap diisi supaya query lintas
                 # market tak perlu memperlakukan spot sebagai kasus khusus.
                 direction=t.direction or "LONG", regime=t.regime,
@@ -176,6 +191,112 @@ async def backfill_exit_events(limit: int = 5000, market: str = "futures") -> di
     logger.info("exit_ledger_backfilled", market=market, added=added, skipped=skipped)
     return {"status": "ok", "market": market, "added": added, "skipped": skipped,
             "scanned": len(trades)}
+
+
+# ── Isi mundur ATR historis (SPOT) ────────────────────────────────────────────
+
+#: Penanda bahwa `atr_pct` sebuah trade adalah hasil REKONSTRUKSI dari klines,
+#: bukan nilai yang tercatat saat posisi dibuka. Dibedakan dengan sengaja: nilai
+#: rekonstruksi dihitung dari candle yang sudah selesai di sekitar waktu entry,
+#: jadi ia perkiraan — bukan angka yang benar-benar dilihat scanner saat itu.
+ATR_SOURCE_BACKFILL = "backfill_klines"
+
+#: Candle 15m yang diambil sebelum entry. ATR(14) butuh 15 candle; 30 memberi
+#: ruang bila ada candle yang hilang di deret Binance.
+_ATR_BACKFILL_CANDLES = 30
+
+
+def _atr_pct_from_klines(klines: list, entry_price: float, period: int = 14) -> float | None:
+    """ATR(period) sebagai persen harga, dari deret kline mentah Binance."""
+    if len(klines) < period + 1 or entry_price <= 0:
+        return None
+    trs = []
+    for i in range(1, len(klines)):
+        try:
+            high, low = float(klines[i][2]), float(klines[i][3])
+            prev_close = float(klines[i - 1][4])
+            trs.append(max(high - low, abs(high - prev_close), abs(low - prev_close)))
+        except (IndexError, ValueError, TypeError):
+            continue
+    if len(trs) < period:
+        return None
+    atr = sum(trs[-period:]) / period
+    return round(atr / entry_price * 100, 4) if atr > 0 else None
+
+
+async def backfill_spot_atr(limit: int = 500, delay_sec: float = 0.12) -> dict:
+    """Isi mundur `atr_pct` trade SPOT lama dari klines Binance.
+
+    Latar: sampai 8 Agu 2026 scanner SPOT tak pernah menyimpan ATR, sehingga
+    seluruh ledger keluar SPOT tak bisa dinormalkan terhadap volatilitas — koin
+    ber-ATR 6% dan 0,1% tak bisa dibandingkan, dan mesin belajar tak punya bahan
+    untuk mengusulkan jarak TP.
+
+    Nilai yang diisi ditandai `atr_pct_source` supaya analisa bisa memisahkan
+    rekonstruksi dari catatan asli. Idempoten: trade yang sudah punya `atr_pct`
+    dilewati, jadi aman dipanggil berulang.
+    """
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+
+    import httpx
+    from app.services.binance_urls import spot as _spot
+
+    async with AsyncSessionLocal() as session:
+        trades = list((await session.execute(
+            select(PaperTrade).where(
+                PaperTrade.style == "opportunity_spot",
+                PaperTrade.status.in_(["tp", "sl"]),
+            ).order_by(PaperTrade.entry_at.desc()).limit(limit)
+        )).scalars().all())
+
+        diisi = dilewati = gagal = 0
+        async with httpx.AsyncClient(timeout=15) as client:
+            for t in trades:
+                try:
+                    meta = json.loads(t.signals_json or "{}")
+                    if not isinstance(meta, dict):
+                        meta = {}
+                except (TypeError, json.JSONDecodeError):
+                    meta = {}
+
+                if meta.get("atr_pct") or not t.entry_at or not t.entry_price:
+                    dilewati += 1
+                    continue
+
+                # Candle yang BERAKHIR sebelum entry — memakai candle sesudahnya
+                # berarti memakai informasi yang belum ada saat posisi dibuka.
+                end_ms = int(float(t.entry_at) * 1000)
+                url = _spot(f"/api/v3/klines?symbol={t.symbol}&interval=15m"
+                            f"&endTime={end_ms}&limit={_ATR_BACKFILL_CANDLES}")
+                try:
+                    r = await client.get(url)
+                    if r.status_code != 200:
+                        gagal += 1
+                        continue
+                    atr_pct = _atr_pct_from_klines(r.json(), float(t.entry_price))
+                except Exception:
+                    gagal += 1
+                    continue
+
+                if not atr_pct:
+                    gagal += 1
+                    continue
+
+                meta["atr_pct"] = atr_pct
+                meta["atr_pct_source"] = ATR_SOURCE_BACKFILL
+                t.signals_json = json.dumps(meta, ensure_ascii=False)
+                diisi += 1
+                await asyncio.sleep(delay_sec)   # jangan menghantam rate limit
+
+        await session.commit()
+
+    logger.info("spot_atr_backfilled", filled=diisi, skipped=dilewati, failed=gagal)
+    return {"status": "ok", "diisi": diisi, "dilewati": dilewati,
+            "gagal": gagal, "dipindai": len(trades),
+            "catatan": ("nilai ditandai atr_pct_source=backfill_klines — hasil "
+                        "rekonstruksi dari candle sekitar entry, bukan angka yang "
+                        "benar-benar tercatat saat posisi dibuka")}
 
 
 # ── Analisa ───────────────────────────────────────────────────────────────────
