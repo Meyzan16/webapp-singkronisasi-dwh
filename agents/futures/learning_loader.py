@@ -43,6 +43,23 @@ BAN_MIN_SAMPLES = 10          # mirror SPOT: ban butuh ≥10 sampel
 BAN_WEIGHT_BELOW = 0.80
 
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class _Agg:
+    """Gabungan beberapa baris bobot untuk SATU kunci sinyal.
+
+    Dipakai agar kunci yang dimiliki lebih dari satu lane tidak saling menimpa.
+    Fieldnya sengaja bernama sama dengan kolom `AgentSignalWeight` supaya kode di
+    bawahnya membacanya tanpa perlu tahu ini hasil gabungan atau baris tunggal.
+    """
+
+    weight: float
+    win_count: int
+    total_count: int
+
+
 def _prefixed(key: str) -> str:
     """Ekspos bobot legacy di bawah namespace fallback policy (`signal:<key>`)."""
     return key if key.startswith(("signal:", "signal_id:", "lane:", "alert:")) else f"signal:{key}"
@@ -68,8 +85,34 @@ async def load_futures_learning() -> tuple[dict, dict, dict, set, str, Optional[
                 )
             )).scalars().all())
 
-            own = {r.signal_key: r for r in rows if r.agent != "cross_agent"}
-            cross = {r.signal_key: r for r in rows if r.agent == "cross_agent"}
+            # Kontrak bobot ini SATU untuk semua lane (lihat pemanggil di
+            # scheduler: `_lw` yang sama diterapkan ke agent1/2/3/bigmover).
+            #
+            # Dulu barisnya dipetakan `{r.signal_key: r}` — dikunci HANYA oleh
+            # signal_key. Saat dua lane punya kunci yang sama, satu baris menimpa
+            # yang lain dan pemenangnya ditentukan URUTAN BARIS dari database,
+            # bukan bukti. Terukur 8 Agu 2026: `signal_id:flow.volume_momentum`
+            # dimiliki agent3 (w=0,848 n=14) DAN bigmover (w=0,829 n=15); satu di
+            # antaranya hilang tanpa jejak, dan hasilnya bisa berubah antar restart.
+            #
+            # Sekarang baris yang bertabrakan DIGABUNG dengan bobot sebanding
+            # jumlah sampelnya — deterministik, dan tak ada bukti yang dibuang.
+            def _merge(items: list) -> dict:
+                grouped: dict[str, list] = {}
+                for row in items:
+                    grouped.setdefault(row.signal_key, []).append(row)
+                out: dict[str, _Agg] = {}
+                for key, group in grouped.items():
+                    total = sum(g.total_count for g in group) or 1
+                    out[key] = _Agg(
+                        weight=sum(g.weight * g.total_count for g in group) / total,
+                        win_count=sum(g.win_count for g in group),
+                        total_count=sum(g.total_count for g in group),
+                    )
+                return out
+
+            own = _merge([r for r in rows if r.agent != "cross_agent"])
+            cross = _merge([r for r in rows if r.agent == "cross_agent"])
 
             weights: dict[str, float] = {}
             probabilities: dict[str, float] = {}
@@ -87,9 +130,11 @@ async def load_futures_learning() -> tuple[dict, dict, dict, set, str, Optional[
                 sample_counts[pkey] = int(
                     own[key].total_count if key in own else cross[key].total_count
                 )
+            # `own` kini memetakan kunci → agregat, jadi kuncinya diambil dari
+            # item, bukan dari atribut baris ORM yang sudah tidak ada di sini.
             banned = {
-                _prefixed(r.signal_key) for r in own.values()
-                if r.weight < BAN_WEIGHT_BELOW and r.total_count >= BAN_MIN_SAMPLES
+                _prefixed(key) for key, agg in own.items()
+                if agg.weight < BAN_WEIGHT_BELOW and agg.total_count >= BAN_MIN_SAMPLES
             }
 
             mature = int(await session.scalar(
