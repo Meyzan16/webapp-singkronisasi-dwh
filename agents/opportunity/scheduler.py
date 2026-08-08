@@ -531,8 +531,11 @@ async def _auto_open_position(coin: dict) -> bool:
             # 65 posisi spot tertutup tak satu pun bisa dinormalkan terhadap
             # volatilitas, dan perbandingan antar koin jadi mustahil. Sisi futures
             # sudah menyimpannya sejak awal; ini menyamakan keduanya.
-            "atr_pct":           (round(float(coin["atr"]) / entry * 100, 4)
-                                  if coin.get("atr") and entry else None),
+            # Scanner sudah menghitungnya per lane (`_atr_pct_from_tf`). Versi
+            # pertama perbaikan ini membaca `coin["atr"]` — field yang TAK PERNAH
+            # ada di hasil scanner, jadi nilainya selalu None dan 67 baris ledger
+            # SPOT lahir tanpa ATR meski perbaikannya tampak selesai.
+            "atr_pct":           coin.get("atr_pct"),
             # P1 / B4.1: slippage info for analytics
             "entry_slippage_pct": round(_slip_pct, 4),
             "entry_session":      _sess(),

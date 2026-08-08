@@ -246,6 +246,37 @@ def _vol_ratio(volumes: list[float]) -> float:
     return volumes[-1] / avg if avg > 0 else 1.0
 
 
+def _atr_pct_from_tf(tf, price: float, period: int = 14) -> Optional[float]:
+    """ATR sebagai PERSEN harga, dihitung dari sebuah TFData.
+
+    Dipakai untuk menyimpan `atr_pct` di tiap kandidat. Tanpa angka ini, seluruh
+    ledger keluar SPOT tak bisa dinormalkan terhadap volatilitas — dan koin
+    ber-ATR 6% tak bisa dibandingkan dengan yang 1%.
+
+    Riwayat yang mahal: 8 Agu 2026 `atr_pct` ditambahkan di scheduler dengan
+    membaca `coin.get("atr")`, padahal SCANNER tak pernah menaruh field itu di
+    hasilnya. Akibatnya 67 baris ledger SPOT lahir tanpa ATR dan perbaikannya
+    tampak selesai padahal nol efek. Sekarang dihitung di tempat datanya ADA.
+    """
+    if not tf or price <= 0:
+        return None
+    highs, lows, closes = tf.highs, tf.lows, tf.closes
+    if min(len(highs), len(lows), len(closes)) < period + 1:
+        return None
+    trs = []
+    for i in range(1, len(closes)):
+        try:
+            trs.append(max(highs[i] - lows[i],
+                           abs(highs[i] - closes[i - 1]),
+                           abs(lows[i] - closes[i - 1])))
+        except (IndexError, TypeError):
+            continue
+    if len(trs) < period:
+        return None
+    atr = sum(trs[-period:]) / period
+    return round(atr / price * 100, 4) if atr > 0 else None
+
+
 def _calc_atr(klines: list, period: int = 14) -> float:
     """Average True Range — used for ATR-based SL in Breakout Hunter lane."""
     if len(klines) < period + 1:
@@ -705,6 +736,8 @@ def _score_breakout(
         "entry_mode":          "momentum_entry",
         "signals":             clean_signals[:5],
         "alert_type":          "breakout_pump",
+        # M7-fix: ATR% ikut disimpan supaya ledger keluar bisa dinormalkan.
+        "atr_pct":             _atr_pct_from_tf(d15, current_price),
         "change_24h":          round(change_24h, 2),
         "change_1h":           round(change_1h, 2),
         "change_7d":           0.0,
@@ -890,6 +923,7 @@ def _score_bigmover_chase(
         "entry_mode":          "bigmover_chase",
         "signals":             clean_signals[:5],
         "alert_type":          "bigmover_chase",
+        "atr_pct":             _atr_pct_from_tf(d15, current_price),
         "change_24h":          round(change_24h, 2),
         "change_1h":           round(change_1h, 2),
         "change_7d":           round(change_7d, 2),
@@ -1064,6 +1098,10 @@ def _score_early_radar(
         "entry_mode":          "early_radar",
         "signals":             clean_signals[:5],
         "alert_type":          "early_radar",
+        # Early Radar hanya punya klines harian — ATR dihitung dari deret itu
+        # langsung, bukan dari TFData yang memang tak tersedia di lane ini.
+        "atr_pct":             (round(_calc_atr(completed, 14) / current_price * 100, 4)
+                                if current_price > 0 else None),
         "change_24h":          round(change_24h, 2),
         "change_1h":           0.0,
         "change_7d":           0.0,
@@ -1349,6 +1387,7 @@ def _score_symbol(
         "entry_mode":          entry_mode,
         "signals":             clean_signals[:5],
         "alert_type":          alert,
+        "atr_pct":             _atr_pct_from_tf(ref, current_price),
         "change_24h":          round(change_24h, 2),
         "change_1h":           round(change_1h, 2),
         "change_7d":           round(change_7d, 2),

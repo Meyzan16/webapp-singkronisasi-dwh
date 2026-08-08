@@ -113,3 +113,30 @@ def test_rekomendasi_sl_ditahan_sampai_mae_cukup():
     assert "MAE_MIN_SAMPLES" in src
     assert "sl_recommendation_ready" in src
     assert el.MAE_MIN_SAMPLES >= 30
+
+
+# ── ATR SPOT: tanpa ini seluruh ledger keluar SPOT tak bisa dinormalkan ───────
+
+def test_scanner_spot_menyertakan_atr_pct_di_semua_lane():
+    """Tiap lane SPOT harus membawa `atr_pct` di hasilnya.
+
+    Perbaikan pertama (8 Agu) menambahkannya di SCHEDULER dengan membaca
+    `coin["atr"]` — field yang tak pernah ada di hasil scanner. Nilainya selalu
+    None, 67 baris ledger lahir tanpa ATR, dan perbaikannya tampak selesai
+    padahal nol efek. Penjaga ini memastikan sumbernya benar-benar mengisi.
+    """
+    import inspect
+    from agents.opportunity import scanner
+    src = inspect.getsource(scanner)
+    # 4 lane + definisi helper
+    assert src.count('"atr_pct":') >= 4, "ada lane SPOT yang tak membawa atr_pct"
+    assert "def _atr_pct_from_tf" in src
+
+
+def test_scheduler_spot_membaca_atr_pct_bukan_atr():
+    """Membaca field yang salah gagal TANPA error — hanya menghasilkan None."""
+    import inspect
+    from agents.opportunity import scheduler
+    src = inspect.getsource(scheduler)
+    assert 'coin.get("atr_pct")' in src
+    assert 'coin.get("atr")' not in src, "membaca `atr` lagi = mengulang bug lama"
