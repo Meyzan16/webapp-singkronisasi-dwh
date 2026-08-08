@@ -36,15 +36,15 @@ class FuturesExitRollout(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
-    #: Sasaran perubahan. `param` memakai nama yang sama dengan kunci config
-    #: (mis. `tp_atr_mult`, `failfast_min_sl_gap`) supaya jejaknya bisa
-    #: ditelusuri bolak-balik antara ledger dan config.
     #: "futures" | "spot". WAJIB eksplisit: lane `accumulation` dan `bigmover`
     #: ada di KEDUA market, jadi market mustahil ditebak dari nama lane — dan
     #: menebak salah berarti menulis ambang ke grup config yang tak pernah dibaca
     #: monitor mana pun, tanpa satu pun error muncul.
     market: Mapped[str] = mapped_column(String(10), nullable=False, default="futures")
 
+    #: Sasaran perubahan. `param` memakai nama yang sama dengan kunci config
+    #: (mis. `tp_atr_mult`, `failfast_min_sl_gap`) supaya jejaknya bisa
+    #: ditelusuri bolak-balik antara ledger dan config.
     lane:  Mapped[str] = mapped_column(String(30), nullable=False)
     param: Mapped[str] = mapped_column(String(40), nullable=False)
 

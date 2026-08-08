@@ -710,7 +710,8 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
     1. `dry_run=True` (default) — tidak menulis apa pun, hanya melaporkan apa
        yang AKAN ditulis.
     2. Menulis pun belum mengubah perilaku: monitor mengabaikan angka per-lane
-       selama `futures.monitor_exit_learning_enabled` masih 0.
+       selama `<market>.monitor_exit_learning_enabled` masih 0 — saklarnya
+       TERPISAH per market sejak MONITOR SPOT ikut tersambung.
     3. Lane dengan sampel kurang dari `MIN_SAMPLES_PER_LANE` DILEWATI — lebih
        baik lane itu tetap pakai batas global daripada ditala oleh 2 trade.
     4. Lane yang mayoritas exit-nya prematur juga DILEWATI: di sana harga belum
@@ -791,5 +792,5 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
                 skipped=len(skipped))
     return {"status": "ok", "planned": planned, "skipped": skipped,
             "written": written,
-            "note": ("angka tersimpan tapi BELUM berpengaruh — nyalakan "
-                     "futures.monitor_exit_learning_enabled untuk memakainya")}
+            "note": (f"angka tersimpan tapi BELUM berpengaruh — nyalakan "
+                     f"{market}.monitor_exit_learning_enabled untuk memakainya")}

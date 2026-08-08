@@ -394,8 +394,12 @@ async def status() -> dict:
     return {
         "status": "ok",
         "learning_enabled": {"futures": fut_on > 0, "spot": spot_on > 0},
-        "note": ("Selama monitor_exit_learning_enabled masih 0, angka per-lane "
-                 "tersimpan dan tercatat tapi TIDAK dipakai satu pun keputusan."),
+        # Saklarnya TERPISAH per market, jadi catatan ini harus menyebut market —
+        # kalimat tunggal membuat orang mengira menyalakan satu = menyalakan dua.
+        "note": ("Angka per-lane sebuah market baru dipakai keputusan bila "
+                 "<market>.monitor_exit_learning_enabled market itu bernilai 1. "
+                 "Selama 0, angkanya tersimpan dan tercatat tapi TIDAK menyentuh "
+                 "satu pun keputusan."),
         "gates": {"canary_min_outcomes": CANARY_MIN_OUTCOMES,
                   "baseline_min_outcomes": BASELINE_MIN_OUTCOMES,
                   "canary_tolerance_pct": CANARY_TOLERANCE_PCT},

@@ -442,10 +442,11 @@ async def exit_rollout_rollback(rollout_id: int) -> dict:
 @router.post("/futures/exit-learning/apply", dependencies=[Depends(require_db)])
 async def exit_learning_apply(days: int = Query(90, ge=1, le=365),
                               dry_run: bool = Query(True)) -> dict:
-    """Tulis usulan batas TP per lane ke config. `dry_run=true` hanya melapor.
+    """Tulis usulan batas TP per lane FUTURES ke config. `dry_run=true` hanya melapor.
 
     Menulis pun tidak mengubah keputusan apa pun sampai
-    `futures.monitor_exit_learning_enabled` dinyalakan.
+    `futures.monitor_exit_learning_enabled` dinyalakan — saklarnya TERPISAH dari
+    SPOT, jadi menyalakan salah satu tidak menyalakan keduanya.
     """
     from agents.learning.exit_learning import apply_exit_recommendations
     return await apply_exit_recommendations(days=days, dry_run=dry_run)
