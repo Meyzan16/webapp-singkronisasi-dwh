@@ -186,13 +186,28 @@ async def start_canary(rollout_id: int) -> dict:
                     "required": BASELINE_MIN_OUTCOMES,
                     "reason": "tanpa pembanding yang layak, perbaikan apa pun tak bisa dibuktikan"}
 
+        # Satu canary per MARKET, bukan satu untuk seluruh sistem.
+        #
+        # Alasan aturan ini (M5) adalah agar hasil bisa diatribusikan: kalau dua
+        # lane berjalan bersama dan hasilnya membaik, tak ada cara tahu mana
+        # penyebabnya. Tapi atribusi itu hanya kabur bila keduanya diukur dari
+        # kumpulan exit yang SAMA. `evaluate()` menyaring `row.market` DAN
+        # `row.lane`, jadi canary SPOT dan FUTURES membaca ledger yang terpisah
+        # dan mustahil saling mengacaukan.
+        #
+        # Ruang lingkup global sempat menahan canary FUTURES hanya karena SPOT
+        # sedang menguji lane lain — pembatasan yang tak menambah keamanan apa
+        # pun, cuma memperlambat pembuktian.
         busy = (await session.execute(select(FuturesExitRollout).where(
-            FuturesExitRollout.stage == "canary"))).scalars().first()
+            FuturesExitRollout.stage == "canary",
+            FuturesExitRollout.market == row.market,
+        ))).scalars().first()
         if busy is not None:
-            return {"status": "canary_lain_berjalan", "lane": busy.lane,
-                    "param": busy.param, "id": busy.id,
-                    "reason": "satu lane pada satu waktu — kalau dua dinyalakan "
-                              "bersama, tak ada cara tahu mana penyebabnya"}
+            return {"status": "canary_lain_berjalan", "market": row.market,
+                    "lane": busy.lane, "param": busy.param, "id": busy.id,
+                    "reason": f"satu lane per market pada satu waktu — {row.market} "
+                              f"sedang menguji {busy.lane}, dan menjalankan dua "
+                              f"bersamaan membuat hasilnya tak bisa diatribusikan"}
 
         group, key = param_config_key(row.param, row.lane, row.market)
         cfg_row, current = await _config_value(session, group, key)

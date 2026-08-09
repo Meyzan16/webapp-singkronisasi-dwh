@@ -103,3 +103,26 @@ def test_advance_tak_menaikkan_shadow_ke_canary():
     src = inspect.getsource(roll.advance)
     assert "start_canary" not in src
     assert "evaluate" in src
+
+
+def test_batas_satu_canary_berlaku_PER_MARKET():
+    """Aturan "satu canary" ada agar hasil bisa diatribusikan. Atribusi hanya
+    kabur bila keduanya diukur dari kumpulan exit yang SAMA — dan `evaluate()`
+    menyaring market DAN lane, jadi canary SPOT & FUTURES membaca ledger terpisah.
+
+    Ruang lingkup global sempat menahan canary FUTURES hanya karena SPOT sedang
+    menguji lane lain: pembatasan yang tak menambah keamanan, cuma memperlambat.
+    """
+    import inspect
+    src = inspect.getsource(roll.start_canary)
+    assert "FuturesExitRollout.market == row.market" in src, \
+        "gate canary masih global — akan menahan market lain tanpa alasan"
+
+
+def test_evaluasi_canary_disaring_market_dan_lane():
+    """Kalau salah satu filter hilang, hasil dua market tercampur dan vonis
+    canary jadi karangan."""
+    import inspect
+    src = inspect.getsource(roll.evaluate)
+    assert "row.market" in src
+    assert "row.lane" in src
