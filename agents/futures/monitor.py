@@ -1692,8 +1692,19 @@ async def check_futures_positions() -> tuple[int, int]:
                     except Exception:
                         pass
                     score = _cur_score or (trade.probability or 0)
-                    if score >= 65:   # PLAN_v11 P3: 70→65 — biar ladder benar-benar aktif (dulu "TP Extended: 0")
-                        trade.take_profit = tp3
+                    # Target perpanjangan HARUS tunduk pada batas yang sama
+                    # dengan TP2. Tanpa ini, TP yang sudah dikompresi akan
+                    # diperpanjang kembali begitu TP1 tersentuh — dan kompresinya
+                    # batal tanpa jejak. Inilah persis asimetri yang jadi temuan
+                    # inti M0: "TP di monitor hanya pernah DIPERPANJANG, tak
+                    # pernah diperpendek".
+                    _tp3_eff, _ = mcfg.effective_take_profit(
+                        entry, tp3, float(meta.get("atr_pct") or 0.0),
+                        direction, lane=lane)
+                    _lebih_jauh = ((direction == "LONG" and _tp3_eff > tp2)
+                                   or (direction == "SHORT" and _tp3_eff < tp2))
+                    if score >= 65 and _lebih_jauh:
+                        trade.take_profit = _tp3_eff
                         # F81: lock SL at TP1 when extending to TP3
                         _curr_trail = trade.trail_sl or 0.0
                         if not trail_active or \
@@ -1708,7 +1719,10 @@ async def check_futures_positions() -> tuple[int, int]:
                         logger.info(
                             "tp_extended_to_tp3",
                             symbol=trade.symbol, direction=direction,
-                            old_tp2=tp2, new_tp3=tp3, score=score,
+                            # Nilai EFEKTIF yang benar-benar dipasang, bukan tp3
+                            # mentah — melaporkan yang mentah membuat log dan
+                            # keputusan bercerita hal berbeda saat audit.
+                            old_tp2=tp2, new_tp3=_tp3_eff, score=score,
                             sl_locked_at=round(tp1, 6),
                         )
 

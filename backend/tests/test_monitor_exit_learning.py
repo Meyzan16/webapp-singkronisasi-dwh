@@ -232,3 +232,32 @@ def test_tangga_kunci_profit_tetap_urut_walau_ditala_terbalik(monkeypatch):
     asyncio.run(mcfg.refresh())
     peaks = [p for p, _ in mcfg.PROFIT_LOCK_TIERS]
     assert peaks == sorted(peaks, reverse=True)
+
+
+def test_perpanjangan_tp3_tunduk_pada_batas_yang_sama():
+    """Temuan inti M0: "TP di monitor hanya pernah DIPERPANJANG, tak pernah
+    diperpendek". Kalau perpanjangan ke TP3 tak tunduk batas belajar, TP yang
+    sudah dikompresi akan diperpanjang kembali begitu TP1 tersentuh — kompresinya
+    batal tanpa jejak, dan asimetri yang jadi akar masalah kembali hidup.
+    """
+    import inspect
+    from agents.futures import monitor as fut_mon
+    src = inspect.getsource(fut_mon.check_futures_positions)
+    assert "_tp3_eff" in src, "perpanjangan TP3 tak melewati batas belajar"
+    assert "trade.take_profit = _tp3_eff" in src
+    assert "trade.take_profit = tp3" not in src, "masih memasang tp3 mentah"
+    # Perpanjangan hanya sah bila targetnya benar-benar LEBIH JAUH dari TP saat ini.
+    assert "_lebih_jauh" in src
+
+
+def test_perpanjangan_batal_saat_kompresi_aktif():
+    """Bila batas belajar sudah memangkas TP2, TP3 yang dikompresi ke batas yang
+    sama TIDAK lebih jauh — jadi perpanjangan otomatis jadi no-op, bukan
+    membatalkan hasil belajar."""
+    mcfg.EXIT_LEARNING_ENABLED = 1.0
+    mcfg.TP_ATR_BY_LANE = {"bigmover": 0.566}
+    entry, atr = 100.0, 6.07
+    tp2, _ = mcfg.effective_take_profit(entry, entry * 1.2428, atr, "LONG", lane="bigmover")
+    tp3, _ = mcfg.effective_take_profit(entry, entry * 1.40, atr, "LONG", lane="bigmover")
+    assert tp3 == tp2, "keduanya harus mendarat di batas yang sama"
+    assert not (tp3 > tp2), "perpanjangan tak boleh lolos saat kompresi aktif"
