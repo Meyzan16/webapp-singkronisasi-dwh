@@ -58,8 +58,29 @@ CONVICTION_CEIL    = 120.0   # raw score for full conviction
 
 # Portfolio discipline (§7B, §12.4, §14.3)
 MAX_CONCURRENT_POSITIONS = 5      # capital concentrated in best setups only
-MIN_NOTIONAL_ABS         = 150.0  # never open dust positions
-MIN_NOTIONAL_FRACTION    = 0.15   # ...or 15% of balance, whichever is higher
+# Lantai anti-posisi-debu. KEDUANYA harus dilihat bersama: yang berlaku adalah
+# `max(ABS, balance × FRACTION)`, jadi menurunkan salah satu saja sering tak
+# berefek — dengan balance $1.070, menurunkan ABS 150→50 tetap menghasilkan
+# max(50, 160) = 160.
+#
+# TEMUAN 9 Agu 2026 (dari 303 blokir di log satu sesi): scanner menemukan
+# kandidat berskor 90–108 tapi TIDAK SATU PUN bisa dibuka. Notional yang
+# dihitung mengumpul di $54–70 (median $56) sementara ambangnya $161 — jadi
+# gerbang ini memblokir 100% auto-open, dan seluruh mesin belajar ikut macet
+# karena tak ada trade baru: 15 entry dalam 14 hari, nol posisi terbuka, dan
+# canary butuh ~105–210 hari untuk mengumpulkan 15 exit.
+#
+# Angka 150/15% tampaknya dirancang untuk akun jauh lebih besar. Pada akun
+# $1.070 ia bukan pelindung dari posisi debu melainkan pemblokir total: dengan
+# batas 5 posisi bersamaan, minimum $161 berarti 75% akun terpakai saat penuh.
+# 50/5% menahan porsi itu di 25% — jadi ini justru MENGURANGI konsentrasi,
+# bukan melonggarkan disiplin.
+#
+# Risiko per trade sengaja TIDAK dinaikkan: menaikkannya ke 1,5% hanya membuka
+# 14% kandidat sambil memperbesar kerugian per trade 50% — membayar mahal untuk
+# perbaikan kecil.
+MIN_NOTIONAL_ABS         = 50.0   # never open dust positions
+MIN_NOTIONAL_FRACTION    = 0.05   # ...or 5% of balance, whichever is higher
 MAX_NOTIONAL_FRACTION    = 0.40   # one position never exceeds 40% of balance
 # PLAN_SPOT_LANES S7 (opsi B): portfolio heat HARUS sama dengan batas rugi harian.
 # Dulu 4% sementara circuit breaker harian 3% — portofolio boleh dimuati sampai 4%
