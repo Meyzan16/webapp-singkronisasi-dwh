@@ -695,6 +695,29 @@ async def _process_trade(
     sl    = meta.get("current_sl") or trade.stop_loss
     entry = trade.entry_price
 
+    # Batas TP hasil belajar per lane. Kompresi HANYA mendekatkan target — tak
+    # pernah menjauhkannya — dan default MATI, jadi tanpa saklar + angka per-lane
+    # perilakunya identik seperti sebelumnya.
+    #
+    # Panggilan ini WAJIB ada di sini: nilai canary sempat sampai ke
+    # `tp_atr_limit()` tapi tak seorang pun memanggil kompresinya, sehingga
+    # angka hasil belajar tersimpan rapi dan berefek NOL — persis penyakit yang
+    # di sisi futures butuh M2 untuk ditutup.
+    try:
+        _lane_tp = lane_of(meta, trade.alert_type)
+        _atr_now = float(meta.get("atr_pct") or 0.0)
+        _tp2_eff, _tp2_kompres = scfg.effective_take_profit(
+            float(entry or 0.0), float(tp2 or 0.0), _atr_now, lane=_lane_tp)
+        if _tp2_kompres:
+            tp2 = _tp2_eff
+            meta["tp_compressed"] = True
+            # TP3 di atas TP2 jadi tak masuk akal setelah TP2 didekatkan.
+            if tp3 and tp3 > tp2:
+                tp3 = None
+    except Exception as exc:      # pencatatan opsional — jangan ganggu monitor
+        logger.warning("spot_tp_compress_failed", symbol=trade.symbol,
+                       error=str(exc)[:100])
+
     if not entry or entry <= 0 or not sl or sl <= 0 or not tp2 or tp2 <= 0:
         logger.warning("monitor_invalid_levels", id=trade.id, symbol=trade.symbol)
         return 0, 0

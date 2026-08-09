@@ -169,3 +169,27 @@ def test_backfill_dan_monitor_memakai_pemeta_lane_yang_sama():
     from agents.opportunity import monitor as spot_mon
     assert "lane_of" in inspect.getsource(exit_learning._lane_for)
     assert "lane_of(meta, trade.alert_type)" in inspect.getsource(spot_mon._process_trade)
+
+
+def test_monitor_spot_benar_benar_memanggil_kompresi_tp():
+    """Angka hasil belajar yang tak pernah DIPANGGIL berefek nol.
+
+    Terukur 8 Agu 2026: canary `bigmover` 2,031 sudah sampai ke `tp_atr_limit()`
+    dan terlihat "aktif" di config, tapi monitor SPOT tak pernah memanggil
+    `effective_take_profit()` — jadi efeknya NOL. Ini penyakit yang sama dengan
+    monitor futures sebelum M2: nilai di-refresh tapi tak ada yang membacanya.
+    """
+    import inspect
+    from agents.opportunity import monitor as spot_mon
+    src = inspect.getsource(spot_mon._process_trade)
+    assert "scfg.effective_take_profit(" in src, \
+        "monitor SPOT tak memanggil kompresi TP — hasil belajar berefek nol"
+    # Lane harus ikut, kalau tidak semua lane memakai batas yang sama.
+    assert "lane=_lane_tp" in src
+
+
+def test_kedua_monitor_memanggil_kompresi_tp():
+    """Padanan di sisi futures — supaya salah satu tak diam-diam kehilangannya."""
+    import inspect
+    from agents.futures import monitor as fut_mon
+    assert "effective_take_profit(" in inspect.getsource(fut_mon.check_futures_positions)
