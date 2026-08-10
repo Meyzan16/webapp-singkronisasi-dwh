@@ -146,6 +146,34 @@ FAST_LOOP_LEVERAGE_MIN = 10.0      # leverage ≥ segini = otomatis dijaga ketat
 FAST_LOOP_MARGIN_LOSS_PCT = 30.0   # rugi ≥ 30% margin = dijaga ketat
 FAST_LOOP_LIQ_DIST_PCT = 10.0      # jarak ke likuidasi < 10% = dijaga ketat
 
+# ── Ambang yang LOLOS dari M2 (audit 9 Agu 2026) ──────────────────────────────
+# M2 memindahkan 24 KONSTANTA MODUL ke sini, tapi melewatkan angka yang ditulis
+# langsung di tengah ekspresi — bentuk hardcode yang paling sulit terlihat karena
+# tak muncul saat mencari definisi konstanta.
+#
+# Kedelapan angka di bawah semuanya menentukan KAPAN posisi ditutup atau SL
+# digeser, jadi mereka tepat sekali jenisnya dengan yang sudah dipusatkan. Selama
+# masih telanjang, tak satu pun bisa ditala dari UI maupun disentuh mesin belajar.
+#
+# Nilai bawaan = perilaku lama persis.
+
+#: Profit minimum (% harga) agar posisi layak diperpanjang umurnya.
+AGE_EXTEND_MIN_PNL_PCT = 5.0
+#: Umur (hari) sebelum posisi mulai dinilai stagnan.
+STAGNANT_CHECK_DAYS = 2.0
+#: Progres minimum menuju TP1 (%) agar posisi tak dianggap stagnan.
+STAGNANT_PROGRESS_PCT = 20.0
+#: Jam tertahan sesudah TP1 sebelum posisi dinilai macet.
+STUCK_AFTER_TP1_HOURS = 24.0
+#: Jam trailing stagnan sesudah TP1 sebelum posisi layak dirotasi.
+TRAIL_STAGNANT_TP1_HOURS = 48.0
+#: Skor minimum agar TP boleh diperpanjang ke TP3.
+TP_EXTEND_MIN_SCORE = 65.0
+#: Porsi keuntungan TP1 yang dikunci saat SL digeser sesudah TP1 tersentuh.
+TRAIL_LOCK_AFTER_TP1_FRAC = 0.75
+#: Porsi jarak TP1→TP2 yang harus ditempuh sebelum SL dimajukan ke TP1.
+TRAIL_ADVANCE_TP1_TP2_FRAC = 0.50
+
 # ── Bank profit & biaya ───────────────────────────────────────────────────────
 MIN_BANK_COST_MULT = 3.0           # dilarang bank profit sukarela < 3× cost floor
 COST_TO_PROFIT_GATE = 0.30         # tutup bila biaya kumulatif > 30% profit
@@ -251,6 +279,14 @@ _KEYS: dict[str, str] = {
     "FAST_LOOP_MARGIN_LOSS_PCT": "monitor_fast_loop_margin_loss_pct",
     "FAST_LOOP_LIQ_DIST_PCT":    "monitor_fast_loop_liq_dist_pct",
     "FAILFAST_MIN_SL_GAP":       "monitor_failfast_min_sl_gap",
+    "AGE_EXTEND_MIN_PNL_PCT":    "monitor_age_extend_min_pnl_pct",
+    "STAGNANT_CHECK_DAYS":       "monitor_stagnant_check_days",
+    "STAGNANT_PROGRESS_PCT":     "monitor_stagnant_progress_pct",
+    "STUCK_AFTER_TP1_HOURS":     "monitor_stuck_after_tp1_hours",
+    "TRAIL_STAGNANT_TP1_HOURS":  "monitor_trail_stagnant_tp1_hours",
+    "TP_EXTEND_MIN_SCORE":       "monitor_tp_extend_min_score",
+    "TRAIL_LOCK_AFTER_TP1_FRAC": "monitor_trail_lock_after_tp1_frac",
+    "TRAIL_ADVANCE_TP1_TP2_FRAC":"monitor_trail_advance_tp1_tp2_frac",
 }
 
 _INT_KEYS = {"MAX_AGE_EXTENSIONS", "RUGPULL_CANDLES"}

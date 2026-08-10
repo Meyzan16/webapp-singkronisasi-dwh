@@ -469,11 +469,11 @@ def _compute_trail(
         # breakeven, even when TP1 (ATR×2 on a volatile coin) sits far away.
         if setup_type == "bigmover":
             halfway_to_tp1 = min(halfway_to_tp1, entry * (1 + mcfg.BM_BE_ARM_ABS_PCT / 100))
-        sl_after_tp1     = entry + (tp1 - entry) * 0.75
+        sl_after_tp1     = entry + (tp1 - entry) * mcfg.TRAIL_LOCK_AFTER_TP1_FRAC
 
         # F77: after TP1 hit (trail_active), when 50% toward TP2, advance SL to TP1
         if trail_active and tp2 > tp1 and sl < tp1:
-            halfway_tp1_tp2 = tp1 + (tp2 - tp1) * 0.50
+            halfway_tp1_tp2 = tp1 + (tp2 - tp1) * mcfg.TRAIL_ADVANCE_TP1_TP2_FRAC
             if price >= halfway_tp1_tp2:
                 return tp1, True, "tp1_lock"
 
@@ -491,11 +491,11 @@ def _compute_trail(
         # PLAN_v15 P4: bigmover absolute arm floor (mirror of LONG above)
         if setup_type == "bigmover":
             halfway_to_tp1 = max(halfway_to_tp1, entry * (1 - mcfg.BM_BE_ARM_ABS_PCT / 100))
-        sl_after_tp1     = entry - (entry - tp1) * 0.75
+        sl_after_tp1     = entry - (entry - tp1) * mcfg.TRAIL_LOCK_AFTER_TP1_FRAC
 
         # F77: after TP1 hit (trail_active), when 50% toward TP2, advance SL to TP1
         if trail_active and tp2 < tp1 and sl > tp1:
-            halfway_tp1_tp2 = tp1 - (tp1 - tp2) * 0.50
+            halfway_tp1_tp2 = tp1 - (tp1 - tp2) * mcfg.TRAIL_ADVANCE_TP1_TP2_FRAC
             if price <= halfway_tp1_tp2:
                 return tp1, True, "tp1_lock"
 
@@ -1008,7 +1008,7 @@ async def check_futures_positions() -> tuple[int, int]:
             # and 1h momentum still aligned (proxied by pnl ≥ 5%).
             if (not new_status
                     and trail_active
-                    and _pnl_now_pct >= 5.0
+                    and _pnl_now_pct >= mcfg.AGE_EXTEND_MIN_PNL_PCT
                     and _age_ext < mcfg.MAX_AGE_EXTENSIONS
                     and age_days >= (_max_age - 0.1)):   # within ~2.4 h of expiry
                 _last_ext = float(meta.get("age_last_extended_at", 0.0))
@@ -1079,13 +1079,13 @@ async def check_futures_positions() -> tuple[int, int]:
                             )
 
             # ── 0a. Stagnant 48h check (F80) ─────────────────────────────────
-            if not new_status and age_days > 2.0:
+            if not new_status and age_days > mcfg.STAGNANT_CHECK_DAYS:
                 _progress = 0.0
                 if direction == "LONG" and tp1 > entry:
                     _progress = (price - entry) / (tp1 - entry) * 100 if price > entry else 0.0
                 elif direction == "SHORT" and tp1 < entry:
                     _progress = (entry - price) / (entry - tp1) * 100 if price < entry else 0.0
-                if _progress < 20.0:
+                if _progress < mcfg.STAGNANT_PROGRESS_PCT:
                     new_status   = "expired"
                     close_price  = round(price, 8)
                     close_reason = "stagnant_48h"
@@ -1096,7 +1096,7 @@ async def check_futures_positions() -> tuple[int, int]:
             if not new_status and trail_active:
                 _tp1_done_g8 = float(meta.get("tp1_done_at", 0.0))
                 _hold_tp1_h  = (time.time() - _tp1_done_g8) / 3600 if _tp1_done_g8 > 0 else 0.0
-                if _hold_tp1_h >= 24.0:
+                if _hold_tp1_h >= mcfg.STUCK_AFTER_TP1_HOURS:
                     _stuck = (
                         (direction == "LONG"  and price <= sl * 1.02) or
                         (direction == "SHORT" and price >= sl * 0.98)
@@ -1611,7 +1611,7 @@ async def check_futures_positions() -> tuple[int, int]:
                     _trail_stagnant_post_tp1 = (
                         trail_active
                         and _tp1_done_at > 0
-                        and (time.time() - _tp1_done_at) > 48 * 3600
+                        and (time.time() - _tp1_done_at) > mcfg.TRAIL_STAGNANT_TP1_HOURS * 3600
                         and _drift_pct <= mcfg.ROTATION_DRIFT_PCT
                     )
                     # PLAN_v16 F3: posisi yang di-tighten time-stop tetap rotate-eligible
@@ -1703,7 +1703,7 @@ async def check_futures_positions() -> tuple[int, int]:
                         direction, lane=lane)
                     _lebih_jauh = ((direction == "LONG" and _tp3_eff > tp2)
                                    or (direction == "SHORT" and _tp3_eff < tp2))
-                    if score >= 65 and _lebih_jauh:
+                    if score >= mcfg.TP_EXTEND_MIN_SCORE and _lebih_jauh:
                         trade.take_profit = _tp3_eff
                         # F81: lock SL at TP1 when extending to TP3
                         _curr_trail = trade.trail_sl or 0.0

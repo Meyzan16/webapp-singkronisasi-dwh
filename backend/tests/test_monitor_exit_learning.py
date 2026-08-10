@@ -261,3 +261,41 @@ def test_perpanjangan_batal_saat_kompresi_aktif():
     tp3, _ = mcfg.effective_take_profit(entry, entry * 1.40, atr, "LONG", lane="bigmover")
     assert tp3 == tp2, "keduanya harus mendarat di batas yang sama"
     assert not (tp3 > tp2), "perpanjangan tak boleh lolos saat kompresi aktif"
+
+
+def test_tak_ada_ambang_keputusan_telanjang_di_monitor():
+    """M2 memusatkan KONSTANTA MODUL tapi melewatkan angka di tengah ekspresi —
+    bentuk hardcode paling sulit terlihat karena tak muncul saat mencari definisi
+    konstanta. Delapan di antaranya ditemukan pada audit 9 Agu 2026, semuanya
+    penentu kapan posisi ditutup atau SL digeser.
+    """
+    import inspect
+    from agents.futures import monitor as mon
+    src = inspect.getsource(mon)
+    telanjang = [
+        "_pnl_now_pct >= 5.0",              # syarat perpanjangan umur
+        "age_days > 2.0",                   # mulai nilai stagnan
+        "_progress < 20.0",                 # ambang progres stagnan
+        "_hold_tp1_h >= 24.0",              # macet sesudah TP1
+        "> 48 * 3600",                      # trailing stagnan pasca-TP1
+        "score >= 65 and",                  # gerbang perpanjangan TP3
+        "(tp1 - entry) * 0.75",             # kunci SL sesudah TP1
+        "(tp2 - tp1) * 0.50",               # maju ke TP1 di separuh jalan
+    ]
+    for pola in telanjang:
+        assert pola not in src, f"ambang keputusan kembali telanjang: {pola}"
+
+
+def test_ambang_hasil_audit_terbaca_monitor_dan_punya_config():
+    """Dipindah ke config saja tak cukup — monitor harus BENAR-BENAR membacanya,
+    dan tiap ambang wajib punya baris config agar muncul di UI."""
+    import inspect
+    from agents.futures import monitor as mon
+    from app.services.agent_config_defaults import all_defaults
+    src = inspect.getsource(mon)
+    keys = {d["key"] for d in all_defaults() if d["group"] == "futures"}
+    for var in ("AGE_EXTEND_MIN_PNL_PCT", "STAGNANT_CHECK_DAYS", "STAGNANT_PROGRESS_PCT",
+                "STUCK_AFTER_TP1_HOURS", "TRAIL_STAGNANT_TP1_HOURS", "TP_EXTEND_MIN_SCORE",
+                "TRAIL_LOCK_AFTER_TP1_FRAC", "TRAIL_ADVANCE_TP1_TP2_FRAC"):
+        assert f"mcfg.{var}" in src, f"{var} tak dibaca monitor"
+        assert mcfg._KEYS[var] in keys, f"{var} tak punya baris config"

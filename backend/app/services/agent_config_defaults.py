@@ -170,6 +170,25 @@ DEFAULTS: list[dict] = [
      "description": "Jarak ke harga likuidasi (%) yang membuat posisi dipindah ke loop cepat 30 detik"},
     {"group": "futures", "key": "monitor_failfast_min_sl_gap", "default": 0.0, "category": "monitor",
      "description": "M3 (DEFAULT 0=MATI): fail-fast hanya boleh memotong dini bila jarak SL minimal sekian kali ambang fail-fast. Bukti 1 Agu: di lane ber-SL sempit (bigmover, SL 1,5x ATR vs pemicu 1,0x ATR) pemotongan dini tak menyelamatkan apa pun - 8 exit, 0 menang, satu di antaranya malah rugi lebih besar daripada bila SL dibiarkan bekerja."},
+    # Audit 9 Agu 2026 — 8 ambang keputusan yang lolos dari M2 karena berupa
+    # angka di tengah ekspresi, bukan konstanta modul (bentuk hardcode paling
+    # sulit terlihat: tak muncul saat mencari definisi konstanta).
+    {"group": "futures", "key": "monitor_age_extend_min_pnl_pct", "default": 5.0, "category": "monitor",
+     "description": "Profit minimum (%) agar umur posisi layak diperpanjang"},
+    {"group": "futures", "key": "monitor_stagnant_check_days", "default": 2.0, "category": "monitor",
+     "description": "Umur (hari) sebelum posisi mulai dinilai stagnan"},
+    {"group": "futures", "key": "monitor_stagnant_progress_pct", "default": 20.0, "category": "monitor",
+     "description": "Progres minimum menuju TP1 (%) agar posisi tak dianggap stagnan"},
+    {"group": "futures", "key": "monitor_stuck_after_tp1_hours", "default": 24.0, "category": "monitor",
+     "description": "Jam tertahan sesudah TP1 sebelum posisi dinilai macet"},
+    {"group": "futures", "key": "monitor_trail_stagnant_tp1_hours", "default": 48.0, "category": "monitor",
+     "description": "Jam trailing stagnan sesudah TP1 sebelum posisi layak dirotasi"},
+    {"group": "futures", "key": "monitor_tp_extend_min_score", "default": 65.0, "category": "monitor",
+     "description": "Skor minimum agar TP boleh diperpanjang ke TP3"},
+    {"group": "futures", "key": "monitor_trail_lock_after_tp1_frac", "default": 0.75, "category": "monitor",
+     "description": "Porsi keuntungan TP1 yang dikunci saat SL digeser sesudah TP1 tersentuh"},
+    {"group": "futures", "key": "monitor_trail_advance_tp1_tp2_frac", "default": 0.50, "category": "monitor",
+     "description": "Porsi jarak TP1->TP2 yang harus ditempuh sebelum SL dimajukan ke TP1"},
     {"group": "futures", "key": "monitor_exit_learning_enabled", "default": 0.0, "category": "monitor",
      "description": "PRIORITAS 2 (DEFAULT 0=MATI): izinkan monitor memakai batas TP per-lane hasil belajar dari ledger keluar (monitor_tp_atr_mult_lane_*). Selama 0, angka hasil belajar boleh ditulis dan diamati tapi tidak mempengaruhi satu pun keputusan tutup posisi."},
 
