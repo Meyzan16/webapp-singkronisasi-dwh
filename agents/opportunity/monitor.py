@@ -529,7 +529,17 @@ def _risk_signal(
     # setup that justified the entry is broken. No profit floor: we don't wait
     # for the position to be profitable before exiting a broken structure.
     # Guard: only fire after ≥60 min hold (not on normal open-candle noise).
-    if entry_ema_bullish and ema9 < ema21 * 0.998 and hold_minutes >= 60:
+    # Ambang di bawah kini bisa ditala (lihat monitor_config). Lantai profitnya
+    # DEFAULT 0 = perilaku lama persis; dinaikkan berarti struktur yang patah saat
+    # posisi masih rugi diserahkan ke SL, bukan direalisasikan sekarang.
+    #
+    # Alasannya ada di data: pemicu ini menutup 10 posisi dengan win rate 10% dan
+    # expectancy −1,191% — satu-satunya pemicu SPOT yang benar-benar merugikan,
+    # sementara rotasi dan penguncian profit semuanya positif.
+    if (entry_ema_bullish
+            and ema9 < ema21 * scfg.TREND_REVERSAL_EMA_BUFFER
+            and hold_minutes >= scfg.TREND_REVERSAL_MIN_HOLD_MIN
+            and pnl_net >= scfg.TREND_REVERSAL_PROFIT_FLOOR_FRAC * tp2_net_pct):
         return "trend_reversal"
 
     if rsi > 80 and pnl_net >= profit_floor:

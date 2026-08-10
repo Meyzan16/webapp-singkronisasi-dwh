@@ -289,6 +289,13 @@ def _monitor_lane_defaults() -> list[dict]:
         "monitor_dyn_rung_atr_mult":       "jarak rung dinamis berikutnya (kelipatan ATR)",
         "monitor_dyn_rung_step_pct":       "lantai jarak rung bila ATR terlalu kecil (%)",
         "monitor_min_hold_minutes":        "menit tahan minimum sebelum exit risk-adjusted boleh",
+        "monitor_trend_reversal_min_hold_min": "trend_reversal: menit tahan minimum sebelum silang EMA dianggap sah",
+        "monitor_trend_reversal_ema_buffer":   "trend_reversal: ema9 harus di bawah ema21 x nilai ini (0,998 = butuh silang 0,2%)",
+        "monitor_trend_reversal_profit_floor_frac": ("trend_reversal: lantai profit sebagai porsi jarak ke TP2. "
+                                            "0 = perilaku lama (keluar walau rugi). Bukti 9 Agu: pemicu ini "
+                                            "menutup 10 posisi dgn WR 10% dan expectancy -1,191% - satu-satunya "
+                                            "pemicu SPOT yang merugikan. Menaikkannya menyerahkan struktur patah "
+                                            "saat rugi ke SL."),
         "monitor_exit_learning_enabled":   ("DEFAULT 0=MATI: izinkan monitor SPOT memakai batas TP "
                                             "per-lane hasil belajar. Saklar TERPISAH dari futures — "
                                             "satu perubahan diuji di satu tempat."),

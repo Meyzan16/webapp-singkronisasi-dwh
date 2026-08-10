@@ -54,6 +54,31 @@ DYN_RUNG_STEP_PCT = 8.0
 
 MIN_HOLD_MINUTES = 30.0        # exit risk-adjusted baru boleh sesudah ini
 
+# ── Pemicu keluar dini: trend_reversal ────────────────────────────────────────
+# BUKTI 9 Agu 2026 dari ledger keluar SPOT (per lane × pemicu):
+#
+#   accumulation / trend_reversal    n=10  WR 10,0%  expectancy −1,191%
+#   accumulation / urgent_rotation   n=19  WR 57,9%  expectancy +1,757%
+#   accumulation / profit_protection n= 3  WR 100%   expectancy +7,357%
+#   bigmover     / tp1_breakeven     n= 9  WR 100%   expectancy +3,863%
+#
+# `trend_reversal` satu-satunya pemicu yang benar-benar merugikan — ia merealisasi
+# kerugian pada 9 dari 10 posisi. Ia sengaja dirancang TANPA lantai profit karena
+# dianggap "sinyal struktur" (EMA silang = alasan masuk sudah patah), tapi
+# hasilnya menunjukkan silang EMA saja terlalu sering keliru.
+#
+# Tiga angka di bawah dulu terkunci di tengah fungsi. Dikeluarkan supaya bisa
+# ditala dan diuji dengan data — persis jalan yang dipakai memperbaiki `fail_fast`
+# di futures, yang juga 0% menang sebelum diberi syarat tambahan.
+#
+# Nilai bawaan = perilaku lama persis.
+TREND_REVERSAL_MIN_HOLD_MIN = 60.0   # jangan bereaksi pada derau candle pembuka
+TREND_REVERSAL_EMA_BUFFER = 0.998    # ema9 harus di bawah ema21 × ini
+#: Lantai profit untuk trend_reversal, sebagai porsi jarak ke TP2.
+#: 0 = perilaku lama (tanpa lantai). Dinaikkan berarti: hanya keluar saat posisi
+#: sudah cukup untung, dan biarkan SL yang mengurus struktur yang patah saat rugi.
+TREND_REVERSAL_PROFIT_FLOOR_FRAC = 0.0
+
 _KEYS: dict[str, str] = {
     # nama variabel modul -> kunci config (grup "spot")
     "STAGNANT_CHECK_DAYS":          "monitor_stagnant_check_days",
@@ -72,6 +97,9 @@ _KEYS: dict[str, str] = {
     "DYN_RUNG_ATR_MULT":            "monitor_dyn_rung_atr_mult",
     "DYN_RUNG_STEP_PCT":            "monitor_dyn_rung_step_pct",
     "MIN_HOLD_MINUTES":             "monitor_min_hold_minutes",
+    "TREND_REVERSAL_MIN_HOLD_MIN":  "monitor_trend_reversal_min_hold_min",
+    "TREND_REVERSAL_EMA_BUFFER":    "monitor_trend_reversal_ema_buffer",
+    "TREND_REVERSAL_PROFIT_FLOOR_FRAC": "monitor_trend_reversal_profit_floor_frac",
     "EXIT_LEARNING_ENABLED":        "monitor_exit_learning_enabled",
 }
 

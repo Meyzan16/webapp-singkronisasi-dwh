@@ -193,3 +193,33 @@ def test_kedua_monitor_memanggil_kompresi_tp():
     import inspect
     from agents.futures import monitor as fut_mon
     assert "effective_take_profit(" in inspect.getsource(fut_mon.check_futures_positions)
+
+
+def test_pemicu_trend_reversal_bisa_ditala():
+    """`trend_reversal` adalah satu-satunya pemicu keluar dini SPOT yang merugikan
+    (n=10, WR 10%, expectancy −1,191%) — padanan `fail_fast` di futures yang juga
+    0% menang sebelum diberi syarat tambahan.
+
+    Tiga angkanya dulu terkunci di tengah fungsi, jadi mesin belajar tak punya
+    jalan untuk mengoreksinya walau datanya sudah jelas.
+    """
+    import inspect
+    from agents.opportunity import monitor as spot_mon
+    from agents.opportunity import monitor_config as scfg
+    src = inspect.getsource(spot_mon)
+    for var in ("TREND_REVERSAL_EMA_BUFFER", "TREND_REVERSAL_MIN_HOLD_MIN",
+                "TREND_REVERSAL_PROFIT_FLOOR_FRAC"):
+        assert f"scfg.{var}" in src, f"{var} tak dibaca monitor"
+        assert var in scfg._KEYS, f"{var} tak punya kunci config"
+    # Angka telanjang yang lama tak boleh kembali.
+    assert "ema21 * 0.998" not in src
+    assert "hold_minutes >= 60" not in src
+
+
+def test_lantai_profit_trend_reversal_default_nol():
+    """Default WAJIB 0 = perilaku lama persis. Menaikkannya mengubah keputusan
+    trading, jadi itu harus jadi pilihan sadar, bukan efek samping deploy."""
+    from agents.opportunity import monitor_config as scfg
+    assert scfg.TREND_REVERSAL_PROFIT_FLOOR_FRAC == 0.0
+    assert scfg.TREND_REVERSAL_MIN_HOLD_MIN == 60.0
+    assert scfg.TREND_REVERSAL_EMA_BUFFER == 0.998
