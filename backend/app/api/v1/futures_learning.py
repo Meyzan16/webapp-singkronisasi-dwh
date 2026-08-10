@@ -392,6 +392,21 @@ async def exit_learning_sl_width(days: int = Query(90, ge=1, le=365)) -> dict:
     return await analyze_sl_width(days=days)
 
 
+@router.get("/futures/exit-learning/trail", dependencies=[Depends(require_db)])
+async def exit_learning_trail(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Usulan dua parameter trailing, dari perbandingan hasil counterfactual."""
+    from agents.learning.exit_learning import recommend_trail_params
+    return await recommend_trail_params(days=days)
+
+
+@router.get("/spot/exit-learning/trail", dependencies=[Depends(require_db)])
+async def spot_exit_learning_trail(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Padanan SPOT — MENGUKUR saja; usulannya tak diterbitkan selama nilai
+    trailing SPOT belum punya kunci config yang dibaca monitor."""
+    from agents.learning.exit_learning import recommend_trail_params
+    return await recommend_trail_params(days=days, market="spot")
+
+
 @router.get("/futures/sl-config", dependencies=[Depends(require_db)])
 async def get_sl_config() -> dict:
     """Lebar SL per lane yang SEDANG berlaku."""

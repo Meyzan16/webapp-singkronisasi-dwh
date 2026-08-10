@@ -698,6 +698,176 @@ async def analyze_sl_width(days: int = 90, market: str = "futures") -> dict:
     }
 
 
+# ── M8: dua parameter trailing ────────────────────────────────────────────────
+
+#: Sampel minimum (posisi yang BENAR-BENAR menyentuh TP1) sebelum usulan trailing
+#: boleh diterbitkan. Populasinya jauh lebih kecil daripada seluruh exit — hanya
+#: posisi yang sampai TP1 yang pernah merasakan kedua parameter ini.
+TRAIL_MIN_SAMPLES = 25
+
+#: Perbaikan expectancy minimum (% P&L) sebelum sebuah usulan layak diajukan.
+#: Di bawah ini bedanya tak bisa dipisahkan dari derau.
+TRAIL_MIN_LIFT = 0.15
+
+
+def _cost_pct(market: str) -> float:
+    """Biaya bolak-balik — dipakai mengubah keuntungan KOTOR di TP1 jadi bersih."""
+    if market == "spot":
+        from app.services.trading_costs import EXECUTION_COST_PCT
+        return float(EXECUTION_COST_PCT)
+    from agents.futures.monitor import ROUND_TRIP
+    return float(ROUND_TRIP) * 100
+
+
+async def recommend_trail_params(days: int = 90, market: str = "futures") -> dict:
+    """Usulkan dua parameter trailing dari perbandingan HASIL, bukan tebakan.
+
+    Caranya: untuk tiap nilai kandidat, hitung ulang hasil tiap posisi seandainya
+    nilai itu yang berlaku, lalu bandingkan expectancy-nya dengan yang nyata.
+
+        kunci setelah TP1 (L') : bila harga pernah turun di bawah L', posisi
+                                 berhenti di sana → hasil = L' × keuntungan TP1
+        maju ke TP1 (A')       : bila kemajuan pernah mencapai A' DAN harga
+                                 pernah balik ke bawah TP1, posisi berhenti di
+                                 TP1 → hasil = keuntungan TP1
+
+    **Batas yang jujur — data ini TERSENSOR.** Nilai yang berlaku sekarang
+    memotong posisi begitu harga menyentuhnya, jadi tak ada yang tahu apa yang
+    akan terjadi DI BAWAH level itu. Karena itu hanya arah MENAIKKAN yang bisa
+    dinilai; kandidat di bawah nilai berjalan sengaja tidak dievaluasi, bukan
+    dievaluasi lalu ditolak.
+    """
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+
+    cfg = _trail_config(market)
+    cutoff = time.time() - days * 86400
+    async with AsyncSessionLocal() as session:
+        rows = list((await session.execute(
+            select(ExitEvent).where(ExitEvent.closed_at >= cutoff,
+                                    ExitEvent.market == market)
+        )).scalars().all())
+
+    # Hanya posisi yang menyentuh TP1 — di posisi lain kedua parameter ini tak
+    # pernah berlaku, jadi memasukkannya hanya mengencerkan bukti.
+    pop = [r for r in rows
+           if r.retrace_after_tp1_frac is not None
+           and r.tp1_gain_pct and r.pnl_pct is not None]
+    cost = _cost_pct(market)
+    n = len(pop)
+    ready = n >= TRAIL_MIN_SAMPLES
+
+    def _expectancy(vals: list[float]) -> float:
+        return round(sum(vals) / len(vals), 4) if vals else 0.0
+
+    actual = _expectancy([r.pnl_pct for r in pop]) if pop else None
+
+    lock_now = cfg["lock"]
+    adv_now = cfg["advance"]
+    lock_grid = [round(lock_now + i * 0.05, 2) for i in range(0, 6)
+                 if lock_now + i * 0.05 <= 1.0]
+    adv_grid = [round(adv_now + i * 0.10, 2) for i in range(0, 6)
+                if adv_now + i * 0.10 <= 1.0]
+
+    def _pilih(curve: list[dict], sekarang: float) -> dict:
+        if not cfg.get("applicable"):
+            return {"recommended": None, "lift_pct": None,
+                    "reason": cfg.get("why", "tak_bisa_diterapkan")}
+        if not ready or not curve:
+            return {"recommended": None, "lift_pct": None,
+                    "reason": "sampel_belum_cukup"}
+        dasar = next((c["expectancy_pct"] for c in curve if c["value"] == sekarang),
+                     actual or 0.0)
+        terbaik = max(curve, key=lambda c: c["expectancy_pct"])
+        lift = round(terbaik["expectancy_pct"] - dasar, 4)
+        if terbaik["value"] == sekarang or lift < TRAIL_MIN_LIFT:
+            return {"recommended": None, "lift_pct": lift,
+                    "reason": "tak_ada_kandidat_cukup_baik"}
+        return {"recommended": terbaik["value"], "lift_pct": lift}
+
+    lock_curve = lock_curve_for(pop, lock_grid, cost)
+    adv_curve = adv_curve_for(pop, adv_grid, cost)
+    return {
+        "status": "ok", "market": market, "window_days": days,
+        "n_exit": len(rows), "n_sampai_tp1": n,
+        "required": TRAIL_MIN_SAMPLES,
+        "recommendation_ready": ready,
+        "expectancy_actual_pct": actual,
+        "cost_pct": round(cost, 3),
+        "params": {
+            "trail_lock_after_tp1": {
+                "current": lock_now, "curve": lock_curve, **_pilih(lock_curve, lock_now)},
+            "trail_advance_tp1_tp2": {
+                "current": adv_now, "curve": adv_curve, **_pilih(adv_curve, adv_now)},
+        },
+        "note": (
+            "Bukti mulai direkam 10 Agu 2026; baris ledger sebelumnya TIDAK bisa "
+            "dipakai karena gerak sesudah TP1 tak pernah disimpan dan mustahil "
+            "direkonstruksi. Hanya arah MENAIKKAN yang dinilai — nilai berjalan "
+            "menyensor apa yang terjadi di bawahnya."),
+    }
+
+
+def _expectancy_of(vals: list[float]) -> float:
+    return round(sum(vals) / len(vals), 4) if vals else 0.0
+
+
+def lock_curve_for(pop: list, grid: list[float], cost: float) -> list[dict]:
+    """Hasil rata-rata seandainya kunci-setelah-TP1 bernilai tiap kandidat.
+
+    Aturannya satu kalimat: bila harga pernah turun DI BAWAH kandidat, posisi
+    berhenti di sana (hasil = kandidat × keuntungan TP1, dikurangi biaya);
+    selain itu hasilnya tetap seperti yang nyata terjadi.
+    """
+    out = []
+    for cand in grid:
+        hasil = [(cand * r.tp1_gain_pct - cost) if r.retrace_after_tp1_frac < cand
+                 else r.pnl_pct for r in pop]
+        out.append({"value": cand, "expectancy_pct": _expectancy_of(hasil),
+                    "n_terpengaruh": sum(1 for r in pop
+                                         if r.retrace_after_tp1_frac < cand)})
+    return out
+
+
+def adv_curve_for(pop: list, grid: list[float], cost: float) -> list[dict]:
+    """Hasil rata-rata seandainya pemicu maju-ke-TP1 bernilai tiap kandidat.
+
+    SL baru pindah ke TP1 kalau kemajuan pernah mencapai kandidat. Setelah itu
+    ia hanya menggigit bila harga memang pernah balik ke bawah TP1 — karena itu
+    syaratnya DUA-DUANYA, bukan salah satu. Tanpa syarat kedua, tiap kandidat
+    rendah akan terlihat menang secara palsu.
+    """
+    out = []
+    sub = [r for r in pop if r.ext_after_tp1_frac is not None]
+    for cand in grid:
+        hasil, terpengaruh = [], 0
+        for r in sub:
+            if r.ext_after_tp1_frac >= cand and r.retrace_after_tp1_frac < 1.0:
+                terpengaruh += 1
+                hasil.append(r.tp1_gain_pct - cost)
+            else:
+                hasil.append(r.pnl_pct)
+        out.append({"value": cand, "expectancy_pct": _expectancy_of(hasil),
+                    "n_terpengaruh": terpengaruh, "n": len(sub)})
+    return out
+
+
+def _trail_config(market: str) -> dict:
+    """Nilai trailing yang BERLAKU sekarang, dibaca dari config monitor terkait —
+    bukan disalin, supaya usulan selalu dibandingkan terhadap yang nyata."""
+    if market == "spot":
+        # SPOT masih memakai 0,5 yang tertanam di `monitor._process_trade`
+        # (`entry * (1 + ((tp1-entry)/entry) * 0.5)`) — belum punya kunci config.
+        # Pengukuran tetap jalan supaya buktinya menumpuk, tapi usulannya TIDAK
+        # diterbitkan: menerbitkan angka untuk kunci yang tak dibaca siapa pun
+        # persis kesalahan yang sudah pernah terjadi di lane SPOT.
+        return {"lock": 0.5, "advance": 0.5, "applicable": False,
+                "why": "nilai trailing SPOT belum punya kunci config"}
+    from agents.futures import monitor_config as mcfg
+    return {"lock": mcfg.TRAIL_LOCK_AFTER_TP1_FRAC,
+            "advance": mcfg.TRAIL_ADVANCE_TP1_TP2_FRAC, "applicable": True}
+
+
 # ── Penerapan ─────────────────────────────────────────────────────────────────
 
 async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,

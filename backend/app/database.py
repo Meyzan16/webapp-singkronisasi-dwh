@@ -179,6 +179,12 @@ async def _migrate_columns(connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_fee_market ON exit_events (market, closed_at)",
         # M4b: gerak merugikan terjauh — pasangan dari mfe_atr.
         "ALTER TABLE exit_events ADD COLUMN IF NOT EXISTS mae_atr FLOAT",
+        # M8: bukti dua parameter trailing, dalam satuan parameternya sendiri.
+        # Baris lama TETAP NULL — nilainya mustahil direkonstruksi dari data
+        # historis, dan mengisinya dengan tebakan akan menyesatkan rekomendasi.
+        "ALTER TABLE exit_events ADD COLUMN IF NOT EXISTS retrace_after_tp1_frac FLOAT",
+        "ALTER TABLE exit_events ADD COLUMN IF NOT EXISTS ext_after_tp1_frac FLOAT",
+        "ALTER TABLE exit_events ADD COLUMN IF NOT EXISTS tp1_gain_pct FLOAT",
         # Tahapan penyalaan kini melayani SPOT juga; baris warisan seluruhnya futures.
         "ALTER TABLE futures_exit_rollouts ADD COLUMN IF NOT EXISTS market VARCHAR(10) "
         "NOT NULL DEFAULT 'futures'",

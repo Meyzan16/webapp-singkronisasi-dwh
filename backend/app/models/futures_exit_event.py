@@ -87,6 +87,20 @@ class FuturesExitEvent(Base):
     #: Apakah trailing stop sempat aktif sebelum ditutup.
     trail_active:   Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # ── M8: bukti untuk dua parameter trailing ────────────────────────────────
+    # Dinyatakan dalam SATUAN PARAMETERNYA SENDIRI (pecahan), bukan ATR — lihat
+    # `agents/shared/trail_tracker.py`. MAE global tak bisa menggantikan ini
+    # karena ia mencakup periode sebelum TP1, saat pertanyaan trailing belum ada.
+    #: Titik TERENDAH sesudah TP1, dalam satuan TP1. 1.0 = tak pernah balik.
+    #: Pembanding langsung untuk TRAIL_LOCK_AFTER_TP1_FRAC.
+    retrace_after_tp1_frac: Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Kemajuan TERJAUH TP1→TP2. 0 = tak pernah lewat TP1, 1.0 = sampai TP2.
+    #: Pembanding langsung untuk TRAIL_ADVANCE_TP1_TP2_FRAC.
+    ext_after_tp1_frac:     Mapped[float | None] = mapped_column(Float, nullable=True)
+    #: Keuntungan di TP1 (harga%) — penyebut yang membuat kedua pecahan di atas
+    #: bisa dikonversi kembali jadi hasil P&L saat menghitung counterfactual.
+    tp1_gain_pct:           Mapped[float | None] = mapped_column(Float, nullable=True)
+
     leverage: Mapped[int | None] = mapped_column(Integer, nullable=True)
     score:    Mapped[float | None] = mapped_column(Float, nullable=True)
 

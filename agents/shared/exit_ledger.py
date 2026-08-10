@@ -49,6 +49,9 @@ async def log_exit(session, trade, meta: dict, *, market: str, lane: str,
                    if (entry and trade.take_profit) else None)
         sl_dist = (abs(entry - float(trade.stop_loss)) / entry * 100
                    if (entry and trade.stop_loss) else None)
+        from agents.shared import trail_tracker
+        _retrace, _ext = trail_tracker.fractions(meta)
+
         entry_at = float(trade.entry_at or 0.0)
         closed_at = float(trade.closed_at or time.time())
 
@@ -74,6 +77,13 @@ async def log_exit(session, trade, meta: dict, *, market: str, lane: str,
             realized_atr=_atr_units(float(pnl_net)),
             tp_compressed=bool(meta.get("tp_compressed")),
             trail_active=bool(getattr(trade, "trail_active", False)),
+            # M8: bukti trailing. Keduanya `None` untuk posisi yang tak pernah
+            # menyentuh TP1 — di sana kedua parameter memang tak pernah berlaku,
+            # jadi memasukkannya ke sampel akan mengencerkan buktinya.
+            retrace_after_tp1_frac=_retrace,
+            ext_after_tp1_frac=_ext,
+            tp1_gain_pct=(float(meta["tp1_gain_pct"])
+                          if meta.get("tp1_gain_pct") else None),
             leverage=getattr(trade, "leverage", None),
             score=meta.get("score") or meta.get("raw_score"),
         ))

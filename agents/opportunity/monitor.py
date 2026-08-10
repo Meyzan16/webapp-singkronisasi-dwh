@@ -46,6 +46,7 @@ from app.services.trading_costs import EXECUTION_COST_PCT, SL_SLIPPAGE_PCT
 #: konstanta lokal. Sebelum 8 Agu 2026 monitor ini punya NOL titik baca config,
 #: sehingga hasil belajar sisi keluar SPOT tak punya jalan untuk sampai ke sini.
 from agents.opportunity import monitor_config as scfg
+from agents.shared import trail_tracker
 
 logger = structlog.get_logger(__name__)
 
@@ -792,6 +793,10 @@ async def _process_trade(
     if _pnl_now_spot < _trough_pnl_spot:
         meta["trough_pnl_pct"] = round(_pnl_now_spot, 3)
         trade.signals_json     = json.dumps(meta, ensure_ascii=False)
+    # M8: gerak SESUDAH TP1 — padanan sisi SPOT. MAE di atas tak menjawabnya
+    # karena titik terdalamnya hampir selalu jatuh sebelum TP1 tersentuh.
+    if trail_tracker.track(meta, price):
+        trade.signals_json = json.dumps(meta, ensure_ascii=False)
     for _pt, _lf in _PROFIT_LOCK_TIERS_SPOT:
         if _peak_pnl_spot >= _pt and _pnl_now_spot <= _peak_pnl_spot * _lf:
             pnl_pct, pnl_dollar = _final_pnl(entry, price, trade.position_size or 0.0, meta)
@@ -930,6 +935,10 @@ async def _process_trade(
         meta["tp1_hit"]         = True
         meta["tp1_hit_price"]   = round(float(eff_high), 8)
         meta["tp1_hit_at"]      = time.time()
+        # M8: acuan dibekukan di sini — sesudah TP1, `trade.take_profit` naik ke
+        # TP2/TP3 sehingga acuan saat penutupan bukan lagi TP1/TP2 asli.
+        trail_tracker.arm_tp1(meta, entry=entry, tp1=tp1, tp2=tp2, direction="LONG")
+        trail_tracker.track(meta, price)
         meta["last_rung_price"] = round(tp1, 8)
         _scale_out(sell_frac, "tp1", tp1, new_sl)
         # kompat lama: tp1_partial_dollar = slice pertama ladder

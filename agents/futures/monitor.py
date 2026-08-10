@@ -39,6 +39,7 @@ from app.services.trading_costs import (
 #: menyelesaikan atribut saat DIPANGGIL, setiap titik keputusan otomatis melihat
 #: nilai terbaru tanpa perlu dialirkan lewat argumen.
 from agents.futures import monitor_config as mcfg
+from agents.shared import trail_tracker
 from agents.futures.utils import (
     MAX_LOSS_PCT_OF_MARGIN_BY_LANE, DEFAULT_MAX_LOSS_PCT,
     MAX_SL_MARGIN_PCT_BY_LANE,     DEFAULT_LANE_CAP,
@@ -912,6 +913,11 @@ async def check_futures_positions() -> tuple[int, int]:
             if _pnl_now_pct < _trough_pnl:
                 meta["trough_pnl_pct"] = round(_pnl_now_pct, 3)
                 trade.signals_json    = json.dumps(meta, ensure_ascii=False)
+            # M8: gerak SESUDAH TP1 — bukti untuk dua parameter trailing. MAE di
+            # atas tak bisa dipakai: titik terdalamnya hampir selalu jatuh
+            # SEBELUM TP1, saat pertanyaan trailing belum berlaku sama sekali.
+            if trail_tracker.track(meta, price):
+                trade.signals_json = json.dumps(meta, ensure_ascii=False)
             for _peak_thresh, _lock_frac in mcfg.PROFIT_LOCK_TIERS:
                 if not new_status and _peak_pnl >= _peak_thresh and _pnl_now_pct <= _peak_pnl * _lock_frac:
                     new_status   = "tp"
@@ -1371,6 +1377,12 @@ async def check_futures_positions() -> tuple[int, int]:
                     meta["tp1_partial_pnl_dollar"] = _partial_dollar
                     meta["tp1_size_reduced"]       = True   # BUG-L17 marker (see close-apply)
                     meta["tp1_done_at"]            = time.time()  # G3/B5.1: rotation eligibility timestamp
+                    # M8: bekukan acuan TP1/TP2 di sini — SESUDAH ini monitor
+                    # memutasi `trade.take_profit` ke TP2 lalu TP3, jadi acuan
+                    # yang dibaca saat penutupan sudah bukan TP1/TP2 aslinya.
+                    trail_tracker.arm_tp1(meta, entry=entry, tp1=tp1, tp2=tp2,
+                                          direction=direction)
+                    trail_tracker.track(meta, price)
                     meta["tp1_partial_frac"]       = float(_partial_frac)
                     trade.pnl_dollar               = (trade.pnl_dollar or 0.0) + _partial_dollar
                     # BUG-L17: shrink stored notional to the sold remainder

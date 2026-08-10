@@ -61,14 +61,36 @@ def param_config_key(param: str, lane: str, market: str = "futures") -> tuple[st
         return "futures", mcfg.tp_lane_key(lane)
     if param == "failfast_min_sl_gap":
         return "futures", mcfg.failfast_gap_key(lane)
+    if param in GLOBAL_PARAMS:
+        return "futures", GLOBAL_PARAMS[param]
     raise ValueError(f"parameter keluar tak dikenal: {param}")
+
+
+#: Parameter yang BUKAN per-lane. Populasi "posisi yang menyentuh TP1" terlalu
+#: kecil untuk dibelah per lane — dibelah empat, tak satu pun lane akan pernah
+#: mencapai ambang sampel, dan mesin belajar diam selamanya tanpa alasan yang
+#: terlihat. Kunci di sini dipetakan LANGSUNG ke nama kunci `agent_config` milik
+#: `agents/futures/monitor_config.py`.
+GLOBAL_PARAMS: dict[str, str] = {
+    "trail_lock_after_tp1":  "monitor_trail_lock_after_tp1_frac",
+    "trail_advance_tp1_tp2": "monitor_trail_advance_tp1_tp2_frac",
+}
+
+#: Lane sentinel untuk parameter global. Wajib dipakai supaya dua baris rollout
+#: dengan lane berbeda tak menulis kunci config yang SAMA — pemeriksaan duplikat
+#: memakai (market, lane, param), jadi tanpa sentinel duplikatnya lolos.
+GLOBAL_LANE = "all"
 
 
 #: Parameter yang boleh melewati tahapan, per market. SPOT belum punya padanan
 #: fail-fast — monitornya memakai pemicu lain (rotasi, trend_reversal), dan
 #: memaksakan parameter futures ke sana akan menulis kunci yang tak pernah dibaca.
 SUPPORTED_PARAMS_BY_MARKET: dict[str, tuple[str, ...]] = {
-    "futures": ("tp_atr_mult", "failfast_min_sl_gap"),
+    # M8: dua parameter trailing hanya untuk FUTURES — padanan SPOT-nya masih
+    # angka tertanam di monitor, jadi baris rollout untuknya akan menulis kunci
+    # yang tak pernah dibaca (kesalahan yang sudah pernah terjadi di lane SPOT).
+    "futures": ("tp_atr_mult", "failfast_min_sl_gap",
+                "trail_lock_after_tp1", "trail_advance_tp1_tp2"),
     "spot": ("tp_atr_mult",),
 }
 
@@ -100,8 +122,12 @@ def _stats(rows: list[FuturesExitEvent]) -> tuple[int, float | None, float | Non
 async def _lane_exits(session, lane: str, market: str = "futures",
                       since: float | None = None,
                       until: float | None = None, limit: int = 500) -> list:
-    q = select(FuturesExitEvent).where(FuturesExitEvent.lane == lane,
-                                       FuturesExitEvent.market == market)
+    q = select(FuturesExitEvent).where(FuturesExitEvent.market == market)
+    # Parameter global memakai lane sentinel `all` — memfilter kolom lane ke
+    # nilai itu akan mengembalikan NOL baris, dan canary-nya tak akan pernah
+    # bisa dievaluasi (gagal senyap, bukan error).
+    if lane != GLOBAL_LANE:
+        q = q.where(FuturesExitEvent.lane == lane)
     if since is not None:
         q = q.where(FuturesExitEvent.closed_at >= since)
     if until is not None:
@@ -132,6 +158,11 @@ async def propose(lane: str, param: str, value: float, reason: str = "",
     if param not in didukung:
         return {"status": "param_tak_dikenal", "param": param, "market": market,
                 "supported": list(didukung)}
+    if param in GLOBAL_PARAMS and lane != GLOBAL_LANE:
+        return {"status": "lane_salah", "param": param, "lane": lane,
+                "harus": GLOBAL_LANE,
+                "why": ("parameter global — lane per-koin akan membuat beberapa "
+                        "baris rollout menulis kunci config yang sama")}
     if not is_db_available():
         return {"status": "db_unavailable"}
 
