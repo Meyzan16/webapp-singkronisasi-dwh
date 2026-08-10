@@ -287,9 +287,12 @@ async def get_stats() -> dict:
         all_trades = result.scalars().all()
 
     def _calc(subset: list) -> dict:
+        from agents.shared.trade_outcome import is_win as _is_win
         closed  = [t for t in subset if t.status in ("tp", "sl")]
-        wins    = [t for t in closed  if t.status == "tp"]
-        losses  = [t for t in closed  if t.status == "sl"]
+        # Menang = membukukan untung, bukan "ditutup oleh mekanisme TP". Trailing
+        # stop di atas entry (`sl_plus`) menutup dgn status="sl" tapi UNTUNG.
+        wins    = [t for t in closed  if _is_win(t)]
+        losses  = [t for t in closed  if not _is_win(t)]
         open_t  = [t for t in subset  if t.status == "open"]
         wr      = len(wins) / len(closed) * 100 if closed else 0.0
         pnls    = [t.pnl_pct for t in closed if t.pnl_pct is not None]

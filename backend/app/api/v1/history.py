@@ -126,16 +126,16 @@ async def get_trades(
         q = select(PaperTrade).where(PaperTrade.entry_at >= cutoff)
         q = _apply_trade_filters(q, style, search)   # F45: shared filter
 
-        # Status filter — §16.5: "win" konsisten dengan _is_real_win (tp + net > 0)
+        # Status filter — WAJIB konsisten dengan `_is_real_win`: menang = untung.
+        # Filter SQL yang memakai aturan berbeda dari penghitung Python akan
+        # menampilkan daftar dan angka ringkasan yang saling bertentangan.
         if status and status != "all":
             if status == "win":
-                q = q.where(PaperTrade.status == "tp", PaperTrade.pnl_pct > 0)
+                q = q.where(PaperTrade.status.in_(["tp", "sl"]),
+                            PaperTrade.pnl_pct > 0)
             elif status == "loss":
-                from sqlalchemy import and_ as _and, or_ as _or
-                q = q.where(_or(
-                    PaperTrade.status == "sl",
-                    _and(PaperTrade.status == "tp", PaperTrade.pnl_pct <= 0),
-                ))
+                q = q.where(PaperTrade.status.in_(["tp", "sl"]),
+                            PaperTrade.pnl_pct <= 0)
             elif status == "open":
                 q = q.where(PaperTrade.status == "open")
             else:
@@ -216,15 +216,16 @@ async def get_trades(
 
 
 def _is_real_win(t: PaperTrade) -> bool:
+    """Menang = membukukan untung — lihat `agents/shared/trade_outcome.py`.
+
+    Syarat `status == "tp"` DIHAPUS 10 Agu 2026. Ia dulu ditambahkan untuk
+    menolak baris ber-status "tp" tapi P&L negatif — masalah yang nyata, obat
+    yang salah sasaran. Efek sampingnya: trailing stop yang menutup DI ATAS
+    entry (`sl_plus`, status="sl") ikut terbuang, yaitu 20 dari 21 kemenangan
+    futures. Melihat P&L saja menyelesaikan dua-duanya sekaligus.
     """
-    BUG FIX: A trade is a REAL win only if:
-      1. status == "tp" AND
-      2. net pnl_pct > 0 (not negative after fees)
-    Previously we counted status=="tp" with pnl_pct=-0.16 as a "win" — wrong!
-    """
-    if t.status != "tp":
-        return False
-    return (t.pnl_pct or 0.0) > 0
+    from agents.shared.trade_outcome import is_win
+    return is_win(t)
 
 
 # ── PLAN_v8 P3: clean vs gross WR ─────────────────────────────────────────────

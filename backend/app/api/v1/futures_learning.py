@@ -76,9 +76,7 @@ async def get_learning_stats() -> dict:
         key=lambda t: t.closed_at or 0,
     )
 
-    def _is_real_win(t) -> bool:
-        """BUG FIX: status=='tp' with negative net pnl is NOT a win."""
-        return t.status == "tp" and (t.pnl_pct or 0.0) > 0
+    from agents.shared.trade_outcome import is_win as _is_real_win
 
     # Phase 9: seed from the REAL futures wallet (initial + deposits − withdrawals),
     # so the chart and the wallet agree and deposits are reflected.
@@ -108,7 +106,7 @@ async def get_learning_stats() -> dict:
             "trade_n": len(equity_points) + 1,
             "balance": round(balance, 2),
             "symbol":  t.symbol,
-            "win":     t.status == "tp",
+            "win":     _is_real_win(t),
             "agent":   t.style,
             "ts":      t.closed_at,
         })

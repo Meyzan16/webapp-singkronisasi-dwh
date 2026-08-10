@@ -461,7 +461,12 @@ async def evaluate_risk_gate() -> None:
         # P6.4: compute per-lane WR and trigger pauses
         for lane_name, lts in lane_trades.items():
             recent = lts[-LANE_WR_MIN_SAMPLE:]
-            wins  = sum(1 for t in recent if t.status == "tp" and (t.pnl_pct or 0) > 0)
+            # Dulu `status == "tp" and pnl > 0` — membuang `sl_plus` (trailing
+            # stop yang menutup DI ATAS entry), yaitu 20 dari 21 kemenangan
+            # futures. Akibatnya lane `bigmover` terlihat ber-WR 4% padahal 64%,
+            # lalu dipotong setengah dan dijeda oleh penjaga ini sendiri.
+            from agents.shared.trade_outcome import is_win as _is_win
+            wins  = sum(1 for t in recent if _is_win(t))
             update_lane_wr(lane_name, wins, len(recent))
 
         # PLAN_v11 A1: Sharpe dari window rolling (N terakhir), bukan kumulatif —

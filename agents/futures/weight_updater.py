@@ -32,6 +32,7 @@ from app.models.paper_trade import PaperTrade
 from app.models.signal_weight import AgentSignalWeight
 from app.models.signal_weight_history import SignalWeightHistory
 # learning_policy murni (hanya re+typing) — tak ada risiko circular import.
+from agents.shared.trade_outcome import is_win as _is_win
 from agents.futures.learning_policy import (
     canonical_signal_key as _canonical_signal_key,
     signal_key as _namespaced_signal_key,
@@ -331,7 +332,7 @@ def _compute_coin_win_rates(trades: list) -> None:
         if t.status not in ("tp", "sl"):
             continue
         by_symbol[t.symbol]["total"] += 1
-        is_win = t.status == "tp" and (t.pnl_pct or 0.0) > 0
+        is_win = _is_win(t)
         if is_win:
             by_symbol[t.symbol]["wins"] += 1
         # P4.8: directional tracking
@@ -372,7 +373,7 @@ def _compute_adaptive_thresholds(trades: list) -> None:
     for t in trades:
         a = t.style
         agent_total[a] += 1
-        if t.status == "tp" and (t.pnl_pct or 0.0) > 0:
+        if _is_win(t):
             agent_wins[a] += 1
 
     for agent_name, total in agent_total.items():
@@ -488,7 +489,7 @@ async def update_weights() -> int:
 
             agent   = trade.style
             regime  = trade.regime or "all"
-            is_win  = trade.status == "tp" and (trade.pnl_pct or 0.0) > 0
+            is_win  = _is_win(trade)
             decay   = _decay_factor(trade.closed_at, now)
             pnl_pct = trade.pnl_pct or 0.0
 

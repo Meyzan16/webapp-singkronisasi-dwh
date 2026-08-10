@@ -885,7 +885,10 @@ async def get_recommendations() -> dict:
             select(
                 PaperTrade.style,
                 func.count().label("n"),
-                func.sum(case((PaperTrade.status == "tp", 1), else_=0)).label("wins"),
+                # Menang = P&L positif. Memakai status="tp" di sini membuang
+                # `sl_plus` (trailing di atas entry) — 20 dari 21 kemenangan
+                # futures — sehingga performa agen tampak jauh lebih buruk.
+                func.sum(case((PaperTrade.pnl_pct > 0, 1), else_=0)).label("wins"),
                 func.avg(PaperTrade.pnl_pct).label("avg_pnl"),
             )
             .where(PaperTrade.style.in_(agent_keys))

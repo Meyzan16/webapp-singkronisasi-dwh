@@ -82,7 +82,10 @@ def _open_line(t) -> str:
 
 
 def _close_line(t) -> str:
-    icon = "✅" if t.status == "tp" else ("❌" if t.status == "sl" else "⚪")
+    # Ikon mengikuti HASIL, label tetap mengikuti MEKANISME. Trailing stop di
+    # atas entry menutup dgn status="sl" tapi untung — dulu tampil ❌ tiap hari.
+    from agents.shared.trade_outcome import is_win
+    icon = "✅" if is_win(t) else ("❌" if t.status in ("tp", "sl") else "⚪")
     tag = {"tp": "TP", "sl": "SL"}.get(t.status, (t.status or "CLOSE").upper())
     pnl_pct = f"{t.pnl_pct:+.2f}%" if t.pnl_pct is not None else "-"
     pnl_usd = f" ({t.pnl_dollar:+.2f}$)" if t.pnl_dollar is not None else ""
@@ -157,8 +160,9 @@ async def _poll_once() -> None:
     # Kirim CLOSE
     if closes:
         if len(closes) > _MAX_DETAIL:
-            tp = sum(1 for t in closes if t.status == "tp")
-            sl = sum(1 for t in closes if t.status == "sl")
+            from agents.shared.trade_outcome import is_win
+            tp = sum(1 for t in closes if is_win(t))
+            sl = len(closes) - tp
             pnl = sum(t.pnl_dollar or 0.0 for t in closes)
             ok = await send_telegram(
                 f"🔔 {len(closes)} posisi ditutup — ✅{tp} TP / ❌{sl} SL · "
