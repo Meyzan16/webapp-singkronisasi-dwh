@@ -1037,7 +1037,14 @@ async def check_futures_positions() -> tuple[int, int]:
             # ≥0.5×risk in our favour within the lane's time budget, the thesis
             # failed — scratch it at market instead of waiting for full SL.
             if not new_status and not trail_active:
-                _ts_min = mcfg.TIME_STOP_MIN_BY_LANE.get(lane)
+                # `.get(lane)` TANPA default dulu mengembalikan None untuk lane
+                # tak terdaftar, sehingga `if _ts_min:` gagal dan time-stop
+                # DILEWATI SELURUHNYA — kebalikan dari yang tertulis di
+                # monitor_config ("lane tak terdaftar memakai default"). Efeknya
+                # juga membuat `monitor_time_stop_default_min` mustahil terpakai
+                # walau punya baris config sendiri.
+                _ts_min = mcfg.TIME_STOP_MIN_BY_LANE.get(
+                    lane, mcfg.TIME_STOP_DEFAULT_MIN)
                 if _ts_min:
                     _hold_min = (time.time() - (trade.entry_at or time.time())) / 60
                     if _hold_min >= _ts_min:
