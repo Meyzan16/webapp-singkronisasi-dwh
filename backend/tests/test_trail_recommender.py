@@ -77,24 +77,30 @@ def test_tp2_tak_di_luar_tp1_membuat_ext_kosong_bukan_nol():
 
 # ── Jalur penerapan ──────────────────────────────────────────────────────────
 
-def test_kunci_config_yang_diusulkan_benar_benar_dibaca_monitor():
+@pytest.mark.parametrize("market,alias", [("futures", "mcfg"), ("spot", "scfg")])
+def test_kunci_config_yang_diusulkan_benar_benar_dibaca_monitor(market, alias):
     """Penyakit berulang: hasil belajar tersimpan rapi di kunci yang tak dibaca
     siapa pun (lane SPOT `squeeze` vs `accumulation`, 8 Agu)."""
-    from agents.futures import monitor_config as mcfg
-    import agents.futures.monitor as fut_mon
-    src = inspect.getsource(fut_mon)
+    if market == "futures":
+        from agents.futures import monitor_config as cfg
+        import agents.futures.monitor as mon
+    else:
+        from agents.opportunity import monitor_config as cfg
+        import agents.opportunity.monitor as mon
+    src = inspect.getsource(mon)
     for param, key in er.GLOBAL_PARAMS.items():
-        grup, k = er.param_config_key(param, er.GLOBAL_LANE)
-        assert (grup, k) == ("futures", key)
-        var = next(v for v, kk in mcfg._KEYS.items() if kk == key)
-        assert f"mcfg.{var}" in src, f"{key} tak pernah dibaca monitor futures"
+        grup, k = er.param_config_key(param, er.GLOBAL_LANE, market)
+        assert (grup, k) == (market, key)
+        var = next(v for v, kk in cfg._KEYS.items() if kk == key)
+        assert f"{alias}.{var}" in src, f"{key} tak dibaca monitor {market}"
 
 
-def test_parameter_trailing_terdaftar_di_rollout_futures():
+@pytest.mark.parametrize("market", ["futures", "spot"])
+def test_parameter_trailing_terdaftar_di_rollout(market):
     for p in er.GLOBAL_PARAMS:
-        assert p in er.SUPPORTED_PARAMS_BY_MARKET["futures"]
-        # SPOT belum punya kunci config — mendaftarkannya = menulis ke kunci mati.
-        assert p not in er.SUPPORTED_PARAMS_BY_MARKET["spot"]
+        assert p in er.SUPPORTED_PARAMS_BY_MARKET[market]
+    # Fail-fast tetap khusus futures — monitor SPOT memakai pemicu lain.
+    assert "failfast_min_sl_gap" not in er.SUPPORTED_PARAMS_BY_MARKET["spot"]
 
 
 @pytest.mark.asyncio
@@ -115,13 +121,17 @@ def test_baseline_parameter_global_tak_memfilter_lane_ke_sentinel():
 
 # ── Kejujuran rekomendasi ────────────────────────────────────────────────────
 
-def test_hanya_arah_menaikkan_yang_dinilai():
-    """Nilai yang berlaku memotong posisi begitu tersentuh, jadi tak ada data
-    tentang apa yang terjadi DI BAWAHNYA. Mengevaluasi kandidat yang lebih rendah
-    berarti menyimpulkan dari ketiadaan bukti."""
+def test_arah_kandidat_berlawanan_untuk_dua_parameter():
+    """Ini pernah SALAH pada versi pertama: kedua parameter dievaluasi ke arah
+    naik. Untuk `maju` itu menyimpulkan dari ketiadaan bukti — posisi yang sudah
+    dilantai di TP1 menyembunyikan apa yang akan terjadi di bawah TP1.
+
+        kunci → level STOP, wilayah gelap di BAWAH  → hanya naik yang dinilai
+        maju  → PEMICU naik,  wilayah gelap di ATAS → hanya turun yang dinilai
+    """
     src = inspect.getsource(el.recommend_trail_params)
-    assert "lock_now + i * 0.05" in src
-    assert "adv_now + i * 0.10" in src
+    assert "lock_now + i * 0.05" in src, "kunci harus dinilai ke arah naik"
+    assert "adv_now - i * 0.10" in src, "maju harus dinilai ke arah TURUN"
     assert "TERSENSOR" in src
 
 
@@ -132,12 +142,51 @@ def test_usulan_ditahan_sampai_sampel_cukup():
     assert "TRAIL_MIN_LIFT" in src
 
 
-def test_spot_mengukur_tapi_tak_menerbitkan_usulan():
-    """SPOT masih memakai 0,5 tertanam di monitor. Menerbitkan usulan untuknya
-    akan mengulang persis kesalahan kunci-mati."""
-    cfg = el._trail_config("spot")
-    assert cfg["applicable"] is False
-    assert el._trail_config("futures")["applicable"] is True
+def test_kedua_market_kini_bisa_menerima_usulan():
+    for market in ("futures", "spot"):
+        assert el._trail_config(market)["applicable"] is True
+
+
+def test_bawaan_trailing_spot_sama_persis_dengan_perilaku_lama():
+    """WAJIB: menambah kunci config TIDAK BOLEH mengubah satu pun keputusan.
+
+    0,5 = angka yang selama ini tertanam di `_process_trade`.
+    1,0 = perilaku lama pemicu maju: lantai baru naik ke TP1 saat TP2 BENAR-BENAR
+    tersentuh. Menurunkannya mengubah keputusan trading, jadi harus pilihan sadar.
+    """
+    from agents.opportunity import monitor_config as scfg
+    assert scfg.default_of("TRAIL_LOCK_AFTER_TP1_FRAC") == 0.5
+    assert scfg.default_of("TRAIL_ADVANCE_TP1_TP2_FRAC") == 1.0
+    assert scfg.default_of("TRAIL_FLOOR_MAX_OF_PRICE") == 0.999
+    assert scfg.default_of("MOMENTUM_BE_TRIGGER_PCT") == 3.0
+    assert scfg.default_of("MOMENTUM_BE_BUFFER_FRAC") == 1.001
+
+
+def test_angka_trailing_telanjang_tak_kembali_ke_monitor_spot():
+    import agents.opportunity.monitor as spot_mon
+    src = inspect.getsource(spot_mon)
+    for pola in ("/ entry) * 0.5)", "entry * 1.001", "pnl_now_pct >= 3.0",
+                 "price * 0.999"):
+        assert pola not in src, f"angka telanjang kembali: {pola}"
+
+
+def test_bawaan_spot_dibekukan_terhadap_override():
+    """Tanpa pembekuan, penyemaian baris `agent_config` membaca nilai modul yang
+    SUDAH ditimpa override — bawaan ikut hanyut dan titik pulang hilang."""
+    from agents.opportunity import monitor_config as scfg
+    asli = scfg.TRAIL_LOCK_AFTER_TP1_FRAC
+    try:
+        scfg.TRAIL_LOCK_AFTER_TP1_FRAC = 0.9        # tiruan override
+        assert scfg.default_of("TRAIL_LOCK_AFTER_TP1_FRAC") == 0.5
+    finally:
+        scfg.TRAIL_LOCK_AFTER_TP1_FRAC = asli
+
+
+def test_penyemaian_default_memakai_nilai_beku():
+    import pathlib
+    src = pathlib.Path("app/services/agent_config_defaults.py").read_text(encoding="utf-8")
+    assert "scfg.default_of(var)" in src
+    assert '"default": getattr(scfg, var)' not in src
 
 
 def test_nilai_berjalan_dibaca_dari_config_bukan_disalin():

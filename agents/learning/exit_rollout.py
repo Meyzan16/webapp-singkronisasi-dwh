@@ -54,6 +54,8 @@ def param_config_key(param: str, lane: str, market: str = "futures") -> tuple[st
         from agents.opportunity import monitor_config as scfg
         if param == "tp_atr_mult":
             return "spot", scfg.tp_lane_key(lane)
+        if param in GLOBAL_PARAMS:
+            return "spot", GLOBAL_PARAMS[param]
         raise ValueError(f"parameter keluar SPOT tak dikenal: {param}")
 
     from agents.futures import monitor_config as mcfg
@@ -86,12 +88,12 @@ GLOBAL_LANE = "all"
 #: fail-fast — monitornya memakai pemicu lain (rotasi, trend_reversal), dan
 #: memaksakan parameter futures ke sana akan menulis kunci yang tak pernah dibaca.
 SUPPORTED_PARAMS_BY_MARKET: dict[str, tuple[str, ...]] = {
-    # M8: dua parameter trailing hanya untuk FUTURES — padanan SPOT-nya masih
-    # angka tertanam di monitor, jadi baris rollout untuknya akan menulis kunci
-    # yang tak pernah dibaca (kesalahan yang sudah pernah terjadi di lane SPOT).
     "futures": ("tp_atr_mult", "failfast_min_sl_gap",
                 "trail_lock_after_tp1", "trail_advance_tp1_tp2"),
-    "spot": ("tp_atr_mult",),
+    # SPOT kini punya kunci config sendiri untuk kedua parameter trailing, jadi
+    # usulannya benar-benar sampai ke monitor. Fail-fast tetap khusus futures —
+    # monitor SPOT memakai pemicu lain (rotasi, trend_reversal).
+    "spot": ("tp_atr_mult", "trail_lock_after_tp1", "trail_advance_tp1_tp2"),
 }
 
 SUPPORTED_PARAMS: tuple[str, ...] = SUPPORTED_PARAMS_BY_MARKET["futures"]

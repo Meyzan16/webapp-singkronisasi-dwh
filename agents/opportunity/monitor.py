@@ -753,11 +753,30 @@ async def _process_trade(
             trade.stop_loss    = round(sl, 8)
             trade.signals_json = json.dumps(meta, ensure_ascii=False)
 
+    # M8: naikkan lantai ke TP1 setelah kemajuan TP1→TP2 mencapai ambang.
+    #
+    # Bawaan 1,0 = PERSIS perilaku lama: lantai baru naik ke TP1 saat TP2 benar-
+    # benar tersentuh (sudah dilakukan cabang TP2 lewat `_scale_out`), jadi cek
+    # ini tak mengubah apa pun sampai angkanya diturunkan dengan sengaja.
+    # Adanya di sini supaya pengamanan keuntungan TP1 bisa DITALA dan DIPELAJARI,
+    # bukan terikat pada satu peristiwa.
+    if meta.get("tp1_hit") and tp1 and tp2 and tp2 > tp1:
+        _pemicu = tp1 + (tp2 - tp1) * scfg.TRAIL_ADVANCE_TP1_TP2_FRAC
+        # Anti-wick: lantai tak boleh dipasang di atas harga berjalan.
+        _lantai = min(tp1, price * scfg.TRAIL_FLOOR_MAX_OF_PRICE)
+        if price >= _pemicu and _lantai > sl:
+            sl = _lantai
+            meta["current_sl"] = round(sl, 8)
+            trade.stop_loss    = round(sl, 8)
+            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+            logger.info("spot_trail_advance_tp1", symbol=trade.symbol,
+                        frac=scfg.TRAIL_ADVANCE_TP1_TP2_FRAC, new_sl=round(sl, 8))
+
     # B6: momentum_entry — move SL to breakeven after +3% gain
     if is_momentum_entry and not meta.get("breakeven_set") and entry > 0:
         pnl_now_pct = (price - entry) / entry * 100
-        if pnl_now_pct >= 3.0:
-            new_sl_be = entry * 1.001   # 0.1% buffer above entry
+        if pnl_now_pct >= scfg.MOMENTUM_BE_TRIGGER_PCT:
+            new_sl_be = entry * scfg.MOMENTUM_BE_BUFFER_FRAC
             if new_sl_be > sl:
                 sl = new_sl_be
                 meta["current_sl"] = round(sl, 8)
@@ -824,7 +843,8 @@ async def _process_trade(
                         "frac": frac, "pnl_dollar": slice_dlr})
         meta["ladder"] = _ladder
         # ratchet floor — hanya boleh NAIK, & jangan di atas harga sekarang (anti wick-stop)
-        _new_floor = min(max(sl, floor_price), price * 0.999)
+        _new_floor = min(max(sl, floor_price),
+                         price * scfg.TRAIL_FLOOR_MAX_OF_PRICE)
         if _new_floor > sl:
             meta["current_sl"] = round(_new_floor, 8)
             trade.stop_loss    = round(_new_floor, 8)
@@ -931,7 +951,8 @@ async def _process_trade(
     elif tp1 and eff_high >= tp1 and not meta.get("tp1_hit"):
         # PLAN_v10 — scale-out 30% di TP1 (dulu 50%), floor = entry + 50% gain TP1.
         sell_frac = LADDER_FRAC_TP1
-        new_sl    = entry * (1 + ((tp1 - entry) / entry) * 0.5)   # §12.6
+        new_sl    = entry * (1 + ((tp1 - entry) / entry)
+                             * scfg.TRAIL_LOCK_AFTER_TP1_FRAC)   # §12.6
         meta["tp1_hit"]         = True
         meta["tp1_hit_price"]   = round(float(eff_high), 8)
         meta["tp1_hit_at"]      = time.time()

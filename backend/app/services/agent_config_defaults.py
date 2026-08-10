@@ -315,13 +315,27 @@ def _monitor_lane_defaults() -> list[dict]:
                                             "menutup 10 posisi dgn WR 10% dan expectancy -1,191% - satu-satunya "
                                             "pemicu SPOT yang merugikan. Menaikkannya menyerahkan struktur patah "
                                             "saat rugi ke SL."),
+        "monitor_trail_lock_after_tp1_frac": ("porsi keuntungan TP1 yang dikunci saat TP1 tersentuh "
+                                            "(SL -> entry + frac x gain). SPOT memakai 0,5; futures 0,75."),
+        "monitor_trail_advance_tp1_tp2_frac": ("porsi jarak TP1->TP2 yang harus ditempuh sebelum SL "
+                                            "naik ke TP1. 1,0 = perilaku lama (lantai baru naik saat TP2 "
+                                            "benar-benar tersentuh). Diturunkan = keuntungan TP1 diamankan "
+                                            "lebih awal. Futures memakai 0,5."),
+        "monitor_trail_floor_max_of_price": ("batas anti-wick: lantai SL tak boleh di atas harga x nilai ini, "
+                                            "kalau tidak SL langsung tersentuh sumbu candle berjalan"),
+        "monitor_momentum_be_trigger_pct": "momentum_entry: untung % yang memicu SL pindah ke breakeven",
+        "monitor_momentum_be_buffer_frac": ("momentum_entry: SL breakeven dipasang di entry x nilai ini "
+                                            "(1,001 = 0,1% di atas entry, supaya keluar tak rugi ongkos)"),
         "monitor_exit_learning_enabled":   ("DEFAULT 0=MATI: izinkan monitor SPOT memakai batas TP "
                                             "per-lane hasil belajar. Saklar TERPISAH dari futures — "
                                             "satu perubahan diuji di satu tempat."),
     }
     for var, key in scfg._KEYS.items():
         rows.append({
-            "group": "spot", "key": key, "default": getattr(scfg, var),
+            # `default_of` BUKAN `getattr`: setelah refresh menarik override,
+            # nilai modul sudah bukan bawaan lagi — mencatatnya di sini akan
+            # membuat bawaan hanyut mengikuti override.
+            "group": "spot", "key": key, "default": scfg.default_of(var),
             "category": "monitor", "description": _SPOT_LABEL[key],
         })
     for lane in scfg.tunable_lanes():

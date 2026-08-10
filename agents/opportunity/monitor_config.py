@@ -79,6 +79,28 @@ TREND_REVERSAL_EMA_BUFFER = 0.998    # ema9 harus di bawah ema21 × ini
 #: sudah cukup untung, dan biarkan SL yang mengurus struktur yang patah saat rugi.
 TREND_REVERSAL_PROFIT_FLOOR_FRAC = 0.0
 
+# ── Trailing: penggeseran SL sesudah posisi untung ────────────────────────────
+# Padanan SPOT dari dua parameter trailing futures. Semua bawaan = perilaku lama
+# PERSIS — menaikkannya mengubah keputusan trading, jadi itu harus pilihan sadar.
+
+#: Porsi keuntungan TP1 yang dikunci saat TP1 tersentuh (SL → entry + frac×gain).
+#: Futures memakai 0,75; SPOT sejak awal 0,5, dulu tertanam di tengah fungsi.
+TRAIL_LOCK_AFTER_TP1_FRAC = 0.5
+
+#: Kemajuan TP1→TP2 yang memicu SL naik ke TP1.
+#: 1,0 = perilaku lama: lantai baru naik ke TP1 saat TP2 BENAR-BENAR tersentuh.
+#: Diturunkan berarti keuntungan TP1 diamankan lebih awal. Futures memakai 0,5.
+TRAIL_ADVANCE_TP1_TP2_FRAC = 1.0
+
+#: Batas anti-wick: lantai baru tak boleh dipasang di atas harga × ini, kalau
+#: tidak SL akan langsung tersentuh oleh sumbu candle yang sedang berjalan.
+TRAIL_FLOOR_MAX_OF_PRICE = 0.999
+
+#: Breakeven `momentum_entry`: dipicu di +3% dan dipasang 0,1% di atas entry.
+#: Buffer-nya ADA supaya keluar di breakeven tak justru rugi ongkos.
+MOMENTUM_BE_TRIGGER_PCT = 3.0
+MOMENTUM_BE_BUFFER_FRAC = 1.001
+
 _KEYS: dict[str, str] = {
     # nama variabel modul -> kunci config (grup "spot")
     "STAGNANT_CHECK_DAYS":          "monitor_stagnant_check_days",
@@ -100,6 +122,11 @@ _KEYS: dict[str, str] = {
     "TREND_REVERSAL_MIN_HOLD_MIN":  "monitor_trend_reversal_min_hold_min",
     "TREND_REVERSAL_EMA_BUFFER":    "monitor_trend_reversal_ema_buffer",
     "TREND_REVERSAL_PROFIT_FLOOR_FRAC": "monitor_trend_reversal_profit_floor_frac",
+    "TRAIL_LOCK_AFTER_TP1_FRAC":    "monitor_trail_lock_after_tp1_frac",
+    "TRAIL_ADVANCE_TP1_TP2_FRAC":   "monitor_trail_advance_tp1_tp2_frac",
+    "TRAIL_FLOOR_MAX_OF_PRICE":     "monitor_trail_floor_max_of_price",
+    "MOMENTUM_BE_TRIGGER_PCT":      "monitor_momentum_be_trigger_pct",
+    "MOMENTUM_BE_BUFFER_FRAC":      "monitor_momentum_be_buffer_frac",
     "EXIT_LEARNING_ENABLED":        "monitor_exit_learning_enabled",
 }
 
@@ -161,6 +188,19 @@ def effective_take_profit(entry: float, take_profit: float, atr_pct: float,
     return round(entry + max_dist, 8), True
 
 
+#: Nilai bawaan dibekukan saat impor — SEBELUM override mana pun sempat masuk.
+#: Tanpa ini, penyemaian baris `agent_config` yang membaca nilai modul akan
+#: mencatat nilai yang SEDANG berlaku sebagai "bawaan", sehingga bawaan hanyut
+#: mengikuti override dan tak ada lagi titik pulang yang benar. Pola ini sudah
+#: dipakai sisi futures; SPOT belum punya.
+_FROZEN: dict[str, float] = {var: globals()[var] for var in _KEYS}
+
+
+def default_of(var: str) -> float:
+    """Nilai bawaan asli sebuah ambang, kebal terhadap override yang sudah masuk."""
+    return _FROZEN[var]
+
+
 async def refresh() -> None:
     """Tarik override dari `agent_config` grup "spot". Gagal = diam & pakai nilai
     terakhir — monitor TIDAK boleh berhenti hanya karena config tak terbaca."""
@@ -168,7 +208,7 @@ async def refresh() -> None:
         from agents.shared.config_reader import cfg
         globs = globals()
         for var, key in _KEYS.items():
-            globs[var] = float(await cfg.get("spot", key, globs[var]))
+            globs[var] = float(await cfg.get("spot", key, _FROZEN[var]))
         globs["TP_ATR_BY_LANE"] = {
             lane: mult
             for lane in tunable_lanes()

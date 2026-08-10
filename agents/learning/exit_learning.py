@@ -731,10 +731,11 @@ async def recommend_trail_params(days: int = 90, market: str = "futures") -> dic
                                  pernah balik ke bawah TP1, posisi berhenti di
                                  TP1 → hasil = keuntungan TP1
 
-    **Batas yang jujur — data ini TERSENSOR.** Nilai yang berlaku sekarang
-    memotong posisi begitu harga menyentuhnya, jadi tak ada yang tahu apa yang
-    akan terjadi DI BAWAH level itu. Karena itu hanya arah MENAIKKAN yang bisa
-    dinilai; kandidat di bawah nilai berjalan sengaja tidak dievaluasi, bukan
+    **Batas yang jujur — data ini TERSENSOR, dan arahnya berlawanan.** Nilai yang
+    berlaku memotong posisi begitu tersentuh, jadi ada wilayah yang tak pernah
+    teramati. Untuk KUNCI, wilayah gelap itu ada di bawah → hanya menaikkan yang
+    bisa dinilai. Untuk MAJU, wilayah gelapnya ada di atas → hanya menurunkan
+    yang bisa dinilai. Kandidat di sisi gelap sengaja tak dievaluasi, bukan
     dievaluasi lalu ditolak.
     """
     if not is_db_available():
@@ -766,8 +767,18 @@ async def recommend_trail_params(days: int = 90, market: str = "futures") -> dic
     adv_now = cfg["advance"]
     lock_grid = [round(lock_now + i * 0.05, 2) for i in range(0, 6)
                  if lock_now + i * 0.05 <= 1.0]
-    adv_grid = [round(adv_now + i * 0.10, 2) for i in range(0, 6)
-                if adv_now + i * 0.10 <= 1.0]
+    # Arah kandidat BERBEDA untuk dua parameter ini, dan bukan karena selera:
+    #
+    #   kunci (L)  = level STOP. Apa yang terjadi di bawah L tak pernah teramati
+    #                karena posisi sudah dipotong di sana → hanya NAIK yang bisa
+    #                dinilai.
+    #   maju (A)   = PEMICU pada kemajuan naik, yang hasilnya memasang lantai di
+    #                TP1. Posisi yang belum mencapai A tetap terlihat apa adanya
+    #                → menurunkan A bisa dinilai. Menaikkannya TIDAK: posisi yang
+    #                sudah terlanjur dilantai TP1 menyembunyikan apa yang akan
+    #                terjadi di bawah TP1.
+    adv_grid = [round(adv_now - i * 0.10, 2) for i in range(0, 6)
+                if adv_now - i * 0.10 >= 0.0]
 
     def _pilih(curve: list[dict], sekarang: float) -> dict:
         if not cfg.get("applicable"):
@@ -803,8 +814,9 @@ async def recommend_trail_params(days: int = 90, market: str = "futures") -> dic
         "note": (
             "Bukti mulai direkam 10 Agu 2026; baris ledger sebelumnya TIDAK bisa "
             "dipakai karena gerak sesudah TP1 tak pernah disimpan dan mustahil "
-            "direkonstruksi. Hanya arah MENAIKKAN yang dinilai — nilai berjalan "
-            "menyensor apa yang terjadi di bawahnya."),
+            "direkonstruksi. Arah kandidat berbeda per parameter: kunci hanya "
+            "dinilai NAIK, maju hanya dinilai TURUN — sisi lainnya tersensor "
+            "oleh nilai yang berlaku sekarang."),
     }
 
 
@@ -856,13 +868,9 @@ def _trail_config(market: str) -> dict:
     """Nilai trailing yang BERLAKU sekarang, dibaca dari config monitor terkait —
     bukan disalin, supaya usulan selalu dibandingkan terhadap yang nyata."""
     if market == "spot":
-        # SPOT masih memakai 0,5 yang tertanam di `monitor._process_trade`
-        # (`entry * (1 + ((tp1-entry)/entry) * 0.5)`) — belum punya kunci config.
-        # Pengukuran tetap jalan supaya buktinya menumpuk, tapi usulannya TIDAK
-        # diterbitkan: menerbitkan angka untuk kunci yang tak dibaca siapa pun
-        # persis kesalahan yang sudah pernah terjadi di lane SPOT.
-        return {"lock": 0.5, "advance": 0.5, "applicable": False,
-                "why": "nilai trailing SPOT belum punya kunci config"}
+        from agents.opportunity import monitor_config as scfg
+        return {"lock": scfg.TRAIL_LOCK_AFTER_TP1_FRAC,
+                "advance": scfg.TRAIL_ADVANCE_TP1_TP2_FRAC, "applicable": True}
     from agents.futures import monitor_config as mcfg
     return {"lock": mcfg.TRAIL_LOCK_AFTER_TP1_FRAC,
             "advance": mcfg.TRAIL_ADVANCE_TP1_TP2_FRAC, "applicable": True}
