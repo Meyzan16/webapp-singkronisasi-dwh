@@ -413,18 +413,27 @@ async def propose_from_recommendations(days: int = 90, market: str = "futures") 
 
 # ── Loop: maju sendiri sejauh yang aman ───────────────────────────────────────
 
-async def advance() -> dict:
-    """Evaluasi semua canary yang berjalan. Dipanggil loop learning.
+async def advance(market: str | None = None) -> dict:
+    """Evaluasi canary yang berjalan. Dipanggil loop scheduler tiap market.
 
     Sengaja TIDAK menaikkan shadow→canary sendiri: memberlakukan parameter baru
-    ke uang sungguhan tetap butuh perintah eksplisit.
+    ke keputusan trading tetap butuh perintah eksplisit.
+
+    `market` WAJIB disebut pemanggil rutin. Tanpanya, satu loop mengevaluasi
+    canary market lain — dan sampai 12 Agu itulah yang terjadi: canary SPOT
+    hanya dinilai sebagai efek samping loop FUTURES, sehingga berhenti dinilai
+    diam-diam setiap kali futures berhenti. Tak ada error, hanya canary yang
+    membeku tanpa alasan yang terlihat.
     """
     if not is_db_available():
         return {"status": "db_unavailable"}
     async with AsyncSessionLocal() as session:
-        ids = [r.id for r in (await session.execute(select(FuturesExitRollout).where(
-            FuturesExitRollout.stage == "canary"))).scalars().all()]
-    return {"status": "ok", "evaluated": [await evaluate(i) for i in ids]}
+        q = select(FuturesExitRollout).where(FuturesExitRollout.stage == "canary")
+        if market:
+            q = q.where(FuturesExitRollout.market == market)
+        ids = [r.id for r in (await session.execute(q)).scalars().all()]
+    return {"status": "ok", "market": market or "semua",
+            "evaluated": [await evaluate(i) for i in ids]}
 
 
 async def status() -> dict:

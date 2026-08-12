@@ -636,6 +636,35 @@ async def run_opportunity_loop() -> None:
             opp_store.set_result({key: value for key, value in result.items() if not key.startswith("_")})
             _last_scan_ts = time.time()
             _cycle_count += 1
+
+            # Tahapan penyalaan parameter KELUAR sisi SPOT punya penggeraknya
+            # SENDIRI di sini. Sampai 12 Agu ia menumpang loop FUTURES: canary
+            # SPOT hanya dinilai selama futures kebetulan hidup, dan membeku
+            # diam-diam saat futures berhenti — tanpa error, tanpa jejak.
+            #
+            # Siklus SPOT 3 menit, jadi tiap 60 siklus ≈ 3 jam — cukup sering
+            # untuk tak menunda keputusan, cukup jarang untuk tak membebani DB.
+            if _cycle_count % 60 == 5:
+                try:
+                    from agents.learning.exit_rollout import (
+                        advance, propose_from_recommendations,
+                    )
+                    _adv = await advance(market="spot")
+                    for _r in _adv.get("evaluated", []):
+                        if _r.get("stage") in ("active", "rolled_back"):
+                            logger.info("exit_rollout_decided", market="spot",
+                                        lane=_r.get("lane"), param=_r.get("param"),
+                                        stage=_r.get("stage"))
+                    # Semua usulan masuk sebagai `shadow` — nol efek pada
+                    # keputusan trading sampai dinaikkan secara eksplisit.
+                    _pro = await propose_from_recommendations(market="spot")
+                    for _p in _pro.get("proposed", []) or []:
+                        if _p.get("status") == "ok":
+                            logger.info("exit_rollout_proposed_auto", market="spot",
+                                        lane=_p.get("lane"), param=_p.get("param"),
+                                        value=_p.get("proposed_value"))
+                except Exception as exc:
+                    logger.warning("exit_rollout_spot_failed", error=str(exc)[:160])
             _last_error   = None
 
             # Auto-open: kandidat ber-gerbang-arah, ranked by EV per unit risk.

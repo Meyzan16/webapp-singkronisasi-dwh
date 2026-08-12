@@ -856,12 +856,31 @@ async def run_futures_loop() -> None:
                 # memburuk — menaikkan shadow→canary tetap butuh perintah
                 # eksplisit, karena itu memberlakukan perubahan ke uang sungguhan.
                 try:
-                    from agents.learning.exit_rollout import advance
-                    _adv = await advance()
+                    from agents.learning.exit_rollout import (
+                        advance, propose_from_recommendations,
+                    )
+                    # Market DISEBUT: loop ini hanya mengurus canary futures.
+                    # Sebelumnya `advance()` polos ikut menilai canary SPOT, jadi
+                    # sisi SPOT diam-diam bergantung pada loop ini tetap hidup.
+                    _adv = await advance(market="futures")
                     for _r in _adv.get("evaluated", []):
                         if _r.get("stage") in ("active", "rolled_back"):
                             logger.info("exit_rollout_decided", lane=_r.get("lane"),
                                         param=_r.get("param"), stage=_r.get("stage"))
+
+                    # Alirkan usulan baru ke antrean. SEMUA masuk sebagai
+                    # `shadow` — tak satu pun menyentuh config, jadi tak ada
+                    # keputusan trading yang berubah tanpa perintah eksplisit.
+                    #
+                    # Tanpa panggilan ini mesin belajar menghitung angka lalu
+                    # berhenti sebagai laporan: sampai 12 Agu usulan hanya lahir
+                    # bila seseorang menekan endpoint API secara manual.
+                    _pro = await propose_from_recommendations(market="futures")
+                    for _p in _pro.get("proposed", []) or []:
+                        if _p.get("status") == "ok":
+                            logger.info("exit_rollout_proposed_auto", market="futures",
+                                        lane=_p.get("lane"), param=_p.get("param"),
+                                        value=_p.get("proposed_value"))
                 except Exception as exc:
                     logger.warning("exit_rollout_advance_failed", error=str(exc)[:160])
 

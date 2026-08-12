@@ -15,6 +15,7 @@ memeriksa satu-satu, tapi menuntut SETIAP kunci config bisa dicapai dari monitor
 """
 
 import inspect
+import pathlib
 
 import pytest
 
@@ -170,6 +171,58 @@ def test_ambang_baru_punya_bawaan_perilaku_lama():
     assert "STUCK_NEAR_SL_BAND_PCT = 2.0" in src_m
     assert "STRUCT_SL_BUFFER_FRAC = 0.99" in inspect.getsource(s)
     assert s.default_of("STRUCT_SL_BUFFER_FRAC") == 0.99
+
+
+# ── Rantai OTOMATIS: hasil belajar harus mengalir tanpa perintah manual ──────
+
+@pytest.mark.parametrize("market,modul", [
+    ("futures", "../agents/futures/scheduler.py"),
+    ("spot", "../agents/opportunity/scheduler.py"),
+])
+def test_tiap_market_punya_penggerak_rollout_sendiri(market, modul):
+    """Sampai 12 Agu `advance()` dipanggil TANPA market dari loop futures saja.
+
+    Akibatnya canary SPOT hanya dinilai selama futures kebetulan hidup, dan
+    membeku diam-diam begitu futures berhenti — tanpa error, tanpa jejak. Tiap
+    market harus punya penggeraknya sendiri.
+    """
+    src = pathlib.Path(modul).read_text(encoding="utf-8")
+    assert f'advance(market="{market}")' in src, \
+        f"{market} tak punya penggerak evaluasi canary sendiri"
+
+
+@pytest.mark.parametrize("market,modul", [
+    ("futures", "../agents/futures/scheduler.py"),
+    ("spot", "../agents/opportunity/scheduler.py"),
+])
+def test_usulan_mengalir_otomatis_ke_antrean(market, modul):
+    """Tanpa ini mesin belajar menghitung angka lalu BERHENTI SEBAGAI LAPORAN.
+
+    Sampai 12 Agu `propose_from_recommendations` hanya bisa dicapai lewat
+    endpoint API — usulan baru tak pernah masuk antrean kecuali ada manusia yang
+    menekannya. Aman diotomatiskan karena semuanya masuk sebagai `shadow`.
+    """
+    src = pathlib.Path(modul).read_text(encoding="utf-8")
+    assert f'propose_from_recommendations(market="{market}")' in src, \
+        f"{market}: usulan tak pernah masuk antrean secara otomatis"
+
+
+def test_advance_menyaring_market():
+    """`advance()` tanpa filter akan menilai canary market lain — persis
+    kekeliruan yang baru diperbaiki."""
+    from agents.learning import exit_rollout as er
+    assert "market" in inspect.signature(er.advance).parameters
+    assert "FuturesExitRollout.market == market" in inspect.getsource(er.advance)
+
+
+def test_kenaikan_ke_canary_TETAP_manual():
+    """Ini BUKAN celah, melainkan batas yang disengaja: memberlakukan parameter
+    baru ke keputusan trading butuh perintah eksplisit. Menaikkannya otomatis
+    akan membuat perubahan berlaku tanpa seorang pun memilihnya."""
+    from agents.learning import exit_rollout as er
+    src = inspect.getsource(er.advance)
+    assert "start_canary" not in src, "advance() menaikkan shadow->canary sendiri"
+    assert "TIDAK menaikkan shadow" in src, "batas sengaja ini tak lagi terdokumentasi"
 
 
 def test_rollout_shadow_tak_menulis_config():
