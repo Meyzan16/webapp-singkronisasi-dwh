@@ -91,3 +91,41 @@ def test_persentil_naik_monoton():
     from agents.learning import exit_learning as el
     p = el.LADDER_PERCENTILES
     assert list(p) == sorted(p) and len(set(p)) == 3
+
+
+# ── Jeda lane progresif (nomor 3 daftar pertumbuhan) ─────────────────────────
+
+def test_jeda_lane_berlipat_tiap_pengulangan():
+    """Jeda TETAP membuat lane rugi jadi pintu putar dengan irama tetap:
+    jeda -> kedaluwarsa -> buka -> rugi -> jeda lagi. Terukur 12 Agu pada
+    `momentum` (WR 10%): dua putaran dalam sehari, sambil menyumbang 82%
+    kerugian futures."""
+    from agents.futures import risk_gate as rg
+    src = inspect.getsource(rg.update_lane_wr)
+    assert "_lane_pause_streak" in src
+    assert "LANE_PAUSE_ESCALATION ** (streak - 1)" in src
+    assert "LANE_PAUSE_MAX_HOURS" in src, "tanpa batas atas lane bisa terkunci selamanya"
+
+
+def test_lane_yang_pulih_direset_hitungannya():
+    """Lane yang benar-benar membaik tak boleh dihukum riwayat lamanya."""
+    from agents.futures import risk_gate as rg
+    assert "_lane_pause_streak.pop(lane, None)" in inspect.getsource(rg.update_lane_wr)
+
+
+def test_bawaan_jeda_sama_dgn_perilaku_lama_pada_jeda_pertama():
+    """Pengulangan PERTAMA harus tetap 24 jam — perubahan hanya berlaku pada
+    pengulangan berikutnya, jadi tak ada kejutan di jeda pertama."""
+    from agents.futures import risk_gate as rg
+    f = rg._FROZEN_PAUSE
+    assert f["LANE_PAUSE_HOURS"] == 24
+    assert f["LANE_PAUSE_ESCALATION"] ** 0 == 1.0
+    assert f["LANE_PAUSE_MAX_HOURS"] == 168.0
+
+
+def test_jeda_lane_bisa_ditala():
+    import pathlib
+    src = pathlib.Path("../agents/futures/risk_gate.py").read_text(encoding="utf-8")
+    for k in ("lane_pause_hours", "lane_pause_escalation", "lane_pause_max_hours"):
+        assert k in src, f"{k} tak pernah ditarik"
+    assert "_FROZEN_PAUSE[" in src, "cadangan memakai nilai berjalan"

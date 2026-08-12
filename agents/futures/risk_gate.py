@@ -52,7 +52,32 @@ _last_probe_at      = 0.0       # A2: kapan probe terakhir dibuka
 # P6.4: per-lane WR auto-pause
 LANE_WR_PAUSE_THRESHOLD = 0.35   # WR < 35% → pause lane
 LANE_WR_MIN_SAMPLE      = 20     # rolling N=20 trades before judging lane
-LANE_PAUSE_HOURS        = 24     # pause duration (hours)
+LANE_PAUSE_HOURS        = 24     # pause duration (hours) — jeda PERTAMA
+
+#: Pengali jeda tiap kali lane dijeda ULANG tanpa sempat membaik.
+#:
+#: Jeda tetap 24 jam membuat lane rugi jadi PINTU PUTAR: jeda → kedaluwarsa →
+#: buka posisi → rugi → jeda lagi, dengan irama tetap. Terukur 12 Agu pada lane
+#: `momentum` (WR 10%, n=10): dua putaran dalam satu hari, dan lane itu
+#: menyumbang 82% kerugian futures.
+#:
+#: Dengan pengali, lane yang benar-benar membaik tetap lolos cepat, sedangkan
+#: yang tidak menjauh sendiri tanpa perlu dimatikan manual. 1.0 = perilaku lama.
+LANE_PAUSE_ESCALATION   = 2.0
+#: Batas atas jeda supaya lane tak terkunci selamanya — pasar berubah, dan lane
+#: yang tak pernah diberi kesempatan tak akan pernah punya bukti baru.
+LANE_PAUSE_MAX_HOURS    = 168.0   # 7 hari
+
+#: Bawaan dibekukan saat impor — cadangan `cfg.get()` yang memakai nilai
+#: berjalan membuat bawaan hanyut mengikuti override.
+_FROZEN_PAUSE: dict[str, float] = {
+    "LANE_PAUSE_HOURS": LANE_PAUSE_HOURS,
+    "LANE_PAUSE_ESCALATION": LANE_PAUSE_ESCALATION,
+    "LANE_PAUSE_MAX_HOURS": LANE_PAUSE_MAX_HOURS,
+}
+
+#: Berapa kali tiap lane sudah dijeda berturut tanpa sempat membaik.
+_lane_pause_streak: dict[str, int] = {}
 
 # ── PLAN_v15 P1/P2/P8 — daily gates & consecutive-loss breaker ────────────────
 WIB_UTC_OFFSET_H          = 7      # daily boundaries follow WIB (UTC+7), same as spot
@@ -413,6 +438,14 @@ async def evaluate_risk_gate() -> None:
         RAR_GATE_THRESHOLD      = await cfg.get("futures", "rar_threshold", RAR_GATE_THRESHOLD)
         LANE_WR_PAUSE_THRESHOLD = await cfg.get("futures", "lane_wr_pause_threshold", LANE_WR_PAUSE_THRESHOLD)
         LANE_WR_MIN_SAMPLE      = int(await cfg.get("futures", "lane_wr_min_sample", LANE_WR_MIN_SAMPLE))
+        # Jeda lane — cadangan memakai nilai BEKU, bukan nilai berjalan.
+        global LANE_PAUSE_HOURS, LANE_PAUSE_ESCALATION, LANE_PAUSE_MAX_HOURS
+        LANE_PAUSE_HOURS      = await cfg.get(
+            "futures", "lane_pause_hours", _FROZEN_PAUSE["LANE_PAUSE_HOURS"])
+        LANE_PAUSE_ESCALATION = await cfg.get(
+            "futures", "lane_pause_escalation", _FROZEN_PAUSE["LANE_PAUSE_ESCALATION"])
+        LANE_PAUSE_MAX_HOURS  = await cfg.get(
+            "futures", "lane_pause_max_hours", _FROZEN_PAUSE["LANE_PAUSE_MAX_HOURS"])
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="risk_gate", error=str(exc)[:120])
 
@@ -554,19 +587,29 @@ def get_lane_wr(lane: str) -> tuple[float, int]:
 
 def update_lane_wr(lane: str, wins: int, total: int) -> None:
     """P6.4: Update per-lane rolling WR and trigger pause if threshold crossed."""
-    global _lane_wr, _lane_paused_until
+    global _lane_wr, _lane_paused_until, _lane_pause_streak
     _lane_wr[lane] = {"wins": wins, "total": total}
     if total >= LANE_WR_MIN_SAMPLE:
         wr = wins / total
         if wr < LANE_WR_PAUSE_THRESHOLD:
-            until = time.time() + LANE_PAUSE_HOURS * 3600
             prev_until = _lane_paused_until.get(lane, 0.0)
             if time.time() >= prev_until:   # only fire once per pause cycle
-                _lane_paused_until[lane] = until
+                # Jeda BERLIPAT tiap pengulangan. Jeda tetap membuat lane rugi
+                # jadi pintu putar dengan irama tetap — `momentum` melakukannya
+                # dua kali dalam sehari sambil menyumbang 82% kerugian futures.
+                streak = _lane_pause_streak.get(lane, 0) + 1
+                _lane_pause_streak[lane] = streak
+                jam = min(LANE_PAUSE_HOURS * (LANE_PAUSE_ESCALATION ** (streak - 1)),
+                          LANE_PAUSE_MAX_HOURS)
+                _lane_paused_until[lane] = time.time() + jam * 3600
                 logger.warning("lane_auto_paused", lane=lane, wr=round(wr, 3),
-                               total=total, pause_hours=LANE_PAUSE_HOURS)
+                               total=total, pause_hours=round(jam, 1),
+                               streak=streak)
         elif time.time() >= _lane_paused_until.get(lane, 0.0):
             _lane_paused_until.pop(lane, None)  # clear expired entry to keep dict clean
+            # Lane sudah membaik di atas ambang: hitungan pengulangan direset,
+            # supaya lane yang benar-benar pulih tak dihukum riwayat lamanya.
+            _lane_pause_streak.pop(lane, None)
 
 
 def is_state_stale() -> bool:

@@ -54,6 +54,15 @@ DEFAULTS: list[dict] = [
     # ── FUTURES — score threshold ────────────────────────────────────────────
     {"group": "futures", "key": "bigmover_min_score", "default": 60, "category": "threshold",
      "description": "BigMover agent — score minimum (fixed, tanpa adaptive threshold)"},
+    {"group": "futures", "key": "lane_pause_hours", "default": 24.0, "category": "risk",
+     "description": "Durasi jeda PERTAMA sebuah lane saat WR-nya jatuh di bawah ambang"},
+    {"group": "futures", "key": "lane_pause_escalation", "default": 2.0, "category": "risk",
+     "description": ("Pengali jeda tiap lane dijeda ULANG tanpa membaik. 1,0 = jeda tetap "
+                     "(perilaku lama), yang membuat lane rugi jadi pintu putar: jeda -> "
+                     "kedaluwarsa -> rugi -> jeda lagi dengan irama tetap.")},
+    {"group": "futures", "key": "lane_pause_max_hours", "default": 168.0, "category": "risk",
+     "description": ("Batas atas jeda lane (jam). Mencegah lane terkunci selamanya — pasar "
+                     "berubah, dan lane tanpa kesempatan tak akan pernah punya bukti baru.")},
     {"group": "futures", "key": "bigmover_daily_budget", "default": 6, "category": "quota",
      "description": "Jatah entri BigMover futures per hari WIB"},
     {"group": "futures", "key": "bigmover_tp1_atr_mult", "default": 2.0, "category": "threshold",
