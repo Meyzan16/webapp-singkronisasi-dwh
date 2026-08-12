@@ -175,6 +175,11 @@ DEFAULTS: list[dict] = [
     # sulit terlihat: tak muncul saat mencari definisi konstanta).
     {"group": "futures", "key": "monitor_age_extend_min_pnl_pct", "default": 5.0, "category": "monitor",
      "description": "Profit minimum (%) agar umur posisi layak diperpanjang"},
+    {"group": "futures", "key": "monitor_age_extend_cooldown_hours", "default": 20.0, "category": "monitor",
+     "description": "Jeda minimum (jam) antar perpanjangan umur posisi (bawaan 20 = satu kali per hari)"},
+    {"group": "futures", "key": "monitor_stuck_near_sl_band_pct", "default": 2.0, "category": "monitor",
+     "description": ("Lebar pita (%) di sekitar SL untuk menilai posisi 'macet dekat SL' sesudah TP1. "
+                     "Angka ini MENUTUP posisi, bukan sekadar menandainya.")},
     {"group": "futures", "key": "monitor_stagnant_check_days", "default": 2.0, "category": "monitor",
      "description": "Umur (hari) sebelum posisi mulai dinilai stagnan"},
     {"group": "futures", "key": "monitor_stagnant_progress_pct", "default": 20.0, "category": "monitor",
@@ -315,6 +320,8 @@ def _monitor_lane_defaults() -> list[dict]:
                                             "menutup 10 posisi dgn WR 10% dan expectancy -1,191% - satu-satunya "
                                             "pemicu SPOT yang merugikan. Menaikkannya menyerahkan struktur patah "
                                             "saat rugi ke SL."),
+        "monitor_struct_sl_buffer_frac": ("buffer di bawah struktur (EMA21 4h / swing-low) saat menghitung "
+                                            "trailing SL. 0,99 = 1% di bawah. Angka ini menentukan LETAK SL."),
         "monitor_trail_lock_after_tp1_frac": ("porsi keuntungan TP1 yang dikunci saat TP1 tersentuh "
                                             "(SL -> entry + frac x gain). SPOT memakai 0,5; futures 0,75."),
         "monitor_trail_advance_tp1_tp2_frac": ("porsi jarak TP1->TP2 yang harus ditempuh sebelum SL "

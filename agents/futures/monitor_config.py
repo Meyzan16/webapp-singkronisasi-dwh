@@ -159,6 +159,13 @@ FAST_LOOP_LIQ_DIST_PCT = 10.0      # jarak ke likuidasi < 10% = dijaga ketat
 
 #: Profit minimum (% harga) agar posisi layak diperpanjang umurnya.
 AGE_EXTEND_MIN_PNL_PCT = 5.0
+#: Jeda minimum (jam) antar perpanjangan umur — "satu kali per hari".
+#: Dulu `20 * 3600` di tengah ekspresi, jadi tak pernah bisa ditala.
+AGE_EXTEND_COOLDOWN_HOURS = 20.0
+#: Lebar pita (% harga) di sekitar SL untuk menilai posisi "macet dekat SL"
+#: sesudah TP1. Dulu `sl * 1.02` / `sl * 0.98` telanjang — dan angka ini
+#: MENUTUP posisi, bukan sekadar menandainya.
+STUCK_NEAR_SL_BAND_PCT = 2.0
 #: Umur (hari) sebelum posisi mulai dinilai stagnan.
 STAGNANT_CHECK_DAYS = 2.0
 #: Progres minimum menuju TP1 (%) agar posisi tak dianggap stagnan.
@@ -280,6 +287,8 @@ _KEYS: dict[str, str] = {
     "FAST_LOOP_LIQ_DIST_PCT":    "monitor_fast_loop_liq_dist_pct",
     "FAILFAST_MIN_SL_GAP":       "monitor_failfast_min_sl_gap",
     "AGE_EXTEND_MIN_PNL_PCT":    "monitor_age_extend_min_pnl_pct",
+    "AGE_EXTEND_COOLDOWN_HOURS": "monitor_age_extend_cooldown_hours",
+    "STUCK_NEAR_SL_BAND_PCT":    "monitor_stuck_near_sl_band_pct",
     "STAGNANT_CHECK_DAYS":       "monitor_stagnant_check_days",
     "STAGNANT_PROGRESS_PCT":     "monitor_stagnant_progress_pct",
     "STUCK_AFTER_TP1_HOURS":     "monitor_stuck_after_tp1_hours",

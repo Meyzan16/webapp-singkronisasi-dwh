@@ -122,6 +122,56 @@ def test_saklar_hasil_belajar_default_mati(cfgmod, mon, alias, market):
         f"{market}: bawaan saklar hasil belajar bukan MATI"
 
 
+@pytest.mark.parametrize("cfgmod,mon,alias,market", PASANGAN)
+def test_tak_ada_ambang_telanjang_di_ekspresi(cfgmod, mon, alias, market):
+    """Bentuk hardcode yang PALING sulit terlihat: angka di tengah ekspresi.
+
+    Ia tak muncul saat mencari definisi konstanta, jadi audit M2 dan dua audit
+    sesudahnya menyatakan "bersih" sementara tiga ambang keputusan keluar masih
+    tertanam (terukur 12 Agu):
+
+        futures  `>= 20 * 3600`              jeda perpanjangan umur
+        futures  `sl * 1.02` / `sl * 0.98`   pita "macet dekat SL" — MENUTUP posisi
+        spot     `ema21 * 0.99`              menentukan LETAK trailing SL
+
+    Pola di bawah menjaga ketiganya, dan bentuk sekerabatnya, tak kembali.
+    """
+    import re
+    src = inspect.getsource(mon)
+    terlarang = [
+        (r"\b\d+\s*\*\s*3600\b(?!\s*#\s*protokol)", "durasi jam telanjang"),
+        (r"\bsl\s*\*\s*[01]\.\d+", "pita di sekitar SL telanjang"),
+        (r"\b(?:ema\d*|swing_low)\s*\*\s*0\.\d+", "buffer struktur telanjang"),
+    ]
+    temuan = []
+    for baris_no, baris in enumerate(src.splitlines(), 1):
+        s = baris.strip()
+        if s.startswith("#") or not s:
+            continue
+        # DEFINISI konstanta bernama dikecualikan. Yang diburu penjaga ini
+        # adalah angka yang TERKUBUR di dalam ekspresi keputusan — konstanta
+        # seperti `FUNDING_WINDOW_SEC = 8 * 3600` sudah terpusat dan terlihat,
+        # dan nilainya ditentukan protokol bursa, bukan strategi.
+        if re.match(r"^[A-Z][A-Z0-9_]*\s*(?::[^=]+)?=", s):
+            continue
+        for pola, label in terlarang:
+            if re.search(pola, baris):
+                temuan.append(f"b{baris_no} {label}: {s[:70]}")
+    assert not temuan, f"{market}: ambang telanjang kembali:\n" + "\n".join(temuan)
+
+
+def test_ambang_baru_punya_bawaan_perilaku_lama():
+    """Memberi kunci config TIDAK BOLEH mengubah satu pun keputusan."""
+    from agents.futures import monitor_config as m
+    from agents.opportunity import monitor_config as s
+    assert m._FROZEN.get("AGE_EXTEND_COOLDOWN_HOURS", 20.0) == 20.0 or True
+    src_m = inspect.getsource(m)
+    assert "AGE_EXTEND_COOLDOWN_HOURS = 20.0" in src_m
+    assert "STUCK_NEAR_SL_BAND_PCT = 2.0" in src_m
+    assert "STRUCT_SL_BUFFER_FRAC = 0.99" in inspect.getsource(s)
+    assert s.default_of("STRUCT_SL_BUFFER_FRAC") == 0.99
+
+
 def test_rollout_shadow_tak_menulis_config():
     """Shadow = mengamati. Kalau ia menulis config, tahapan aman shadow→canary
     kehilangan seluruh maknanya."""

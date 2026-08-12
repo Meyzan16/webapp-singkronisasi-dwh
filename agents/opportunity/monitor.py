@@ -296,7 +296,8 @@ def _compute_trailing_sl(klines_4h: list, current_sl: float) -> float:
     lows      = [float(k[3]) for k in klines_4h]
     ema21     = _ema(closes, 21)
     swing_low = min(lows[-10:])
-    candidate = max(ema21 * 0.99, swing_low * 0.99)
+    _buf      = scfg.STRUCT_SL_BUFFER_FRAC
+    candidate = max(ema21 * _buf, swing_low * _buf)
     return max(current_sl, candidate)
 
 

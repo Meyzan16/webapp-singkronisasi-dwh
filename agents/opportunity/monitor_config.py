@@ -96,6 +96,12 @@ TRAIL_ADVANCE_TP1_TP2_FRAC = 1.0
 #: tidak SL akan langsung tersentuh oleh sumbu candle yang sedang berjalan.
 TRAIL_FLOOR_MAX_OF_PRICE = 0.999
 
+#: Buffer di bawah struktur (EMA21 4h / swing-low 10 candle) saat menghitung
+#: trailing SL. 0,99 = 1% di bawah — memberi ruang agar sumbu candle tak
+#: langsung menyentuh SL yang baru dipasang.
+#: Dulu `ema21 * 0.99` telanjang, padahal angka ini menentukan LETAK SL.
+STRUCT_SL_BUFFER_FRAC = 0.99
+
 #: Breakeven `momentum_entry`: dipicu di +3% dan dipasang 0,1% di atas entry.
 #: Buffer-nya ADA supaya keluar di breakeven tak justru rugi ongkos.
 MOMENTUM_BE_TRIGGER_PCT = 3.0
@@ -122,6 +128,7 @@ _KEYS: dict[str, str] = {
     "TREND_REVERSAL_MIN_HOLD_MIN":  "monitor_trend_reversal_min_hold_min",
     "TREND_REVERSAL_EMA_BUFFER":    "monitor_trend_reversal_ema_buffer",
     "TREND_REVERSAL_PROFIT_FLOOR_FRAC": "monitor_trend_reversal_profit_floor_frac",
+    "STRUCT_SL_BUFFER_FRAC":        "monitor_struct_sl_buffer_frac",
     "TRAIL_LOCK_AFTER_TP1_FRAC":    "monitor_trail_lock_after_tp1_frac",
     "TRAIL_ADVANCE_TP1_TP2_FRAC":   "monitor_trail_advance_tp1_tp2_frac",
     "TRAIL_FLOOR_MAX_OF_PRICE":     "monitor_trail_floor_max_of_price",

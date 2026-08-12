@@ -1042,7 +1042,7 @@ async def check_futures_positions() -> tuple[int, int]:
                     and _age_ext < mcfg.MAX_AGE_EXTENSIONS
                     and age_days >= (_max_age - 0.1)):   # within ~2.4 h of expiry
                 _last_ext = float(meta.get("age_last_extended_at", 0.0))
-                if (time.time() - _last_ext) >= 20 * 3600:   # one extension per day
+                if (time.time() - _last_ext) >= mcfg.AGE_EXTEND_COOLDOWN_HOURS * 3600:
                     meta["age_extensions"]       = _age_ext + 1
                     meta["age_last_extended_at"] = time.time()
                     trade.signals_json           = json.dumps(meta, ensure_ascii=False)
@@ -1134,9 +1134,10 @@ async def check_futures_positions() -> tuple[int, int]:
                 _tp1_done_g8 = float(meta.get("tp1_done_at", 0.0))
                 _hold_tp1_h  = (time.time() - _tp1_done_g8) / 3600 if _tp1_done_g8 > 0 else 0.0
                 if _hold_tp1_h >= mcfg.STUCK_AFTER_TP1_HOURS:
+                    _band = mcfg.STUCK_NEAR_SL_BAND_PCT / 100.0
                     _stuck = (
-                        (direction == "LONG"  and price <= sl * 1.02) or
-                        (direction == "SHORT" and price >= sl * 0.98)
+                        (direction == "LONG"  and price <= sl * (1 + _band)) or
+                        (direction == "SHORT" and price >= sl * (1 - _band))
                     )
                     if _stuck:
                         new_status   = "tp"   # TP1 was booked, net profitable
