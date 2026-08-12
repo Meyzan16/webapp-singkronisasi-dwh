@@ -225,6 +225,65 @@ def test_kenaikan_ke_canary_TETAP_manual():
     assert "TIDAK menaikkan shadow" in src, "batas sengaja ini tak lagi terdokumentasi"
 
 
+# ── Ingatan atas percobaan yang sudah ditolak ────────────────────────────────
+
+def test_penolakan_dinilai_dari_bukti_bukan_dari_kalimat():
+    """Membedakan "ditolak karena terbukti buruk" dari "digeser manual" TIDAK
+    boleh bergantung pada cocok-kata di kolom `reason` — kalimatnya bisa berubah
+    kapan saja. `observed_n` adalah penanda strukturalnya."""
+    from agents.learning import exit_rollout as er
+    src = inspect.getsource(er._ditolak_dgn_bukti)
+    assert "observed_n" in src and "CANARY_MIN_OUTCOMES" in src
+    assert "reason" not in src.split('"""')[2], "penjaga bergantung pada teks reason"
+
+
+def test_ingatan_hanya_memblokir_arah_yang_sudah_diuji():
+    """Arah sebaliknya BELUM pernah diuji. Memblokirnya berarti menyimpulkan
+    dari ketiadaan bukti — kesalahan yang sama seperti mengevaluasi kandidat di
+    sisi tersensor pada recommender trailing."""
+    from agents.learning import exit_rollout as er
+    for p in er.SUPPORTED_PARAMS_BY_MARKET["futures"]:
+        assert p in er._ARAH_AGRESIF, f"{p} tak punya arah agresif"
+    # tp lebih KECIL = lebih agresif; gap fail-fast lebih BESAR = lebih agresif
+    assert er._ARAH_AGRESIF["tp_atr_mult"] < 0
+    assert er._ARAH_AGRESIF["failfast_min_sl_gap"] > 0
+
+
+def test_ingatan_tidak_berlaku_selamanya():
+    """Pasar berubah. Angka yang merugikan bulan lalu belum tentu merugikan
+    bulan depan — mengunci selamanya menghentikan pembelajaran."""
+    from agents.learning import exit_rollout as er
+    assert 1 <= er.REJECT_MEMORY_DAYS <= 90
+    assert "decided_at" in inspect.getsource(er._ditolak_dgn_bukti)
+
+
+def test_propose_benar_benar_memeriksa_ingatan():
+    from agents.learning import exit_rollout as er
+    src = inspect.getsource(er.propose)
+    assert "_ditolak_dgn_bukti" in src
+    assert "ditolak_dgn_bukti" in src
+
+
+def test_usulan_yang_ditolak_tak_dihitung_sebagai_usulan():
+    """Menaruhnya di `diusulkan` membuat laporan terbaca seolah antrean
+    bertambah padahal tidak."""
+    from agents.learning import exit_rollout as er
+    src = inspect.getsource(er.propose_from_recommendations)
+    assert src.count('dilewati if _r.get("status") == "ditolak_dgn_bukti"') >= 2
+
+
+@pytest.mark.parametrize("modul", [
+    "../agents/futures/scheduler.py",
+    "../agents/opportunity/scheduler.py",
+])
+def test_scheduler_membaca_kunci_hasil_yang_benar(modul):
+    """`propose_from_recommendations` mengembalikan `diusulkan`, bukan
+    `proposed`. Kunci yang salah TIDAK error — ia hanya diam selamanya."""
+    src = pathlib.Path(modul).read_text(encoding="utf-8")
+    assert '_pro.get("diusulkan"' in src
+    assert '_pro.get("proposed"' not in src
+
+
 def test_rollout_shadow_tak_menulis_config():
     """Shadow = mengamati. Kalau ia menulis config, tahapan aman shadow→canary
     kehilangan seluruh maknanya."""

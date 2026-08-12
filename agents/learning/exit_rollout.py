@@ -83,6 +83,76 @@ GLOBAL_PARAMS: dict[str, str] = {
 #: memakai (market, lane, param), jadi tanpa sentinel duplikatnya lolos.
 GLOBAL_LANE = "all"
 
+# ── Ingatan atas percobaan yang sudah ditolak ────────────────────────────────
+#
+# Recommender menurunkan angka dari ledger tiap kali dipanggil. Ledger tidak
+# berubah hanya karena sebuah percobaan gagal, jadi tanpa ingatan ia akan
+# MENGUSULKAN ULANG hal yang baru saja terbukti merugikan — bahkan dengan angka
+# yang lebih ekstrem.
+#
+# Terukur 12 Agu, beberapa menit sesudah usul-otomatis dinyalakan:
+#   id=7  futures/bigmover tp_atr_mult 0,526 -> DIBALIK (expectancy -2,03 vs
+#         baseline +0,036, n=15)
+#   id=10 futures/bigmover tp_atr_mult 0,431 -> diusulkan lagi 18 jam kemudian,
+#         lane sama, parameter sama, KOMPRESI LEBIH KETAT.
+#
+# Tanpa penjaga ini, otomatisasi justru memutar ulang eksperimen gagal.
+
+#: Berapa lama penolakan diingat. Bukan selamanya: pasar berubah, dan angka yang
+#: merugikan bulan lalu belum tentu merugikan bulan depan.
+REJECT_MEMORY_DAYS = 14
+
+#: Arah "lebih agresif" tiap parameter. Ingatan hanya memblokir usulan yang
+#: SETIDAKNYA SEEKSTREM yang sudah ditolak DI ARAH YANG SAMA — arah sebaliknya
+#: belum pernah diuji, jadi memblokirnya berarti menyimpulkan dari ketiadaan
+#: bukti.
+_ARAH_AGRESIF: dict[str, int] = {
+    "tp_atr_mult":           -1,   # makin KECIL = TP makin dikompresi
+    "failfast_min_sl_gap":   +1,   # makin BESAR = fail-fast makin sering diblokir
+    "trail_lock_after_tp1":  +1,   # makin BESAR = kunci sesudah TP1 makin ketat
+    "trail_advance_tp1_tp2": -1,   # makin KECIL = lantai naik makin dini
+}
+
+
+async def _ditolak_dgn_bukti(session, market: str, lane: str, param: str,
+                             value: float) -> dict | None:
+    """Penolakan berbasis BUKTI yang menutupi nilai ini, bila ada.
+
+    Yang dihitung sebagai bukti hanya canary yang benar-benar sempat dinilai
+    (`observed_n` terisi). Baris yang dibalik manual atau digeser karena macet
+    TIDAK membuktikan apa pun — memblokir berdasarkan itu akan mengunci lane
+    hanya karena pemiliknya pernah mengubah prioritas.
+    """
+    batas = time.time() - REJECT_MEMORY_DAYS * 86400
+    rows = list((await session.execute(select(FuturesExitRollout).where(
+        FuturesExitRollout.market == market,
+        FuturesExitRollout.lane == lane,
+        FuturesExitRollout.param == param,
+        FuturesExitRollout.stage == "rolled_back",
+    ))).scalars().all())
+
+    arah = _ARAH_AGRESIF.get(param, 0)
+    for r in rows:
+        if (r.observed_n or 0) < CANARY_MIN_OUTCOMES:
+            continue                      # dibalik manual/macet — bukan bukti
+        if (r.decided_at or 0) < batas:
+            continue                      # sudah terlalu tua untuk mengikat
+        ditolak = float(r.proposed_value or 0.0)
+        lebih_ekstrem = (
+            (arah < 0 and value <= ditolak)
+            or (arah > 0 and value >= ditolak)
+            or (arah == 0 and abs(value - ditolak) < 1e-9)
+        )
+        if lebih_ekstrem:
+            return {
+                "id": r.id, "nilai_ditolak": ditolak,
+                "observed_n": r.observed_n,
+                "observed_expectancy": r.observed_expectancy,
+                "baseline_expectancy": r.baseline_expectancy,
+                "umur_jam": round((time.time() - (r.decided_at or 0)) / 3600, 1),
+            }
+    return None
+
 
 #: Parameter yang boleh melewati tahapan, per market. SPOT belum punya padanan
 #: fail-fast — monitornya memakai pemicu lain (rotasi, trend_reversal), dan
@@ -178,6 +248,20 @@ async def propose(lane: str, param: str, value: float, reason: str = "",
         if existing:
             return {"status": "sudah_ada", "stage": existing.stage,
                     "id": existing.id, "proposed_value": existing.proposed_value}
+
+        # Jangan mengusulkan ulang apa yang sudah TERBUKTI merugikan.
+        _tolak = await _ditolak_dgn_bukti(session, market, lane, param, value)
+        if _tolak:
+            return {
+                "status": "ditolak_dgn_bukti", "market": market, "lane": lane,
+                "param": param, "value": value, "sebelumnya": _tolak,
+                "why": (f"nilai {value} setidaknya seekstrem {_tolak['nilai_ditolak']} "
+                        f"yang sudah diuji (id={_tolak['id']}, n={_tolak['observed_n']}) "
+                        f"dan dibalik karena expectancy {_tolak['observed_expectancy']} "
+                        f"di bawah baseline {_tolak['baseline_expectancy']}. "
+                        f"Ingatan berlaku {REJECT_MEMORY_DAYS} hari; arah sebaliknya "
+                        f"tetap boleh diusulkan."),
+            }
 
         _, current = await _config_value(session, group, key)
         n, exp, wr = _stats(await _lane_exits(session, lane, market))
@@ -388,10 +472,13 @@ async def propose_from_recommendations(days: int = 90, market: str = "futures") 
             dilewati.append({"lane": rec["lane"], "param": "tp_atr_mult",
                              "reason": "mayoritas_exit_prematur"})
             continue
-        hasil.append(await propose(
+        _r = await propose(
             rec["lane"], "tp_atr_mult", rec["suggested_tp_atr"], market=market,
             reason=f"TP realistis dari {rec['n']} exit; "
-                   f"akan tersentuh ~{rec.get('would_be_reached_pct')}%"))
+                   f"akan tersentuh ~{rec.get('would_be_reached_pct')}%")
+        # Usulan yang ditolak ingatan BUKAN usulan — menaruhnya di `diusulkan`
+        # membuat laporan terbaca seolah antrean bertambah padahal tidak.
+        (dilewati if _r.get("status") == "ditolak_dgn_bukti" else hasil).append(_r)
 
     # Fail-fast hanya ada di futures; melewatinya untuk market lain lebih jujur
     # daripada menulis kunci yang tak pernah dibaca monitornya.
@@ -404,9 +491,10 @@ async def propose_from_recommendations(days: int = 90, market: str = "futures") 
             dilewati.append({"lane": rec.get("lane"), "param": "failfast_min_sl_gap",
                              "reason": rec.get("status")})
             continue
-        hasil.append(await propose(
+        _r = await propose(
             rec["lane"], "failfast_min_sl_gap", rec["suggested_gap"], market=market,
-            reason=rec.get("note", "")))
+            reason=rec.get("note", ""))
+        (dilewati if _r.get("status") == "ditolak_dgn_bukti" else hasil).append(_r)
 
     return {"status": "ok", "market": market, "diusulkan": hasil, "dilewati": dilewati}
 

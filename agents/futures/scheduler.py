@@ -876,7 +876,7 @@ async def run_futures_loop() -> None:
                     # berhenti sebagai laporan: sampai 12 Agu usulan hanya lahir
                     # bila seseorang menekan endpoint API secara manual.
                     _pro = await propose_from_recommendations(market="futures")
-                    for _p in _pro.get("proposed", []) or []:
+                    for _p in _pro.get("diusulkan", []) or []:
                         if _p.get("status") == "ok":
                             logger.info("exit_rollout_proposed_auto", market="futures",
                                         lane=_p.get("lane"), param=_p.get("param"),

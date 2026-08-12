@@ -658,7 +658,7 @@ async def run_opportunity_loop() -> None:
                     # Semua usulan masuk sebagai `shadow` — nol efek pada
                     # keputusan trading sampai dinaikkan secara eksplisit.
                     _pro = await propose_from_recommendations(market="spot")
-                    for _p in _pro.get("proposed", []) or []:
+                    for _p in _pro.get("diusulkan", []) or []:
                         if _p.get("status") == "ok":
                             logger.info("exit_rollout_proposed_auto", market="spot",
                                         lane=_p.get("lane"), param=_p.get("param"),
