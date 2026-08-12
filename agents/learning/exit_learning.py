@@ -876,6 +876,77 @@ def _trail_config(market: str) -> dict:
             "advance": mcfg.TRAIL_ADVANCE_TP1_TP2_FRAC, "applicable": True}
 
 
+# ── M9: tangga TP sisi MASUK, diturunkan dari MFE ────────────────────────────
+
+#: Sampel MFE minimum sebelum tangga TP masuk boleh diusulkan.
+LADDER_MIN_SAMPLES = 25
+
+#: Persentil MFE yang dipetakan ke tiap anak tangga. TP1 di median berarti
+#: kira-kira separuh posisi menyentuhnya; TP3 di p90 menyisakan ekor untuk
+#: runner. Angka-angka ini adalah RANCANGAN (seberapa sering tiap rung ingin
+#: tersentuh), sedangkan NILAINYA sepenuhnya datang dari data.
+LADDER_PERCENTILES = (0.50, 0.75, 0.90)
+
+
+async def recommend_entry_tp_ladder(days: int = 90, market: str = "futures",
+                                    lane: str = "bigmover") -> dict:
+    """Usulkan tangga TP MASUK dari sebaran MFE — sejauh mana harga benar-benar
+    bergerak ke arah kita.
+
+    Kenapa MFE dan bukan yang lain: tangga TP menentukan target, dan satu-satunya
+    bukti tentang target yang realistis adalah seberapa jauh harga PERNAH sampai.
+    Terukur 12 Agu untuk futures/bigmover: MFE p90 = 1,14 ATR sementara TP1
+    dipasang di 2,0 ATR — anak tangga PERTAMA pun berada di luar jangkauan 90%
+    posisi. Itu sejalan dengan temuan bahwa hanya 1 dari 46 trade futures yang
+    pernah menyentuh TP.
+
+    Satuannya mengikuti market: futures memakai kelipatan ATR (seperti tangganya
+    sendiri), SPOT memakai persen harga.
+    """
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+
+    cutoff = time.time() - days * 86400
+    async with AsyncSessionLocal() as session:
+        rows = list((await session.execute(
+            select(ExitEvent).where(ExitEvent.closed_at >= cutoff,
+                                    ExitEvent.market == market,
+                                    ExitEvent.lane == lane)
+        )).scalars().all())
+
+    mfe = sorted(r.mfe_atr for r in rows if r.mfe_atr is not None)
+    atr = [r.atr_pct for r in rows if r.atr_pct]
+    n = len(mfe)
+    siap = n >= LADDER_MIN_SAMPLES
+
+    tangga = [_quantile(mfe, q) for q in LADDER_PERCENTILES] if mfe else [None] * 3
+    atr_med = median(atr) if atr else None
+
+    # SPOT menyusun tangganya dalam PERSEN harga, jadi kelipatan ATR dikonversi.
+    # Tanpa ATR tak ada konversi yang jujur — lebih baik kosong daripada dikarang.
+    if market == "spot":
+        tangga_out = ([round(t * atr_med, 2) if (t and atr_med) else None for t in tangga])
+        satuan = "persen_harga"
+    else:
+        tangga_out = [round(t, 3) if t else None for t in tangga]
+        satuan = "kelipatan_atr"
+
+    return {
+        "status": "ok", "market": market, "lane": lane, "window_days": days,
+        "n_mfe": n, "required": LADDER_MIN_SAMPLES,
+        "recommendation_ready": siap and all(tangga_out),
+        "satuan": satuan,
+        "atr_pct_median": round(atr_med, 3) if atr_med else None,
+        "mfe_atr": {"p50": tangga[0], "p75": tangga[1], "p90": tangga[2]},
+        "suggested_ladder": tangga_out if siap else None,
+        "note": (
+            "Tiap anak tangga dipetakan ke persentil MFE: TP1 di median (kira-kira "
+            "separuh posisi menyentuhnya), TP3 di p90 (menyisakan ekor untuk runner). "
+            "Bila tangga berjalan jauh DI ATAS p90, target pertama pun berada di luar "
+            "jangkauan mayoritas posisi — dan TP praktis tak pernah tersentuh."),
+    }
+
+
 # ── Penerapan ─────────────────────────────────────────────────────────────────
 
 async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,

@@ -90,6 +90,15 @@ PROFIT_LOCK_SIZE_MULT   = 0.5   #     …at half size ("play with house money")
 BREADTH_FADE_FRAC       = 0.60  # P3a: ≥60% of top gainers fading on 1h → market is pump-and-fade
 BREADTH_MIN_SAMPLE      = 5     # P3a: need ≥5 gainers in sample before the gate can fire
 
+#: Bawaan dibekukan saat impor — SEBELUM override mana pun masuk.
+#: `cfg.get(..., NILAI_BERJALAN)` memakai nilai yang SUDAH ditimpa siklus
+#: sebelumnya sebagai cadangan, sehingga bawaan hanyut mengikuti override dan
+#: titik pulang yang benar hilang. Pola itu sudah tiga kali jadi bug di proyek
+#: ini; kunci baru dibekukan sejak awal.
+_FROZEN: dict[str, float] = {
+    "BIGMOVER_DAILY_BUDGET": BIGMOVER_DAILY_BUDGET,
+}
+
 # BC2: hedge mode — when True, allow LONG + SHORT on the same symbol simultaneously.
 # Default: False (one-way mode, one position per symbol across all lanes).
 HEDGE_MODE: bool = os.getenv("HEDGE_MODE", "false").lower() == "true"
@@ -213,6 +222,12 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         # PLAN_v15 P3b/P3d
         MAX_SAME_DIRECTION     = int(await cfg.get("futures", "max_same_direction", MAX_SAME_DIRECTION))
         BIGMOVER_DAILY_SL_STOP = int(await cfg.get("futures", "bigmover_daily_sl_stop", BIGMOVER_DAILY_SL_STOP))
+        # Jatah entri harian bigmover. Cadangannya nilai BEKU, bukan nilai
+        # berjalan: `cfg.get(..., NILAI_SEKARANG)` membuat bawaan hanyut
+        # mengikuti override sampai titik pulang hilang.
+        global BIGMOVER_DAILY_BUDGET
+        BIGMOVER_DAILY_BUDGET  = int(await cfg.get(
+            "futures", "bigmover_daily_budget", _FROZEN["BIGMOVER_DAILY_BUDGET"]))
         # PLAN_v16 F2
         global MIN_TP1_COST_MULT
         MIN_TP1_COST_MULT      = await cfg.get("futures", "min_tp1_cost_mult", MIN_TP1_COST_MULT)

@@ -38,6 +38,9 @@ WIB_UTC_OFFSET_H          = 7
 # PLAN_SPOT_LANES B-Fix 7: pembatas frekuensi. 12 Juli tercatat 10 entri auto dan
 # 13 penutupan dalam satu hari (−$36.44) — itu churn, bukan peluang.
 MAX_AUTO_OPENS_PER_DAY    = 6
+
+#: Bawaan dibekukan saat impor — lihat catatan pola di `auto_trader._FROZEN`.
+_FROZEN: dict[str, float] = {"MAX_AUTO_OPENS_PER_DAY": MAX_AUTO_OPENS_PER_DAY}
 # PLAN_SPOT_LANES S5: slot yang DISISIHKAN untuk lane non-Accumulation tiap cycle
 # selama ada kandidatnya. Bukan memaksa entri — slot yang tak terpakai dikembalikan
 # di lintasan kedua. Tujuannya memberi lane kecil kesempatan mengumpulkan sampel.
@@ -619,6 +622,13 @@ async def run_opportunity_loop() -> None:
             try:
                 from agents.shared.config_reader import cfg
                 MAX_OPENS_PER_CYCLE = int(await cfg.get("spot", "max_opens_per_cycle", MAX_OPENS_PER_CYCLE))
+                # Jatah auto-open harian + tangga TP bigmover. Cadangan memakai
+                # nilai BEKU, bukan nilai berjalan — kalau tidak, bawaan hanyut
+                # mengikuti override dan titik pulang hilang.
+                global MAX_AUTO_OPENS_PER_DAY
+                MAX_AUTO_OPENS_PER_DAY = int(await cfg.get(
+                    "spot", "max_auto_opens_per_day", _FROZEN["MAX_AUTO_OPENS_PER_DAY"]))
+                await opp_scanner.refresh_tp_ladder()
                 MAX_BIGMOVER_OPENS  = int(await cfg.get("spot", "max_bigmover_opens", MAX_BIGMOVER_OPENS))
                 DAILY_LOSS_LIMIT_FRACTION = await cfg.get(
                     "spot", "daily_loss_limit_pct", DAILY_LOSS_LIMIT_FRACTION * 100

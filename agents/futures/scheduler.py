@@ -616,6 +616,14 @@ async def run_futures_loop() -> None:
                 a_bm.SHORT_TP_MAX_DROP_FRAC = await cfg.get(
                     "futures", "bigmover_short_tp_max_drop_frac",
                     a_bm._FROZEN_SHORT_TP_MAX_DROP_FRAC)
+                # Tangga TP (kelipatan ATR). Ditarik SEBELUM scan supaya setiap
+                # level yang disusun siklus ini memakai tala yang sama — bukan
+                # campuran nilai lama dan baru dalam satu putaran.
+                for _v, _k in (("TP1_ATR_MULT", "bigmover_tp1_atr_mult"),
+                               ("TP2_ATR_MULT", "bigmover_tp2_atr_mult"),
+                               ("TP3_ATR_MULT", "bigmover_tp3_atr_mult")):
+                    setattr(a_bm, _v, float(await cfg.get(
+                        "futures", _k, a_bm._FROZEN_TP[_v])))
             except Exception as exc:
                 logger.warning("agent_config_pull_failed", scope="futures_scheduler", error=str(exc)[:120])
 

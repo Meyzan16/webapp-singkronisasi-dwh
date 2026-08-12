@@ -164,6 +164,33 @@ BIGMOVER_TP1_RR_MIN       = 1.5
 BIGMOVER_TP1_PCT          = 5.0    # was 3.0
 BIGMOVER_TP2_PCT          = 12.0   # was 6.0
 BIGMOVER_TP3_PCT          = 25.0   # was 10.0
+
+#: Bawaan tangga TP dibekukan saat impor. Lihat catatan pola yang sama di
+#: `auto_trader._FROZEN`: cadangan `cfg.get()` yang memakai nilai berjalan
+#: membuat bawaan hanyut mengikuti override.
+_FROZEN_TP: dict[str, float] = {
+    "BIGMOVER_TP1_PCT": BIGMOVER_TP1_PCT,
+    "BIGMOVER_TP2_PCT": BIGMOVER_TP2_PCT,
+    "BIGMOVER_TP3_PCT": BIGMOVER_TP3_PCT,
+}
+
+
+async def refresh_tp_ladder() -> None:
+    """Tarik tangga TP bigmover SPOT dari `agent_config`.
+
+    Dipanggil scheduler tiap siklus SEBELUM scan, supaya setiap level yang
+    disusun siklus ini memakai tala yang sama — bukan campuran nilai lama dan
+    baru di dalam satu putaran.
+    """
+    try:
+        from agents.shared.config_reader import cfg
+        g = globals()
+        for var, key in (("BIGMOVER_TP1_PCT", "bigmover_tp1_pct"),
+                         ("BIGMOVER_TP2_PCT", "bigmover_tp2_pct"),
+                         ("BIGMOVER_TP3_PCT", "bigmover_tp3_pct")):
+            g[var] = float(await cfg.get("spot", key, _FROZEN_TP[var]))
+    except Exception as exc:
+        logger.warning("spot_tp_ladder_refresh_failed", error=str(exc)[:120])
 # Explosive TP (change_24h ≥ 50%) — coin sudah parabolic, beri ruang lebih besar
 BIGMOVER_EXPLOSIVE_THRESHOLD = 50.0
 BIGMOVER_EXPLOSIVE_TP1_PCT   = 8.0

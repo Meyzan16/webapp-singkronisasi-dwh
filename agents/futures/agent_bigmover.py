@@ -74,6 +74,13 @@ SHORT_TP_MAX_DROP_FRAC = 0.90
 #: bawaan hanyut mengikuti override dan menghapus titik pulang. Pola ini sudah
 #: dua kali jadi bug di proyek ini (monitor SPOT, penyemaian agent_config).
 _FROZEN_SHORT_TP_MAX_DROP_FRAC = SHORT_TP_MAX_DROP_FRAC
+
+#: Tangga TP dalam kelipatan ATR — bawaan dibekukan dengan alasan yang sama.
+_FROZEN_TP: dict[str, float] = {
+    "TP1_ATR_MULT": TP1_ATR_MULT,
+    "TP2_ATR_MULT": TP2_ATR_MULT,
+    "TP3_ATR_MULT": TP3_ATR_MULT,
+}
 from .sl_config import params as _sl_params
 
 # Fixed leverage — A1-A3 mature ATR-based, BM coins too volatile
