@@ -86,6 +86,26 @@ def test_usulan_ditahan_saat_bukti_kurang():
     assert "mfe_kurang" in src
 
 
+def test_sampel_canary_sisi_masuk_disaring_dari_ENTRY_bukan_CLOSE():
+    """Tangga TP dibekukan saat entry. Posisi yang dibuka SEBELUM canary membawa
+    tangga LAMA sampai mati — menyaringnya dgn `closed_at` (benar untuk sisi
+    keluar) akan menilai canary dari sampel yang separuhnya bukan miliknya."""
+    assert "entry_tp_ladder" in er.ENTRY_SIDE_PARAMS
+    src = inspect.getsource(er.evaluate)
+    assert "by_entry=row.param in ENTRY_SIDE_PARAMS" in src
+    q = inspect.getsource(er._lane_exits)
+    assert "FuturesExitEvent.entry_at >= since" in q
+    assert "if by_entry" in q
+
+
+def test_parameter_keluar_tetap_disaring_dari_CLOSE():
+    """Jalur lama harus utuh: posisi yang sudah terbuka LANGSUNG memakai aturan
+    keluar yang baru, jadi exit-nya memang milik canary."""
+    for p in ("tp_atr_mult", "failfast_min_sl_gap", "trail_lock_after_tp1"):
+        assert p not in er.ENTRY_SIDE_PARAMS
+    assert "FuturesExitEvent.closed_at >= since" in inspect.getsource(er._lane_exits)
+
+
 def test_json_usulan_berbentuk_peta_kunci_nilai():
     """Bentuknya harus {kunci: nilai}, bukan daftar — daftar bergantung pada
     urutan, dan urutan yang bergeser diam-diam menukar TP1 dengan TP3."""

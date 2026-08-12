@@ -227,9 +227,19 @@ def _stats(rows: list[FuturesExitEvent]) -> tuple[int, float | None, float | Non
             round(100.0 * wins / len(pnls), 1))
 
 
+#: Parameter yang berlaku SAAT POSISI DIBUKA, bukan saat ditutup.
+#:
+#: Tangga TP dibekukan di entry: posisi yang dibuka SEBELUM canary membawa
+#: tangga lama sampai mati. Menyaringnya dengan `closed_at` — cara yang benar
+#: untuk parameter keluar — akan menghitung posisi ber-tangga LAMA sebagai hasil
+#: canary, dan canary dinilai dari sampel yang separuhnya bukan miliknya.
+ENTRY_SIDE_PARAMS: frozenset[str] = frozenset({"entry_tp_ladder"})
+
+
 async def _lane_exits(session, lane: str, market: str = "futures",
                       since: float | None = None,
-                      until: float | None = None, limit: int = 500) -> list:
+                      until: float | None = None, limit: int = 500,
+                      by_entry: bool = False) -> list:
     q = select(FuturesExitEvent).where(FuturesExitEvent.market == market)
     # Parameter global memakai lane sentinel `all` — memfilter kolom lane ke
     # nilai itu akan mengembalikan NOL baris, dan canary-nya tak akan pernah
@@ -237,7 +247,11 @@ async def _lane_exits(session, lane: str, market: str = "futures",
     if lane != GLOBAL_LANE:
         q = q.where(FuturesExitEvent.lane == lane)
     if since is not None:
-        q = q.where(FuturesExitEvent.closed_at >= since)
+        # Parameter sisi MASUK disaring dari kapan posisi DIBUKA — lihat
+        # ENTRY_SIDE_PARAMS. Memakai closed_at akan memasukkan posisi yang
+        # membawa tangga LAMA ke dalam sampel canary.
+        q = q.where((FuturesExitEvent.entry_at >= since) if by_entry
+                    else (FuturesExitEvent.closed_at >= since))
     if until is not None:
         q = q.where(FuturesExitEvent.closed_at < until)
     q = q.order_by(FuturesExitEvent.closed_at.desc()).limit(limit)
@@ -424,8 +438,15 @@ async def start_canary(rollout_id: int) -> dict:
 async def evaluate(rollout_id: int) -> dict:
     """Bandingkan hasil SESUDAH aktivasi dengan baseline, lalu putuskan.
 
-    Hanya exit yang tertutup sesudah `activated_at` yang dihitung — posisi yang
-    sudah terbuka masih memakai parameter lama.
+    Batas sampelnya BERBEDA menurut sisi parameternya:
+
+    * sisi KELUAR — disaring dari `closed_at`. Posisi yang sudah terbuka saat
+      canary menyala langsung memakai aturan keluar yang baru, jadi exit-nya
+      memang milik canary.
+    * sisi MASUK (`ENTRY_SIDE_PARAMS`) — disaring dari `entry_at`. Tangga TP
+      dibekukan saat entry, jadi posisi yang dibuka sebelum canary membawa
+      tangga LAMA sampai mati. Menghitungnya akan menilai canary dari sampel
+      yang separuhnya bukan miliknya.
     """
     if not is_db_available():
         return {"status": "db_unavailable"}
@@ -439,7 +460,8 @@ async def evaluate(rollout_id: int) -> dict:
             return {"status": "bukan_canary", "stage": row.stage}
 
         after = await _lane_exits(session, row.lane, row.market,
-                                  since=row.activated_at or 0.0)
+                                  since=row.activated_at or 0.0,
+                                  by_entry=row.param in ENTRY_SIDE_PARAMS)
         n, exp, wr = _stats(after)
         row.observed_n, row.observed_expectancy, row.observed_win_rate = n, exp, wr
 
