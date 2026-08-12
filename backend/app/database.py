@@ -188,6 +188,8 @@ async def _migrate_columns(connection) -> None:
         # Tahapan penyalaan kini melayani SPOT juga; baris warisan seluruhnya futures.
         "ALTER TABLE futures_exit_rollouts ADD COLUMN IF NOT EXISTS market VARCHAR(10) "
         "NOT NULL DEFAULT 'futures'",
+        # Parameter majemuk (tangga TP) — satu baris, beberapa kunci config.
+        "ALTER TABLE futures_exit_rollouts ADD COLUMN IF NOT EXISTS proposed_json TEXT",
         # Safety-net: create tables that may be missing if backend started before these models were added.
         "CREATE TABLE IF NOT EXISTS app_settings ("
         "  key VARCHAR(100) PRIMARY KEY,"

@@ -28,6 +28,7 @@ loop learning, dan naik ke canary tetap butuh perintah eksplisit.
 
 from __future__ import annotations
 
+import json
 import time
 
 import structlog
@@ -56,6 +57,8 @@ def param_config_key(param: str, lane: str, market: str = "futures") -> tuple[st
             return "spot", scfg.tp_lane_key(lane)
         if param in GLOBAL_PARAMS:
             return "spot", GLOBAL_PARAMS[param]
+        if param in COMPOSITE_PARAMS:
+            return "spot", COMPOSITE_PARAMS[param]["spot"][0]
         raise ValueError(f"parameter keluar SPOT tak dikenal: {param}")
 
     from agents.futures import monitor_config as mcfg
@@ -65,7 +68,33 @@ def param_config_key(param: str, lane: str, market: str = "futures") -> tuple[st
         return "futures", mcfg.failfast_gap_key(lane)
     if param in GLOBAL_PARAMS:
         return "futures", GLOBAL_PARAMS[param]
+    if param in COMPOSITE_PARAMS:
+        return "futures", COMPOSITE_PARAMS[param]["futures"][0]
     raise ValueError(f"parameter keluar tak dikenal: {param}")
+
+
+# ── Parameter MAJEMUK: satu baris rollout, beberapa kunci config ─────────────
+#
+# Tangga TP adalah tiga angka yang HARUS bergerak bersama. Tiga baris terpisah
+# akan salah dua kali: aturan satu-canary-per-market memblokir dua sisanya, dan
+# TP1 yang berubah sendirian mengubah BENTUK tangganya — hasilnya tak lagi
+# mencerminkan usulan mana pun.
+#
+# Ini juga parameter sisi MASUK pertama yang melewati tahapan ini. Mekanismenya
+# sengaja dipakai ulang, bukan disalin: sisi SPOT dan katalog Formulas dua-duanya
+# pernah lahir sebagai salinan lalu menyimpang diam-diam.
+COMPOSITE_PARAMS: dict[str, dict[str, tuple[str, ...]]] = {
+    "entry_tp_ladder": {
+        "futures": ("bigmover_tp1_atr_mult", "bigmover_tp2_atr_mult",
+                    "bigmover_tp3_atr_mult"),
+        "spot":     ("bigmover_tp1_pct", "bigmover_tp2_pct", "bigmover_tp3_pct"),
+    },
+}
+
+
+def composite_keys(param: str, market: str) -> tuple[str, ...]:
+    """Kunci config yang ditulis sebuah parameter majemuk, terurut TP1→TP3."""
+    return COMPOSITE_PARAMS.get(param, {}).get(market, ())
 
 
 #: Parameter yang BUKAN per-lane. Populasi "posisi yang menyentuh TP1" terlalu
@@ -111,6 +140,11 @@ _ARAH_AGRESIF: dict[str, int] = {
     "failfast_min_sl_gap":   +1,   # makin BESAR = fail-fast makin sering diblokir
     "trail_lock_after_tp1":  +1,   # makin BESAR = kunci sesudah TP1 makin ketat
     "trail_advance_tp1_tp2": -1,   # makin KECIL = lantai naik makin dini
+    # Majemuk: dinilai dari anak tangga PERTAMA (`proposed_value`), karena TP1
+    # yang paling menentukan seberapa sering posisi keluar lebih awal. Ini
+    # perbandingan PARSIAL — tangga dengan TP1 sama tapi ekor berbeda dianggap
+    # setara. Disebut terus terang di sini supaya tak dikira menyeluruh.
+    "entry_tp_ladder":       -1,   # TP1 makin KECIL = target makin dipangkas
 }
 
 
@@ -159,11 +193,13 @@ async def _ditolak_dgn_bukti(session, market: str, lane: str, param: str,
 #: memaksakan parameter futures ke sana akan menulis kunci yang tak pernah dibaca.
 SUPPORTED_PARAMS_BY_MARKET: dict[str, tuple[str, ...]] = {
     "futures": ("tp_atr_mult", "failfast_min_sl_gap",
-                "trail_lock_after_tp1", "trail_advance_tp1_tp2"),
+                "trail_lock_after_tp1", "trail_advance_tp1_tp2",
+                "entry_tp_ladder"),
     # SPOT kini punya kunci config sendiri untuk kedua parameter trailing, jadi
     # usulannya benar-benar sampai ke monitor. Fail-fast tetap khusus futures —
     # monitor SPOT memakai pemicu lain (rotasi, trend_reversal).
-    "spot": ("tp_atr_mult", "trail_lock_after_tp1", "trail_advance_tp1_tp2"),
+    "spot": ("tp_atr_mult", "trail_lock_after_tp1", "trail_advance_tp1_tp2",
+             "entry_tp_ladder"),
 }
 
 SUPPORTED_PARAMS: tuple[str, ...] = SUPPORTED_PARAMS_BY_MARKET["futures"]
@@ -220,11 +256,15 @@ async def _config_value(session, group: str, key: str) -> tuple[AgentConfig | No
 # ── Tahap 1: catat usulan sebagai shadow ──────────────────────────────────────
 
 async def propose(lane: str, param: str, value: float, reason: str = "",
-                  market: str = "futures") -> dict:
+                  market: str = "futures", values: dict | None = None) -> dict:
     """Catat usulan sebagai `shadow` beserta baseline lane saat ini.
 
     Baseline diambil SEKARANG — sebelum angka berlaku — karena itulah satu-satunya
     saat pembanding masih bersih.
+
+    `values` diisi untuk parameter MAJEMUK (mis. tangga TP): peta kunci→nilai
+    yang akan ditulis bersamaan saat naik ke canary. `value` tetap diisi anak
+    tangga pertama supaya kode dan tampilan lama tak perlu tahu soal ini.
     """
     didukung = SUPPORTED_PARAMS_BY_MARKET.get(market, ())
     if param not in didukung:
@@ -270,6 +310,8 @@ async def propose(lane: str, param: str, value: float, reason: str = "",
             proposed_value=value, previous_value=current,
             baseline_n=n, baseline_expectancy=exp, baseline_win_rate=wr,
             reason=reason or "usulan dari ledger keluar",
+            proposed_json=(json.dumps({"keys": values}, ensure_ascii=False)
+                           if values else None),
         )
         session.add(row)
         await session.commit()
@@ -327,18 +369,44 @@ async def start_canary(rollout_id: int) -> dict:
                               f"bersamaan membuat hasilnya tak bisa diatribusikan"}
 
         group, key = param_config_key(row.param, row.lane, row.market)
-        cfg_row, current = await _config_value(session, group, key)
-        if cfg_row is None:
-            return {"status": "baris_config_hilang", "key": key}
-        row.previous_value = current
-        cfg_row.value_num = row.proposed_value
-        cfg_row.updated_at = time.time()
-        cfg_row.updated_by = "exit_rollout"
+
+        # Parameter MAJEMUK menulis semua kuncinya sekaligus. Menulis sebagian
+        # akan meninggalkan tangga TP setengah berubah — bentuk yang tak pernah
+        # diusulkan siapa pun, dan hasilnya tak mencerminkan apa-apa.
+        _keys = composite_keys(row.param, row.market)
+        current = None          # diisi kedua cabang — dipakai blok `return`
+        if _keys:
+            _usul = json.loads(row.proposed_json or "{}").get("keys", {})
+            _lama: dict[str, float] = {}
+            for k in _keys:
+                cr, cur = await _config_value(session, group, k)
+                if cr is None:
+                    return {"status": "baris_config_hilang", "key": k}
+                _lama[k] = cur
+                cr.value_num = float(_usul[k])
+                cr.updated_at = time.time()
+                cr.updated_by = "exit_rollout"
+            row.proposed_json = json.dumps({"keys": _usul, "previous": _lama},
+                                           ensure_ascii=False)
+            row.previous_value = _lama[_keys[0]]
+            current = _lama[_keys[0]]
+            row.reason = (f"canary majemuk: " +
+                          "; ".join(f"{k} {_lama[k]} -> {_usul[k]}" for k in _keys) +
+                          f"; baseline n={row.baseline_n} "
+                          f"expectancy={row.baseline_expectancy}")
+        else:
+            cfg_row, current = await _config_value(session, group, key)
+            if cfg_row is None:
+                return {"status": "baris_config_hilang", "key": key}
+            row.previous_value = current
+            cfg_row.value_num = row.proposed_value
+            cfg_row.updated_at = time.time()
+            cfg_row.updated_by = "exit_rollout"
+            row.reason = (f"canary: {key} {current} -> {row.proposed_value}; "
+                          f"baseline n={row.baseline_n} "
+                          f"expectancy={row.baseline_expectancy}")
         row.stage = "canary"
         row.activated_at = time.time()
-        row.reason = (f"canary: {key} {current} -> {row.proposed_value}; "
-                      f"baseline n={row.baseline_n} "
-                      f"expectancy={row.baseline_expectancy}")
         await session.commit()
         out = {"status": "ok", "stage": "canary", "id": row.id,
                "market": row.market, "lane": row.lane,
@@ -430,14 +498,31 @@ async def rollback(rollout_id: int, reason: str = "dibalik manual") -> dict:
             return {"status": "tak_bisa_dibalik", "stage": row.stage}
 
         group, key = param_config_key(row.param, row.lane, row.market)
-        cfg_row, _ = await _config_value(session, group, key)
-        if cfg_row is not None:
-            cfg_row.value_num = row.previous_value
-            cfg_row.updated_at = time.time()
-            cfg_row.updated_by = "exit_rollout_rollback"
+
+        # Majemuk: kembalikan SEMUA kuncinya. Mengembalikan sebagian akan
+        # meninggalkan tangga campuran — separuh nilai usulan, separuh nilai
+        # lama — yang tak pernah diuji dan tak pernah dipilih siapa pun.
+        _keys = composite_keys(row.param, row.market)
+        if _keys:
+            _lama = json.loads(row.proposed_json or "{}").get("previous", {})
+            _pulih = []
+            for k in _keys:
+                cr, _ = await _config_value(session, group, k)
+                if cr is not None and k in _lama:
+                    cr.value_num = float(_lama[k])
+                    cr.updated_at = time.time()
+                    cr.updated_by = "exit_rollout_rollback"
+                    _pulih.append(f"{k}->{_lama[k]}")
+            row.reason = f"{reason}; dikembalikan: " + ", ".join(_pulih)
+        else:
+            cfg_row, _ = await _config_value(session, group, key)
+            if cfg_row is not None:
+                cfg_row.value_num = row.previous_value
+                cfg_row.updated_at = time.time()
+                cfg_row.updated_by = "exit_rollout_rollback"
+            row.reason = f"{reason}; {key} dikembalikan ke {row.previous_value}"
         row.stage = "rolled_back"
         row.decided_at = time.time()
-        row.reason = f"{reason}; {key} dikembalikan ke {row.previous_value}"
         await session.commit()
         out = {"status": "ok", "stage": "rolled_back", "id": row.id,
                "market": row.market, "lane": row.lane, "param": row.param, "key": key,
@@ -496,7 +581,34 @@ async def propose_from_recommendations(days: int = 90, market: str = "futures") 
             reason=rec.get("note", ""))
         (dilewati if _r.get("status") == "ditolak_dgn_bukti" else hasil).append(_r)
 
+    await _usulkan_tangga_masuk(days, market, hasil, dilewati)
     return {"status": "ok", "market": market, "diusulkan": hasil, "dilewati": dilewati}
+
+
+async def _usulkan_tangga_masuk(days: int, market: str,
+                                hasil: list, dilewati: list) -> None:
+    """Alirkan tangga TP sisi MASUK ke antrean, sebagai SATU baris majemuk.
+
+    Ketiga anak tangga bergerak utuh — lihat `COMPOSITE_PARAMS`. Tetap masuk
+    `shadow`: tak ada yang berlaku sampai dinaikkan secara eksplisit.
+    """
+    from agents.learning.exit_learning import recommend_entry_tp_ladder
+    for lane in ("bigmover",):
+        lad = await recommend_entry_tp_ladder(days=days, market=market, lane=lane)
+        if not lad.get("recommendation_ready"):
+            dilewati.append({"lane": lane, "param": "entry_tp_ladder",
+                             "reason": f"mfe_kurang ({lad.get('n_mfe')}/"
+                                       f"{lad.get('required')})"})
+            continue
+        keys = composite_keys("entry_tp_ladder", market)
+        vals = dict(zip(keys, lad["suggested_ladder"]))
+        r = await propose(
+            lane, "entry_tp_ladder", lad["suggested_ladder"][0], market=market,
+            values=vals,
+            reason=(f"tangga dari MFE n={lad['n_mfe']}: p50/p75/p90 = "
+                    f"{lad['mfe_atr']['p50']}/{lad['mfe_atr']['p75']}"
+                    f"/{lad['mfe_atr']['p90']} ATR"))
+        (dilewati if r.get("status") == "ditolak_dgn_bukti" else hasil).append(r)
 
 
 # ── Loop: maju sendiri sejauh yang aman ───────────────────────────────────────

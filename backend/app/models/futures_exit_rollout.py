@@ -55,6 +55,18 @@ class FuturesExitRollout(Base):
     proposed_value: Mapped[float] = mapped_column(Float, nullable=False)
     previous_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
+    #: Parameter MAJEMUK — satu baris yang menulis BEBERAPA kunci config sekaligus.
+    #:
+    #: Tangga TP adalah tiga angka yang HARUS bergerak bersama: mengubah TP1
+    #: sendirian mengubah bentuk tangganya, dan mengajukannya sebagai tiga baris
+    #: terpisah membuat aturan satu-canary-per-market memblokir dua sisanya.
+    #: `proposed_value` tetap diisi anak tangga pertama supaya tampilan dan kode
+    #: lama tak perlu tahu soal ini.
+    #:
+    #: Bentuk: {"keys": {kunci: nilai_baru}, "previous": {kunci: nilai_lama}}
+    #: Kosong = parameter tunggal seperti biasa.
+    proposed_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     #: Metrik lane SEBELUM angka baru berlaku — pembanding satu-satunya yang sah.
     baseline_n:          Mapped[int]   = mapped_column(Integer, nullable=False, default=0)
     baseline_expectancy: Mapped[float | None] = mapped_column(Float, nullable=True)
