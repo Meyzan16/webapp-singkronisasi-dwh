@@ -610,6 +610,12 @@ async def run_futures_loop() -> None:
                 # PLAN_v15 P3c: weekend size damper — DB-overridable like MIN_SCORE
                 a_bm.WEEKEND_SIZE_MULT = await cfg.get(
                     "futures", "weekend_size_mult", a_bm.WEEKEND_SIZE_MULT)
+                # Lantai target SHORT. Cadangannya nilai BEKU, bukan nilai modul
+                # yang baru saja ditimpa siklus sebelumnya — kalau tidak, bawaan
+                # ikut hanyut dan tak ada lagi titik pulang yang benar.
+                a_bm.SHORT_TP_MAX_DROP_FRAC = await cfg.get(
+                    "futures", "bigmover_short_tp_max_drop_frac",
+                    a_bm._FROZEN_SHORT_TP_MAX_DROP_FRAC)
             except Exception as exc:
                 logger.warning("agent_config_pull_failed", scope="futures_scheduler", error=str(exc)[:120])
 

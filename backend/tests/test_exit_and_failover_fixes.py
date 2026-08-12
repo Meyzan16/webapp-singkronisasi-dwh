@@ -79,6 +79,36 @@ def test_lantai_benar_benar_diterapkan_di_kode():
         assert f"{tp} = max({tp}, _lantai_short)" in src, f"{tp} tak diberi lantai"
 
 
+def test_lantai_short_bisa_ditala_lewat_config():
+    """Konstanta modul tanpa kunci config = tombol yang tak bisa diputar. Kunci
+    ini ditarik scheduler tiap siklus, sama seperti MIN_SCORE."""
+    src = pathlib.Path("../agents/futures/scheduler.py").read_text(encoding="utf-8")
+    assert "bigmover_short_tp_max_drop_frac" in src, "override tak pernah ditarik"
+    assert "a_bm.SHORT_TP_MAX_DROP_FRAC =" in src
+
+
+def test_bawaan_lantai_short_dibekukan():
+    """Cadangan `cfg.get()` HARUS nilai beku, bukan nilai modul yang sudah
+    ditimpa siklus sebelumnya — kalau tidak bawaan hanyut mengikuti override.
+    Pola ini sudah dua kali jadi bug di proyek ini."""
+    from agents.futures import agent_bigmover as bm
+    asli = bm.SHORT_TP_MAX_DROP_FRAC
+    try:
+        bm.SHORT_TP_MAX_DROP_FRAC = 0.5          # tiruan override
+        assert bm._FROZEN_SHORT_TP_MAX_DROP_FRAC == 0.90
+    finally:
+        bm.SHORT_TP_MAX_DROP_FRAC = asli
+    src = pathlib.Path("../agents/futures/scheduler.py").read_text(encoding="utf-8")
+    assert "a_bm._FROZEN_SHORT_TP_MAX_DROP_FRAC" in src, \
+        "scheduler memakai nilai modul sbg cadangan — bawaan akan hanyut"
+
+
+def test_baris_config_lantai_short_tersedia():
+    src = pathlib.Path("app/services/agent_config_defaults.py").read_text(encoding="utf-8")
+    assert '"key": "bigmover_short_tp_max_drop_frac"' in src
+    assert '"default": 0.90' in src
+
+
 # ── 3. failover host SPOT benar-benar dipanggil ──────────────────────────────
 
 def test_failover_ada_DAN_dipakai():

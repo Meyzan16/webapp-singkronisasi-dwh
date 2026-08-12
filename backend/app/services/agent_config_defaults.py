@@ -54,6 +54,12 @@ DEFAULTS: list[dict] = [
     # ── FUTURES — score threshold ────────────────────────────────────────────
     {"group": "futures", "key": "bigmover_min_score", "default": 60, "category": "threshold",
      "description": "BigMover agent — score minimum (fixed, tanpa adaptive threshold)"},
+    {"group": "futures", "key": "bigmover_short_tp_max_drop_frac", "default": 0.90,
+     "category": "threshold",
+     "description": ("Penurunan harga TERBESAR yang boleh jadi target SHORT, sbg porsi harga masuk. "
+                     "SHORT untung maksimum 100% (harga ke nol), jadi target di luar itu MUSTAHIL "
+                     "tersentuh. Bawaan 0,90 hanya menggigit koin ber-ATR ekstrem — terukur 11 Agu: "
+                     "TUTUSDT ATR 26,67% menghasilkan tp2/tp3 berharga NEGATIF.")},
     # ── FUTURES — quota ───────────────────────────────────────────────────────
     {"group": "futures", "key": "max_auto_positions", "default": 6, "category": "quota",
      "description": "Max posisi futures terbuka bersamaan (GLOBAL, semua lane)"},

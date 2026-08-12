@@ -68,6 +68,12 @@ TP3_ATR_MULT     = 6.0
 #: 0,90 dipilih karena pada koin normal tangga TP tak pernah sedekat itu ke nol,
 #: sehingga lantai ini HANYA menggigit pada kasus yang memang sudah rusak.
 SHORT_TP_MAX_DROP_FRAC = 0.90
+
+#: Bawaan dibekukan saat impor. `scheduler` menimpa nilai modul di atas tiap
+#: siklus; memakai nilai yang SUDAH ditimpa sebagai cadangan `cfg.get()` membuat
+#: bawaan hanyut mengikuti override dan menghapus titik pulang. Pola ini sudah
+#: dua kali jadi bug di proyek ini (monitor SPOT, penyemaian agent_config).
+_FROZEN_SHORT_TP_MAX_DROP_FRAC = SHORT_TP_MAX_DROP_FRAC
 from .sl_config import params as _sl_params
 
 # Fixed leverage — A1-A3 mature ATR-based, BM coins too volatile
