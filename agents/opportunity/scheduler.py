@@ -601,6 +601,18 @@ async def run_opportunity_loop() -> None:
 
     while True:
         try:
+            # Failover host SPOT: cek host utama tiap siklus (ber-cooldown
+            # sendiri). Tanpa panggilan ini, `BINANCE_FALLBACK_URL` yang sudah
+            # dikonfigurasi tak pernah dipakai — dan scanner mati diam-diam
+            # selama host utama diblokir (terjadi 11 Agu, ~12 jam).
+            try:
+                from app.services.binance_urls import refresh_spot_host
+                _fo = await refresh_spot_host()
+                if _fo.get("status") in ("beralih", "pulih", "dua_duanya_mati"):
+                    logger.warning("spot_host_failover", **_fo)
+            except Exception as _exc:
+                logger.warning("spot_host_failover_gagal", error=str(_exc)[:100])
+
             # PLAN_v5 Group C: pull DB overrides once per cycle (see scanner.py
             # run_opportunity_scan for the full rationale on `global` here).
             global MAX_OPENS_PER_CYCLE, MAX_BIGMOVER_OPENS, DAILY_LOSS_LIMIT_FRACTION

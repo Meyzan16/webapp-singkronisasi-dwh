@@ -55,6 +55,19 @@ EXTREME_CHANGE_24H = 150.0     # ≥ this → extreme tier: size ½ (time-stop 9
 TP1_ATR_MULT     = 2.0
 TP2_ATR_MULT     = 4.0
 TP3_ATR_MULT     = 6.0
+
+#: Penurunan harga TERBESAR yang boleh dijadikan target SHORT, sebagai porsi
+#: harga masuk. SHORT untung maksimum 100% (harga ke nol), jadi target di luar
+#: itu bukan sekadar ambisius — ia MUSTAHIL tersentuh selamanya.
+#:
+#: Terukur 11 Agu: TUTUSDT ber-ATR 26,67% menghasilkan tp2 = −0,0076 dan
+#: tp3 = −0,0685 (harga NEGATIF), karena tangga dibangun `price − atr × 4/6`
+#: tanpa lantai. 2 dari 53 trade futures terkena, dua-duanya koin ATR ekstrem.
+#: Posisi jadi hanya bisa keluar lewat SL.
+#:
+#: 0,90 dipilih karena pada koin normal tangga TP tak pernah sedekat itu ke nol,
+#: sehingga lantai ini HANYA menggigit pada kasus yang memang sudah rusak.
+SHORT_TP_MAX_DROP_FRAC = 0.90
 from .sl_config import params as _sl_params
 
 # Fixed leverage — A1-A3 mature ATR-based, BM coins too volatile
@@ -330,6 +343,13 @@ def _calc_levels(
         tp1 = price - atr * TP1_ATR_MULT if not _use_quiet else price * (1 - sl_pct * TP1_ATR_MULT / 100 / _slp['fallback_atr_mult'])
         tp2 = price - atr * TP2_ATR_MULT if not _use_quiet else price * (1 - sl_pct * TP2_ATR_MULT / 100 / _slp['fallback_atr_mult'])
         tp3 = price - atr * TP3_ATR_MULT if not _use_quiet else price * (1 - sl_pct * TP3_ATR_MULT / 100 / _slp['fallback_atr_mult'])
+        # Lantai: target SHORT tak boleh menembus (atau melewati) nol — lihat
+        # SHORT_TP_MAX_DROP_FRAC. Tanpa ini koin ber-ATR ekstrem menghasilkan
+        # harga target NEGATIF yang mustahil tersentuh.
+        _lantai_short = price * (1 - SHORT_TP_MAX_DROP_FRAC)
+        tp1 = max(tp1, _lantai_short)
+        tp2 = max(tp2, _lantai_short)
+        tp3 = max(tp3, _lantai_short)
         tp1_pct = (price - tp1) / price * 100
         tp2_pct = (price - tp2) / price * 100
         tp3_pct = (price - tp3) / price * 100

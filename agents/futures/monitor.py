@@ -982,7 +982,31 @@ async def check_futures_positions() -> tuple[int, int]:
                             logger.info("fail_fast_suppressed", symbol=trade.symbol,
                                         lane=lane, sl_gap=_gap_actual,
                                         gap_needed=mcfg.failfast_sl_gap(lane))
-                        if _confirm_ff and _gap_ok:
+                        # Kalau SL SUDAH tertembus, fail-fast tak boleh ikut campur.
+                        #
+                        # Terukur 11 Agu: BLUAIUSDT SHORT ber-SL 7,99% dibukukan
+                        # di −16,96% karena fail-fast dievaluasi LEBIH DULU
+                        # (baris ~985) daripada blok SL (~1187) dan menutup di
+                        # harga pasar berjalan. Blok SL sengaja memakai
+                        # `close_price = sl` — stop order sungguhan terisi di
+                        # harga stop, bukan di harga setelah harga lari jauh.
+                        # Dua kejadian, ~$13 kerugian yang tak pernah nyata.
+                        #
+                        # Dengan melewatkan fail-fast di sini, blok SL yang
+                        # menangani — beserta label sl_hit/sl_plus/breakeven_stop
+                        # yang benar.
+                        _sl_tertembus = ((direction == "LONG" and eff_low <= sl)
+                                         or (direction != "LONG" and eff_high >= sl))
+                        if _confirm_ff and _gap_ok and _sl_tertembus:
+                            _append_trade_event(meta, "fail_fast_after_sl", {
+                                "lane": lane, "sl": round(sl, 8),
+                                "price": round(price, 8),
+                            })
+                            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+                            logger.info("fail_fast_dilewati_sl_tertembus",
+                                        symbol=trade.symbol, lane=lane,
+                                        sl=round(sl, 8), price=round(price, 8))
+                        if _confirm_ff and _gap_ok and not _sl_tertembus:
                             new_status   = "sl"
                             close_price  = round(price, 8)
                             close_reason = "fail_fast"
