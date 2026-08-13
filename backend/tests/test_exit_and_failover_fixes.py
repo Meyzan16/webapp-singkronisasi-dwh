@@ -144,3 +144,27 @@ async def test_probe_ber_cooldown():
     bu._probe_at = __import__("time").time()
     hasil = await bu.refresh_spot_host()
     assert hasil["status"] == "dilewati"
+
+
+def test_failover_punya_tugas_MANDIRI_bukan_di_loop_scanner():
+    """Terukur 13 Agu: host utama mati, kedua scanner macet 42 menit, dan
+    failover TIDAK menyala (`_active_spot` masih None) — karena ia dipanggil
+    dari ATAS loop scanner, sementara loop itu terjebak menunggu timeout pada
+    host yang sudah mati.
+
+    Penyelamat yang menunggu di belakang pintu yang dikuncinya sendiri. Ia harus
+    berjalan sebagai tugas terpisah supaya tak ikut terblokir.
+    """
+    from app.services import binance_urls as bu
+    assert hasattr(bu, "run_host_watchdog")
+    main_src = pathlib.Path("app/main.py").read_text(encoding="utf-8")
+    assert "run_host_watchdog()" in main_src, "watchdog tak pernah dijalankan"
+    assert "asyncio.create_task(run_host_watchdog" in main_src, \
+        "watchdog dipanggil inline — ia akan ikut terblokir"
+
+
+def test_watchdog_memaksa_probe_bukan_menunggu_cooldown():
+    """Cooldown 300 dtk berguna saat dipanggil tiap siklus scanner. Watchdog
+    punya iramanya sendiri, jadi menunggu cooldown akan melewatkan giliran."""
+    from app.services import binance_urls as bu
+    assert "refresh_spot_host(force=True)" in inspect.getsource(bu.run_host_watchdog)

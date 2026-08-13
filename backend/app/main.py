@@ -156,6 +156,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     db_watchdog_task = asyncio.create_task(_db_watchdog())
 
+    # Penjaga host SPOT — tugas MANDIRI, bukan di dalam loop scanner.
+    # 13 Agu: host utama mati, kedua scanner macet 42 menit, dan failover-nya
+    # tak pernah menyala karena ia dipanggil dari atas loop yang justru sedang
+    # terjebak menunggu timeout pada host mati itu. Tugas terpisah tak ikut
+    # terblokir, jadi ia tetap bisa memindahkan host selagi loop utama macet.
+    from app.services.binance_urls import run_host_watchdog
+    host_watchdog_task = asyncio.create_task(run_host_watchdog())
+
     # ── Background agents ─────────────────────────────────────────────────────
     if _AGENTS_STANDALONE:
         logger.info("agents_mode", mode="standalone", msg="agents run in separate container")

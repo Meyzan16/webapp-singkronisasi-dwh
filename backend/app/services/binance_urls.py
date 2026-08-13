@@ -32,6 +32,34 @@ def get_spot_url() -> str:
     return _active_spot or get_settings().binance_spot_url
 
 
+async def run_host_watchdog(interval_sec: float = 120.0) -> None:
+    """Loop MANDIRI yang menjaga host SPOT tetap hidup.
+
+    Kenapa berdiri sendiri, bukan di dalam loop scanner seperti versi pertama:
+    terukur 13 Agu, `www.binance.bh` mati lagi dan kedua scanner macet 42 menit.
+    Failover-nya TIDAK menyala — `_active_spot` masih None — karena ia dipanggil
+    dari atas loop scanner, sementara loop itu justru terjebak menunggu timeout
+    pada host yang sudah mati. Penyelamat yang menunggu di belakang pintu yang
+    dikuncinya sendiri.
+
+    Tugas terpisah tak ikut terblokir, jadi ia tetap bisa memindahkan host
+    selagi loop utama macet — dan loop itu pulih sendiri pada percobaan
+    berikutnya karena `spot()` sudah menunjuk host yang hidup.
+    """
+    import asyncio
+
+    import structlog
+    log = structlog.get_logger(__name__)
+    while True:
+        try:
+            hasil = await refresh_spot_host(force=True)
+            if hasil.get("status") in ("beralih", "pulih", "dua_duanya_mati"):
+                log.warning("spot_host_watchdog", **hasil)
+        except Exception as exc:
+            log.warning("spot_host_watchdog_gagal", error=str(exc)[:120])
+        await asyncio.sleep(interval_sec)
+
+
 async def refresh_spot_host(force: bool = False) -> dict:
     """Cek host utama; alihkan ke cadangan bila mati, kembalikan bila pulih.
 
