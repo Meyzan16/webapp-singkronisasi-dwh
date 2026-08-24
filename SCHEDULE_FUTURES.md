@@ -11,7 +11,57 @@ filter ≥ ini. Baseline validasi: 2026-07-11.
 
 ---
 
+## ⛔ HASIL GATE — dicatat 24 Agu 2026
+
+Semua tanggal di jadwal bawah **sudah lewat**. Hasilnya belum pernah dituliskan,
+jadi dicatat di sini dari state DB agar jadwal ini berhenti terbaca seolah masih
+menunggu.
+
+### Gate Live (~25 Jul) dan Gate Hari-30 (~10 Agu): **GAGAL — tidak lolos**
+
+| Kriteria gate | Target | Nyata (24 Agu) | |
+|---|---|---|---|
+| Rasio hari WIN : LOSS | ≥ 25 : ≤5 | **0 : 7** | ❌ |
+| Day-WR | ≥ 80% | **0%** | ❌ |
+| Win rate futures | — | 44,7% (76 closed) | ❌ |
+| Expectancy | ≥ +$2/trade | **−$1,59/trade** (−120,70 total) | ❌ |
+
+Tujuh hari terakhir yang punya trade tertutup — **seluruhnya LOSS**:
+
+```
+08-20 −8,70 · 08-19 −8,70 · 08-14 −2,11 · 08-13 −1,71
+08-12 −1,69 · 08-11 −21,32 · 08-10 −11,88
+```
+
+### Konsekuensi yang mengikat
+
+- **Item G (maker-first, kalibrasi testnet, deposit kecil) TIDAK BOLEH dimulai.**
+  Prasyaratnya gate lolos; gate gagal telak.
+- **`PLAN-LIVE-TRADING.md` tetap LOCKED.** Syaratnya WR ≥ 55%; futures 44,7%,
+  spot 47,1% (102 closed).
+- **Aturan 14-hari "lane expectancy negatif DIMATIKAN" jatuh tempo** dan belum
+  dijalankan. Menurut aturan itu sendiri, kandidatnya sekarang:
+
+| Lane | n | WR | Expectancy | Vonis menurut aturan |
+|---|---|---|---|---|
+| momentum | 15 | 6,7% | −3,67 | **matikan** (WR jauh < 40%, exp < 0) |
+| bigmover | 55 | 54,5% | −1,13 | perbaiki dulu (WR > 40% → aturan tak menyuruh matikan) |
+| pre_gainer | 3 | 33,3% | −4,38 | sampel < 10, aturan belum berlaku |
+| accumulation | 3 | 66,7% | +3,26 | sampel < 10, aturan belum berlaku |
+
+Penyalaan/pematian lane tetap **keputusan pemilik** — dicatat di sini sebagai
+tagihan yang jatuh tempo, bukan tindakan yang diambil sendiri.
+
+### Catatan jeda data
+Futures tak punya trade tertutup sejak **20 Agu 20:31** (0 posisi terbuka) karena
+service mati; SPOT tetap jalan (terakhir 24 Agu 20:21). Service dinyalakan kembali
+24 Agu — hitungan hari-30 berikutnya baru sahih dari data setelah ini.
+
+---
+
 ## JADWAL EKSEKUSI
+
+> Bagian di bawah ini **arsip** — tanggalnya sudah lewat, hasil di atas.
 
 ### 📅 14 Jul — Item B: kalibrasi agent1/agent2 (hanya bila masih dormant)
 Cek near-miss 3 hari era-H; H mungkin sudah cukup (bukti dini: a2 near-miss 63).

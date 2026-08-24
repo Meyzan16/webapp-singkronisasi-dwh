@@ -125,11 +125,43 @@ BELUM dikerjakan (butuh kehati-hatian — bisa OVERFIT periode):
 ### ✅ SELESAI
 - Fase 0 (fix bug ECONNRESET) · Fase 3 (monitoring Telegram) · Fase 1 shadow-compare (alat ukur) · Fase 1b fix strategi dasar futures #1 overextension + #2 floor lane-lemah · pelacak arah forward.
 
-### ▶️ FASE A — Validasi Forward (SEKARANG, pasif, ~3-7 hari) — GATE semua fase lain
-- A1. Pantau #1+#2 bertahan forward via Telegram (shadow@72, arah 70-80, per-lane).
-- A2. Konfirmasi expectancy futures tetap >=0 pada data BARU (bukan cuma 11.5 hari historis).
-- A3. Cek apakah edge SHORT bertahan atau memang artefak squeeze.
-- Kerja: nol kode. Cuma observasi. Semua keputusan di bawah menunggu bukti ini.
+### ❌ FASE A — Validasi Forward: **SELESAI, HASILNYA GAGAL** (dicatat 24 Agu)
+
+Window 3-7 hari sudah lewat sebulan. Vonis dari data forward (76 exit futures):
+
+- **A2 GAGAL — expectancy TIDAK bertahan ≥0.** Counterfactual 23 Jul menjanjikan
+  +0,19% / PF 1,05. Forward nyata: **−$1,59/trade**, total **−$120,70**, WR 44,7%.
+  Perbaikan #1 (overextension) + #2 (floor lane lemah) **tidak bertahan forward** —
+  persis risiko overfit yang ditulis sendiri di plan ini.
+- **A1** — arah per-lane forward:
+
+| Lane | n | WR | Expectancy |
+|---|---|---|---|
+| bigmover | 55 | 54,5% | −1,13 |
+| momentum | 15 | **6,7%** | −3,67 |
+| accumulation | 3 | 66,7% | +3,26 |
+| pre_gainer | 3 | 33,3% | −4,38 |
+
+- **A3** — edge SHORT tak bisa disimpulkan: sampel per arah terlalu tipis setelah
+  dipecah per lane.
+
+**Konsekuensi:** karena Fase A adalah **gate** untuk semua fase di bawahnya, dan
+gate itu gagal, urutan berubah — lihat "PRIORITAS SETELAH FASE A GAGAL".
+
+### PRIORITAS SETELAH FASE A GAGAL (24 Agu)
+
+Fase A gagal berarti **masalahnya bukan di lapisan learning**, tapi di ekonomi
+trade-nya sendiri. Bukti paling tajam: **bigmover menang 54,5% tapi tetap rugi.**
+Menaikkan akurasi seleksi tak akan menolong sistem yang kalah walau sering menang —
+yang salah adalah *ukuran* menang vs kalah.
+
+1. **C2 naik jadi prioritas #1** (dulu "menyusul"): audit SL/TP asimetris bigmover.
+   Ini satu-satunya temuan yang menjelaskan WR 54,5% + expectancy negatif.
+2. **C3 momentum** — WR 6,7% dari 15 exit; kandidat pause (keputusan pemilik).
+3. **B (flip adaptive_score) DITAHAN.** Membuat seleksi lebih pintar tak menambal
+   R:R yang rusak; lift shadow-compare juga masih ~0.
+4. **D (promosi model) tetap terkunci** — gate `outcome_completeness` dan
+   `walkforward_passed` masih blokir.
 
 ### FASE B — Selesaikan Fase 1: aktifkan kontribusi skor FUTURES (setelah A lulus)
 - B1. Buat bobot canonical (signal_id:*) menyimpang dari 1.0 — butuh outcome matang lebih banyak + weight_updater lebih tajam.

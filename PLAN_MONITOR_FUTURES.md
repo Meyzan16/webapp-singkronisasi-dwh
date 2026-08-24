@@ -198,9 +198,52 @@ futures (−0,76%, PF 0,612).
 | profit_protection | 5 | +6,778% | 100% |
 
 ### Sisa
-Tak ada fase terbuka. Yang menunggu waktu, bukan pekerjaan: MAE terkumpul (M4b),
-sampel `fail_fast` mencapai ambang (M3), dan keputusan pemilik untuk menyalakan
-canary pertama (M5).
+
+> **Status diperbarui 24 Agu 2026** dari state live (DB + endpoint). Catatan lama
+> "belum ada yang dinyalakan" sudah tidak berlaku — lihat di bawah.
+
+**M5 sudah dinyalakan.** `monitor_exit_learning_enabled` = **1** untuk *futures*
+**dan** *spot* (default 0). Rollout sudah berjalan satu putaran penuh:
+
+| Tahap | Isi |
+|---|---|
+| canary (1) | `futures/bigmover/failfast_min_sl_gap` 0,000 → 1,260 (12 Agu) |
+| shadow (4) | `spot/accumulation/tp_atr_mult` · `futures/bigmover/entry_tp_ladder` · `spot/bigmover/tp_atr_mult` · `futures/momentum/tp_atr_mult` |
+| rolled_back (4) | 2× macet 0/15 outcome · 2× expectancy di bawah baseline |
+
+**Canary yang berjalan sedang MEMBURUK** — dan inilah gunanya baseline direkam:
+
+| | n | expectancy | WR |
+|---|---|---|---|
+| baseline | 44 | −0,664 | 61,4% |
+| observed | 11 | **−2,138** | **27,3%** |
+
+Belum diputuskan karena n=11 di bawah ambang keputusan. Kalau arah ini bertahan
+sampai ambang, `advance()` akan membalikkannya sendiri. **Perlu dipantau, bukan
+dibiarkan** — ini satu-satunya parameter keluar yang sedang menyentuh keputusan.
+
+**Yang kini SIAP dikerjakan (data sudah cukup):**
+- **M4b lanjutan — rekomendasi lebar SL.** MAE terkumpul **51 sampel** (ambang 30).
+  Rekomendasi yang sengaja ditahan sejak `cd153b7` sekarang boleh dihitung.
+
+**Yang masih menunggu data:**
+- **M3** — usul otomatis `fail_fast`: baru **3** sampel di ledger, ambang 5 per lane.
+
+**Temuan dari data terbaru (bahan M4b/C2), 76 exit futures:**
+
+| Lane | n | WR | Expectancy | Total |
+|---|---|---|---|---|
+| bigmover | 55 | 54,5% | −1,13 | −62,35 |
+| momentum | 15 | **6,7%** | −3,67 | −54,99 |
+| accumulation | 3 | 66,7% | +3,26 | +9,79 |
+| pre_gainer | 3 | 33,3% | −4,38 | −13,15 |
+
+Dua hal yang dibaca dari tabel ini:
+1. **bigmover menang lebih sering (54,5%) tapi tetap rugi** — bukti langsung bahwa
+   masalahnya *ukuran*, bukan *arah*: rugi rata-rata melampaui untung rata-rata.
+   Ini persis kandidat M4b (lebar SL) dan C2 (SL/TP asimetris).
+2. **momentum WR 6,7% dari 15 exit** — jauh lebih buruk dari perkiraan sebelumnya.
+   Kandidat pause lane, tapi keputusan itu milik pemilik.
 
 ---
 
