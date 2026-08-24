@@ -390,6 +390,20 @@ async def exit_learning_sl_width(days: int = Query(90, ge=1, le=365)) -> dict:
     return await analyze_sl_width(days=days)
 
 
+@router.get("/futures/exit-learning/sl-recommendation", dependencies=[Depends(require_db)])
+async def exit_learning_sl_recommendation(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Usulan lebar SL per lane, batas bawahnya dari MAE posisi yang MENANG."""
+    from agents.learning.exit_learning import recommend_sl_width
+    return await recommend_sl_width(days=days)
+
+
+@router.get("/spot/exit-learning/sl-recommendation", dependencies=[Depends(require_db)])
+async def spot_exit_learning_sl_recommendation(days: int = Query(90, ge=1, le=365)) -> dict:
+    """Padanan SPOT — fungsi yang sama, satu jalur kode, hanya beda market."""
+    from agents.learning.exit_learning import recommend_sl_width
+    return await recommend_sl_width(days=days, market="spot")
+
+
 @router.get("/futures/exit-learning/trail", dependencies=[Depends(require_db)])
 async def exit_learning_trail(days: int = Query(90, ge=1, le=365)) -> dict:
     """Usulan dua parameter trailing, dari perbandingan hasil counterfactual."""

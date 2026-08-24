@@ -698,6 +698,141 @@ async def analyze_sl_width(days: int = 90, market: str = "futures") -> dict:
     }
 
 
+# ── M4b lanjutan: usulan lebar SL dari MAE ───────────────────────────────────
+
+#: Sampel ber-MAE minimum per lane sebelum lebar SL-nya boleh dinilai.
+SL_LANE_MIN_MAE = 8
+
+#: Pemenang ber-MAE minimum. Inilah populasi yang menentukan batas bawah: SL yang
+#: lebih sempit dari drawdown terdalam seorang pemenang akan memotongnya.
+SL_MIN_WINNERS = 5
+
+#: Ruang aman di atas MAE pemenang terdalam. Pemenang berikutnya boleh sedikit
+#: lebih dalam dari yang pernah terjadi tanpa langsung terpotong.
+SL_SAFETY_MARGIN = 1.25
+
+#: Penyempitan minimum (fraksi) supaya usulan layak diajukan. Di bawah ini bedanya
+#: tak sepadan dengan risiko mengubah gerbang yang diskalakan ke `risk_pct`.
+SL_MIN_SHRINK = 0.15
+
+#: Penyempitan MAKSIMUM dalam satu usulan. Tanpa batas ini, lane yang pemenangnya
+#: kebetulan tak pernah drawdown (mis. 6 pemenang, MAE terdalam 0,26× ATR) akan
+#: mengusulkan potong 79% sekali jalan — angka yang benar terhadap sampel yang ada,
+#: tapi rapuh terhadap pemenang berikutnya. Sama alasannya dengan step-cap bobot:
+#: bergerak ke arah yang benar, sedikit demi sedikit, sambil terus diukur.
+SL_MAX_SHRINK = 0.40
+
+
+async def recommend_sl_width(days: int = 90, market: str = "futures") -> dict:
+    """Usulan lebar SL per lane, diturunkan dari gerak MELAWAN terdalam (MAE).
+
+    Pertanyaan yang menentukan bukan "seberapa jauh harga sempat menguntungkan"
+    (MFE), melainkan **seberapa dalam harga sempat melawan sebelum berbalik**.
+    Karena itu batas bawahnya diambil dari MAE **posisi yang MENANG**: SL yang
+    lebih sempit dari drawdown terdalam seorang pemenang akan memotong posisi yang
+    sebenarnya akan menang — kerugian yang tak terlihat di statistik mana pun.
+
+    Setiap usulan disertai counterfactual terhadap ledger, bukan janji:
+    berapa pemenang yang akan terpotong (harus 0) dan berapa pecundang yang akan
+    dihentikan lebih awal beserta ATR yang dihemat.
+    """
+    if not is_db_available():
+        return {"status": "db_unavailable"}
+
+    cutoff = time.time() - days * 86400
+    async with AsyncSessionLocal() as session:
+        rows = list((await session.execute(
+            select(ExitEvent).where(ExitEvent.closed_at >= cutoff,
+                                    ExitEvent.market == market)
+        )).scalars().all())
+
+    by_lane: dict[str, list] = {}
+    for r in rows:
+        if r.mae_atr is not None and r.sl_dist_atr and r.pnl_pct is not None:
+            by_lane.setdefault(r.lane or "-", []).append(r)
+
+    recs = []
+    for lane, group in sorted(by_lane.items(), key=lambda kv: -len(kv[1])):
+        n = len(group)
+        winners = [r for r in group if r.pnl_pct > 0]
+        losers = [r for r in group if r.pnl_pct <= 0]
+
+        if n < SL_LANE_MIN_MAE or len(winners) < SL_MIN_WINNERS:
+            recs.append({"lane": lane, "n": n, "n_winners": len(winners),
+                         "status": "sampel_kurang",
+                         "required_mae": SL_LANE_MIN_MAE,
+                         "required_winners": SL_MIN_WINNERS,
+                         "note": "batas bawah SL hanya boleh ditarik dari MAE pemenang; "
+                                 "sampel pemenang belum cukup untuk itu"})
+            continue
+
+        current = median([r.sl_dist_atr for r in group])
+        mae_win_max = max(r.mae_atr for r in winners)
+        raw_proposed = round(mae_win_max * SL_SAFETY_MARGIN, 3)
+
+        # Batas langkah: jangan pernah memotong lebih dari SL_MAX_SHRINK sekali jalan.
+        floor_by_cap = round(current * (1 - SL_MAX_SHRINK), 3)
+        capped = raw_proposed < floor_by_cap
+        proposed = floor_by_cap if capped else raw_proposed
+
+        if proposed >= current * (1 - SL_MIN_SHRINK):
+            recs.append({"lane": lane, "n": n, "n_winners": len(winners),
+                         "status": "biarkan",
+                         "current_sl_atr": round(current, 3),
+                         "mae_winner_max_atr": round(mae_win_max, 3),
+                         "note": f"SL sekarang ({current:.2f}× ATR) sudah dekat dengan "
+                                 f"drawdown terdalam pemenang ({mae_win_max:.2f}× ATR). "
+                                 f"Penyempitan di bawah {SL_MIN_SHRINK:.0%} tak sepadan."})
+            continue
+
+        # Counterfactual terhadap ledger — bukan proyeksi.
+        winners_cut = [r for r in winners if r.mae_atr >= proposed]
+        losers_capped = [r for r in losers if r.mae_atr >= proposed]
+        saved_atr = sum(min(r.mae_atr, r.sl_dist_atr) - proposed for r in losers_capped)
+
+        atr_pct_med = median([r.atr_pct for r in group if r.atr_pct]) if any(
+            r.atr_pct for r in group) else None
+
+        recs.append({
+            "lane": lane, "n": n, "n_winners": len(winners), "n_losers": len(losers),
+            # Pemenang terpotong > 0 berarti usulan ini memakan pemenang: tahan.
+            "status": "ok" if not winners_cut else "ditahan",
+            "current_sl_atr": round(current, 3),
+            "proposed_sl_atr": proposed,
+            "shrink_frac": round(1 - proposed / current, 3),
+            "proposed_sl_pct": (round(proposed * atr_pct_med, 2) if atr_pct_med else None),
+            "mae_winner_max_atr": round(mae_win_max, 3),
+            "mae_all_median_atr": round(median([r.mae_atr for r in group]), 3),
+            # Jejak pembatasan: nilai mentah dari data vs nilai yang benar-benar
+            # diusulkan setelah batas langkah. Tanpa ini, capping tak terlihat.
+            "raw_proposed_atr": raw_proposed,
+            "step_capped": capped,
+            "winners_cut": len(winners_cut),
+            "losers_capped": len(losers_capped),
+            "atr_saved_total": round(saved_atr, 2),
+            "note": (
+                f"Pemenang terdalam di lane ini hanya melawan {mae_win_max:.2f}× ATR, "
+                f"sementara SL dipasang {current:.2f}× ATR — {1 - proposed / current:.0%} "
+                f"dari jarak itu tak pernah terpakai oleh satu pun pemenang. "
+                f"Pada {n} exit yang tercatat, SL {proposed}× ATR memotong "
+                f"{len(winners_cut)} pemenang dan menghentikan {len(losers_capped)} "
+                f"pecundang lebih awal (hemat ~{saved_atr:.1f}× ATR)."
+                + (f" Data sebenarnya membolehkan {raw_proposed}× ATR, tapi dibatasi "
+                   f"ke {SL_MAX_SHRINK:.0%} per langkah — usulan berikutnya boleh "
+                   f"melanjutkan setelah angka ini terbukti." if capped else "")
+                if not winners_cut else
+                f"DITAHAN: usulan {proposed}× ATR akan memotong {len(winners_cut)} "
+                f"posisi yang sebenarnya menang."),
+        })
+
+    return {"status": "ok", "window_days": days, "market": market,
+            "recommendations": recs,
+            "safety_margin": SL_SAFETY_MARGIN,
+            "min_shrink": SL_MIN_SHRINK,
+            "note": ("Batas bawah diambil dari MAE pemenang, bukan MFE dan bukan MAE "
+                     "keseluruhan. Usulan yang memotong satu pun pemenang ditahan.")}
+
+
 # ── M8: dua parameter trailing ────────────────────────────────────────────────
 
 #: Sampel minimum (posisi yang BENAR-BENAR menyentuh TP1) sebelum usulan trailing
