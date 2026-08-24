@@ -17,7 +17,27 @@
 
 ---
 
-## F1 — Endpoint config rusak: seluruh UI tala **buta** 🔴
+## F1 — Endpoint config rusak: seluruh UI tala **buta** ✅ SELESAI `7506e20`
+
+**Hasil.** Endpoint pulih: `errors` kosong, spot 10 kunci / futures 9 / learning 5,
+bersih lewat backend maupun proxy frontend.
+
+Audit menyeluruh menemukan **7 atribut hilang, bukan 3** — sisanya tersembunyi
+karena error pertama menjatuhkan grup sebelum atribut berikutnya dievaluasi.
+
+Sekalian diperbaiki kekeliruan yang lebih dalam: 6 nilai itu dibaca **langsung dari
+atribut modul**, padahal backend dan agen jalan di proses terpisah — jadi yang
+tampil selama ini adalah *default*, bukan nilai yang berlaku. Kini lewat `cfg.get()`.
+Terbukti: endpoint melaporkan `max_age_fresh 10,0` / `momentum 5,0`, sama persis
+dengan yang dicetak agen saat start.
+
+Jaring pengaman 21 test: daftar atribut **dibaca dari sumber**, bukan diketik ulang,
+sehingga rujukan yang ditambahkan nanti ikut terjaga. Sudah dibuktikan menangkap
+regresi (rujukan sengaja dirusak → 2 test gagal di dua lapis). 370 test lulus.
+
+<details>
+<summary>Uraian masalah aslinya</summary>
+
 
 **Temuan.** `GET /api/v1/agent/config` mengembalikan `{"spot":{},"futures":{},"learning":{}}`
 — **kosong untuk ketiga grup** — dengan tiga error:
@@ -44,6 +64,8 @@ keras. Agen **tidak** terpengaruh (mereka membaca DB langsung), jadi nol risiko
 keputusan trading.
 
 **Ukuran:** kecil · **Risiko:** nol · **Dampak:** mengembalikan seluruh kendali UI
+
+</details>
 
 ---
 
@@ -122,7 +144,8 @@ membuat trade berikutnya lebih sehat.
 ## Urutan yang disarankan
 
 ```
-F1 (buta → melihat)  →  F2 (hentikan yang berdarah)  →  F3 (perbaiki sumbernya)  →  F4
+F1 ✅ selesai  →  F2 (hentikan yang berdarah)  →  F3 (perbaiki sumbernya)  →  F4
+                  ↑ berikutnya
 ```
 
 F1 lebih dulu karena tanpa UI yang hidup, F2 dan F3 dinilai dari terminal saja.
