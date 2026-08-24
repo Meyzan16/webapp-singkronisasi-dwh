@@ -30,6 +30,9 @@ async def _spot_config() -> dict:
     from agents.opportunity import scanner as sc
     from agents.opportunity import scheduler as sched
     from agents.opportunity import monitor as mon
+    # M7: ambang keputusan monitor pindah ke monitor_config; membacanya dari
+    # `monitor` menaikkan AttributeError yang menjatuhkan SELURUH grup ini.
+    from agents.opportunity import monitor_config as scfg
     from agents.shared.config_reader import cfg
 
     # PLAN_v5 Group C fix: backend and agents run in SEPARATE processes/containers
@@ -55,6 +58,12 @@ async def _spot_config() -> dict:
     max_bigmover_opens   = await cfg.get("spot", "max_bigmover_opens", sched.MAX_BIGMOVER_OPENS)
     early_radar_max_open = await cfg.get("spot", "early_radar_max_open", sc.EARLY_RADAR_MAX_OPEN)
     daily_loss_limit_pct = await cfg.get("spot", "daily_loss_limit_pct", sched.DAILY_LOSS_LIMIT_FRACTION * 100)
+    # Dibaca lewat cfg.get dengan kunci registry monitor_config — sama alasannya
+    # dengan blok di atas: proses backend tak pernah melihat `global` milik agen,
+    # jadi membaca atribut modul hanya memberi DEFAULT, bukan nilai yang berlaku.
+    min_hold_minutes    = await cfg.get("spot", "monitor_min_hold_minutes", scfg.MIN_HOLD_MINUTES)
+    max_age_fresh       = await cfg.get("spot", "monitor_max_age_fresh_setup", scfg.MAX_AGE_DAYS_FRESH_SETUP)
+    max_age_momentum    = await cfg.get("spot", "monitor_max_age_momentum_chase", scfg.MAX_AGE_DAYS_MOMENTUM_CHASE)
 
     return {
         "scan_interval_sec": sched.INTERVAL_SEC,
@@ -104,9 +113,9 @@ async def _spot_config() -> dict:
             "daily_loss_limit_pct":         round(daily_loss_limit_pct, 2),
         },
         "monitor": {
-            "min_hold_minutes":         mon.MIN_HOLD_MINUTES,
-            "max_age_fresh_setup_days": mon.MAX_AGE_DAYS_FRESH_SETUP,
-            "max_age_momentum_days":    mon.MAX_AGE_DAYS_MOMENTUM_CHASE,
+            "min_hold_minutes":         min_hold_minutes,
+            "max_age_fresh_setup_days": max_age_fresh,
+            "max_age_momentum_days":    max_age_momentum,
             "profit_lock_tiers": [
                 {"peak_pct": p, "lock_frac": f} for p, f in mon._PROFIT_LOCK_TIERS_SPOT
             ],
@@ -117,6 +126,8 @@ async def _spot_config() -> dict:
 async def _futures_config() -> dict:
     from agents.futures import scheduler as fsched
     from agents.futures import monitor as fmon
+    # M2: 24 konstanta keputusan dihapus dari monitor.py dan dipusatkan di sini.
+    from agents.futures import monitor_config as fmcfg
     from agents.futures import auto_trader as at
     from agents.futures import risk_gate as rg
     from agents.futures import agent1, agent2, agent3, agent_bigmover
@@ -156,7 +167,9 @@ async def _futures_config() -> dict:
     bm_daily_sl_stop    = await cfg.get("futures", "bigmover_daily_sl_stop", at.BIGMOVER_DAILY_SL_STOP)
     weekend_size_mult   = await cfg.get("futures", "weekend_size_mult", agent_bigmover.WEEKEND_SIZE_MULT)
     max_same_direction  = await cfg.get("futures", "max_same_direction", at.MAX_SAME_DIRECTION)
-    failfast_atr_mult   = await cfg.get("futures", "failfast_atr_mult", fmon.FAILFAST_ATR_MULT)
+    failfast_atr_mult   = await cfg.get("futures", "failfast_atr_mult", fmcfg.FAILFAST_ATR_MULT)
+    max_age_days        = await cfg.get("futures", "monitor_max_age_days", fmcfg.MAX_AGE_DAYS)
+    max_age_extensions  = await cfg.get("futures", "monitor_max_age_extensions", fmcfg.MAX_AGE_EXTENSIONS)
 
     return {
         "scan_interval_sec": fsched.INTERVAL_SEC,
@@ -192,8 +205,8 @@ async def _futures_config() -> dict:
             "auto_open_threshold_fallback": at.AUTO_OPEN_THRESHOLD,
         },
         "monitor": {
-            "max_age_days":       fmon.MAX_AGE_DAYS,
-            "max_age_extensions": fmon.MAX_AGE_EXTENSIONS,
+            "max_age_days":       max_age_days,
+            "max_age_extensions": int(max_age_extensions),
             "lane_margin_caps_pct": {
                 "accumulation": lane_cap_accum,
                 "pre_gainer":   lane_cap_pregain,
@@ -229,12 +242,17 @@ async def _futures_config() -> dict:
 
 async def _learning_config() -> dict:
     from agents.opportunity import weight_updater as wu
+    # `learning.step_cap` nyatanya dibaca oleh weight_updater FUTURES
+    # (`futures/weight_updater.py` → cfg.get("learning", "step_cap", STEP_CAP));
+    # sisi spot tak lagi punya konstanta itu. Defaultnya diambil dari modul yang
+    # benar-benar memakainya, bukan dari modul yang kebetulan senama.
+    from agents.futures import weight_updater as fwu_learn
     from agents.shared import cross_agent_learning as cal
     from agents.shared.config_reader import cfg
 
     training_window_days = await cfg.get("learning", "training_window_days", wu.TRAINING_WINDOW_D)
     decay_half_life_days  = await cfg.get("learning", "decay_half_life_days", wu.DECAY_HALF_LIFE_D)
-    step_cap              = await cfg.get("learning", "step_cap", wu.STEP_CAP)
+    step_cap              = await cfg.get("learning", "step_cap", fwu_learn.STEP_CAP)
     cross_blend           = await cfg.get("learning", "cross_blend", cal.CROSS_BLEND)
 
     return {
