@@ -227,6 +227,23 @@ def _stats(rows: list[FuturesExitEvent]) -> tuple[int, float | None, float | Non
             round(100.0 * wins / len(pnls), 1))
 
 
+def _komposisi(rows: list[FuturesExitEvent]) -> str:
+    """Ringkas alasan tutup selama canary, mis. `sl_hit×8, sl_plus×5, fail_fast×1`.
+
+    Canary dinilai dari expectancy SELURUH lane, padahal sebuah parameter belum
+    tentu menyentuh semua exit di dalamnya. Terukur 24 Agu: canary
+    `failfast_min_sl_gap` dinilai dari 14 exit, padahal hanya **1** yang lewat
+    jalur fail-fast — kerugiannya datang dari `sl_hit` yang tak disentuhnya.
+
+    Komposisi ini tidak mengubah vonis; ia membuat vonis bisa dibaca. Tanpa ini,
+    "dibalik: expectancy di bawah baseline" terbaca seolah parameternya bersalah,
+    padahal buktinya bisa saja tak menyinggung parameter itu sama sekali.
+    """
+    from collections import Counter
+    c = Counter((r.close_reason or "?") for r in rows)
+    return ", ".join(f"{k}×{v}" for k, v in c.most_common())
+
+
 #: Parameter yang berlaku SAAT POSISI DIBUKA, bukan saat ditutup.
 #:
 #: Tangga TP dibekukan di entry: posisi yang dibuka SEBELUM canary membawa
@@ -473,11 +490,12 @@ async def evaluate(rollout_id: int) -> dict:
         base = row.baseline_expectancy if row.baseline_expectancy is not None else 0.0
         lulus = exp is not None and exp >= base - CANARY_TOLERANCE_PCT
         row.decided_at = time.time()
+        komposisi = _komposisi(after)
 
         if lulus:
             row.stage = "active"
             row.reason = (f"lulus: expectancy {exp} vs baseline {base} "
-                          f"(toleransi {CANARY_TOLERANCE_PCT}), n={n}")
+                          f"(toleransi {CANARY_TOLERANCE_PCT}), n={n} [{komposisi}]")
         else:
             group, key = param_config_key(row.param, row.lane, row.market)
             cfg_row, _ = await _config_value(session, group, key)
@@ -487,7 +505,7 @@ async def evaluate(rollout_id: int) -> dict:
                 cfg_row.updated_by = "exit_rollout_rollback"
             row.stage = "rolled_back"
             row.reason = (f"dibalik: expectancy {exp} di bawah baseline {base} "
-                          f"(toleransi {CANARY_TOLERANCE_PCT}), n={n}; "
+                          f"(toleransi {CANARY_TOLERANCE_PCT}), n={n} [{komposisi}]; "
                           f"{key} dikembalikan ke {row.previous_value}")
 
         await session.commit()
@@ -496,7 +514,8 @@ async def evaluate(rollout_id: int) -> dict:
                "param": row.param, "reason": row.reason,
                "baseline": {"n": row.baseline_n, "expectancy_pct": base,
                             "win_rate": row.baseline_win_rate},
-               "observed": {"n": n, "expectancy_pct": exp, "win_rate": wr}}
+               "observed": {"n": n, "expectancy_pct": exp, "win_rate": wr,
+                            "close_reasons": komposisi}}
 
     logger.info("exit_rollout_decided", lane=out["lane"], param=out["param"],
                 stage=out["stage"])

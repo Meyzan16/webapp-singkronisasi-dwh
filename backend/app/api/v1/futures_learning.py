@@ -460,10 +460,18 @@ async def exit_rollout_evaluate(rollout_id: int) -> dict:
 
 
 @router.post("/futures/exit-rollout/{rollout_id}/rollback", dependencies=[Depends(require_db)])
-async def exit_rollout_rollback(rollout_id: int) -> dict:
-    """Kembalikan parameter ke nilai sebelumnya."""
+async def exit_rollout_rollback(
+    rollout_id: int,
+    reason: str = Query("dibalik manual", max_length=400),
+) -> dict:
+    """Kembalikan parameter ke nilai sebelumnya.
+
+    `reason` diteruskan ke ledger: pembalikan tanpa alasan tercatat memaksa orang
+    berikutnya menebak-nebak kenapa sebuah percobaan dihentikan. `rollback()`
+    sudah menerimanya sejak awal; endpoint ini dulu membuangnya diam-diam.
+    """
     from agents.learning.exit_rollout import rollback
-    return await rollback(rollout_id)
+    return await rollback(rollout_id, reason=reason)
 
 
 @router.post("/futures/exit-learning/apply", dependencies=[Depends(require_db)])
