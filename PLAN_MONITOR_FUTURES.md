@@ -222,12 +222,32 @@ Belum diputuskan karena n=11 di bawah ambang keputusan. Kalau arah ini bertahan
 sampai ambang, `advance()` akan membalikkannya sendiri. **Perlu dipantau, bukan
 dibiarkan** — ini satu-satunya parameter keluar yang sedang menyentuh keputusan.
 
-**Yang kini SIAP dikerjakan (data sudah cukup):**
-- **M4b lanjutan — rekomendasi lebar SL.** MAE terkumpul **51 sampel** (ambang 30).
-  Rekomendasi yang sengaja ditahan sejak `cd153b7` sekarang boleh dihitung.
+### M4b lanjutan — usulan lebar SL diterbitkan ✅ `188fa32`
+
+Batas bawah SL diambil dari **MAE posisi yang MENANG**, bukan MFE dan bukan MAE
+keseluruhan (yang dibebani pecundang). `recommend_sl_width()` + endpoint kedua
+market. Tiap usulan membawa counterfactual terhadap ledger, bukan janji.
+
+| Market / lane | SL sekarang | Usulan | Pemenang terpotong | Hemat |
+|---|---|---|---|---|
+| spot/accumulation | 7,66× ATR | **5,83×** (−24%) | **0** | 8,1× ATR |
+| futures/bigmover | 1,50× ATR | **0,90×** (−40%, dibatasi dari 0,32) | **0** | 2,2× ATR |
+| spot/bigmover | — | *sampel kurang* (3 pemenang) | — | — |
+
+Tiga pengaman: usulan yang memotong ≥1 pemenang **ditahan**; lane butuh 8 MAE **dan**
+5 pemenang; **step-cap 40%** per langkah — tanpa itu futures/bigmover mengusulkan
+potong 79% sekali jalan (benar terhadap 6 pemenangnya, rapuh terhadap pemenang
+ke-7). Nol keputusan trading berubah; penyalaan tetap milik pemilik.
+
+> **Koreksi hitungan sampel.** Catatan sebelumnya menyebut "MAE 51 sampel" — itu
+> **futures + spot dijumlah**. Per market: futures **21**, spot **30**. Jadi ambang
+> global 30 baru dilewati SPOT; `sl_recommendation_ready` futures masih `false`.
+> Usulan futures/bigmover di atas tetap sah karena gerbangnya **per lane**
+> (8 MAE + 5 pemenang), bukan gerbang global itu.
 
 **Yang masih menunggu data:**
 - **M3** — usul otomatis `fail_fast`: baru **3** sampel di ledger, ambang 5 per lane.
+- **M4b futures** — `mae_n` 21/30 untuk lampu hijau tingkat-market.
 
 **Temuan dari data terbaru (bahan M4b/C2), 76 exit futures:**
 
