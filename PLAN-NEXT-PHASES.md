@@ -69,7 +69,31 @@ keputusan trading.
 
 ---
 
-## F2 — Canary yang sedang berjalan sedang memburuk 🔴
+## F2 — Canary yang sedang berjalan sedang memburuk ✅ SELESAI `14ae065`
+
+**Vonisnya berbeda dari dugaan awal.** Angka "memburuk" itu benar, tapi menyesatkan.
+
+Ditelusuri ke ledger: dari **14 exit** bigmover sejak aktivasi, hanya **1** yang lewat
+jalur fail-fast. Kerugiannya datang dari **8 `sl_hit` senilai −21,5%** — yang tak
+disentuh parameter ini sama sekali. Dan `fail_fast_suppressed` **nihil di seluruh
+ledger**: gap 1,26 tak pernah sekali pun menolak pemotongan selama 12 hari.
+
+Jadi parameternya **menganggur**, lalu nyaris dihukum atas kerugian yang bukan
+perbuatannya. Dibalik dengan alasan itu — bukan "memburuk" — dan config kembali ke 0.
+Slot canary (hanya boleh satu pada satu waktu) kini **bebas untuk F3**.
+
+Dua perbaikan supaya tak terulang:
+- `evaluate()` menyertakan komposisi alasan tutup di vonisnya, mis.
+  `[sl_hit×8, sl_plus×5, fail_fast×1]` — tak mengubah keputusan, membuatnya bisa dibaca.
+- Endpoint rollback meneruskan `reason` yang selama ini dibuang diam-diam.
+
+Yang **tidak** diubah: ambang `CANARY_MIN_OUTCOMES=15` dan logika vonisnya. Penjaga
+`_ditolak_dgn_bukti` sudah benar mengabaikan pembalikan ber-`observed_n < 15`, jadi
+parameter ini tetap boleh diusulkan lagi. 370 test lulus.
+
+<details>
+<summary>Uraian masalah aslinya</summary>
+
 
 `futures/bigmover/failfast_min_sl_gap` (aktif 12 Agu):
 
@@ -85,6 +109,8 @@ ambangnya lebih tinggi, putuskan sadar: tunggu, atau balikkan lebih awal. Yang
 nyata.
 
 **Ukuran:** kecil · **Risiko:** menyentuh keputusan keluar · **Dampak:** hentikan kerugian berjalan
+
+</details>
 
 ---
 
@@ -103,7 +129,7 @@ Modalnya sudah ada dari M4b hari ini:
 
 **Rencana.** Jalankan lewat mekanisme yang sudah ada (M5: shadow → canary 1 lane →
 active/rolled_back), bukan saklar langsung. Baseline direkam sebelum angka berlaku;
-hanya exit sesudah aktivasi yang dihitung. **Menunggu F2 selesai** — dua canary
+hanya exit sesudah aktivasi yang dihitung. **F2 sudah selesai, slot bebas** — dua canary
 sekaligus membuat hasilnya mustahil ditafsirkan (disiplin yang ditulis M5 sendiri).
 
 **Ukuran:** sedang · **Risiko:** terkendali lewat rollout · **Dampak:** menyerang sumber kerugian terbesar
@@ -144,8 +170,8 @@ membuat trade berikutnya lebih sehat.
 ## Urutan yang disarankan
 
 ```
-F1 ✅ selesai  →  F2 (hentikan yang berdarah)  →  F3 (perbaiki sumbernya)  →  F4
-                  ↑ berikutnya
+F1 ✅  →  F2 ✅  →  F3 (perbaiki sumbernya)  →  F4
+                    ↑ berikutnya — slot canary sudah bebas
 ```
 
 F1 lebih dulu karena tanpa UI yang hidup, F2 dan F3 dinilai dari terminal saja.
