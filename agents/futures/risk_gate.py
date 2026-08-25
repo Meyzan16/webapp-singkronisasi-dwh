@@ -79,6 +79,19 @@ _FROZEN_PAUSE: dict[str, float] = {
 #: Berapa kali tiap lane sudah dijeda berturut tanpa sempat membaik.
 _lane_pause_streak: dict[str, int] = {}
 
+#: Kunci `app_settings` tempat jeda lane disimpan.
+#:
+#: Terukur 24-25 Agu: `momentum` dijeda TIGA kali dalam ~15 jam, `streak` selalu 1,
+#: dan jeda kedua datang kurang dari dua jam setelah yang pertama. Jeda 24 jam itu
+#: sama sekali tak menahan — setiap restart backend mengosongkan ingatannya, lane
+#: hidup kembali, lalu dijeda lagi dari nol. Jeda berlipat yang dirancang
+#: (24 j → 48 j → … → 168 j) karena itu tak pernah sekali pun tercapai.
+_LANE_PAUSE_KEY = "futures_lane_pause_state"
+
+#: Sudah dipulihkan dari DB? Pemuatan hanya sekali per proses; sesudah itu memori
+#: adalah sumber kebenarannya dan DB hanya menerima salinannya.
+_lane_pause_loaded = False
+
 # ── PLAN_v15 P1/P2/P8 — daily gates & consecutive-loss breaker ────────────────
 WIB_UTC_OFFSET_H          = 7      # daily boundaries follow WIB (UTC+7), same as spot
 DAILY_LOSS_LIMIT_PCT      = 2.5    # P1: realized day loss ≥ this % of balance → stop opens
@@ -428,6 +441,11 @@ async def evaluate_risk_gate() -> None:
     if not is_db_available():
         return  # keep existing state; don't block on DB unavailability
 
+    # F4: pulihkan jeda lane SEBELUM menilai. Kalau tidak, `update_lane_wr` di
+    # bawah melihat dict kosong, menyimpulkan lane belum pernah dijeda, dan
+    # memulai jeda baru dari streak 1 — persis kebocoran yang diperbaiki di sini.
+    await load_lane_pause_state()
+
     # PLAN_v5 Group C: pull DB overrides once per evaluation. NOTE: DD_HARD_STOP_PCT/
     # DD_RECOVER_PCT are deliberately NOT wired here — _scaled_dd_threshold() below
     # computes them fresh from wallet size on every call and would immediately
@@ -501,6 +519,10 @@ async def evaluate_risk_gate() -> None:
             from agents.shared.trade_outcome import is_win as _is_win
             wins  = sum(1 for t in recent if _is_win(t))
             update_lane_wr(lane_name, wins, len(recent))
+
+        # F4: simpan sesudah SELURUH lane dinilai — satu tulisan per evaluasi,
+        # bukan satu per lane.
+        await save_lane_pause_state()
 
         # PLAN_v11 A1: Sharpe dari window rolling (N terakhir), bukan kumulatif —
         # supaya performa terbaru bisa MEMBUKA kembali gate (keluar dari deadlock).
@@ -583,6 +605,85 @@ def get_lane_wr(lane: str) -> tuple[float, int]:
     total = int(d.get("total", 0))
     wr = (d.get("wins", 0) / total) if total else 0.0
     return wr, total
+
+
+async def load_lane_pause_state() -> None:
+    """Pulihkan jeda lane + hitungan pengulangannya dari DB — sekali per proses.
+
+    Tanpa ini, restart mengosongkan `_lane_paused_until`, sehingga lane yang
+    sedang dijeda langsung boleh membuka posisi lagi, lalu dijeda ulang dari
+    streak 1. Jeda yang dimaksudkan menahan justru menjadi pintu putar.
+
+    Jeda yang sudah lewat dibuang saat dimuat: menyimpannya hanya membuat dict
+    tumbuh tanpa mengubah keputusan apa pun.
+    """
+    global _lane_paused_until, _lane_pause_streak, _lane_pause_loaded
+    if _lane_pause_loaded:
+        return
+    _lane_pause_loaded = True          # sekali jalan, sukses atau gagal
+    # Impor di dalam fungsi mengikuti pola modul ini: `select`/`is_db_available`
+    # sengaja TIDAK di scope modul supaya risk_gate bisa diimpor tanpa DB siap.
+    from app.database import is_db_available
+    if not is_db_available():
+        return
+    try:
+        import json as _json
+        from sqlalchemy import select
+        from app.database import AsyncSessionLocal
+        from app.models.app_settings import AppSettings
+
+        async with AsyncSessionLocal() as session:
+            row = (await session.execute(select(AppSettings).where(
+                AppSettings.key == _LANE_PAUSE_KEY))).scalar_one_or_none()
+            if row is None or not row.value:
+                return
+            data = _json.loads(row.value)
+
+        now = time.time()
+        until = {k: float(v) for k, v in (data.get("until") or {}).items()
+                 if float(v) > now}
+        # Streak hanya berarti untuk lane yang jedanya MASIH berjalan. Lane yang
+        # jedanya sudah lewat berarti sempat diberi kesempatan lagi; menghukumnya
+        # dengan hitungan lama akan melipatgandakan jeda tanpa bukti baru.
+        streak = {k: int(v) for k, v in (data.get("streak") or {}).items()
+                  if k in until}
+        _lane_paused_until.update(until)
+        _lane_pause_streak.update(streak)
+        if until:
+            logger.info("lane_pause_state_restored",
+                        lanes=sorted(until), streak=streak)
+    except Exception as exc:
+        logger.warning("lane_pause_state_load_failed", error=str(exc)[:120])
+
+
+async def save_lane_pause_state() -> None:
+    """Simpan jeda lane supaya tak menguap saat restart berikutnya."""
+    from app.database import is_db_available
+    if not is_db_available():
+        return
+    try:
+        import json as _json
+        from sqlalchemy import select
+        from app.database import AsyncSessionLocal
+        from app.models.app_settings import AppSettings
+
+        now = time.time()
+        payload = _json.dumps({
+            "until":  {k: round(v, 2) for k, v in _lane_paused_until.items() if v > now},
+            "streak": {k: v for k, v in _lane_pause_streak.items()
+                       if _lane_paused_until.get(k, 0.0) > now},
+        })
+        async with AsyncSessionLocal() as session:
+            row = (await session.execute(select(AppSettings).where(
+                AppSettings.key == _LANE_PAUSE_KEY))).scalar_one_or_none()
+            if row is None:
+                session.add(AppSettings(key=_LANE_PAUSE_KEY, value=payload,
+                                        updated_at=now))
+            else:
+                row.value, row.updated_at = payload, now
+            await session.commit()
+    except Exception as exc:
+        logger.warning("lane_pause_state_save_failed", error=str(exc)[:120])
 
 
 def update_lane_wr(lane: str, wins: int, total: int) -> None:
