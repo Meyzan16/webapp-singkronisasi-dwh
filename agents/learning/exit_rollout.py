@@ -66,6 +66,12 @@ def param_config_key(param: str, lane: str, market: str = "futures") -> tuple[st
         return "futures", mcfg.tp_lane_key(lane)
     if param == "failfast_min_sl_gap":
         return "futures", mcfg.failfast_gap_key(lane)
+    if param == "sl_max_pct":
+        # Plafon lebar SL (% harga). Untuk bigmover inilah yang benar-benar
+        # menentukan: 56% posisinya mentok plafon, sehingga `fallback_atr_mult`
+        # yang dimaksudkan sadar-volatilitas jarang berlaku.
+        from agents.futures import sl_config
+        return "futures", sl_config.sl_key("max_pct", lane)
     if param in GLOBAL_PARAMS:
         return "futures", GLOBAL_PARAMS[param]
     if param in COMPOSITE_PARAMS:
@@ -140,6 +146,7 @@ _ARAH_AGRESIF: dict[str, int] = {
     "failfast_min_sl_gap":   +1,   # makin BESAR = fail-fast makin sering diblokir
     "trail_lock_after_tp1":  +1,   # makin BESAR = kunci sesudah TP1 makin ketat
     "trail_advance_tp1_tp2": -1,   # makin KECIL = lantai naik makin dini
+    "sl_max_pct":            -1,   # makin KECIL = SL makin sempit, makin mudah terpotong
     # Majemuk: dinilai dari anak tangga PERTAMA (`proposed_value`), karena TP1
     # yang paling menentukan seberapa sering posisi keluar lebih awal. Ini
     # perbandingan PARSIAL — tangga dengan TP1 sama tapi ekor berbeda dianggap
@@ -194,7 +201,7 @@ async def _ditolak_dgn_bukti(session, market: str, lane: str, param: str,
 SUPPORTED_PARAMS_BY_MARKET: dict[str, tuple[str, ...]] = {
     "futures": ("tp_atr_mult", "failfast_min_sl_gap",
                 "trail_lock_after_tp1", "trail_advance_tp1_tp2",
-                "entry_tp_ladder"),
+                "entry_tp_ladder", "sl_max_pct"),
     # SPOT kini punya kunci config sendiri untuk kedua parameter trailing, jadi
     # usulannya benar-benar sampai ke monitor. Fail-fast tetap khusus futures —
     # monitor SPOT memakai pemicu lain (rotasi, trend_reversal).
@@ -250,7 +257,11 @@ def _komposisi(rows: list[FuturesExitEvent]) -> str:
 #: tangga lama sampai mati. Menyaringnya dengan `closed_at` — cara yang benar
 #: untuk parameter keluar — akan menghitung posisi ber-tangga LAMA sebagai hasil
 #: canary, dan canary dinilai dari sampel yang separuhnya bukan miliknya.
-ENTRY_SIDE_PARAMS: frozenset[str] = frozenset({"entry_tp_ladder"})
+#: `sl_max_pct` ikut di sini karena lebar SL DIPASANG saat posisi dibuka. Posisi
+#: yang sudah terbuka saat canary menyala membawa SL lama sampai mati — menyaring
+#: dengan `closed_at` akan menghitungnya sebagai hasil canary, dan plafon baru
+#: dinilai dari posisi yang tak pernah memakainya.
+ENTRY_SIDE_PARAMS: frozenset[str] = frozenset({"entry_tp_ladder", "sl_max_pct"})
 
 
 async def _lane_exits(session, lane: str, market: str = "futures",
@@ -623,7 +634,49 @@ async def propose_from_recommendations(days: int = 90, market: str = "futures") 
         (dilewati if _r.get("status") == "ditolak_dgn_bukti" else hasil).append(_r)
 
     await _usulkan_tangga_masuk(days, market, hasil, dilewati)
+    await _usulkan_lebar_sl(days, market, hasil, dilewati)
     return {"status": "ok", "market": market, "diusulkan": hasil, "dilewati": dilewati}
+
+
+async def _usulkan_lebar_sl(days: int, market: str, hasil: list, dilewati: list) -> None:
+    """Alirkan usulan lebar SL (M4b) ke antrean — satuannya diterjemahkan dulu.
+
+    `recommend_sl_width()` bekerja dalam kelipatan ATR, tapi yang benar-benar
+    menentukan lebar SL adalah PLAFON dalam % harga: 56% posisi bigmover mentok
+    plafon 8%, sehingga `fallback_atr_mult` yang dimaksudkan sadar-volatilitas
+    jarang berlaku. Mengusulkan angka ATR ke kunci `max_pct` akan menulis "0,9"
+    ke sebuah plafon persen — SL 0,9% harga, jauh lebih sempit dari yang dimaksud,
+    tanpa satu pun error muncul.
+    """
+    if "sl_max_pct" not in SUPPORTED_PARAMS_BY_MARKET.get(market, ()):
+        return
+
+    from agents.learning.exit_learning import recommend_sl_width
+    sl = await recommend_sl_width(days=days, market=market)
+    if sl.get("status") != "ok":
+        return
+
+    for rec in sl.get("recommendations", []):
+        lane = rec.get("lane")
+        if rec.get("status") != "ok":
+            dilewati.append({"lane": lane, "param": "sl_max_pct",
+                             "reason": rec.get("status")})
+            continue
+        # ATR → % harga. Tanpa `proposed_sl_pct` (lane tanpa atr_pct) usulannya
+        # DILEWATI, bukan ditebak: menebak satuan di sini menghasilkan plafon yang
+        # tampak masuk akal tapi salah besaran.
+        usulan_pct = rec.get("proposed_sl_pct")
+        if not usulan_pct:
+            dilewati.append({"lane": lane, "param": "sl_max_pct",
+                             "reason": "atr_pct_tak_ada_utk_konversi"})
+            continue
+        _r = await propose(
+            lane, "sl_max_pct", round(float(usulan_pct), 2), market=market,
+            reason=(f"plafon SL dari MAE pemenang: terdalam {rec['mae_winner_max_atr']}× ATR "
+                    f"pada {rec['n']} exit; {rec['winners_cut']} pemenang terpotong, "
+                    f"{rec['losers_capped']} pecundang dihentikan lebih awal"
+                    + (" [dibatasi step-cap]" if rec.get("step_capped") else "")))
+        (dilewati if _r.get("status") == "ditolak_dgn_bukti" else hasil).append(_r)
 
 
 async def _usulkan_tangga_masuk(days: int, market: str,
