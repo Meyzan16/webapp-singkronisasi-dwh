@@ -1,6 +1,6 @@
 # PLAN — Susulan UI atas perubahan 24–25 Agu
 
-> **Status: BELUM DIKERJAKAN — daftar untuk ditinjau dulu.**
+> **Status: U1–U5 SELESAI 25 Agu (`172ce26`).**
 >
 > Disusun dari audit UI terhadap 12 commit kemarin (momentum dimatikan · M4b · F1–F4).
 > Semua temuan diverifikasi dari kode UI **dan** payload endpoint yang berjalan, bukan
@@ -22,7 +22,7 @@ tak terlihat.
 
 ---
 
-## U1 — Lane yang tidak dipakai HILANG dari UI 🔴
+## U1 — Lane yang tidak dipakai HILANG dari UI ✅ SELESAI
 
 > **Arahan pemilik (25 Agu):** lane yang tidak dipakai jangan ditampilkan sebagai panel
 > kosong — hilangkan dari UI.
@@ -78,7 +78,7 @@ disembunyikan — kalau hilang, orang akan mengira lane-nya dimatikan.
 
 ---
 
-## U2 — Usulan lebar SL berhenti di API 🟠
+## U2 — Usulan lebar SL berhenti di API ✅ SELESAI
 
 Sub-tab **3· Lebar SL** sudah menampilkan kesiapan (`sl_recommendation_ready`,
 `mae_n/mae_required`, `sl_utilization`) — tapi tidak menampilkan **angkanya**.
@@ -103,7 +103,7 @@ menunjukkan hasilnya.
 
 ---
 
-## U3 — Nama parameter tampil mentah 🟡
+## U3 — Nama parameter tampil mentah ✅ SELESAI
 
 Sub-tab **4· Penyalaan** merender `r.param` apa adanya: `sl_max_pct`, `failfast_min_sl_gap`,
 `entry_tp_ladder`. Tak ada peta label.
@@ -118,7 +118,7 @@ tanpa satuan bisa terbaca sebagai 4,51× ATR — hampir dua kali lipat dari maks
 
 ---
 
-## U4 — Komposisi exit hanya terbawa sebagai teks 🟡
+## U4 — Komposisi exit hanya terbawa sebagai teks ✅ SELESAI
 
 F2 menambahkan komposisi alasan tutup ke vonis canary. Karena UI merender `r.reason`
 apa adanya, `[sl_hit×8, sl_plus×5, fail_fast×1]` **memang muncul** — tapi sebagai ekor
@@ -134,7 +134,7 @@ membawa `observed.close_reasons` tersendiri, tapi tipe UI belum memuat field itu
 
 ---
 
-## U5 — Halaman Architecture menjelaskan sistem yang sudah berubah 🟢
+## U5 — Halaman Architecture menjelaskan sistem yang sudah berubah ✅ SELESAI
 
 `architecture/data.ts` (700+ baris) adalah data **statis**. Sebagian pernyataannya kini
 tak lagi cocok dengan keadaan, mis. lane WR-pause digambarkan "24 jam" — padahal sejak
@@ -152,8 +152,16 @@ paling merugikan kalau isinya usang.
 ## Urutan yang disarankan
 
 ```
-U1 (yang tak terlihat) → U2 (hasil belajar sampai ke mata) → U3 + U4 (mudah disalahbaca) → U5 (dokumentasi)
+U1 ✅  →  U2 ✅  →  U3 ✅ + U4 ✅  →  U5 ✅   — semuanya selesai
 ```
+
+**Temuan saat mengerjakan** (tak terlihat dari analisis saja):
+- `close_reasons` (U4) ada di respons `evaluate()` **tapi tidak di listing** yang dipakai
+  UI — tampilannya akan selamanya kosong. `status()` kini menghitungnya untuk baris canary.
+- Tipe `lane_pauses` saya tulis `{lane: epoch}`; bentuk nyatanya objek
+  `{paused, pause_until, wr, total}`. Ketahuan karena payload diperiksa, bukan diasumsikan.
+- Sisa jeda dihitung dari `generated_at` **server**, bukan `Date.now()` klien — selain
+  melanggar kemurnian render, jam klien yang meleset akan menampilkan sisa waktu yang salah.
 
 U1 didahulukan karena satu-satunya yang bisa menyebabkan **salah tindakan**: mengira
 sistem sedang mencari peluang padahal sedang berhenti. Arahan pemilik mempertegasnya —
