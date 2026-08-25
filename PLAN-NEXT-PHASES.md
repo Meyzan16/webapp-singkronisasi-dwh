@@ -1,6 +1,6 @@
 # PLAN — Fase Berikutnya (disusun 24 Agu 2026)
 
-> **Status: MENUNGGU PERSETUJUAN PEMILIK. Belum ada satu pun yang dikerjakan.**
+> **Status: F1–F4 SELESAI (25 Agu). Sisanya F5 — menunggu data, bukan pekerjaan.**
 >
 > Disusun dari state live (DB + endpoint), bukan dari catatan lama. Urutannya
 > mengikuti satu aturan: **yang membuat buta didahulukan, lalu yang sedang
@@ -168,7 +168,38 @@ sekaligus membuat hasilnya mustahil ditafsirkan (disiplin yang ditulis M5 sendir
 
 ---
 
-## F4 — Jeda lane lupa ingatan tiap restart 🟡
+## F4 — Jeda lane lupa ingatan tiap restart ✅ SELESAI `3131c16`
+
+**Lebih buruk dari dugaan.** Dugaan awal: "eskalasi tumpul". Log 24-25 Agu menunjukkan
+jeda 24 jam itu **sama sekali tak menahan**:
+
+```
+08-24 13:24  momentum  wr=0,1  streak=1  pause=24j
+08-24 15:12  momentum  wr=0,1  streak=1  pause=24j   ← 2 jam kemudian, bukan 24
+08-25 04:00  momentum  wr=0,1  streak=1  pause=24j
+```
+
+Tiga kali dijeda dalam ~15 jam, `streak` **selalu 1**. Lane hidup kembali di antaranya
+dan bisa membuka posisi rugi lagi.
+
+Disimpan ke `app_settings` (key-value yang sudah ada — tanpa tabel/migrasi baru).
+`load` dipanggil di **awal** `evaluate_risk_gate`, sebelum lane dinilai; kalau sesudahnya,
+`update_lane_wr` melihat dict kosong dan kebocoran yang sama hanya berpindah tempat.
+Jeda yang sudah lewat dibuang saat dimuat, dan streak hanya dipulihkan untuk lane yang
+jedanya **masih** berjalan.
+
+**Dua kesalahan saya sendiri yang tertangkap saat verifikasi:**
+1. Fungsi baru memakai `select`/`is_db_available` yang di modul ini sengaja tak ada di
+   scope modul — `py_compile` lulus, runtime `NameError`. Ketahuan karena fungsinya
+   dijalankan sungguhan, bukan hanya dikompilasi.
+2. Test penjaga versi pertama mencocokkan **teks**, jadi saat sambungannya dilepas dengan
+   cara dijadikan komentar, test tetap lulus. Diganti pemeriksaan **AST**.
+
+Terverifikasi: proses baru memulihkan jeda (tersisa 24,0 j, `is_lane_paused` → True) —
+sebelum ini proses baru melihat dict kosong. 376 test lulus (+6).
+
+<details>
+<summary>Uraian masalah aslinya</summary>
 
 `_lane_paused_until` dan `_lane_pause_streak` hidup **hanya di memori**. Setiap
 restart backend, hitungan pengulangan kembali ke nol, sehingga jeda berlipat yang
@@ -182,6 +213,8 @@ pernah ditemukan di state learning; obatnya juga sama: simpan.
 penjaganya tetap tumpul untuk lane lain.
 
 **Ukuran:** kecil–sedang · **Risiko:** rendah · **Dampak:** penjaga bekerja seperti yang dirancang
+
+</details>
 
 ---
 
@@ -202,8 +235,9 @@ membuat trade berikutnya lebih sehat.
 ## Urutan yang disarankan
 
 ```
-F1 ✅  →  F2 ✅  →  F3 ✅ (canary berjalan)  →  F4
-                                                ↑ berikutnya
+F1 ✅  →  F2 ✅  →  F3 ✅ (canary berjalan)  →  F4 ✅
+
+Keempat fase selesai. Yang tersisa hanya F5 — menunggu data, bukan pekerjaan.
 ```
 
 F1 lebih dulu karena tanpa UI yang hidup, F2 dan F3 dinilai dari terminal saja.
