@@ -14,7 +14,7 @@
 | F2 — komposisi exit di vonis canary | ✅ ikut terbawa di teks `reason` |
 | F3 — canary `sl_max_pct` | ⚠️ tampil, tapi namanya mentah |
 | F4 — jeda lane bertahan | ❌ **tak terlihat sama sekali** |
-| Lane `momentum` dimatikan | ❌ **tak terlihat sama sekali** |
+| Lane `momentum` dimatikan | ❌ panel kosong permanen — **harus dihilangkan** |
 | M4b — usulan lebar SL | ❌ endpoint tak dipanggil UI |
 
 Tak ada yang **rusak**. Yang bermasalah: keputusan paling menentukan justru yang paling
@@ -22,26 +22,57 @@ tak terlihat.
 
 ---
 
-## U1 — Lane dimatikan & lane dijeda tak terlihat 🔴
+## U1 — Lane yang tidak dipakai HILANG dari UI 🔴
 
-Dua keputusan yang langsung menghentikan pembukaan posisi, dan **tak satu pun muncul di UI**:
+> **Arahan pemilik (25 Agu):** lane yang tidak dipakai jangan ditampilkan sebagai panel
+> kosong — hilangkan dari UI.
 
-| Keadaan nyata sekarang | Di UI |
+Keadaan sekarang: `momentum` mati (`lane_quota_momentum = 0`) tapi UI tetap menyediakan
+tab filternya, kolom posisinya, baris breakdown-nya, dan kartu margin-nya — semuanya
+permanen kosong. Panel kosong itu bukan sekadar sampah visual: ia terbaca seolah lane
+sedang menunggu sinyal, padahal lane itu tak akan pernah membuka posisi.
+
+Tempat yang menampilkan lane sebagai bagian tetap (hasil telusur):
+
+| Berkas | Bentuknya |
 |---|---|
-| `lane_quota_momentum = 0` (lane mati) | tak ada |
-| `bigmover` + `momentum` dijeda 24 jam | tak ada |
+| `futures/MonitorTab.tsx` | tab filter, `AgentColumn`, breakdown, kartu margin |
+| `futures/BigMoversWatchlist.tsx` | peta label lane |
+| `scanner/page.tsx` | tab lane |
+| `signals/ExitSection.tsx` | `LaneBadge` di tabel |
 
-- **`lane_quotas` tak dirender di komponen mana pun.** Endpoint `/agent/config` sudah
-  mengembalikannya (`{momentum: 0, pre_gainer: 2, accumulation: 1}`) — tinggal dipakai.
-- **`gate.lane_pauses` dan `gate.lane_wr` sudah dikirim** `/futures/monitor/risk`, tapi
-  tak ada satu pun komponen yang membacanya. `GateBanner` hanya membaca `probe_allowed`.
+### Dua hal yang harus diputuskan lebih dulu
 
-Akibatnya, seseorang yang melihat dashboard akan mengira momentum sedang menunggu sinyal,
-padahal lane itu mati; dan mengira bigmover sedang cari peluang, padahal sedang dijeda.
-Diamnya scanner tak bisa dibedakan dari tak adanya peluang.
+**(a) Aturannya tak bisa "quota 0 = sembunyikan" begitu saja.**
+`bigmover` **tidak ada** di `lane_quotas` — ia dibatasi `MAX_BIGMOVER_POSITIONS`, jalur
+yang sama sekali lain. Kalau aturannya ditulis naif, bigmover akan ikut lenyap padahal
+justru lane paling aktif. Aturan yang benar: *lane yang **ada** di `lane_quotas` **dan**
+nilainya 0* → sembunyikan. Lane di luar daftar itu tak tersentuh.
 
-**Rencana:** tampilkan quota lane (0 = MATI) dan lane yang sedang dijeda beserta sisa
-waktunya. Datanya sudah tersedia di dua endpoint itu — ini murni sisi tampilan.
+**(b) Menyembunyikan harus dibatasi pada yang MELIHAT KE DEPAN.**
+Momentum meninggalkan **14 trade tertutup** dan **14 exit event** — termasuk kerugian
+−54,99 yang jadi dasar keputusan mematikannya. Kalau lane disembunyikan dari seluruh UI,
+bukti itu ikut hilang, dan riwayat jadi berbohong tentang dari mana kerugian datang.
+
+Usulan pembagian:
+
+| Bagian | Perlakuan |
+|---|---|
+| Posisi terbuka, tab scanner, breakdown margin, quota | **sembunyikan** saat lane mati |
+| History, win-rate per lane, analitik exit | **tetap tampil** — datanya nyata |
+
+Kalau nanti momentum dinyalakan lagi (`quota` kembali 2), panelnya muncul sendiri tanpa
+sentuhan kode — karena yang dibaca adalah keadaan, bukan daftar hardcode.
+
+### Bagian kedua: lane yang sedang DIJEDA
+
+Beda dari lane mati — lane dijeda itu **sementara** dan akan kembali sendiri. Sekarang
+`bigmover` + `momentum` sedang dijeda 24 jam dan tak ada jejaknya di layar.
+
+`gate.lane_pauses` dan `gate.lane_wr` **sudah dikirim** `/futures/monitor/risk`; tak ada
+komponen yang membacanya (`GateBanner` hanya memakai `probe_allowed`). Karena sifatnya
+sementara, lane dijeda sebaiknya **tetap tampil dengan penanda + sisa waktu**, bukan
+disembunyikan — kalau hilang, orang akan mengira lane-nya dimatikan.
 
 **Ukuran:** sedang · **Risiko:** nol (baca-saja)
 
@@ -125,7 +156,8 @@ U1 (yang tak terlihat) → U2 (hasil belajar sampai ke mata) → U3 + U4 (mudah 
 ```
 
 U1 didahulukan karena satu-satunya yang bisa menyebabkan **salah tindakan**: mengira
-sistem sedang mencari peluang padahal sedang berhenti. U3 dinaikkan di atas U5 karena
+sistem sedang mencari peluang padahal sedang berhenti. Arahan pemilik mempertegasnya —
+lane yang tak dipakai dihilangkan, bukan ditandai. U3 dinaikkan di atas U5 karena
 satuan yang salah baca bisa memicu keputusan tala yang keliru.
 
 ## Catatan
