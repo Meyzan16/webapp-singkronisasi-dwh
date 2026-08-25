@@ -114,7 +114,37 @@ nyata.
 
 ---
 
-## F3 — C2: perbaiki R:R `bigmover` (prioritas #1 dari analisis) 🟠
+## F3 — C2: perbaiki R:R `bigmover` ✅ SELESAI `d962901`
+
+**Canary berjalan:** `sl_max_pct_bigmover` **8,0 → 4,51%**, baseline n=59, exp −0,924,
+WR 54,2%. Terverifikasi terbaca agen; lane lain tak tersentuh.
+
+Tiga hal dipastikan sebelum menerapkan angka, **dua di antaranya mengubah rencana**:
+
+1. **TP bigmover diturunkan dari ATR langsung, bukan dari jarak SL.** Kalau TP
+   diturunkan dari risk, mempersempit SL ikut mempersempit TP dan R:R tak berubah —
+   usulan itu akan jadi pekerjaan sia-sia yang terlihat masuk akal.
+2. **Parameter yang benar bukan `fallback_atr_mult` melainkan plafon `max_pct`** —
+   56% posisi bigmover SL-nya mentok plafon 8%, jadi menala `fallback_atr_mult` tak
+   akan menyentuh mayoritas posisi.
+3. **`sl_max_pct` belum ada di `SUPPORTED_PARAMS`** — lebar SL tak bisa di-canary
+   sama sekali sebelum ini.
+
+Counterfactual pada 23 exit ber-MAE:
+
+| Hasil | n | MAE terdalam | Kena plafon 4,51% | Hemat |
+|---|---|---|---|---|
+| MENANG | 6 | **1,89%** (margin 2,4×) | **0** | — |
+| KALAH | 17 | 16,96% | **8** | **16,3%** |
+
+Usulan M4b kini **mengalir sendiri** ke antrean (`_usulkan_lebar_sl`), dengan konversi
+ATR → % harga. Tanpa konversi, "0,9" tertulis ke kunci *persen* — SL 0,9% harga, jauh
+lebih sempit dari yang dimaksud, tanpa satu pun error muncul.
+
+Reversibel: rollback id 20 mengembalikan plafon ke 8,0. 370 test lulus.
+
+<details>
+<summary>Uraian rencana aslinya</summary>
 
 Bukti paling tajam di seluruh sistem: **bigmover menang 54,5% tapi tetap rugi**
 (n=55, expectancy −1,13, total −62,35). Yang salah **bukan seleksi**, melainkan
@@ -133,6 +163,8 @@ hanya exit sesudah aktivasi yang dihitung. **F2 sudah selesai, slot bebas** — 
 sekaligus membuat hasilnya mustahil ditafsirkan (disiplin yang ditulis M5 sendiri).
 
 **Ukuran:** sedang · **Risiko:** terkendali lewat rollout · **Dampak:** menyerang sumber kerugian terbesar
+
+</details>
 
 ---
 
@@ -170,8 +202,8 @@ membuat trade berikutnya lebih sehat.
 ## Urutan yang disarankan
 
 ```
-F1 ✅  →  F2 ✅  →  F3 (perbaiki sumbernya)  →  F4
-                    ↑ berikutnya — slot canary sudah bebas
+F1 ✅  →  F2 ✅  →  F3 ✅ (canary berjalan)  →  F4
+                                                ↑ berikutnya
 ```
 
 F1 lebih dulu karena tanpa UI yang hidup, F2 dan F3 dinilai dari terminal saja.
