@@ -92,6 +92,10 @@ export interface GateState {
   rar_window?:        number;
   probe_allowed?:     boolean;
   next_probe_in_sec?: number | null;
+  // P6.4 — lane yang sedang dijeda. Dikirim backend sejak lama; UI baru membacanya
+  // sekarang (U1). Bentuknya OBJEK per lane, bukan epoch telanjang.
+  lane_pauses?:       Record<string, { paused: boolean; pause_until: number; wr: number; total: number }>;
+  lane_wr?:           Record<string, { wins: number; total: number }>;
 }
 
 export interface LearningStats {
@@ -111,6 +115,10 @@ export interface LearningStats {
 }
 
 export interface RiskDashboard {
+  /** Waktu server saat payload dibuat. Dipakai sebagai acuan "sekarang" untuk sisa
+   *  jeda lane — memakai jam KLIEN akan meleset kalau jamnya beda dari server, dan
+   *  memanggil Date.now() saat render melanggar kemurnian komponen. */
+  generated_at?: number;
   positions: RiskPosition[];
   portfolio: {
     open_count: number; total_margin: number; total_notional: number;

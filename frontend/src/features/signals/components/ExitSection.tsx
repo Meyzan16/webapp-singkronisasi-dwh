@@ -48,6 +48,7 @@ interface MarketSpec {
     analysis: string | null;
     triggers: string | null;
     slWidth:  string | null;
+    slRec:    string | null;
     rollout:  string | null;
   };
   /** Nama ramah untuk sebuah lane di market ini. */
@@ -63,6 +64,7 @@ const MARKETS: MarketSpec[] = [
       analysis: "/api/v1/futures/exit-learning/analysis",
       triggers: "/api/v1/futures/exit-learning/triggers",
       slWidth:  "/api/v1/futures/exit-learning/sl-width",
+      slRec:    "/api/v1/futures/exit-learning/sl-recommendation",
       rollout:  "/api/v1/futures/exit-rollout",
     },
     laneLabel: futuresLaneLabel,
@@ -73,6 +75,7 @@ const MARKETS: MarketSpec[] = [
       analysis: "/api/v1/spot/exit-learning/analysis",
       triggers: "/api/v1/spot/exit-learning/triggers",
       slWidth:  "/api/v1/spot/exit-learning/sl-width",
+      slRec:    "/api/v1/spot/exit-learning/sl-recommendation",
       rollout:  "/api/v1/spot/exit-rollout",
     },
     // Nilai lane SPOT di ledger berupa alert_type mentah (`squeeze`,
@@ -168,7 +171,9 @@ interface RolloutRow {
   proposed_value: number;
   previous_value: number;
   baseline: { n: number; expectancy_pct: number | null; win_rate: number | null };
-  observed: { n: number; expectancy_pct: number | null; win_rate: number | null };
+  observed: { n: number; expectancy_pct: number | null; win_rate: number | null;
+              /** U4: rincian alasan tutup selama canary, mis. "sl_hit×8, sl_plus×5". */
+              close_reasons?: string };
   created_at: number;
   activated_at: number | null;
   decided_at: number | null;
@@ -269,11 +274,37 @@ function Panel({ title, sub, children }: {
 
 // ── Seksi ─────────────────────────────────────────────────────────────────────
 
+/** Usulan lebar SL (M4b) — batas bawahnya diambil dari MAE posisi yang MENANG. */
+interface SlRecRow {
+  lane: string;
+  n: number;
+  n_winners?: number;
+  status: "ok" | "ditahan" | "biarkan" | "sampel_kurang" | string;
+  current_sl_atr?: number;
+  proposed_sl_atr?: number;
+  proposed_sl_pct?: number | null;
+  shrink_frac?: number;
+  mae_winner_max_atr?: number;
+  raw_proposed_atr?: number;
+  step_capped?: boolean;
+  winners_cut?: number;
+  losers_capped?: number;
+  atr_saved_total?: number;
+  note?: string;
+}
+interface SlRecResponse {
+  status: string;
+  recommendations?: SlRecRow[];
+  safety_margin?: number;
+  min_shrink?: number;
+}
+
 export function ExitSection({ subTab }: { subTab: ExitSubTab }) {
   const [marketKey, setMarketKey] = useState<ExitMarket>("futures");
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [triggers, setTriggers] = useState<TriggersResponse | null>(null);
   const [slWidth, setSlWidth] = useState<SlWidthResponse | null>(null);
+  const [slRec, setSlRec] = useState<SlRecResponse | null>(null);
   const [rollout, setRollout] = useState<RolloutResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -286,7 +317,7 @@ export function ExitSection({ subTab }: { subTab: ExitSubTab }) {
     setError(null);
     // Market tanpa endpoint dikosongkan secara eksplisit — JANGAN biarkan data
     // market sebelumnya tertinggal di layar dan terbaca sebagai milik market ini.
-    setAnalysis(null); setTriggers(null); setSlWidth(null); setRollout(null);
+    setAnalysis(null); setTriggers(null); setSlWidth(null); setSlRec(null); setRollout(null);
     const { endpoints } = market;
     try {
       const get = async (url: string | null) => {
@@ -294,11 +325,11 @@ export function ExitSection({ subTab }: { subTab: ExitSubTab }) {
         const res = await fetch(url);
         return res.ok ? await res.json() : null;
       };
-      const [a, t, s, r] = await Promise.all([
+      const [a, t, s, sr, r] = await Promise.all([
         get(endpoints.analysis), get(endpoints.triggers),
-        get(endpoints.slWidth), get(endpoints.rollout),
+        get(endpoints.slWidth), get(endpoints.slRec), get(endpoints.rollout),
       ]);
-      setAnalysis(a); setTriggers(t); setSlWidth(s); setRollout(r);
+      setAnalysis(a); setTriggers(t); setSlWidth(s); setSlRec(sr); setRollout(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : "gagal memuat data keluar");
     } finally {
@@ -368,7 +399,7 @@ export function ExitSection({ subTab }: { subTab: ExitSubTab }) {
       {banner}
       {subTab === "exit_reasons"  && <ExitReasons  data={analysis} market={market} />}
       {subTab === "exit_triggers" && <ExitTriggers data={triggers} market={market} />}
-      {subTab === "exit_sl"       && <ExitSlWidth  data={slWidth}  market={market} />}
+      {subTab === "exit_sl"       && <ExitSlWidth  data={slWidth}  rec={slRec} market={market} />}
       {subTab === "exit_rollout"  && <ExitRollout  data={rollout}  market={market} onRefresh={fetchAll} />}
     </>
   );
@@ -554,7 +585,111 @@ function ExitTriggers({ data, market }: { data: TriggersResponse | null; market:
 
 // ── 3· Lebar SL ───────────────────────────────────────────────────────────────
 
-function ExitSlWidth({ data, market }: { data: SlWidthResponse | null; market: MarketSpec }) {
+/** U2: usulan lebar SL beserta counterfactual-nya.
+ *
+ *  Tanpa ini UI hanya mengumumkan "lebar SL bisa dinilai" lalu berhenti — kesiapan
+ *  tanpa hasil. Yang paling menentukan justru dua angka di bawah: berapa PEMENANG
+ *  yang akan terpotong (harus 0) dan berapa pecundang yang dihentikan lebih awal.
+ */
+/** U3: nama + satuan tiap parameter tahapan.
+ *
+ *  Sebelumnya nama parameter dirender mentah (`sl_max_pct`, `failfast_min_sl_gap`).
+ *  Untuk `sl_max_pct` itu menyesatkan: satuannya PERSEN HARGA, sementara tetangganya
+ *  di layar dinyatakan dalam kelipatan ATR — "4,51" bisa terbaca 4,51× ATR, hampir
+ *  dua kali lipat maksudnya.
+ */
+const PARAM_META: Record<string, { label: string; unit: string; hint: string }> = {
+  tp_atr_mult:           { label: "Batas TP",          unit: "× ATR", hint: "Jarak target, dalam kelipatan ATR." },
+  sl_max_pct:            { label: "Plafon lebar SL",   unit: "%",     hint: "Batas ATAS lebar SL dalam PERSEN HARGA — bukan kelipatan ATR." },
+  failfast_min_sl_gap:   { label: "Gap fail-fast",     unit: "×",     hint: "Jarak SL minimum (relatif ambang) sebelum pemotongan dini boleh jalan." },
+  trail_lock_after_tp1:  { label: "Kunci sesudah TP1", unit: "",      hint: "Porsi keuntungan yang dikunci begitu TP1 tersentuh." },
+  trail_advance_tp1_tp2: { label: "Naik TP1→TP2",      unit: "",      hint: "Seberapa dini lantai dinaikkan menuju TP2." },
+  entry_tp_ladder:       { label: "Tangga TP (masuk)", unit: "× ATR", hint: "Tiga anak tangga TP yang dibekukan saat posisi dibuka." },
+};
+
+function ParamLabel({ param }: { param: string }) {
+  const m = PARAM_META[param];
+  if (!m) return <span className="font-mono text-[11px] text-neutral-500">{param}</span>;
+  return (
+    <span className="text-[11px] text-neutral-600" title={`${param} — ${m.hint}`}>
+      <span className="font-semibold">{m.label}</span>
+      <span className="font-mono text-[10px] text-neutral-400"> {param}</span>
+    </span>
+  );
+}
+
+/** Nilai + satuannya, supaya angka tak pernah muncul tanpa konteks. */
+function ParamValue({ param, value }: { param: string; value: number | string | null | undefined }) {
+  if (value === null || value === undefined) return <span className="text-neutral-400">—</span>;
+  const unit = PARAM_META[param]?.unit ?? "";
+  return <>{value}{unit ? <span className="text-neutral-400">{unit}</span> : null}</>;
+}
+
+function SlRecommendations({ rec, market }: { rec: SlRecResponse | null; market: MarketSpec }) {
+  const rows = rec?.recommendations ?? [];
+  if (!rows.length) return null;
+
+  const layak = rows.filter(r => r.status === "ok");
+  const lain  = rows.filter(r => r.status !== "ok");
+
+  return (
+    <Panel
+      title="Usulan lebar SL"
+      sub="Batas bawahnya diambil dari MAE posisi yang MENANG — bukan MFE, bukan MAE keseluruhan (yang dibebani pecundang). Usulan yang memotong satu pun pemenang ditahan.">
+      {layak.length === 0 ? (
+        <p className="text-[11px] text-neutral-500">Belum ada usulan yang layak diajukan.</p>
+      ) : (
+        <div className="space-y-2">
+          {layak.map(r => (
+            <div key={r.lane} className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <LaneBadge lane={r.lane} market={market} />
+                  <span className="text-[11px] text-neutral-500">{r.n} exit · {r.n_winners ?? 0} menang</span>
+                </div>
+                <span className="font-mono text-[11px]">
+                  {r.current_sl_atr}× <span className="text-neutral-400">→</span>{" "}
+                  <span className="font-bold text-emerald-800">{r.proposed_sl_atr}× ATR</span>
+                  {r.proposed_sl_pct != null && (
+                    <span className="text-neutral-500"> ({r.proposed_sl_pct}% harga)</span>
+                  )}
+                  {r.shrink_frac != null && (
+                    <span className="text-emerald-700 font-bold"> −{Math.round(r.shrink_frac * 100)}%</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 mt-2.5">
+                <Stat label="Pemenang terpotong"
+                      value={String(r.winners_cut ?? 0)}
+                      tone={(r.winners_cut ?? 0) === 0 ? "text-emerald-700" : "text-red-600"} />
+                <Stat label="Pecundang dihentikan awal" value={String(r.losers_capped ?? 0)} />
+                <Stat label="Hemat" value={`${r.atr_saved_total ?? 0}× ATR`} />
+              </div>
+
+              {r.step_capped && (
+                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2 leading-relaxed">
+                  Dibatasi langkah: data sebenarnya membolehkan <strong>{r.raw_proposed_atr}× ATR</strong>,
+                  tapi penyempitan dibatasi per langkah supaya tak rapuh terhadap pemenang berikutnya.
+                </p>
+              )}
+              {r.note && <p className="text-[10px] text-neutral-500 mt-2 leading-relaxed">{r.note}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {lain.length > 0 && (
+        <p className="text-[10px] text-neutral-400 mt-2.5 leading-relaxed">
+          Belum diusulkan:{" "}
+          {lain.map(r => `${market.laneLabel(r.lane)} (${r.status.replace(/_/g, " ")})`).join(" · ")}
+        </p>
+      )}
+    </Panel>
+  );
+}
+
+function ExitSlWidth({ data, rec, market }: { data: SlWidthResponse | null; rec: SlRecResponse | null; market: MarketSpec }) {
   if (!data || data.status !== "ok" || !data.lanes?.length) {
     return <Empty>Belum cukup data untuk membedah lebar SL.</Empty>;
   }
@@ -594,6 +729,8 @@ function ExitSlWidth({ data, market }: { data: SlWidthResponse | null; market: M
           {" "}({data.mae_n}/{data.mae_required} sampel MAE)
         </div>
       )}
+
+      <SlRecommendations rec={rec} market={market} />
 
       <Panel
         title="Per lane"
@@ -722,11 +859,14 @@ function ExitRollout({ data, market, onRefresh }: { data: RolloutResponse | null
                 <div className="flex items-center gap-2">
                   <StageBadge stage={r.stage} />
                   <LaneBadge lane={r.lane} market={market} />
-                  <span className="font-mono text-[11px] text-neutral-500">{r.param}</span>
+                  <ParamLabel param={r.param} />
                 </div>
                 <span className="text-[11px] font-mono text-neutral-600">
-                  {r.previous_value} <span className="text-neutral-400">→</span>{" "}
-                  <span className="font-bold text-neutral-900">{r.proposed_value}</span>
+                  <ParamValue param={r.param} value={r.previous_value} />
+                  {" "}<span className="text-neutral-400">→</span>{" "}
+                  <span className="font-bold text-neutral-900">
+                    <ParamValue param={r.param} value={r.proposed_value} />
+                  </span>
                 </span>
               </div>
 
@@ -735,6 +875,28 @@ function ExitRollout({ data, market, onRefresh }: { data: RolloutResponse | null
                 <MetricPair title="Sesudah (teramati)" m={r.observed} />
               </div>
 
+              {r.observed?.close_reasons && (
+                <div className="mt-2 rounded-lg bg-neutral-50 border border-neutral-200 p-2">
+                  <p className="text-[9px] uppercase tracking-wider text-neutral-400 font-bold mb-1">
+                    Exit yang menilai percobaan ini
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {r.observed.close_reasons.split(", ").map((bagian) => {
+                      const [nama, jml] = bagian.split("×");
+                      return (
+                        <span key={bagian}
+                          className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-white border-neutral-200 text-neutral-600">
+                          <ReasonLabel value={nama} /> <strong className="text-neutral-800">×{jml}</strong>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] text-neutral-400 mt-1.5 leading-relaxed">
+                    Canary dinilai dari SELURUH exit lane. Bila hampir tak ada exit yang lewat jalur
+                    parameter ini, vonisnya lebih menggambarkan keadaan lane daripada parameternya.
+                  </p>
+                </div>
+              )}
               {r.reason && (
                 <p className="text-[10px] text-neutral-500 mt-2 leading-relaxed">{r.reason}</p>
               )}

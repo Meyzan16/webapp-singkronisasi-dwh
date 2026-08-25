@@ -742,6 +742,19 @@ async def status() -> dict:
         _, fut_on = await _config_value(session, "futures", "monitor_exit_learning_enabled")
         _, spot_on = await _config_value(session, "spot", "monitor_exit_learning_enabled")
 
+        # Komposisi exit hanya dihitung untuk baris yang SEDANG canary — baris yang
+        # sudah diputuskan membawa komposisinya di dalam `reason`, dan menghitung
+        # ulang seratus baris riwayat tiap kali daftar dibuka tak sepadan.
+        komposisi_canary: dict[int, str] = {}
+        for r in rows:
+            if r.stage != "canary" or not r.activated_at:
+                continue
+            after = await _lane_exits(session, r.lane, r.market,
+                                      since=r.activated_at,
+                                      by_entry=r.param in ENTRY_SIDE_PARAMS)
+            if after:
+                komposisi_canary[r.id] = _komposisi(after)
+
     return {
         "status": "ok",
         "learning_enabled": {"futures": fut_on > 0, "spot": spot_on > 0},
@@ -761,7 +774,12 @@ async def status() -> dict:
             "baseline": {"n": r.baseline_n, "expectancy_pct": r.baseline_expectancy,
                          "win_rate": r.baseline_win_rate},
             "observed": {"n": r.observed_n, "expectancy_pct": r.observed_expectancy,
-                         "win_rate": r.observed_win_rate},
+                         "win_rate": r.observed_win_rate,
+                         # Komposisi alasan tutup selama canary. Tanpa ini, "expectancy
+                         # di bawah baseline" terbaca seolah parameternya bersalah —
+                         # padahal buktinya bisa tak menyinggung parameter itu sama
+                         # sekali (terukur 24 Agu: 1 dari 14 exit).
+                         "close_reasons": komposisi_canary.get(r.id)},
             "created_at": r.created_at, "activated_at": r.activated_at,
             "decided_at": r.decided_at, "reason": r.reason,
         } for r in rows],

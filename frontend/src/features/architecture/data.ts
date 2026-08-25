@@ -22,7 +22,7 @@ export const SYSTEM_OVERVIEW = {
     monitorInterval: "2 menit",
     fastMonitorInterval: "30 detik (high-risk)",
     maxPositions: 6,
-    maxPositionsNote: "global (lane quota 2/2/1 + bigmover 2)",
+    maxPositionsNote: "global — quota per-lane ditala lewat config (lane ber-quota 0 = dimatikan) + bigmover terpisah",
     maxAge: "3–5 hari",
     minScore: 52,
     autoOpenScore: "70–75 (adaptive)",
@@ -684,7 +684,7 @@ export const FUTURES_MONITOR_LAYERS = [
 export const RISK_GATE = {
   states: [
     { state: "OPEN",        color: "bg-green-100 text-green-800 border-green-300",   desc: "Drawdown < hard-stop → auto-open normal, max 6 posisi global" },
-    { state: "LANE PAUSED", color: "bg-yellow-100 text-yellow-800 border-yellow-300",desc: "1+ lane di-pause 24 jam karena WR < 35% (lane lain tetap jalan)" },
+    { state: "LANE PAUSED", color: "bg-yellow-100 text-yellow-800 border-yellow-300",desc: "1+ lane dijeda karena WR < 35% (lane lain tetap jalan). Jeda BERLIPAT tiap pengulangan: 24 j → 48 j → … maks 168 j, dan bertahan melewati restart" },
     { state: "CLOSED",      color: "bg-red-100 text-red-800 border-red-300",         desc: "Drawdown ≥ hard-stop ATAU Sharpe < −0.5 → semua auto-open stop sampai recovery" },
   ],
   drawdownThresholds: [
@@ -700,8 +700,8 @@ export const RISK_GATE = {
   laneWRPause: {
     rolling: 20,
     threshold: "WR < 35%",
-    duration: "24 jam",
-    desc: "Per-lane auto-pause jika win rate rolling 20 trade < 35%. Cegah death spiral satu style.",
+    duration: "24 j → 48 j → … maks 168 j",
+    desc: "Per-lane auto-pause jika win rate rolling 20 trade < 35%. Cegah death spiral satu style. Jeda BERLIPAT tiap kali lane dijeda ulang tanpa sempat membaik, dan tersimpan di DB sehingga restart tak mengosongkan hitungannya — sebelum diperbaiki, jeda 24 jam bisa buyar dalam 2 jam dan eskalasinya tak pernah tercapai. Lane yang membaik mereset hitungan.",
   },
 };
 

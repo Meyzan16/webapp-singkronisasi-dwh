@@ -1,12 +1,26 @@
 "use client";
 import { useState } from "react";
 import { EmptyState } from "@/components/ui/feedback";
+import { useLaneStatus } from "@/features/shared/useLaneStatus";
 import { GateBanner } from "./GateBanner";
 import { OpenPosCard } from "./OpenPosCard";
 import type { FuturesPosition, RiskDashboard, LearningStats, RiskPosition } from "./types";
 import { calcNotional, calcMargin, tradePnlDollar } from "./types";
 
 type AgentFilter = "all" | "agent1" | "agent2" | "agent3" | "agent_bigmover";
+
+/** Satu sumber daftar lane — dulu diulang di tiga tempat (breakdown, chip, kolom),
+ *  sehingga lane baru gampang tertinggal di salah satunya tanpa error apa pun. */
+const LANES = [
+  { key: "agent1",         lane: "pre_gainer",   label: "🎯 Pre-Gainer",
+    chip: "bg-blue-100 text-blue-700 border-blue-200",       dark: "text-blue-300"   },
+  { key: "agent2",         lane: "accumulation", label: "📦 Accumulation",
+    chip: "bg-purple-100 text-purple-700 border-purple-200", dark: "text-purple-300" },
+  { key: "agent3",         lane: "momentum",     label: "🔥 Momentum",
+    chip: "bg-orange-100 text-orange-700 border-orange-200", dark: "text-orange-300" },
+  { key: "agent_bigmover", lane: "bigmover",     label: "💥 Big Mover",
+    chip: "bg-amber-100 text-amber-700 border-amber-200",    dark: "text-amber-300"  },
+] as const;
 
 interface Props {
   positions:    FuturesPosition[];
@@ -18,16 +32,36 @@ interface Props {
   onRefresh:    () => void;
 }
 
-function AgentColumn({ label, color, positions, riskMap, riskDollar, atRisk }: {
+/** Penanda lane yang sedang DIJEDA — beda dari lane mati: sementara, kembali sendiri.
+ *  Karena itu lane dijeda tetap ditampilkan; kalau ikut disembunyikan, orang akan
+ *  mengira lane-nya dimatikan. */
+function PauseBadge({ until, now }: { until?: number; now: number }) {
+  if (!until) return null;
+  // `now` diteruskan dari induk, bukan dibaca di sini: memanggil Date.now() saat
+  // render membuat hasilnya berubah tiap kali komponen kebetulan dirender ulang.
+  const sisaJam = (until - now) / 3600;
+  if (sisaJam <= 0) return null;
+  const teks = sisaJam >= 1 ? `${sisaJam.toFixed(1)} j lagi` : `${Math.round(sisaJam * 60)} mnt lagi`;
+  return (
+    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full border bg-yellow-50 text-yellow-700 border-yellow-300"
+          title="Lane dijeda otomatis karena win rate rendah — akan aktif lagi sendiri">
+      ⏸ dijeda · {teks}
+    </span>
+  );
+}
+
+function AgentColumn({ label, color, positions, riskMap, riskDollar, atRisk, pausedUntil, now }: {
   label: string; color: string; positions: FuturesPosition[];
   riskMap: Record<number, RiskPosition>; riskDollar: number; atRisk?: number;
+  pausedUntil?: number; now: number;
 }) {
   return (
     <div>
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${color}`}>{label}</span>
         <span className="text-xs text-neutral-500">{positions.length} posisi</span>
         {(atRisk ?? 0) > 0 && <span className="text-[10px] text-red-600 font-bold">⚠️ {atRisk}</span>}
+        <PauseBadge until={pausedUntil} now={now} />
       </div>
       {positions.length === 0
         ? <div className="text-center py-8 text-neutral-400 text-xs border border-dashed border-neutral-200 rounded-2xl">Kosong</div>
@@ -39,6 +73,21 @@ function AgentColumn({ label, color, positions, riskMap, riskDollar, atRisk }: {
 
 export function MonitorTab({ positions, riskDash, learning, startingBalance, riskDollar, countdown, onRefresh }: Props) {
   const [agentFilter, setAgentFilter] = useState<AgentFilter>("all");
+  const { isDisabled } = useLaneStatus();
+
+  // U1: lane yang tak dipakai (quota 0) HILANG dari tampilan ke-depan. Panel yang
+  // permanen kosong terbaca seolah lane sedang menunggu sinyal, padahal ia tak akan
+  // pernah membuka posisi. Riwayatnya tetap utuh di tab lain — trade yang sudah
+  // terjadi tak ikut disembunyikan.
+  const lanesAktif = LANES.filter(l => !isDisabled(l.lane));
+  const lanePauses = riskDash?.gate?.lane_pauses ?? {};
+  // Ringkasan margin ikut menyesuaikan: menyebut "Momo" saat lane momentum mati
+  // membuat angka nol itu terbaca seolah lane-nya sedang sepi, bukan dimatikan.
+  const momentumAktif = !isDisabled("momentum");
+  const labelMarginGabung = momentumAktif ? "Margin Momo+BM" : "Margin BigMover";
+  // Acuan "sekarang" diambil dari waktu SERVER pada payload, bukan jam klien:
+  // murni saat render, dan tak meleset kalau jam klien berbeda dari server.
+  const now = riskDash?.generated_at ?? 0;
 
   const pd = riskDash?.portfolio;
   const ab = riskDash?.agent_breakdown;
@@ -47,8 +96,6 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
   (riskDash?.positions ?? []).forEach(rp => { riskMap[rp.id] = rp; });
 
   const openPos = positions.filter(p => p.status === "open");
-  const a1Open  = openPos.filter(p => p.agent === "futures_agent1");
-  const a2Open  = openPos.filter(p => p.agent === "futures_agent2");
   const a3Open  = openPos.filter(p => p.agent === "futures_agent3");
   const bmOpen  = openPos.filter(p => p.agent === "futures_agent_bigmover");
   const hasOpen = openPos.length > 0;
@@ -110,14 +157,14 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
 
           {ab && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {([
-                { key: "agent1",         label: "🎯 Pre-Gainer",   cls: "text-blue-300",   data: ab.agent1 },
-                { key: "agent2",         label: "📦 Accumulation", cls: "text-purple-300", data: ab.agent2 },
-                { key: "agent3",         label: "🔥 Momentum",     cls: "text-orange-300", data: ab.agent3 },
-                { key: "agent_bigmover", label: "💥 Big Mover",    cls: "text-amber-300",  data: ab.agent_bigmover },
-              ] as const).filter(a => a.data).map(a => (
+              {lanesAktif
+                .map(l => ({ ...l, data: (ab as Record<string, { open: number; margin: number; at_risk?: number } | undefined>)[l.key] }))
+                .filter(a => a.data).map(a => (
                 <div key={a.key} className={`bg-white/5 rounded-xl p-3 border ${(a.data!.at_risk ?? 0) > 0 ? "border-red-700/40" : "border-white/5"}`}>
-                  <p className={`text-[10px] font-bold mb-2 ${a.cls}`}>{a.label}</p>
+                  <p className={`text-[10px] font-bold mb-2 ${a.dark}`}>
+                    {a.label}
+                    {lanePauses[a.lane]?.paused ? <span className="ml-1 text-yellow-400" title="dijeda">⏸</span> : null}
+                  </p>
                   <div className="flex flex-col gap-1 text-xs">
                     <span className="text-neutral-400">Open: <strong className="text-white">{a.data!.open}</strong></span>
                     <span className="text-neutral-400">Margin: <strong className="text-yellow-300">${a.data!.margin.toFixed(0)}</strong></span>
@@ -189,7 +236,7 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
           <div className="flex gap-4 text-xs flex-wrap">
             <span className="text-neutral-400">Open: <strong className="text-blue-400">{openPos.length}</strong></span>
             <span className="text-neutral-400">Total Margin: <strong className="text-yellow-300">${totalMargin.toFixed(0)}</strong></span>
-            <span className="text-neutral-400">Margin Momo+BM: <strong className="text-orange-300">${(momentumMargin + bmMargin).toFixed(0)}</strong></span>
+            <span className="text-neutral-400">{labelMarginGabung}: <strong className="text-orange-300">${(momentumMargin + bmMargin).toFixed(0)}</strong></span>
           </div>
         </div>
       ) : null}
@@ -198,11 +245,8 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
       {hasOpen && (
         <div className="flex gap-1.5 flex-wrap">
           {([
-            { key: "all",            label: "Semua",           cls: "bg-neutral-100 text-neutral-700 border-neutral-300"  },
-            { key: "agent1",         label: "🎯 Pre-Gainer",   cls: "bg-blue-100 text-blue-700 border-blue-200"           },
-            { key: "agent2",         label: "📦 Accumulation", cls: "bg-purple-100 text-purple-700 border-purple-200"     },
-            { key: "agent3",         label: "🔥 Momentum",     cls: "bg-orange-100 text-orange-700 border-orange-200"     },
-            { key: "agent_bigmover", label: "💥 Big Mover",    cls: "bg-amber-100 text-amber-700 border-amber-200"        },
+            { key: "all", label: "Semua", cls: "bg-neutral-100 text-neutral-700 border-neutral-300" },
+            ...lanesAktif.map(l => ({ key: l.key, label: l.label, cls: l.chip })),
           ] as { key: AgentFilter; label: string; cls: string }[]).map(f => (
             <button key={f.key} onClick={() => setAgentFilter(f.key)}
               className={`text-[10px] font-bold px-3 py-1 rounded-full border transition-all ${
@@ -216,23 +260,21 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
 
       {/* Open positions by agent */}
       {hasOpen ? (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-          {(agentFilter === "all" || agentFilter === "agent1") && (
-            <AgentColumn label="🎯 Pre-Gainer"   color="bg-blue-100 text-blue-700 border-blue-200"
-              positions={a1Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent1.at_risk} />
-          )}
-          {(agentFilter === "all" || agentFilter === "agent2") && (
-            <AgentColumn label="📦 Accumulation" color="bg-purple-100 text-purple-700 border-purple-200"
-              positions={a2Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent2.at_risk} />
-          )}
-          {(agentFilter === "all" || agentFilter === "agent3") && (
-            <AgentColumn label="🔥 Momentum"     color="bg-orange-100 text-orange-700 border-orange-200"
-              positions={a3Open} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent3?.at_risk} />
-          )}
-          {(agentFilter === "all" || agentFilter === "agent_bigmover") && (
-            <AgentColumn label="💥 Big Mover"    color="bg-amber-100 text-amber-700 border-amber-200"
-              positions={bmOpen} riskMap={riskMap} riskDollar={riskDollar} atRisk={ab?.agent_bigmover?.at_risk} />
-          )}
+        <div className={`grid grid-cols-1 gap-4 ${
+          lanesAktif.length >= 4 ? "lg:grid-cols-4"
+          : lanesAktif.length === 3 ? "lg:grid-cols-3"
+          : lanesAktif.length === 2 ? "lg:grid-cols-2" : ""}`}>
+          {lanesAktif
+            .filter(l => agentFilter === "all" || agentFilter === l.key)
+            .map(l => {
+              const posLane = openPos.filter(p => p.agent === `futures_${l.key}`);
+              const d = (ab as Record<string, { at_risk?: number } | undefined> | undefined)?.[l.key];
+              return (
+                <AgentColumn key={l.key} label={l.label} color={l.chip}
+                  positions={posLane} riskMap={riskMap} riskDollar={riskDollar}
+                  atRisk={d?.at_risk} pausedUntil={lanePauses[l.lane]?.pause_until} now={now} />
+              );
+            })}
         </div>
       ) : (
         <EmptyState icon="📭" title="Tidak ada posisi terbuka saat ini" />
@@ -267,8 +309,10 @@ export function MonitorTab({ positions, riskDash, learning, startingBalance, ris
             <p className={`text-xl font-black tabular-nums ${(a3Open.length + bmOpen.length) > 0 ? "text-orange-600" : "text-neutral-400"}`}>
               {(a3Open.length + bmOpen.length) > 0 ? `$${(momentumMargin + bmMargin).toFixed(0)}` : "—"}
             </p>
-            <p className="text-[10px] text-neutral-600 font-semibold mt-1">Margin Momo+BM</p>
-            <p className="text-[9px] text-neutral-400">{a3Open.length} Momentum · {bmOpen.length} BigMover</p>
+            <p className="text-[10px] text-neutral-600 font-semibold mt-1">{labelMarginGabung}</p>
+            <p className="text-[9px] text-neutral-400">
+              {momentumAktif ? `${a3Open.length} Momentum · ` : ""}{bmOpen.length} BigMover
+            </p>
           </div>
 
           {/* Closed Today */}
