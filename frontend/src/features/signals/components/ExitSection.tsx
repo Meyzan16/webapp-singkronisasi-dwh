@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 /**
  * Seksi EXIT — sisi KELUAR dari Adaptive Learning Engine (M6).
  *
@@ -322,7 +323,7 @@ export function ExitSection({ subTab }: { subTab: ExitSubTab }) {
     try {
       const get = async (url: string | null) => {
         if (!url) return null;
-        const res = await fetch(url);
+        const res = await apiFetch(url);
         return res.ok ? await res.json() : null;
       };
       const [a, t, s, sr, r] = await Promise.all([

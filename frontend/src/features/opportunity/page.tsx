@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import {
@@ -94,7 +95,7 @@ export default function OpportunityPage() {
   // Fetch active open positions for the banner (poll every 30s)
   const fetchActivePositions = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/opportunity/positions");
+      const r = await apiFetch("/api/v1/opportunity/positions");
       if (!r.ok) return;
       const d = await r.json() as { positions: ActivePos[] };
       setActivePositions(d.positions.filter(p => (p as unknown as { status: string }).status === "open"));
@@ -111,7 +112,7 @@ export default function OpportunityPage() {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await fetch("/api/v1/opportunity/config");
+        const r = await apiFetch("/api/v1/opportunity/config");
         if (r.ok) setConfig(await r.json() as ScannerConfig);
       } catch { /* fallback: teks generik tanpa angka */ }
     })();
@@ -239,7 +240,7 @@ export default function OpportunityPage() {
     setScanning(true);
     try {
       // §11.7: tanpa parameter mati — engine sudah memfilter via MIN_SCORE
-      const r = await fetch("/api/v1/opportunity/scan?limit=50", { method: "POST" });
+      const r = await apiFetch("/api/v1/opportunity/scan?limit=50", { method: "POST", timeoutMs: HEAVY_TIMEOUT_MS });
       if (!r.ok) return;
       const d = await r.json() as Record<string, unknown>;
       applySnapshot(d);

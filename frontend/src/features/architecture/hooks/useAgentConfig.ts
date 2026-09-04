@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState } from "react";
 
 export interface AgentConfigSpot {
@@ -107,7 +108,7 @@ export function useAgentConfig(): UseAgentConfigState {
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/v1/agent/config")
+    apiFetch("/api/v1/agent/config")
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return (await res.json()) as AgentConfigResponse;

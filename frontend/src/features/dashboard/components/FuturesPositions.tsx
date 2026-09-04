@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { apiFetch } from "@/lib/api";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -25,10 +26,18 @@ export function FuturesPositions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Poll 5 detik memanggil endpoint yang menembus Binance. Tanpa penjaga ini,
+  // satu respons lambat membuat tick berikutnya menumpuk di atasnya sampai soket
+  // habis — persis pola yang bikin layar menggantung. Tick baru dilewati saja
+  // selama permintaan sebelumnya belum selesai.
+  const inFlight = useRef(false);
+
   const fetchData = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     try {
       setLoading(true);
-      const res = await fetch("/api/v1/market/futures-positions");
+      const res = await apiFetch("/api/v1/market/futures-positions");
       if (!res.ok) throw new Error(await res.text());
       setData(await res.json());
       setError(null);
@@ -36,6 +45,7 @@ export function FuturesPositions() {
       setError(e instanceof Error ? e.message : "Failed to fetch futures positions");
     } finally {
       setLoading(false);
+      inFlight.current = false;
     }
   }, []);
 

@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useState } from "react";
 
 // PLAN-SIGNAL-GAP P4: informational panel — shows coins with big 24h moves and
@@ -32,7 +33,7 @@ export function BigMoversPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/futures/big-movers?limit=60");
+      const r = await apiFetch("/api/v1/futures/big-movers?limit=60");
       if (r.ok) {
         const d = await r.json() as { movers: BigMover[] };
         setMovers(d.movers ?? []);

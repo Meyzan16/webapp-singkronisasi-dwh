@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { DBHistoryTable } from "@/features/health/components/DBHistoryTable";
 
@@ -46,7 +47,7 @@ export function OppSpotTab() {
 
   const fetchBalance = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/balance/spot");
+      const r = await apiFetch("/api/v1/balance/spot");
       if (r.ok) setApiBalance(await r.json() as ApiBalance);
     } catch { /* silent */ }
   }, []);
@@ -55,7 +56,7 @@ export function OppSpotTab() {
   // limit=1 karena kita hanya butuh metadatanya, bukan daftar hasilnya.
   const fetchScanMeta = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/opportunity/scan?min_score=0&limit=1");
+      const r = await apiFetch("/api/v1/opportunity/scan?min_score=0&limit=1");
       if (r.ok) setScanMeta(await r.json() as ScanMeta);
     } catch { /* silent — panel lane tetap tampil tanpa corong */ }
   }, []);
@@ -64,7 +65,7 @@ export function OppSpotTab() {
     if (!silent) setLoading(true);
     setError(false);
     try {
-      const r = await fetch(`/api/v1/opportunity/positions?days=${HISTORY_DAYS}`);
+      const r = await apiFetch(`/api/v1/opportunity/positions?days=${HISTORY_DAYS}`);
       if (!r.ok) { setError(true); return; }
       const d = await r.json() as { positions: OppPosition[]; total: number };
       const next = d.positions ?? [];
@@ -106,7 +107,7 @@ export function OppSpotTab() {
     if (!amt || amt <= 0) return;
     setDepositing(true);
     try {
-      const r = await fetch("/api/v1/balance/spot/deposit", {
+      const r = await apiFetch("/api/v1/balance/spot/deposit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount: amt, notes: "Manual deposit via UI" }),
@@ -132,7 +133,7 @@ export function OppSpotTab() {
     if (!confirm(`Tutup posisi ${symbol.replace("USDT", "")}/USDT sekarang di harga pasar?`)) return;
     setClosingId(id);
     try {
-      const r = await fetch(`/api/v1/opportunity/positions/${id}/close`, { method: "POST" });
+      const r = await apiFetch(`/api/v1/opportunity/positions/${id}/close`, { method: "POST" });
       if (!r.ok) { alert("Gagal menutup posisi"); return; }
       await fetchPositions(true);
     } catch { alert("Gagal menutup posisi"); }

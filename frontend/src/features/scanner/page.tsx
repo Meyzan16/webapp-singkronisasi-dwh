@@ -1,10 +1,22 @@
 "use client";
+import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useCallback, useEffect, useState, useMemo, useRef } from "react";
 import { fmtPrice } from "@/lib/format";
 import { MarketIntelBanner } from "@/components/MarketIntelBanner";
 import { DirBadge, AgentBadge } from "@/components/ui/trading-badges";
 import { type ConnState, CONN_META } from "@/components/ui/live-badge";
+import { useLaneStatus } from "@/features/shared/useLaneStatus";
+import { PauseBadge } from "@/features/shared/PauseBadge";
 import { BigMoversPanel } from "./components/BigMoversPanel";
+
+/** U1 — satu daftar lane scanner, dipetakan ke nama lane pada `lane_quotas`.
+ *  Nama agen (`agent3`) dan nama lane (`momentum`) BEDA; pemetaan ini yang
+ *  menyambungkannya, jadi status pakai lane bisa dibaca dari keadaan. */
+const LANE_TABS = [
+  { key: "agent1" as const, lane: "pre_gainer",   name: "Pre-Gainer",   label: "🎯 Pre-Gainer",   cls: "bg-blue-500/20 border-blue-400/40 text-blue-300"       },
+  { key: "agent2" as const, lane: "accumulation", name: "Accumulation", label: "📦 Accumulation", cls: "bg-purple-500/20 border-purple-400/40 text-purple-300" },
+  { key: "agent3" as const, lane: "momentum",     name: "Momentum",     label: "🔥 Momentum",     cls: "bg-orange-500/20 border-orange-400/40 text-orange-300" },
+];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -31,6 +43,21 @@ interface FuturesSignal {
   tp2_pct:      number;
   tp3_pct:      number;
   rr_ratio:     number;
+}
+
+/** Bentuk `gate.lane_pauses` dari `/futures/monitor/risk` — objek per lane,
+ *  bukan epoch telanjang. */
+interface LanePause {
+  paused:      boolean;
+  pause_until: number;
+  wr:          number;
+  total:       number;
+}
+
+interface RiskSnapshot {
+  positions:     OpenPosition[];
+  generated_at?: number;
+  gate?:         { lane_pauses?: Record<string, LanePause> };
 }
 
 interface OpenPosition {
@@ -188,7 +215,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
   useEffect(() => {
     void (async () => {
       try {
-        const r = await fetch("/api/v1/balance/futures");
+        const r = await apiFetch("/api/v1/balance/futures");
         if (r.ok) {
           const d = await r.json() as { balance?: number };
           if (typeof d.balance === "number" && d.balance > 0) setBalance(d.balance);
@@ -200,7 +227,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
   const handleOpen = async () => {
     setOpening(true); setError("");
     try {
-      const res = await fetch("/api/v1/futures/trade", {
+      const res = await apiFetch("/api/v1/futures/trade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -398,6 +425,7 @@ export default function ScannerFuturesPage() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [scanned, setScanned]         = useState(0);
   const [activeAgent, setActiveAgent] = useState<"all" | "agent1" | "agent2" | "agent3">("all");
+  const { isDisabled } = useLaneStatus();
   const [dirFilter, setDirFilter]     = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [minScore, setMinScore]       = useState(52);
   const [search, setSearch]           = useState("");
@@ -409,6 +437,10 @@ export default function ScannerFuturesPage() {
   const [autoToggling, setAutoToggling]     = useState(false);
   // Open positions monitor
   const [openPositions, setOpenPositions]   = useState<OpenPosition[]>([]);
+  // U1 — lane yang sedang DIJEDA (sementara) + acuan "sekarang" dari SERVER.
+  // Jam klien tak dipakai: kalau meleset, sisa jeda yang ditampilkan ikut salah.
+  const [lanePauses, setLanePauses] = useState<Record<string, LanePause>>({});
+  const [riskNow, setRiskNow]       = useState(0);
 
   const nextScanRef = useRef<number | null>(null);
   const [nextScanDisplay, setNextScanDisplay] = useState<number | null>(null);
@@ -422,11 +454,16 @@ export default function ScannerFuturesPage() {
 
   // Fetch auto status + open positions on mount
   useEffect(() => {
+    const terapkanRisk = (d: RiskSnapshot) => {
+      setOpenPositions(d.positions ?? []);
+      setLanePauses(d.gate?.lane_pauses ?? {});
+      setRiskNow(d.generated_at ?? 0);
+    };
     void (async () => {
       try {
         const [autoRes, riskRes] = await Promise.all([
-          fetch("/api/v1/futures/auto/status"),
-          fetch("/api/v1/futures/monitor/risk"),
+          apiFetch("/api/v1/futures/auto/status"),
+          apiFetch("/api/v1/futures/monitor/risk"),
         ]);
         if (autoRes.ok) {
           const a = await autoRes.json() as { enabled: boolean; threshold?: number };
@@ -434,19 +471,15 @@ export default function ScannerFuturesPage() {
           if (typeof a.threshold === "number") setAutoThreshold(a.threshold);
         }
         if (riskRes.ok) {
-          const r = await riskRes.json() as { positions: OpenPosition[] };
-          setOpenPositions(r.positions ?? []);
+          terapkanRisk(await riskRes.json() as RiskSnapshot);
         }
       } catch { /* silent */ }
     })();
 
     const t = setInterval(async () => {
       try {
-        const r = await fetch("/api/v1/futures/monitor/risk");
-        if (r.ok) {
-          const d = await r.json() as { positions: OpenPosition[] };
-          setOpenPositions(d.positions ?? []);
-        }
+        const r = await apiFetch("/api/v1/futures/monitor/risk");
+        if (r.ok) terapkanRisk(await r.json() as RiskSnapshot);
       } catch { /* silent */ }
     }, 30_000);
     return () => clearInterval(t);
@@ -455,7 +488,7 @@ export default function ScannerFuturesPage() {
   const toggleAutoTrade = async () => {
     setAutoToggling(true);
     try {
-      const res = await fetch("/api/v1/futures/auto/toggle", {
+      const res = await apiFetch("/api/v1/futures/auto/toggle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled: !autoEnabled }),
@@ -525,25 +558,47 @@ export default function ScannerFuturesPage() {
   const manualScan = useCallback(async () => {
     setScanning(true);
     try {
-      const r = await fetch("/api/v1/futures/scan", { method: "POST" });
+      const r = await apiFetch("/api/v1/futures/scan", { method: "POST", timeoutMs: HEAVY_TIMEOUT_MS });
       if (!r.ok) return;
       applySnapshot(await r.json() as Record<string, unknown>);
     } catch { /* silent */ } finally { setScanning(false); }
   }, [applySnapshot]);
 
+  // U1 — lane yang quota-nya 0 tak akan pernah membuka posisi. Sinyalnya tetap
+  // dipindai backend, jadi kalau dibiarkan tampil layar ini menawarkan peluang yang
+  // sudah pasti dilewati auto-trader. Tab-nya hilang, sinyalnya keluar dari daftar
+  // dan dari hitungan LONG/SHORT. Riwayat lane itu TIDAK tersentuh (ada di History).
+  const laneMatiKey = LANE_TABS.filter(t => isDisabled(t.lane)).map(t => t.key).join(",");
+  const laneTabs    = LANE_TABS.filter(t => !isDisabled(t.lane));
+
+  // Filter yang menunjuk lane mati akan menampilkan "kosong" tanpa sebab yang
+  // terlihat — kembalikan ke "all" begitu lane-nya dimatikan.
+  useEffect(() => {
+    if (activeAgent !== "all" && laneMatiKey.split(",").includes(activeAgent)) setActiveAgent("all");
+  }, [laneMatiKey, activeAgent]);
+
+  const sinyalLaneAktif = useMemo(() => {
+    const mati = new Set(laneMatiKey ? laneMatiKey.split(",") : []);
+    return [
+      ...(mati.has("agent1") ? [] : agent1),
+      ...(mati.has("agent2") ? [] : agent2),
+      ...(mati.has("agent3") ? [] : agent3),
+    ];
+  }, [agent1, agent2, agent3, laneMatiKey]);
+
   const filtered = useMemo(() => {
+    const mati = new Set(laneMatiKey ? laneMatiKey.split(",") : []);
     const all: FuturesSignal[] =
-      activeAgent === "agent1" ? agent1 :
-      activeAgent === "agent2" ? agent2 :
-      activeAgent === "agent3" ? agent3 :
-      [...agent1, ...agent2, ...agent3];
+      activeAgent !== "all" && !mati.has(activeAgent)
+        ? (activeAgent === "agent1" ? agent1 : activeAgent === "agent2" ? agent2 : agent3)
+        : sinyalLaneAktif;
     const q = search.trim().toLowerCase();
     return all.filter(s =>
       s.score >= minScore &&
       (dirFilter === "ALL" || s.direction === dirFilter) &&
       (!q || s.symbol.toLowerCase().includes(q))
     );
-  }, [agent1, agent2, agent3, activeAgent, minScore, dirFilter, search]);
+  }, [agent1, agent2, agent3, sinyalLaneAktif, laneMatiKey, activeAgent, minScore, dirFilter, search]);
 
   const cm = CONN_META[connState];
   const scanProg = nextScanDisplay != null
@@ -551,9 +606,10 @@ export default function ScannerFuturesPage() {
   const fmtCD = (s: number | null) => s == null ? "--:--"
     : `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
   // F40: dedupe by symbol across agents — one coin counted once per direction
-  const allSignals = [...agent1, ...agent2, ...agent3];
-  const totalLong  = new Set(allSignals.filter(s => s.direction === "LONG").map(s => s.symbol)).size;
-  const totalShort = new Set(allSignals.filter(s => s.direction === "SHORT").map(s => s.symbol)).size;
+  // U1: hitungan ikut lane aktif saja — koin yang hanya muncul di lane mati bukan
+  // peluang, karena auto-trader pasti melewatinya.
+  const totalLong  = new Set(sinyalLaneAktif.filter(s => s.direction === "LONG").map(s => s.symbol)).size;
+  const totalShort = new Set(sinyalLaneAktif.filter(s => s.direction === "SHORT").map(s => s.symbol)).size;
 
   // Compute sets of open symbols for badge
   const openSymbolMap = useMemo(() => {
@@ -577,19 +633,18 @@ export default function ScannerFuturesPage() {
                 <span className="text-3xl">⚡</span>
                 <div>
                   <h1 className="text-2xl font-bold">Futures Scanner</h1>
-                  <p className="text-xs text-neutral-400">Pre-Move (sebelum pump) · Momentum (saat bergerak) · New Listing · satu wallet cross-margin</p>
+                  {/* Disusun dari lane yang benar-benar aktif — menyebut lane mati di sini
+                      membuat kalimatnya berbohong tiap kali quota ditala. */}
+                  <p className="text-xs text-neutral-400">{laneTabs.map(t => t.name).join(" · ")} · New Listing · satu wallet cross-margin</p>
                 </div>
               </div>
               <div className="flex gap-2 ml-12 flex-wrap">
-                {[
-                  { key: "agent1" as const, label: "🎯 Pre-Gainer",   cls: "bg-blue-500/20 border-blue-400/40 text-blue-300"     },
-                  { key: "agent2" as const, label: "📦 Accumulation", cls: "bg-purple-500/20 border-purple-400/40 text-purple-300" },
-                  { key: "agent3" as const, label: "🔥 Momentum",     cls: "bg-orange-500/20 border-orange-400/40 text-orange-300" },
-                ].map(a => (
+                {laneTabs.map(a => (
                   <button key={a.key}
                     onClick={() => setActiveAgent(prev => prev === a.key ? "all" : a.key)}
-                    className={`text-[10px] font-bold px-3 py-1 rounded-full border transition-all ${activeAgent === a.key ? a.cls : "bg-white/5 border-white/10 text-neutral-400 hover:border-white/20"}`}>
+                    className={`flex items-center gap-1.5 text-[10px] font-bold px-3 py-1 rounded-full border transition-all ${activeAgent === a.key ? a.cls : "bg-white/5 border-white/10 text-neutral-400 hover:border-white/20"}`}>
                     {a.label}
+                    <PauseBadge until={lanePauses[a.lane]?.paused ? lanePauses[a.lane]?.pause_until : undefined} now={riskNow} />
                   </button>
                 ))}
               </div>
@@ -734,7 +789,7 @@ export default function ScannerFuturesPage() {
             <span className="text-3xl animate-bounce">⚡</span>
           </div>
           <p className="font-semibold text-neutral-700">Menghubungkan ke Pre-Gainer Scanner...</p>
-          <p className="text-xs text-neutral-400">Pre-Gainer + Accumulation + Momentum · 150 USDT-M pairs + new listings</p>
+          <p className="text-xs text-neutral-400">{laneTabs.map(t => t.name).join(" + ")} · 150 USDT-M pairs + new listings</p>
         </div>
       )}
 
@@ -766,7 +821,7 @@ export default function ScannerFuturesPage() {
       )}
 
       {/* Empty */}
-      {!loading && filtered.length === 0 && (agent1.length > 0 || agent2.length > 0 || agent3.length > 0) && (
+      {!loading && filtered.length === 0 && sinyalLaneAktif.length > 0 && (
         <div className="text-center py-12 text-neutral-400">
           <p className="text-3xl mb-3">🔍</p>
           <p className="font-semibold">Tidak ada sinyal untuk filter ini</p>
@@ -774,7 +829,7 @@ export default function ScannerFuturesPage() {
             className="mt-3 text-sm text-teal-600 underline">Reset filter</button>
         </div>
       )}
-      {!loading && !scanning && !agent1.length && !agent2.length && !agent3.length && (
+      {!loading && !scanning && sinyalLaneAktif.length === 0 && (
         <div className="space-y-4">
           <div className="text-center py-8 text-neutral-400">
             <p className="text-3xl mb-3">📡</p>

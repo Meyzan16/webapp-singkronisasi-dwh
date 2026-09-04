@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -44,7 +45,7 @@ function EditableRow({ row, onSaved }: { row: ConfigRow; onSaved: () => void }) 
     setBusy(true);
     setErr(null);
     try {
-      const r = await fetch(`/api/v1/agent/config/${row.agent_group}/${row.key}`, {
+      const r = await apiFetch(`/api/v1/agent/config/${row.agent_group}/${row.key}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ value: num }),
@@ -66,7 +67,7 @@ function EditableRow({ row, onSaved }: { row: ConfigRow; onSaved: () => void }) 
     setBusy(true);
     setErr(null);
     try {
-      const r = await fetch(`/api/v1/agent/config/${row.agent_group}/${row.key}/reset`, {
+      const r = await apiFetch(`/api/v1/agent/config/${row.agent_group}/${row.key}/reset`, {
         method: "POST",
       });
       if (!r.ok) throw new Error(await r.text());
@@ -163,7 +164,7 @@ export function AgentConfigEditor() {
   const [activeGroup, setActiveGroup] = useState<string>("spot");
 
   const load = useCallback(() => {
-    fetch("/api/v1/agent/config/all")
+    apiFetch("/api/v1/agent/config/all")
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return (await r.json()) as ConfigRow[];

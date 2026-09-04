@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 interface MarketCtx {
@@ -43,7 +44,7 @@ export function MarketIntelBanner({ mode, refreshMs = 60_000 }: Props) {
 
   const fetchCtx = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/market/context");
+      const r = await apiFetch("/api/v1/market/context");
       if (r.ok) setCtx(await r.json() as MarketCtx);
     } catch { /* silent */ }
     finally { setLoading(false); }

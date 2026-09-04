@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState } from "react";
 
 /**
@@ -11,7 +12,7 @@ export function useAgentConfigDbKeys(): Set<string> {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/v1/agent/config/all")
+    apiFetch("/api/v1/agent/config/all")
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return (await r.json()) as { agent_group: string; key: string }[];

@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -25,7 +26,8 @@ export function DBResetCard() {
     setResult(null);
     setError(null);
     try {
-      const r = await fetch("/api/v1/admin/reset_simulation", {
+      const r = await apiFetch("/api/v1/admin/reset_simulation", {
+        timeoutMs: HEAVY_TIMEOUT_MS,
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({

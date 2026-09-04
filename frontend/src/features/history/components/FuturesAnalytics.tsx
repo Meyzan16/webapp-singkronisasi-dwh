@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useEffect, useState, useCallback } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -137,7 +138,7 @@ export function FuturesAnalytics() {
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const sRes = await fetch("/api/v1/futures/learning/stats");
+      const sRes = await apiFetch("/api/v1/futures/learning/stats");
       if (sRes.ok) {
         const d = await sRes.json() as LearningStats;
         if (!("error" in d)) setStats(d);
@@ -150,7 +151,7 @@ export function FuturesAnalytics() {
   const forceUpdate = async () => {
     setUpdating(true);
     try {
-      await fetch("/api/v1/futures/learning/update", { method: "POST" });
+      await apiFetch("/api/v1/futures/learning/update", { method: "POST", timeoutMs: HEAVY_TIMEOUT_MS });
       await fetchAll(true);
     } finally { setUpdating(false); }
   };

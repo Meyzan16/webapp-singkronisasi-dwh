@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState } from "react";
 
 /**
@@ -43,7 +44,7 @@ export function useLaneStatus(): LaneStatus {
 
   useEffect(() => {
     let batal = false;
-    fetch("/api/v1/agent/config")
+    apiFetch("/api/v1/agent/config")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (batal) return;

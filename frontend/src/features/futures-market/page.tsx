@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtPrice, fmtVol } from "@/lib/format";
 import { PctBadge } from "@/components/ui/trading-badges";
@@ -35,7 +36,7 @@ export default function FuturesMarketPage() {
       const url = forceRefresh
         ? "/api/v1/market/futures-overview?refresh=true"
         : "/api/v1/market/futures-overview";
-      const r = await fetch(url);
+      const r = await apiFetch(url);
       if (r.ok) {
         setData(await r.json() as Overview);
         countRef.current = 60;
@@ -47,7 +48,7 @@ export default function FuturesMarketPage() {
 
   const fetchRadar = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/futures/big-movers?limit=200");
+      const r = await apiFetch("/api/v1/futures/big-movers?limit=200");
       if (r.ok) {
         const d = await r.json() as { movers: RadarMover[] };
         const preMove = (d.movers ?? []).filter(m =>

@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MarketIntelBanner } from "@/components/MarketIntelBanner";
 import { KpiCard } from "@/components/ui/stat-card";
@@ -103,23 +104,23 @@ export default function DashboardPage() {
   const fetchAll = useCallback(async () => {
     try {
       const [ctxR, oppR, futR, learnR, statR, spotR, healthR, binanceR, balR, futBalR] = await Promise.allSettled([
-        fetch("/api/v1/market/context"),
-        fetch("/api/v1/opportunity/positions?days=365"),   // DASH-FIX: endpoint cap le=365; 3650 → 422 = SEMUA posisi (termasuk open) hilang. Open selalu disertakan apa pun days.
-        fetch("/api/v1/futures/positions?status=all"),
-        fetch("/api/v1/futures/learning/stats"),
-        fetch("/api/v1/futures/status"),
-        fetch("/api/v1/market/spot-positions"),
-        fetch("/health"),
-        fetch("/api/v1/market/binance-status"),
-        fetch("/api/v1/balance/spot"),
-        fetch("/api/v1/balance/futures"),
+        apiFetch("/api/v1/market/context"),
+        apiFetch("/api/v1/opportunity/positions?days=365"),   // DASH-FIX: endpoint cap le=365; 3650 → 422 = SEMUA posisi (termasuk open) hilang. Open selalu disertakan apa pun days.
+        apiFetch("/api/v1/futures/positions?status=all"),
+        apiFetch("/api/v1/futures/learning/stats"),
+        apiFetch("/api/v1/futures/status"),
+        apiFetch("/api/v1/market/spot-positions"),
+        apiFetch("/health"),
+        apiFetch("/api/v1/market/binance-status"),
+        apiFetch("/api/v1/balance/spot"),
+        apiFetch("/api/v1/balance/futures"),
       ]);
       // DASH-FIX: history source of truth (stats + equity per wallet) — dipisah
       // dari Promise.allSettled utama agar mudah dibaca; tetap paralel.
       const [histR, sEqR, fEqR] = await Promise.allSettled([
-        fetch("/api/v1/history/stats?days=3650"),
-        fetch("/api/v1/history/equity?style=spot"),
-        fetch("/api/v1/history/equity?style=futures"),
+        apiFetch("/api/v1/history/stats?days=3650"),
+        apiFetch("/api/v1/history/equity?style=spot"),
+        apiFetch("/api/v1/history/equity?style=futures"),
       ]);
       if (histR.status === "fulfilled" && histR.value.ok) setHistStats(await histR.value.json());
       if (sEqR.status === "fulfilled" && sEqR.value.ok)   setSpotEquity((await sEqR.value.json()).points ?? []);

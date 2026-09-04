@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useState } from "react";
 import { ConfigPanel, ResultsDisplay } from "./components";
 
@@ -13,7 +14,8 @@ export default function BacktestPage() {
   const handleRunBacktest = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/v1/backtest/${selectedPair}/${selectedTF}`, {
+      const response = await apiFetch(`/api/v1/backtest/${selectedPair}/${selectedTF}`, {
+        timeoutMs: HEAVY_TIMEOUT_MS,
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

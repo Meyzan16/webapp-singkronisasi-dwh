@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtPrice } from "@/lib/format";
 import { laneForSpot } from "@/lib/lanes";
@@ -272,7 +273,7 @@ export function DBHistoryTable({
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (debouncedQ)              params.set("search", debouncedQ);
 
-      const r = await fetch(`/api/v1/history/trades?${params.toString()}`);
+      const r = await apiFetch(`/api/v1/history/trades?${params.toString()}`);
       if (r.ok) {
         setData(await r.json() as TradeResponse);
         setLastRefresh(new Date());

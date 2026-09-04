@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -59,7 +60,7 @@ export function APIKeyForm() {
 
   const loadKeyStatus = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/exchange/keys");
+      const r = await apiFetch("/api/v1/exchange/keys");
       if (r.ok) setKeyStatus(await r.json() as KeyStatus);
     } catch { /* backend offline */ }
   }, []);
@@ -67,7 +68,7 @@ export function APIKeyForm() {
   const loadWallet = useCallback(async () => {
     setLoadingWallet(true);
     try {
-      const r = await fetch("/api/v1/wallet/spot");
+      const r = await apiFetch("/api/v1/wallet/spot");
       if (r.ok) setWallet(await r.json() as SpotWallet);
     } catch { /* ignore */ }
     finally { setLoadingWallet(false); }
@@ -88,7 +89,7 @@ export function APIKeyForm() {
     setSaving(true);
     setSaveMsg(null);
     try {
-      const r = await fetch("/api/v1/exchange/keys", {
+      const r = await apiFetch("/api/v1/exchange/keys", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ api_key: apiKey.trim(), api_secret: apiSecret.trim() }),
@@ -121,7 +122,8 @@ export function APIKeyForm() {
     setTesting(true);
     setTestResult(null);
     try {
-      const r = await fetch("/api/v1/account/test-connection", {
+      const r = await apiFetch("/api/v1/account/test-connection", {
+        timeoutMs: HEAVY_TIMEOUT_MS,
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ api_key: apiKey.trim(), api_secret: apiSecret.trim() }),

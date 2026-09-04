@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -35,7 +36,7 @@ export function SpotPositions() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch("/api/v1/market/spot-positions");
+      const res = await apiFetch("/api/v1/market/spot-positions");
       if (!res.ok) throw new Error(await res.text());
       setData(await res.json());
       setError(null);

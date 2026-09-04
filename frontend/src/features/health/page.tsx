@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { HealthEventLog } from "./components/HealthEventLog";
 import { StatusDot } from "@/components/ui/trading-badges";
@@ -116,8 +117,8 @@ export default function HealthPage() {
   const fetchAll = useCallback(async () => {
     try {
       const [healthR, binanceR] = await Promise.allSettled([
-        fetch("/health"),
-        fetch("/api/v1/market/binance-status"),
+        apiFetch("/health"),
+        apiFetch("/api/v1/market/binance-status"),
       ]);
       if (healthR.status === "fulfilled" && healthR.value.ok)   setHealth(await healthR.value.json() as Health);
       if (binanceR.status === "fulfilled" && binanceR.value.ok) setBinance(await binanceR.value.json() as BinanceStatus);

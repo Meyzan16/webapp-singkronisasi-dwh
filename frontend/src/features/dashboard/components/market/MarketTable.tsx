@@ -13,10 +13,9 @@ interface FuturesTicker {
 interface MarketTableProps {
   tickers: FuturesTicker[];
   startIndex: number;
-  onSelect: (symbol: string) => void;
 }
 
-export function MarketTable({ tickers, startIndex, onSelect }: MarketTableProps) {
+export function MarketTable({ tickers, startIndex }: MarketTableProps) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -37,8 +36,8 @@ export function MarketTable({ tickers, startIndex, onSelect }: MarketTableProps)
             const base = t.symbol.replace("USDT", "");
             const cat  = getCoinCategory(t.symbol);
             return (
-              <tr key={t.symbol} onClick={() => onSelect(t.symbol)}
-                className="border-b border-neutral-50 hover:bg-teal-50 cursor-pointer transition-colors group">
+              <tr key={t.symbol}
+                className="border-b border-neutral-50 hover:bg-teal-50 transition-colors group">
                 <td className="py-2.5 pr-3 pl-1 text-muted-foreground text-xs">{startIndex + i + 1}</td>
                 <td className="py-2.5 pr-3">
                   <div className="flex items-center gap-2">

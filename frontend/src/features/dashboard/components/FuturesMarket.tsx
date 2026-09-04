@@ -1,10 +1,10 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Pagination } from "@/components/ui/pagination";
 import { MarketTable } from "./market/MarketTable";
 import { getCoinCategory, ALL_CATEGORIES } from "../data/categories";
-import { CoinModal } from "./CoinModal";
 
 interface FuturesTicker {
   symbol: string;
@@ -21,14 +21,13 @@ export function FuturesMarket() {
   const [tickers, setTickers]           = useState<FuturesTicker[]>([]);
   const [loading, setLoading]           = useState(true);
   const [category, setCategory]         = useState("All");
-  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [search, setSearch]             = useState("");
   const [page, setPage]                 = useState(1);
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch("/api/v1/market/futures-market");
+      const res = await apiFetch("/api/v1/market/futures-market");
       const d   = await res.json();
       setTickers(d.tickers ?? []);
     } finally {
@@ -121,7 +120,6 @@ export function FuturesMarket() {
             <MarketTable
               tickers={paginated}
               startIndex={(page - 1) * PAGE_SIZE}
-              onSelect={setSelectedSymbol}
             />
           )}
 
@@ -134,10 +132,6 @@ export function FuturesMarket() {
           />
         </CardContent>
       </Card>
-
-      {selectedSymbol && (
-        <CoinModal symbol={selectedSymbol} onClose={() => setSelectedSymbol(null)} />
-      )}
     </>
   );
 }

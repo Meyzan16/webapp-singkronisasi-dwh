@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useEffect, useState, useCallback } from "react";
 import { fmtPrice } from "@/lib/format";
 import { OpportunityResult, scoreLabel, TYPE_META } from "./OpportunityCard";
@@ -134,7 +135,7 @@ export function CoinModal({
     setAnalyzing(true);
     setAnalyzeErr("");
     try {
-      const res = await fetch(`/api/v1/opportunity/analyze/${r.symbol}`);
+      const res = await apiFetch(`/api/v1/opportunity/analyze/${r.symbol}`, { timeoutMs: HEAVY_TIMEOUT_MS });
       if (!res.ok) throw new Error("Gagal menganalisis");
       const data = await res.json() as AnalysisResult;
       setAnalysis(data);
@@ -148,7 +149,7 @@ export function CoinModal({
   // Per-coin rule: lock only if THIS exact coin already has an open position
   const checkExistingPosition = useCallback(async () => {
     try {
-      const res = await fetch("/api/v1/opportunity/positions");
+      const res = await apiFetch("/api/v1/opportunity/positions");
       if (!res.ok) return;
       const d = await res.json() as { positions: Array<{ symbol: string; entry: number; status: string }> };
       const sameOpen = d.positions.find(p => p.status === "open" && p.symbol === r.symbol);
@@ -197,7 +198,7 @@ export function CoinModal({
         taker_ratio:       levels.taker_ratio,
         confidence:        levels.confidence,
       };
-      const res = await fetch("/api/v1/opportunity/trade", {
+      const res = await apiFetch("/api/v1/opportunity/trade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

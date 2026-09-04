@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useState } from "react";
 
 // PLAN_v12 P6-F0 — versi RINGKAS pengganti panel "Dompet Futures":
@@ -21,7 +22,7 @@ export function FuturesWalletChips({ onChanged }: { onChanged?: () => void }) {
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/balance/futures");
+      const r = await apiFetch("/api/v1/balance/futures");
       if (r.ok) setInfo(await r.json() as WalletInfo);
     } catch { /* silent */ }
   }, []);
@@ -34,7 +35,7 @@ export function FuturesWalletChips({ onChanged }: { onChanged?: () => void }) {
     setBusy(true); setErr("");
     try {
       const ep = mode === "withdraw" ? "withdraw" : "deposit";
-      const r  = await fetch(`/api/v1/balance/futures/${ep}`, {
+      const r  = await apiFetch(`/api/v1/balance/futures/${ep}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ amount: value }),

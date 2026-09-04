@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 // Phase 1 T1 — Big Movers Watchlist di Futures Overview.
@@ -67,8 +68,8 @@ export function BigMoversWatchlist({ onChanged }: { onChanged?: () => void }) {
   const refresh = useCallback(async () => {
     try {
       const [m, b] = await Promise.all([
-        fetch("/api/v1/futures/big-movers?limit=60"),
-        fetch(`/api/v1/futures/force-open/budget?session_id=${sid}`),
+        apiFetch("/api/v1/futures/big-movers?limit=60"),
+        apiFetch(`/api/v1/futures/force-open/budget?session_id=${sid}`),
       ]);
       if (m.ok) {
         const d = (await m.json()) as { movers: BigMover[] };
@@ -245,7 +246,7 @@ function ForceOpenModal({
     let alive = true;
     void (async () => {
       try {
-        const r = await fetch(`/api/v1/futures/eligibility/${mover.symbol}`);
+        const r = await apiFetch(`/api/v1/futures/eligibility/${mover.symbol}`);
         if (r.ok && alive) setElig((await r.json()) as Eligibility);
       } catch {
         /* silent */
@@ -306,7 +307,7 @@ function ForceOpenModal({
         force_open: true,
         session_id: sid,
       };
-      const res = await fetch("/api/v1/futures/trade", {
+      const res = await apiFetch("/api/v1/futures/trade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),

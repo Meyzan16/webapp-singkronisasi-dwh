@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isFuturesAgent, agentLabel as agentLabelOf, SPOT_AGENT } from "@/lib/agents";
 import { ExitSection, type ExitSubTab } from "./components/ExitSection";
@@ -2626,14 +2627,14 @@ export default function SignalsPage() {
     if (!silent) setLoading(true);
     try {
       const [perfRes, crossRes, stateRes, catalogRes, healthRes, adaptiveRes, futuresRes, spotScanRes] = await Promise.all([
-        fetch(`/api/v1/signals/performance?agent=all&regime=all&min_trades=${minTrades}&sort_by=${sortBy}&sort_dir=${sortDir}&limit=50`),
-        fetch(`/api/v1/signals/cross_agent?min_trades=5`),
-        fetch("/api/v1/signals/updater/state"),
-        fetch("/api/v1/signals/catalog"),
-        fetch("/api/v1/signals/agent_health"),
-        fetch("/api/v1/signals/adaptive-engine"),
-        fetch("/api/v1/signals/adaptive-engine/futures"),
-        fetch("/api/v1/opportunity/status"),
+        apiFetch(`/api/v1/signals/performance?agent=all&regime=all&min_trades=${minTrades}&sort_by=${sortBy}&sort_dir=${sortDir}&limit=50`),
+        apiFetch(`/api/v1/signals/cross_agent?min_trades=5`),
+        apiFetch("/api/v1/signals/updater/state"),
+        apiFetch("/api/v1/signals/catalog"),
+        apiFetch("/api/v1/signals/agent_health"),
+        apiFetch("/api/v1/signals/adaptive-engine", { timeoutMs: HEAVY_TIMEOUT_MS }),
+        apiFetch("/api/v1/signals/adaptive-engine/futures", { timeoutMs: HEAVY_TIMEOUT_MS }),
+        apiFetch("/api/v1/opportunity/status"),
       ]);
       if (perfRes.ok)    setPerfData(await perfRes.json() as PerformanceResponse);
       if (crossRes.ok)   setCrossData(await crossRes.json() as CrossResponse);
@@ -2649,14 +2650,14 @@ export default function SignalsPage() {
 
   const fetchRegime = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/signals/regime_heatmap?limit=30");
+      const r = await apiFetch("/api/v1/signals/regime_heatmap?limit=30");
       if (r.ok) setRegimeData(await r.json() as RegimeResponse);
     } catch { /* stale */ }
   }, []);
 
   const fetchRejections = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/signals/rejections?hours=24&limit=100");
+      const r = await apiFetch("/api/v1/signals/rejections?hours=24&limit=100");
       if (r.ok) {
         const d = await r.json() as { rejections: RejectionRow[] };
         setRejectionsData(d.rejections ?? []);
@@ -2669,14 +2670,14 @@ export default function SignalsPage() {
   // repair. Yang benar-benar dipakai tab ini hanya review mingguan.
   const fetchImprovements = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/predictive/signal_review");
+      const r = await apiFetch("/api/v1/predictive/signal_review");
       if (r.ok) setReviewData(await r.json() as ReviewData);
     } catch { /* stale */ }
   }, []);
 
   const fetchReco = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/signals/recommendations");
+      const r = await apiFetch("/api/v1/signals/recommendations");
       if (r.ok) setRecoData(await r.json() as RecoResponse);
     } catch { /* stale */ }
   }, []);
@@ -2686,8 +2687,8 @@ export default function SignalsPage() {
     try {
       // PLAN_PERFORMANCE_INTEGRATION — paralel: FUTURES (Claude Code) + SPOT (mine)
       const [futR, spotR] = await Promise.all([
-        fetch("/api/v1/signals/repairs?limit=100"),
-        fetch("/api/v1/spot-repair/repairs?limit=100"),
+        apiFetch("/api/v1/signals/repairs?limit=100"),
+        apiFetch("/api/v1/spot-repair/repairs?limit=100"),
       ]);
       if (futR.ok)  setRepairsData(await futR.json() as RepairsResponse);
       if (spotR.ok) setSpotRepairsData(await spotR.json() as RepairsResponse);
@@ -2697,7 +2698,7 @@ export default function SignalsPage() {
   // PLAN_PERFORMANCE_INTEGRATION — fetch SPOT saran auto-applicable
   const fetchSpotReco = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/spot-repair/recommendations");
+      const r = await apiFetch("/api/v1/spot-repair/recommendations");
       if (r.ok) setSpotRecoData(await r.json() as SpotRecoResponse);
     } catch { /* stale */ }
   }, []);
@@ -2707,7 +2708,7 @@ export default function SignalsPage() {
     try {
       // PLAN_PERFORMANCE_INTEGRATION — routing: SPOT saran punya apply.endpoint sendiri
       const url = apply.endpoint ?? "/api/v1/signals/recommendations/apply";
-      const r = await fetch(url, {
+      const r = await apiFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(apply),
@@ -2731,7 +2732,7 @@ export default function SignalsPage() {
 
   const fetchPredictive = useCallback(async () => {
     try {
-      const r = await fetch("/api/v1/predictive/hit_rate?hours=168");
+      const r = await apiFetch("/api/v1/predictive/hit_rate?hours=168");
       if (r.ok) {
         const d = await r.json() as { by_agent: PredictiveHitRow[] };
         setPredictiveData(d.by_agent ?? []);
@@ -2764,7 +2765,7 @@ export default function SignalsPage() {
   const handleForce = async () => {
     setForceMsg("Memperbarui...");
     try {
-      const r = await fetch("/api/v1/signals/updater/run", { method: "POST" });
+      const r = await apiFetch("/api/v1/signals/updater/run", { method: "POST", timeoutMs: HEAVY_TIMEOUT_MS });
       if (r.ok) {
         const d = await r.json() as { updated: Record<string, number | string> };
         setForceMsg(`Selesai: SPOT=${d.updated.spot} · Futures=${d.updated.futures} · Cross=${d.updated.cross}`);

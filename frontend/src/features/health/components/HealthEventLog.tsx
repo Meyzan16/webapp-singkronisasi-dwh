@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ export function HealthEventLog() {
   const fetchLog = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const r = await fetch("/health/log?limit=200");
+      const r = await apiFetch("/health/log?limit=200");
       if (r.ok) {
         const d = await r.json() as { events: HealthEvent[]; stats: typeof stats };
         setEvents(d.events ?? []);

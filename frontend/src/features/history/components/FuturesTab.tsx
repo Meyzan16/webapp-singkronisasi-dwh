@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { FuturesAnalytics } from "./FuturesAnalytics";
 import { LoadingPage } from "@/components/ui/feedback";
@@ -42,10 +43,10 @@ export function FuturesTab() {
     if (!silent) setLoading(true);
     try {
       const [posRes, learnRes, riskRes, autoRes] = await Promise.all([
-        fetch("/api/v1/futures/positions?status=all"),
-        fetch("/api/v1/futures/learning/stats"),
-        fetch("/api/v1/futures/monitor/risk"),
-        fetch("/api/v1/futures/auto/status"),
+        apiFetch("/api/v1/futures/positions?status=all"),
+        apiFetch("/api/v1/futures/learning/stats"),
+        apiFetch("/api/v1/futures/monitor/risk"),
+        apiFetch("/api/v1/futures/auto/status"),
       ]);
       if (posRes.ok) {
         setPositions(((await posRes.json()) as { positions: FuturesPosition[] }).positions ?? []);

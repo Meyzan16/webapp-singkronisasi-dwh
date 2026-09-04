@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmtVol } from "@/lib/format";
 import { PctBadge } from "@/components/ui/trading-badges";
@@ -21,7 +22,7 @@ export default function SpotMarketPage() {
       const url = forceRefresh
         ? "/api/v1/market/spot-overview?refresh=true"
         : "/api/v1/market/spot-overview";
-      const r = await fetch(url);
+      const r = await apiFetch(url);
       if (r.ok) {
         setData(await r.json() as SpotOverview);
         countRef.current = 60;

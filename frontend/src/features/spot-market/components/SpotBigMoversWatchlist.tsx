@@ -1,4 +1,5 @@
 "use client";
+import { apiFetch } from "@/lib/api";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 // Phase 1 T2 — Big Movers Watchlist di Spot Market page.
@@ -44,7 +45,7 @@ export function SpotBigMoversWatchlist({ movers }: { movers: SpotMover[] }) {
 
   const refreshBudget = useCallback(async () => {
     try {
-      const r = await fetch(`/api/v1/futures/force-open/budget?session_id=${sid}`);
+      const r = await apiFetch(`/api/v1/futures/force-open/budget?session_id=${sid}`);
       if (r.ok) setBudget((await r.json()) as ForceOpenBudget);
     } catch {
       /* silent */
@@ -181,7 +182,7 @@ function ForceOpenModal({
         force_open: true,
         session_id: sid,
       };
-      const res = await fetch("/api/v1/opportunity/trade", {
+      const res = await apiFetch("/api/v1/opportunity/trade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
