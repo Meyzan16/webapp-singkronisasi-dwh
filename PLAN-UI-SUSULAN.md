@@ -76,6 +76,26 @@ disembunyikan — kalau hilang, orang akan mengira lane-nya dimatikan.
 
 **Ukuran:** sedang · **Risiko:** nol (baca-saja)
 
+### Susulan 26 Agu — halaman Scanner ikut dibereskan
+
+Saat U1 dikerjakan 25 Agu, dua dari empat berkas di tabel di atas tersentuh
+(`MonitorTab`, `ExitSection`). `scanner/page.tsx` **tertinggal**: tab 🔥 Momentum masih
+ada, dan — ini yang lebih menentukan — backend **tetap memindai** lane mati, jadi
+kartunya tetap muncul. Layar menawarkan peluang yang sudah pasti dilewati auto-trader
+(`lane_quota_full` → `continue`). Hitungan LONG/SHORT ikut menghitungnya.
+
+Yang dikerjakan: tab lane dibangun dari `LANE_TABS` (memetakan `agent3` → lane
+`momentum`, dua nama yang selama ini beda tanpa jembatan), lane mati hilang beserta
+sinyal dan hitungannya, filter yang menunjuk lane mati dikembalikan ke "Semua", dan dua
+kalimat yang menyebut nama lane secara mati kini disusun dari lane yang aktif.
+`PauseBadge` dipindah ke `features/shared/` — dipakai dua halaman, dan menyalinnya
+berarti salah satunya akan tertinggal saat diubah.
+
+`BigMoversWatchlist.tsx` ternyata **tidak** memuat lane sama sekali (tabel di atas
+keliru) — tak ada yang perlu diubah di sana.
+
+**Ukuran:** sedang · **Risiko:** nol (baca-saja)
+
 ---
 
 ## U2 — Usulan lebar SL berhenti di API ✅ SELESAI

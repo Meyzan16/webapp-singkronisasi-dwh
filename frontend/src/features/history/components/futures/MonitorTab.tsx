@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { EmptyState } from "@/components/ui/feedback";
 import { useLaneStatus } from "@/features/shared/useLaneStatus";
+import { PauseBadge } from "@/features/shared/PauseBadge";
 import { GateBanner } from "./GateBanner";
 import { OpenPosCard } from "./OpenPosCard";
 import type { FuturesPosition, RiskDashboard, LearningStats, RiskPosition } from "./types";
@@ -30,24 +31,6 @@ interface Props {
   riskDollar:   number;
   countdown:    number;
   onRefresh:    () => void;
-}
-
-/** Penanda lane yang sedang DIJEDA — beda dari lane mati: sementara, kembali sendiri.
- *  Karena itu lane dijeda tetap ditampilkan; kalau ikut disembunyikan, orang akan
- *  mengira lane-nya dimatikan. */
-function PauseBadge({ until, now }: { until?: number; now: number }) {
-  if (!until) return null;
-  // `now` diteruskan dari induk, bukan dibaca di sini: memanggil Date.now() saat
-  // render membuat hasilnya berubah tiap kali komponen kebetulan dirender ulang.
-  const sisaJam = (until - now) / 3600;
-  if (sisaJam <= 0) return null;
-  const teks = sisaJam >= 1 ? `${sisaJam.toFixed(1)} j lagi` : `${Math.round(sisaJam * 60)} mnt lagi`;
-  return (
-    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full border bg-yellow-50 text-yellow-700 border-yellow-300"
-          title="Lane dijeda otomatis karena win rate rendah — akan aktif lagi sendiri">
-      ⏸ dijeda · {teks}
-    </span>
-  );
 }
 
 function AgentColumn({ label, color, positions, riskMap, riskDollar, atRisk, pausedUntil, now }: {
