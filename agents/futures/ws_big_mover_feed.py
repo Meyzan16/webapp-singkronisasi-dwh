@@ -8,6 +8,20 @@ Latency target: market move → store cache < 2 detik (vs 2 min scan cycle).
 
 Heartbeat tiap 10s; fallback ke REST polling kalau no msg > 30s (EC3).
 Auto-reconnect dengan exponential backoff.
+
+KENYATAAN DI JARINGAN INI (diukur 5 Sep 2026): tidak ada satu pun endpoint WS
+futures Binance yang terjangkau. Domain utama `fstream.binance.com` di-resolve
+ke 198.54.100.22 — host parkir, bukan Binance — sehingga sertifikat yang muncul
+memang bukan milik Binance dan ditolak. Mirror pun tak menyediakan penggantinya:
+`fstream/stream.binance.bh` memutus koneksi, `:9443` timeout, `www.binance.bh/ws`
+menjawab HTTP 202. Jadi WS di sini adalah OPTIMASI YANG TAK PERNAH AKTIF, bukan
+jalur utama.
+
+Konsekuensinya untuk pembaca kode: jangan tergoda "memperbaiki" error sertifikat
+dengan mematikan verifikasi TLS. Verifikasi justru sedang bekerja benar — ia
+menolak sambungan yang dialihkan. Yang menjaga feed tetap hidup adalah REST-poll
+ke mirror tiap ~30 detik (terbukti: 149 movers, 0 error), dan `get_state()`
+melaporkannya sebagai `degraded=True, healthy=True` — bukan sebagai kerusakan.
 """
 
 import asyncio
@@ -42,14 +56,26 @@ _running:        bool                       = False
 _last_msg_ts:    float                      = 0.0
 _last_error:     Optional[str]              = None
 _msg_count:      int                        = 0
+_ws_reason:      Optional[str]              = None   # kenapa WS tak tersambung (hasil diagnosa)
+_ws_fail_count:  int                        = 0
+_last_rest_ok:   float                      = 0.0
 _movers_live:    dict[str, dict]            = {}   # symbol -> ticker snapshot
 _prev_prices:    dict[str, tuple[float, float]] = {}  # symbol -> (price, ts) for 1m delta
 _subscribers:    list[asyncio.Queue]        = []
 
 
 def get_state() -> dict:
-    """Public state for /health and dashboards."""
+    """Status feed untuk /health dan dasbor.
+
+    Yang diukur adalah KESEGARAN DATA, bukan hidup-matinya WebSocket. Dari
+    jaringan ini WS futures memang tak terjangkau (lihat _diagnose_ws_failure),
+    dan itu bukan kerusakan: REST-poll mirror menjaga movers tetap segar.
+    Melaporkan "error" hanya karena WS mati membuat dasbor merah terus-menerus
+    dan menyembunyikan kegagalan yang benar-benar penting — yaitu ketika REST
+    pun berhenti bekerja.
+    """
     age = round(time.time() - _last_msg_ts, 1) if _last_msg_ts else None
+    transport = "websocket" if _msg_count else ("rest_fallback" if _last_rest_ok else "none")
     return {
         "running":         _running,
         "last_msg_ts":     _last_msg_ts,
@@ -58,6 +84,14 @@ def get_state() -> dict:
         "msg_count":       _msg_count,
         "movers_tracked":  len(_movers_live),
         "is_stale":        bool(age and age > STALE_FALLBACK_SEC),
+        # Baru: pisahkan "WS tak terjangkau" dari "feed rusak".
+        "transport":       transport,
+        "ws_connected":    bool(_msg_count),
+        "ws_reason":       _ws_reason,
+        "ws_fail_count":   _ws_fail_count,
+        "last_rest_ok":    _last_rest_ok or None,
+        "degraded":        transport == "rest_fallback",   # jalan, tapi bukan realtime
+        "healthy":         bool(age is not None and age <= STALE_FALLBACK_SEC),
     }
 
 
@@ -221,6 +255,8 @@ async def _rest_fallback_poll() -> None:
             # Tandai feed segar (REST dianggap "pesan") — get_live_movers() jadi
             # mengembalikan movers & watchdog menahan poll berikutnya ~30 dtk.
             _last_msg_ts = now
+            global _last_rest_ok
+            _last_rest_ok = now
             logger.info("ws_rest_fallback_done", movers=kept, src="mirror")
     except Exception as exc:
         logger.warning("ws_rest_fallback_error", error=str(exc)[:80])
@@ -247,6 +283,59 @@ async def _heartbeat_watchdog() -> None:
 
 # ── Connection loop ────────────────────────────────────────────────────────────
 
+# Alamat yang dipakai pembajak DNS/parkir domain saat sebuah host diblokir.
+# fstream.binance.com dari jaringan Indonesia menunjuk ke sini, bukan ke Binance —
+# itulah kenapa sertifikat yang muncul BUKAN milik Binance dan verifikasi gagal.
+_HIJACK_HINT_NETS = ("198.54.100.",)
+
+
+async def _diagnose_ws_failure(exc: Exception) -> str:
+    """Terjemahkan kegagalan koneksi WS menjadi sebab yang sebenarnya.
+
+    Dibuat 5 Sep 2026. Sebelumnya loop ini hanya mencatat pesan mentah
+    "A certificate chain processed, but terminated in a root certificate which
+    is not trusted by the trust provider" — dan itu MENYESATKAN: terbaca seperti
+    trust store salah pasang, padahal REST ke mirror binance.bh jalan mulus lewat
+    truststore yang sama. Sebab nyatanya: DNS fstream.binance.com dibajak ke
+    198.54.100.22 (host parkir), jadi sertifikat yang disodorkan memang bukan
+    milik Binance. Verifikasi sertifikat justru BEKERJA BENAR di sini — ia
+    menolak sambungan yang disadap. Karena itu jangan pernah "memperbaikinya"
+    dengan mematikan verifikasi.
+
+    Terukur 5 Sep 2026, tak ada satu pun WS futures yang terjangkau dari sini:
+      fstream.binance.com   -> DNS 198.54.100.22, sertifikat ditolak
+      fstream/stream.binance.bh -> koneksi diputus (ConnectionReset)
+      fstream.binance.bh:9443   -> timeout saat handshake
+      www.binance.bh/ws         -> HTTP 202 (bukan endpoint WS)
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    host = urlparse(WS_URL).hostname or ""
+    ip = ""
+    try:
+        # DNS di thread: getaddrinfo memblokir, dan loop ini berbagi proses
+        # dengan seluruh API.
+        ip = await asyncio.to_thread(socket.gethostbyname, host)
+    except Exception:
+        return f"DNS {host} tak bisa di-resolve — jaringan memblokir domainnya"
+
+    if any(ip.startswith(net) for net in _HIJACK_HINT_NETS):
+        return (f"DNS {host} dibajak ke {ip} (host parkir, bukan Binance) — "
+                f"sertifikatnya memang bukan milik Binance, jadi ditolak. "
+                f"Ini pemblokiran jaringan, BUKAN masalah trust store.")
+
+    name = type(exc).__name__
+    if "Certificate" in name or "SSLCert" in name:
+        return (f"Sertifikat {host} ({ip}) ditolak — sambungan tampaknya disadap "
+                f"atau dialihkan. Verifikasi sengaja TIDAK dimatikan.")
+    if isinstance(exc, ConnectionResetError) or "ConnectionReset" in name:
+        return f"{host} ({ip}) memutus koneksi — diblokir di jaringan ini"
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return f"{host} ({ip}) tak menjawab handshake — kemungkinan difilter"
+    return f"{name}: {str(exc)[:90]}"
+
+
 async def _connect_once() -> None:
     """One connection lifetime — yields when disconnected."""
     import websockets  # local import to avoid module-load failure if not installed
@@ -257,6 +346,11 @@ async def _connect_once() -> None:
         ping_timeout=HEARTBEAT_SEC * 2,
         max_size=None,
     ) as ws:
+        global _ws_reason, _ws_fail_count
+        if _ws_reason is not None:
+            logger.info("ws_big_mover_recovered", url=WS_URL,
+                        after_failures=_ws_fail_count, previous_reason=_ws_reason)
+        _ws_reason, _ws_fail_count = None, 0
         logger.info("ws_big_mover_connected", url=WS_URL)
         async for raw in ws:
             try:
@@ -293,8 +387,25 @@ async def run_ws_big_mover_feed() -> None:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                global _ws_reason, _ws_fail_count
                 _last_error = str(exc)[:120]
-                logger.warning("ws_big_mover_reconnect", error=_last_error, backoff=backoff)
+                _ws_fail_count += 1
+                reason = await _diagnose_ws_failure(exc)
+
+                # Sebab yang SAMA berulang tiap 5 menit tak perlu diteriakkan
+                # terus. Dulu tiap percobaan menulis warning berisi pesan
+                # sertifikat mentah, sehingga log penuh alarm untuk kondisi yang
+                # sudah diketahui dan permanen — dan kegagalan yang benar-benar
+                # baru jadi tenggelam di antaranya. Sebab baru tetap warning.
+                if reason != _ws_reason:
+                    _ws_reason = reason
+                    logger.warning("ws_big_mover_unavailable", reason=reason,
+                                   url=WS_URL, fail_count=_ws_fail_count,
+                                   fallback="REST poll mirror tiap ~30 dtk")
+                else:
+                    logger.info("ws_big_mover_retry", fail_count=_ws_fail_count,
+                                backoff=backoff)
+
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2, RECONNECT_MAX_SEC)
     except asyncio.CancelledError:
