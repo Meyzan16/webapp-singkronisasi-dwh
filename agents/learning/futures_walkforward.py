@@ -14,6 +14,7 @@ Diagnostik counterfactual: overlap portfolio & kunci kapital belum disimulasi
 
 from __future__ import annotations
 
+import asyncio
 import json
 from statistics import mean
 
@@ -128,20 +129,29 @@ async def run_futures_walkforward(force: bool = False) -> dict:
                 FuturesDecisionEvent.pnl_4h_pct.isnot(None),
             ).order_by(FuturesDecisionEvent.scan_ts)
         )).scalars().all())
-    rows = []
-    for ev in events:
-        try:
-            snap = json.loads(ev.feature_snapshot_json or "{}")
-        except (TypeError, json.JSONDecodeError):
-            snap = {}
-        cost = snap.get("cost_floor_pct")
-        rows.append({
-            "scan_ts": ev.scan_ts,
-            "score": float(ev.adaptive_score or ev.score or 0.0),
-            "pnl_4h_pct": ev.pnl_4h_pct,
-            "cost_pct": float(cost) if isinstance(cost, (int, float)) else DEFAULT_COST_PCT,
-        })
-    result = evaluate_walkforward(rows)
+    # json.loads per baris + penilaian walkforward = kerja CPU murni. Dijalankan
+    # langsung di event loop, ia MENAHAN seluruh backend: request lain (bahkan
+    # yang tak menyentuh DB) ikut antre sampai selesai, dan FE melihatnya sebagai
+    # layar menggantung / "socket hang up". Kembarannya di spot_walkforward.py
+    # terukur membekukan backend 56 detik. Baris di sini sudah lepas dari session
+    # (expire_on_commit=False, kolom biasa sudah termuat), jadi aman diolah di thread.
+    def _compute() -> dict:
+        rows = []
+        for ev in events:
+            try:
+                snap = json.loads(ev.feature_snapshot_json or "{}")
+            except (TypeError, json.JSONDecodeError):
+                snap = {}
+            cost = snap.get("cost_floor_pct")
+            rows.append({
+                "scan_ts": ev.scan_ts,
+                "score": float(ev.adaptive_score or ev.score or 0.0),
+                "pnl_4h_pct": ev.pnl_4h_pct,
+                "cost_pct": float(cost) if isinstance(cost, (int, float)) else DEFAULT_COST_PCT,
+            })
+        return evaluate_walkforward(rows)
+
+    result = await asyncio.to_thread(_compute)
     _WF_CACHE["ts"] = _time.time()
     _WF_CACHE["data"] = result
     return result

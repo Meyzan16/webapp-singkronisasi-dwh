@@ -807,7 +807,12 @@ async def run_opportunity_loop() -> None:
                 await update_cross_agent_weights()
                 await backfill_closed_spot_trades()
                 outcomes_updated = await update_decision_outcomes()
-                if outcomes_updated:
+                # Langkah berat pembelajaran pindah ke proses terpisah bila
+                # LEARNING_STANDALONE=true. Weight updater, cross-agent, backfill
+                # dan outcome tracker di atas TETAP di sini: ringan, dan API
+                # membaca status hidupnya dari memori proses ini.
+                from agents.learning.mode import LEARNING_STANDALONE
+                if outcomes_updated and not LEARNING_STANDALONE:
                     from agents.learning.spot_adaptive_model import train_and_register, monitor_champion_drift
                     training = await train_and_register()
                     if training.get("status") == "registered":

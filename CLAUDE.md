@@ -12,10 +12,40 @@ with R:R ≥ 1:3, and records results in paper-trading history to measure win ra
 agents-trading/
 ├── frontend/        ← Next.js 16 UI
 ├── backend/         ← FastAPI API server + TA engine
-├── agents/          ← Autonomous trading agents (scanner + paper trader + future ML)
+├── agents/          ← Autonomous trading agents (scanner + paper trader + learning)
 ├── docker-compose.yml
 └── CLAUDE.md
 ```
+
+### Proses pembelajaran TERPISAH (wajib)
+
+Melatih model dilakukan atas **seluruh** ledger keputusan (387.390 baris per
+4 Sep 2026). Itu kerja Python murni yang **menahan event loop 94-129 detik**:
+selama itu proses yang menampungnya tidak menjawab request apa pun. Terukur
+`/balance/futures` sampai **119 detik**, dan FE melihatnya sebagai layar
+menggantung lalu `Error: socket hang up` (ECONNRESET).
+
+`asyncio.to_thread`, select kolom seperlunya, dan streaming hasil query semuanya
+sudah dicoba dan **terukur tidak cukup** — GIL membuat kerja Python murni tak
+pernah benar-benar paralel dengan event loop di proses yang sama. Jadi latihan
+model dijalankan sebagai **proses sendiri**:
+
+```bash
+# proses API: matikan langkah berat
+LEARNING_STANDALONE=true  (env untuk uvicorn / container backend & agents)
+
+# proses pembelajaran (dari REPO ROOT, bukan backend/)
+backend/.venv/Scripts/python.exe -m agents.learning     # health: :8002/health
+```
+
+`ops/start-night.ps1` dan `docker-compose.yml` sudah menyalakan keduanya.
+Sesudah pemisahan, selama satu siklus latihan 172 detik: `/openapi.json` maks
+2,3 dtk dan `/balance/futures` maks 6,8 dtk (dari 119 dtk).
+
+Yang **tetap** di proses backend: scanner, monitor, weight updater, outcome
+tracker. Semua itu ringan DAN API membaca status hidupnya dari memori proses
+yang sama (scanner store, risk gate, cache bobot) — memindahkannya akan membuat
+API kehilangan status tersebut.
 
 ## Tech stack
 
@@ -97,7 +127,7 @@ backend/
 ### Backend dev
 ```bash
 cd backend
-.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 75
 ```
 
 ---
@@ -132,8 +162,12 @@ agents/
 # Mode 1: embedded in backend (current default)
 # Agents start automatically when backend starts (via FastAPI lifespan)
 
-# Mode 2: standalone (future — uncomment in docker-compose.yml)
+# Mode 2: standalone (dipakai docker-compose)
 cd backend && python -m agents
+
+# Proses pembelajaran — SELALU terpisah (lihat "Proses pembelajaran TERPISAH")
+# Dijalankan dari REPO ROOT: paket `agents` ada di root, bukan di backend/.
+backend/.venv/Scripts/python.exe -m agents.learning
 ```
 
 ### Future learning agents (add to `agents/learning/`)
@@ -170,7 +204,7 @@ docker compose up postgres redis -d
 
 # 2. Start backend (includes agents in embedded mode)
 cd backend
-.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 75
 
 # 3. Start frontend
 cd frontend

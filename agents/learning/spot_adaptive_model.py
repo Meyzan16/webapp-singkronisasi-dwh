@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import time
@@ -125,21 +126,52 @@ async def train_and_register() -> dict:
     if not is_db_available():
         return {"status": "db_unavailable"}
     async with AsyncSessionLocal() as session:
-        events = list((await session.execute(select(SpotDecisionEvent).where(SpotDecisionEvent.pnl_24h_pct.isnot(None)).order_by(SpotDecisionEvent.scan_ts))).scalars().all())
+        # Ambil HANYA 3 kolom yang dipakai, bukan hydrate ratusan ribu objek ORM
+        # penuh (pola yang sama sudah dipakai spot_walkforward.py). Membangun
+        # entitas ORM untuk ~322rb baris adalah kerja Python yang terjadi DI event
+        # loop — terukur menahan request lain sampai 86 detik. Row hasil select
+        # kolom tetap punya akses atribut (.scan_ts, dst) jadi pemakainya tak berubah.
+        # ALIRKAN hasilnya, jangan tarik sekaligus. Ledger ini ratusan ribu baris dan
+        # tiap baris membawa blob JSON, jadi satu execute() menahan event loop sampai
+        # SELURUH hasil masuk memori — terukur 94 detik backend tak menjawab apa pun.
+        # `.partitions()` membuat baris datang per potongan, dan `async for` memberi
+        # loop kesempatan melayani request lain di sela tiap potongan. Baris dan
+        # urutannya SAMA PERSIS seperti sebelumnya — hasil latihan tidak berubah.
+        events = []
+        stream = await session.stream(
+            select(
+                SpotDecisionEvent.scan_ts,
+                SpotDecisionEvent.pnl_24h_pct,
+                SpotDecisionEvent.feature_snapshot_json,
+            ).where(SpotDecisionEvent.pnl_24h_pct.isnot(None))
+             .order_by(SpotDecisionEvent.scan_ts)
+             .execution_options(yield_per=5_000)
+        )
+        async for partition in stream.partitions(5_000):
+            events.extend(partition)
         latest = (await session.execute(select(SpotModelVersion).order_by(
             SpotModelVersion.trained_at.desc()
         ).limit(1))).scalar_one_or_none()
-    samples = []
-    for event in events:
-        try:
-            snapshot = json.loads(event.feature_snapshot_json or "{}")
-            features = snapshot.get("challenger_features") or {}
-        except (TypeError, json.JSONDecodeError):
-            continue
-        if features:
-            pnl = float(event.pnl_24h_pct)
-            samples.append({"scan_ts": event.scan_ts, "features": features, "pnl": pnl, "label": int(pnl > EXECUTION_COST_PCT)})
-    result = train_challenger(samples)
+    # Melatih model = kerja CPU murni (json.loads per baris + fitting) atas SELURUH
+    # ledger. Dijalankan langsung di event loop, ia MENAHAN seluruh backend selama
+    # puluhan detik sampai menit: koneksi DB tergantung "idle in transaction /
+    # ClientRead" karena sisi Python berhenti membaca, dan request FE apa pun ikut
+    # antre — persis gejala layar menggantung + "socket hang up".
+    # Terukur 4 Sep 2026 (ledger 387.390 baris): /balance/futures sampai 119 detik.
+    def _build_and_train() -> tuple[list, dict]:
+        samples = []
+        for event in events:
+            try:
+                snapshot = json.loads(event.feature_snapshot_json or "{}")
+                features = snapshot.get("challenger_features") or {}
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if features:
+                pnl = float(event.pnl_24h_pct)
+                samples.append({"scan_ts": event.scan_ts, "features": features, "pnl": pnl, "label": int(pnl > EXECUTION_COST_PCT)})
+        return samples, train_challenger(samples)
+
+    samples, result = await asyncio.to_thread(_build_and_train)
     if result.get("status") != "trained":
         return result
     if latest is not None:

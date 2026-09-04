@@ -13,4 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY agents      ./agents
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --timeout-keep-alive 75 (default 5): proxy Next memakai ulang koneksi keep-alive
+# sementara poller FE berjeda 30-60 detik. Dengan 5 detik, soket sudah ditutup server
+# saat dipakai lagi → "socket hang up" (ECONNRESET) di sisi FE. Lihat frontend/src/lib/api.ts.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "75"]

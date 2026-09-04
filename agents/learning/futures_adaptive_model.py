@@ -15,6 +15,7 @@ hanya melatih shadow. Dependency-light: tanpa numpy/sklearn (identik SPOT).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import time
@@ -276,17 +277,44 @@ async def train_and_register() -> dict:
         logger.warning("selection_gate_config_failed", error=str(exc)[:120])
 
     async with AsyncSessionLocal() as session:
-        events = list((await session.execute(
-            select(FuturesDecisionEvent).where(
-                FuturesDecisionEvent.pnl_4h_pct.isnot(None)
-            ).order_by(FuturesDecisionEvent.scan_ts)
-        )).scalars().all())
+        # Ambil HANYA 3 kolom yang dipakai, bukan hydrate ratusan ribu objek ORM
+        # penuh (pola yang sama sudah dipakai spot_walkforward.py). Membangun
+        # entitas ORM untuk ~322rb baris adalah kerja Python yang terjadi DI event
+        # loop — terukur menahan request lain sampai 86 detik. Row hasil select
+        # kolom tetap punya akses atribut (.scan_ts, dst) jadi pemakainya tak berubah.
+        # ALIRKAN hasilnya, jangan tarik sekaligus. Ledger ini ratusan ribu baris dan
+        # tiap baris membawa blob JSON, jadi satu execute() menahan event loop sampai
+        # SELURUH hasil masuk memori — terukur 94 detik backend tak menjawab apa pun.
+        # `.partitions()` membuat baris datang per potongan, dan `async for` memberi
+        # loop kesempatan melayani request lain di sela tiap potongan. Baris dan
+        # urutannya SAMA PERSIS seperti sebelumnya — hasil latihan tidak berubah.
+        events = []
+        stream = await session.stream(
+            select(
+                FuturesDecisionEvent.scan_ts,
+                FuturesDecisionEvent.pnl_4h_pct,
+                FuturesDecisionEvent.feature_snapshot_json,
+            ).where(FuturesDecisionEvent.pnl_4h_pct.isnot(None))
+             .order_by(FuturesDecisionEvent.scan_ts)
+             .execution_options(yield_per=5_000)
+        )
+        async for partition in stream.partitions(5_000):
+            events.extend(partition)
         latest = (await session.execute(
             select(FuturesModelVersion).order_by(FuturesModelVersion.trained_at.desc()).limit(1)
         )).scalar_one_or_none()
 
-    samples = [s for s in (_sample_from_event(e) for e in events) if s]
-    result = train_challenger(samples)
+    # Melatih model = kerja CPU murni (json.loads per baris + fitting) atas SELURUH
+    # ledger. Dijalankan langsung di event loop, ia MENAHAN seluruh backend selama
+    # puluhan detik sampai menit: koneksi DB tergantung "idle in transaction /
+    # ClientRead" karena sisi Python berhenti membaca, dan request FE apa pun ikut
+    # antre — persis gejala layar menggantung + "socket hang up".
+    # Terukur 4 Sep 2026 (ledger 387.390 baris): /balance/futures sampai 119 detik.
+    def _build_and_train() -> tuple[list, dict]:
+        built = [s for s in (_sample_from_event(e) for e in events) if s]
+        return built, train_challenger(built)
+
+    samples, result = await asyncio.to_thread(_build_and_train)
     if result.get("status") != "trained":
         return result
     if latest is not None:

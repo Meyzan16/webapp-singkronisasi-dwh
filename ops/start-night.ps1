@@ -13,10 +13,37 @@ $PidFile = Join-Path $Repo 'ops\backend.pid'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $stamp   = Get-Date -Format 'yyyyMMdd-HHmmss'
 $OutLog  = Join-Path $LogDir "backend-$stamp.out.log"
+$LearnPidFile = Join-Path $Repo 'ops\learning.pid'
+$LearnOutLog  = Join-Path $LogDir "learning-$stamp.out.log"
+$LearnErrLog  = Join-Path $LogDir "learning-$stamp.err.log"
 $ErrLog  = Join-Path $LogDir "backend-$stamp.err.log"
 $RunLog  = Join-Path $LogDir 'night-runner.log'
 
 function Log($m) { "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))  $m" | Tee-Object -FilePath $RunLog -Append }
+
+# Nyalakan proses pembelajaran bila belum hidup. Dipanggil dari KEDUA jalur —
+# termasuk jalur "backend sudah jalan". Kalau hanya dipanggil di jalur start
+# penuh, proses ini bisa mati diam-diam dan tak pernah kembali sampai restart
+# manual: persis pola kegagalan senyap yang sudah dua kali memakan berjam-jam
+# di proyek ini (flag DB terkunci, 30 Jul 2026).
+function Start-LearningIfDown {
+    if (Test-Path $LearnPidFile) {
+        $old = Get-Content $LearnPidFile -ErrorAction SilentlyContinue
+        if ($old -and (Get-Process -Id $old -ErrorAction SilentlyContinue)) {
+            Log "learning sudah jalan (PID $old)"
+            return
+        }
+    }
+    # WorkingDirectory = REPO ROOT, bukan backend/. `python -m agents.learning`
+    # butuh paket `agents` (ada di root) bisa diimpor sebelum modulnya jalan;
+    # dari backend/ ia gagal "No module named 'agents'". Path ke `app` disisipkan
+    # sendiri oleh agents/learning/__main__.py.
+    $lp = Start-Process -FilePath $Py -ArgumentList '-m','agents.learning' -WorkingDirectory $Repo `
+            -RedirectStandardOutput $LearnOutLog -RedirectStandardError $LearnErrLog `
+            -WindowStyle Hidden -PassThru
+    $lp.Id | Out-File -FilePath $LearnPidFile -Encoding ascii
+    Log ("learning START (PID {0}) log {1}" -f $lp.Id, $LearnOutLog)
+}
 
 # Tanpa penjaga di bawah ini, kegagalan APA PUN sesudah baris ini menghilang
 # tanpa jejak: $ErrorActionPreference='Stop' membuat error pertama menghentikan
@@ -88,6 +115,7 @@ if (Test-Path $PidFile) {
     $old = Get-Content $PidFile -ErrorAction SilentlyContinue
     if ($old -and (Get-Process -Id $old -ErrorAction SilentlyContinue)) {
         Log "backend sudah jalan (PID $old) - lewati start, kirim laporan status"
+        Start-LearningIfDown
         try { & (Join-Path $Repo 'ops\report-telegram.ps1') 'Startup (backend sudah jalan)' | Out-Null; Log "laporan dikirim" }
         catch { Log "laporan gagal: $($_.Exception.Message)" }
         # Penanda tuntas WAJIB ada juga di jalur keluar-awal ini. Tanpa itu,
@@ -99,12 +127,28 @@ if (Test-Path $PidFile) {
 }
 
 # 3) Start backend (uvicorn, no-reload), detached
-$uvArgs = '-m','uvicorn','app.main:app','--host','0.0.0.0','--port','8000'
+#
+# --timeout-keep-alive 75: default uvicorn 5 detik. Next mem-proxy /api/v1/* lewat
+# koneksi keep-alive yang dipakai ulang, sementara poller FE berjeda 30-60 detik —
+# jadi soket SELALU sudah ditutup server saat dipakai lagi, dan Node melaporkannya
+# sebagai "socket hang up" (ECONNRESET). 75 detik melewati poller terlama (60 dtk),
+# sehingga koneksi masih hidup saat request berikutnya datang.
+$uvArgs = '-m','uvicorn','app.main:app','--host','0.0.0.0','--port','8000',
+          '--timeout-keep-alive','75'
+# LEARNING_STANDALONE=true: langkah pembelajaran BERAT (latih model atas ledger
+# ratusan ribu baris) tidak lagi jalan di dalam proses API. Dulu satu putaran
+# latihan menahan event loop 94-129 detik dan SELURUH API berhenti menjawab —
+# terukur /balance/futures 119 detik, dan FE melihatnya sebagai layar
+# menggantung + "socket hang up". Proses pembelajaran dinyalakan di langkah 3b.
+$env:LEARNING_STANDALONE = 'true'
 $p = Start-Process -FilePath $Py -ArgumentList $uvArgs -WorkingDirectory $Backend `
         -RedirectStandardOutput $OutLog -RedirectStandardError $ErrLog `
         -WindowStyle Hidden -PassThru
 $p.Id | Out-File -FilePath $PidFile -Encoding ascii
 Log ("backend START (PID {0}) log {1}" -f $p.Id, $OutLog)
+
+# 3b) Start proses pembelajaran terpisah, detached
+Start-LearningIfDown
 
 # 4) Tunggu backend sehat, lalu kirim laporan menyeluruh ke Telegram
 Start-Sleep -Seconds 25

@@ -44,6 +44,7 @@ services:
       DATABASE_URL:      postgresql+asyncpg://postgres:postgres@postgres:5432/agents_trading
       REDIS_URL:         redis://redis:6379/0
       AGENTS_STANDALONE: "true"
+      LEARNING_STANDALONE: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,12 +71,40 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/agents_trading
       REDIS_URL:    redis://redis:6379/0
+      # Latihan model dikerjakan container `learning`, bukan di sini — satu putaran
+      # menahan event loop 94-129 detik dan akan membuat scanner/monitor ikut telat.
+      LEARNING_STANDALONE: "true"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Learning — latihan model berat, sengaja diisolasi ────────────────────────
+  #
+  # Kenapa container sendiri: melatih model atas ledger ratusan ribu baris adalah
+  # kerja Python murni yang MENAHAN event loop-nya sampai 94-129 detik. Selama itu
+  # proses yang menampungnya tak menjawab apa pun. `asyncio.to_thread` tidak
+  # menolong (GIL), jadi satu-satunya pemisah nyata adalah proses terpisah.
+  # Container ini boleh membeku sesukanya — tak ada yang menunggu jawabannya.
+
+  learning:
+    build:
+      context: .
+      dockerfile: agents/Dockerfile
+    command: ["python", "-m", "agents.learning"]
+    ports:
+      - "8002:8002"
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/agents_trading
+      REDIS_URL:    redis://redis:6379/0
+    depends_on:
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 

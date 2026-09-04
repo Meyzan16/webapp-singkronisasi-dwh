@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from statistics import mean
 
 from sqlalchemy import select
@@ -112,11 +113,24 @@ async def run_spot_walkforward(force: bool = False) -> dict:
                 SpotDecisionEvent.outcome_status.in_(["partial", "complete"]),
             ).order_by(SpotDecisionEvent.scan_ts)
         )).all()
-    rows = [
-        {"scan_ts": scan_ts, "score": score, "pnl_24h_pct": pnl}
-        for scan_ts, score, pnl in raw
-    ]
-    result = evaluate_walkforward(rows)
+    # Ledger SPOT sudah ratusan ribu baris (322.852 saat diukur 4 Sep 2026).
+    # Menyusun dict + menilai walkforward untuk sebanyak itu adalah kerja CPU
+    # murni: selama itu berjalan, event loop TIDAK bisa melayani request lain —
+    # seluruh backend membeku. Terukur: satu panggilan /signals/adaptive-engine
+    # memakan 56 detik dan membuat /openapi.json (tanpa DB sama sekali) ikut
+    # menunggu 63 detik, sementara /balance/futures balas 500. Dari sisi FE itu
+    # tampak sebagai layar menggantung lalu "socket hang up" (ECONNRESET).
+    #
+    # Pindahkan ke thread: hasilnya identik, tapi loop tetap bebas menjawab
+    # request lain sementara perhitungan berjalan.
+    def _compute() -> dict:
+        rows = [
+            {"scan_ts": scan_ts, "score": score, "pnl_24h_pct": pnl}
+            for scan_ts, score, pnl in raw
+        ]
+        return evaluate_walkforward(rows)
+
+    result = await asyncio.to_thread(_compute)
     _WF_CACHE["ts"] = _time.time()
     _WF_CACHE["data"] = result
     return result

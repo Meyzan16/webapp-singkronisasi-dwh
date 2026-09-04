@@ -804,7 +804,12 @@ async def run_futures_loop() -> None:
             # outcome (`if outcomes_updated:`), bukan dari counter. Di bawah kini
             # sama: counter dipertahankan sebagai jaring pengaman berkala, tapi
             # kedatangan bukti baru sudah cukup untuk memicu.
-            if _outcomes_baru or _cycle_count % 100 == 50:
+            # Seluruh blok berat ini pindah ke proses terpisah saat
+            # LEARNING_STANDALONE=true: melatih model atas ledger ratusan ribu
+            # baris menahan event loop 94-129 detik sehingga SELURUH API berhenti
+            # menjawab. Lihat [agents/learning/mode.py].
+            from agents.learning.mode import LEARNING_STANDALONE
+            if (_outcomes_baru or _cycle_count % 100 == 50) and not LEARNING_STANDALONE:
                 try:
                     from agents.learning.futures_adaptive_model import train_and_register
                     _mres = await train_and_register()
