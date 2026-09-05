@@ -32,7 +32,7 @@ from app.models.paper_trade import PaperTrade
 from app.models.signal_weight import AgentSignalWeight
 from app.models.signal_weight_history import SignalWeightHistory
 # learning_policy murni (hanya re+typing) — tak ada risiko circular import.
-from agents.shared.trade_outcome import is_win as _is_win
+from agents.shared.trade_outcome import is_win as _is_win, is_scratch as _is_scratch
 from agents.futures.learning_policy import (
     canonical_signal_key as _canonical_signal_key,
     signal_key as _namespaced_signal_key,
@@ -331,6 +331,10 @@ def _compute_coin_win_rates(trades: list) -> None:
     for t in trades:
         if t.status not in ("tp", "sl"):
             continue
+        # Fase 1b: trade impas (hasil di dalam derau biaya) tak mengajarkan apa
+        # pun tentang koin ini — memasukkannya hanya mengencerkan win-rate.
+        if _is_scratch(t):
+            continue
         by_symbol[t.symbol]["total"] += 1
         is_win = _is_win(t)
         if is_win:
@@ -371,6 +375,8 @@ def _compute_adaptive_thresholds(trades: list) -> None:
     agent_total: dict[str, int] = defaultdict(int)
 
     for t in trades:
+        if _is_scratch(t):
+            continue      # Fase 1b: impas bukan bukti untuk menggeser ambang
         a = t.style
         agent_total[a] += 1
         if _is_win(t):
@@ -437,6 +443,13 @@ async def update_weights() -> int:
         # Kunci bobot memakai namespace scoring (nyambung ke apply_learning_policy).
         UNIFIED_SIGNAL_KEYS = bool(await cfg.get(
             "futures", "unified_signal_keys", UNIFIED_SIGNAL_KEYS))
+        # Fase 1b (bug B1): ambang "menang" futures. Ditarik di SINI karena
+        # pelatihan bobot di bawah adalah pemakai terbesarnya — kalau ambangnya
+        # basi, seluruh bobot siklus ini dilatih dari label yang salah.
+        from agents.shared import trade_outcome as _outcome
+        _outcome.refresh_from_config({
+            k: await cfg.get("futures", k, v) for k, v in _outcome._FROZEN.items()
+        })
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="futures_weight_updater", error=str(exc)[:120])
 
@@ -485,6 +498,14 @@ async def update_weights() -> int:
 
             signals = meta.get("signals", [])
             if not signals:
+                continue
+
+            # Fase 1b (bug B1): trade impas DIBUANG dari pelatihan. Sampai 5 Sep
+            # 2026, 38 dari 55 "kemenangan" futures membukukan di bawah $0,50 —
+            # dan tiap satunya menaikkan bobot sinyal seolah setara kemenangan
+            # $14. Menghitungnya sebagai kekalahan juga salah: sinyalnya netral,
+            # bukan buruk.
+            if _is_scratch(trade):
                 continue
 
             agent   = trade.style

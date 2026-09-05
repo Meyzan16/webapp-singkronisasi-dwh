@@ -464,6 +464,13 @@ async def evaluate_risk_gate() -> None:
             "futures", "lane_pause_escalation", _FROZEN_PAUSE["LANE_PAUSE_ESCALATION"])
         LANE_PAUSE_MAX_HOURS  = await cfg.get(
             "futures", "lane_pause_max_hours", _FROZEN_PAUSE["LANE_PAUSE_MAX_HOURS"])
+        # Fase 1b (bug B1): ambang "menang" futures. Ditarik di SINI karena
+        # pelatihan bobot di bawah adalah pemakai terbesarnya — kalau ambangnya
+        # basi, seluruh bobot siklus ini dilatih dari label yang salah.
+        from agents.shared import trade_outcome as _outcome
+        _outcome.refresh_from_config({
+            k: await cfg.get("futures", k, v) for k, v in _outcome._FROZEN.items()
+        })
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="risk_gate", error=str(exc)[:120])
 
@@ -516,9 +523,13 @@ async def evaluate_risk_gate() -> None:
             # stop yang menutup DI ATAS entry), yaitu 20 dari 21 kemenangan
             # futures. Akibatnya lane `bigmover` terlihat ber-WR 4% padahal 64%,
             # lalu dipotong setengah dan dijeda oleh penjaga ini sendiri.
-            from agents.shared.trade_outcome import is_win as _is_win
-            wins  = sum(1 for t in recent if _is_win(t))
-            update_lane_wr(lane_name, wins, len(recent))
+            from agents.shared.trade_outcome import is_win as _is_win, is_scratch as _is_scratch
+            # Fase 1b: nilai lane dari trade yang HASILNYA TEGAS saja. Trade
+            # impas tak boleh menjeda lane (bukan bukti buruk) maupun
+            # menyelamatkannya (bukan bukti baik).
+            tegas = [t for t in recent if not _is_scratch(t)]
+            wins  = sum(1 for t in tegas if _is_win(t))
+            update_lane_wr(lane_name, wins, len(tegas))
 
         # F4: simpan sesudah SELURUH lane dinilai — satu tulisan per evaluasi,
         # bukan satu per lane.

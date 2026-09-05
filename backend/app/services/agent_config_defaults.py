@@ -137,6 +137,20 @@ DEFAULTS: list[dict] = [
      "description": ("Fase 0: 0=OFF (4 lane lama). 1 = agen tunggal 'agentic' "
                      "mengambil alih pemindaian & sizing. Lihat PLAN-FUTURES-AGENTIC.md.")},
 
+    # Ambang "menang" (bug B1). Sampai 5 Sep 2026 kemenangan cukup `pnl_pct > 0`,
+    # sehingga 38 dari 55 "kemenangan" futures membukukan di bawah $0,50 — dan
+    # weight_updater melatih tiap bobot sinyal dari label itu. Kini kemenangan
+    # menuntut untung yang bermakna: lebih besar dari ambang dolar DAN dari
+    # kelipatan biaya trade itu sendiri. SPOT tidak memakai kunci ini.
+    {"group": "futures", "key": "win_min_profit_usd", "default": 3.0, "category": "learning",
+     "description": ("Untung bersih minimum ($) agar sebuah trade futures dihitung MENANG. "
+                     "Di bawah ini dan di atas negatifnya = impas: dibuang dari pelatihan "
+                     "bobot dan dari penilaian jeda lane, bukan dihitung kalah.")},
+    {"group": "futures", "key": "win_min_cost_mult", "default": 2.0, "category": "learning",
+     "description": ("Kemenangan juga harus melebihi sekian kali biaya round-trip trade itu. "
+                     "Dua syarat sekaligus: $3 pada posisi $100 itu kemenangan nyata, "
+                     "$3 pada posisi $3.000 masih di dalam derau biaya.")},
+
     # Rantai ukuran: risk → notional → leverage → margin. Sampai 5 Sep 2026
     # bagian yang menentukan BERAPA BESAR uang masuk justru satu-satunya yang tak
     # bisa ditala (18 konstanta di balance.py + 15 di utils.py, nol dibaca dari
