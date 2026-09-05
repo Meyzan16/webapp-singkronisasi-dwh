@@ -60,18 +60,31 @@ def cap_leverage_by_lane(
       3. PLAN_v6 P1a hard ceiling → L ≤ MAX_LEVERAGE_BY_LANE[lane]  (absolute)
       4. PLAN_v6 P1b → halve when entering an already-extended move (|change_24h| high)
     """
-    hard_cap = MAX_LEVERAGE_BY_LANE.get(lane, DEFAULT_MAX_LEVERAGE)
+    # Fase 1a: angka-angka di bawah datang dari `sizing_config` (dapat ditala
+    # lewat agent_config tanpa deploy). Konstanta modul di atas TETAP ada sebagai
+    # cadangan beku — dipakai persis saat DB tak terbaca, sehingga nilainya
+    # identik dengan perilaku sebelum fase ini.
+    #
+    # Kenapa lewat modul sendiri, bukan membaca dict `MAX_SL_MARGIN_PCT_BY_LANE`
+    # yang dimutasi monitor: plafon leverage milik SCANNER tak boleh bergantung
+    # pada loop MONITOR yang kebetulan sudah jalan. Sampai 5 Sep 2026 memang
+    # begitu — dan saat monitor belum menyelesaikan siklus pertamanya, scanner
+    # diam-diam memakai angka hardcode sementara UI menampilkan angka lain.
+    from agents.futures import sizing_config as szcfg
+
+    hard_cap = szcfg.lev_max_for_lane(lane)
 
     if not risk_pct or risk_pct <= 0:
         lev = min(int(base_lev), hard_cap)
     else:
-        lane_cap = MAX_SL_MARGIN_PCT_BY_LANE.get(lane, DEFAULT_LANE_CAP)
+        lane_cap = MAX_SL_MARGIN_PCT_BY_LANE.get(lane, szcfg.get("lev_lane_cap_default"))
         sl_cap   = max(1, int(lane_cap / risk_pct))
-        liq_cap  = max(1, int(95.0 / LIQ_SAFETY_MULT / risk_pct))   # = int(47.5 / risk_pct)
+        # liq_dist_pct ≈ 95 / leverage; syaratnya liq_dist ≥ SL_dist × safety
+        liq_cap  = max(1, int(95.0 / szcfg.get("lev_liq_safety_mult") / risk_pct))
         lev      = min(int(base_lev), sl_cap, liq_cap, hard_cap)
 
     # P1b: extended-entry → halve (late entry = higher reversal risk)
-    if abs(change_24h) >= EXTENDED_CHANGE_24H_PCT:
+    if abs(change_24h) >= szcfg.get("lev_extended_change_24h_pct"):
         lev = lev // 2
 
     return max(1, lev)

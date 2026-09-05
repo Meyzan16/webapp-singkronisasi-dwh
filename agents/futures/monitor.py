@@ -2119,6 +2119,16 @@ async def run_futures_monitor() -> None:
             except Exception as exc:
                 logger.warning("monitor_config_pull_failed", error=str(exc)[:120])
 
+            # Fase 1a: rantai ukuran — dipakai monitor untuk menilai batas rugi
+            # margin & jarak likuidasi. Kedua loop menyegarkannya sendiri supaya
+            # tak ada yang bergantung pada loop lain sudah jalan.
+            try:
+                from agents.futures import sizing_config
+                await sizing_config.refresh()
+            except Exception as exc:
+                logger.warning("sizing_config_pull_failed", scope="futures_monitor",
+                               error=str(exc)[:120])
+
             try:
                 from agents.shared.config_reader import cfg
                 # Batas SL per lane. Dulu 4 baris dengan nama lane ditulis tangan —

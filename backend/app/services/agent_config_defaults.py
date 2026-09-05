@@ -129,6 +129,49 @@ DEFAULTS: list[dict] = [
      "description": "P3d: max posisi futures terbuka dengan arah sama (LONG/SHORT)"},
     {"group": "futures", "key": "failfast_atr_mult", "default": 1.0, "category": "risk",
      "description": "P9: kelipatan ATR adverse (10-45 mnt pertama, tanpa progres) yang memicu fail-fast exit"},
+    # ── FUTURES — PLAN-FUTURES-AGENTIC (Fase 0 & 1a, 5 Sep 2026) ────────────
+    # Saklar induk rewrite. 0 = perilaku lama (4 lane, agent1/2/3/bigmover).
+    # Seluruh kode agentic bercabang dari sini, jadi menyalakannya adalah SATU
+    # keputusan yang bisa dibatalkan seketika tanpa deploy.
+    {"group": "futures", "key": "agentic_enabled", "default": 0, "category": "rollout",
+     "description": ("Fase 0: 0=OFF (4 lane lama). 1 = agen tunggal 'agentic' "
+                     "mengambil alih pemindaian & sizing. Lihat PLAN-FUTURES-AGENTIC.md.")},
+
+    # Rantai ukuran: risk → notional → leverage → margin. Sampai 5 Sep 2026
+    # bagian yang menentukan BERAPA BESAR uang masuk justru satu-satunya yang tak
+    # bisa ditala (18 konstanta di balance.py + 15 di utils.py, nol dibaca dari
+    # config). Nilai bawaan di bawah SAMA PERSIS dengan konstanta yang
+    # digantikannya — Fase 1a tidak mengubah perilaku, hanya membuka kunci.
+    # Sumber kebenaran nilainya: agents/futures/sizing_config.py::_FROZEN
+    {"group": "futures", "key": "size_risk_base_pct", "default": 1.0, "category": "sizing",
+     "description": "Risiko per trade sebagai %% wallet pada setup biasa (skala naik ke size_risk_max_pct mengikuti conviction)"},
+    {"group": "futures", "key": "size_risk_max_pct", "default": 1.5, "category": "sizing",
+     "description": "Risiko per trade sebagai %% wallet pada conviction penuh"},
+    {"group": "futures", "key": "size_conviction_floor", "default": 72.0, "category": "sizing",
+     "description": "Skor tempat penskalaan conviction MULAI (di bawah ini pakai risk base)"},
+    {"group": "futures", "key": "size_conviction_ceil", "default": 90.0, "category": "sizing",
+     "description": "Skor tempat conviction PENUH (di atas ini pakai risk max)"},
+    {"group": "futures", "key": "size_min_notional_abs", "default": 50.0, "category": "sizing",
+     "description": "Notional minimum ($) — di bawah ini posisi ditolak sebagai posisi debu"},
+    {"group": "futures", "key": "size_portfolio_max_risk_pct", "default": 6.0, "category": "sizing",
+     "description": "Portfolio heat: Σ risk posisi terbuka tak boleh lewat %% wallet ini"},
+    {"group": "futures", "key": "size_max_margin_pct", "default": 35.0, "category": "sizing",
+     "description": "Margin SATU posisi tak boleh lewat %% wallet ini"},
+    {"group": "futures", "key": "size_max_notional_mult", "default": 1.5, "category": "sizing",
+     "description": "Notional SATU posisi tak boleh lewat kelipatan wallet ini (BUG-L4: SL sempit bisa meniup ukuran)"},
+    {"group": "futures", "key": "size_drawdown_cut_pct", "default": 10.0, "category": "sizing",
+     "description": "Drawdown dari puncak ekuitas di atas %% ini memotong risiko per trade"},
+    {"group": "futures", "key": "size_drawdown_risk_mult", "default": 0.5, "category": "sizing",
+     "description": "Pengali risiko saat drawdown melewati ambang di atas"},
+    {"group": "futures", "key": "lev_liq_safety_mult", "default": 2.0, "category": "sizing",
+     "description": "Jarak likuidasi wajib ≥ jarak SL × angka ini — wick ke SL tak boleh mendarat di zona likuidasi"},
+    {"group": "futures", "key": "lev_max_default", "default": 6.0, "category": "sizing",
+     "description": "Plafon leverage absolut untuk lane yang belum punya barisnya sendiri"},
+    {"group": "futures", "key": "lev_lane_cap_default", "default": 25.0, "category": "sizing",
+     "description": "Batas rugi margin di SL (%) untuk lane tanpa lane_cap sendiri"},
+    {"group": "futures", "key": "lev_extended_change_24h_pct", "default": 15.0, "category": "sizing",
+     "description": "|change 24h| di atas ini = entry terlambat → leverage dibagi dua"},
+
     # ── FUTURES — PLAN_v16 (true-cost profit engine) ─────────────────────────
     {"group": "futures", "key": "min_tp1_cost_mult", "default": 3.0, "category": "threshold",
      "description": "F2: TP1 minimum sebagai kelipatan cost_floor (fee+slippage+funding) sebelum posisi boleh dibuka"},
@@ -252,8 +295,13 @@ def _monitor_lane_defaults() -> list[dict]:
     monitor saat berjalan), jadi mustahil keduanya berbeda diam-diam.
     """
     from agents.futures import monitor_config as mcfg
+    from agents.futures import sizing_config as szcfg
     from agents.futures.monitor import _LANE_CAP_DEFAULTS, _MAX_LOSS_DEFAULTS
     from agents.futures.utils import DEFAULT_LANE_CAP, DEFAULT_MAX_LOSS_PCT
+
+    # Bawaan plafon leverage per lane diambil dari sizing_config — sumber yang
+    # SAMA yang dibaca agen saat berjalan, jadi keduanya mustahil berbeda diam-diam.
+    _LEV_MAX_LANE_DEFAULTS = szcfg._FROZEN_LEV_MAX_LANE
 
     rows: list[dict] = []
     ts_defaults = mcfg._FROZEN["TIME_STOP_MIN_BY_LANE"]
@@ -285,6 +333,13 @@ def _monitor_lane_defaults() -> list[dict]:
             "description": (f"Lane {lane}: gap SL minimum untuk fail-fast, hasil belajar. "
                             "0 = belum ada, pakai gap global. Hanya berlaku bila "
                             "monitor_exit_learning_enabled menyala."),
+        })
+        rows.append({
+            "group": "futures", "key": f"lev_max_{lane}",
+            "default": _LEV_MAX_LANE_DEFAULTS.get(lane, szcfg._FROZEN["lev_max_default"]),
+            "category": "sizing",
+            "description": (f"Lane {lane}: plafon leverage ABSOLUT, berlaku di atas "
+                            "batas margin & likuidasi (yang terkecil menang)"),
         })
         rows.append({
             "group": "futures", "key": f"lane_cap_{lane}",

@@ -28,6 +28,11 @@ const CATEGORY_COLOR: Record<string, string> = {
   quota: "bg-purple-50 text-purple-700",
   risk: "bg-red-50 text-red-700",
   timing: "bg-amber-50 text-amber-700",
+  // PLAN-FUTURES-AGENTIC Fase 0/1a: rantai ukuran (risk/notional/leverage/margin)
+  // dan saklar penyalaan bertahap. Diberi warna sendiri karena keduanya menyentuh
+  // besaran uang per posisi — bukan sekadar ambang tampilan.
+  sizing: "bg-emerald-50 text-emerald-700",
+  rollout: "bg-fuchsia-50 text-fuchsia-700",
 };
 
 function EditableRow({ row, onSaved }: { row: ConfigRow; onSaved: () => void }) {

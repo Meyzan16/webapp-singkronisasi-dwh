@@ -637,6 +637,18 @@ async def run_futures_loop() -> None:
                 logger.warning("sl_config_pull_failed", scope="futures_scheduler",
                                error=str(exc)[:120])
 
+            # Fase 1a: rantai ukuran (risk/notional/leverage/margin). Ditarik DI
+            # SINI, bukan menumpang loop monitor. Sampai 5 Sep 2026 plafon
+            # leverage scanner memang datang dari mutasi dict oleh loop monitor —
+            # jadi kalau monitor mati atau siklus pertamanya belum selesai,
+            # scanner memakai angka hardcode sementara UI menampilkan angka lain.
+            try:
+                from agents.futures import sizing_config
+                await sizing_config.refresh()
+            except Exception as exc:
+                logger.warning("sizing_config_pull_failed", scope="futures_scheduler",
+                               error=str(exc)[:120])
+
             futures_store.set_scanning(True)
             result = await _run_scan()
 

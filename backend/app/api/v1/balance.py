@@ -248,7 +248,18 @@ async def compute_spot_sizing(
     }
 
 
-# ── Futures sizing (Phase 9) — leverage-aware, single shared wallet ───────────
+# ── Futures sizing (Phase 9) ─ leverage-aware, single shared wallet ──────────
+#
+# Fase 1a (5 Sep 2026): angka-angka ini kini NILAI BEKU — cadangan saat DB tak
+# terbaca. Nilai yang benar-benar dipakai datang dari `agents.futures.sizing_config`
+# (tabel `agent_config`), sehingga risiko per trade dan plafon margin bisa diubah
+# tanpa deploy. Sebelum ini, rantai yang menentukan BERAPA BESAR uang masuk justru
+# satu-satunya bagian yang sama sekali tak bisa ditala: 18 konstanta, 0 dibaca
+# dari config, sementara 141 kunci lain sudah dinamis.
+#
+# Nilai di sini WAJIB sama persis dengan `_FROZEN` di sizing_config — keduanya
+# dipakai sebagai `default` saat membaca config, dan perbedaan di antara keduanya
+# akan membuat perilaku berubah diam-diam saat DB kebetulan tak terbaca.
 FUTURES_RISK_BASE_FRACTION  = 0.01    # 1% of wallet at risk on a baseline setup
 FUTURES_RISK_MAX_FRACTION   = 0.015   # up to 1.5% for high-conviction (conservative w/ leverage)
 FUTURES_CONVICTION_FLOOR    = 72.0    # auto-open threshold — where conviction scaling starts
@@ -258,6 +269,9 @@ FUTURES_MIN_NOTIONAL_ABS    = 50.0    # never open dust positions
 FUTURES_MAX_PORTFOLIO_RISK  = 0.06    # Σ open risk_dollar ≤ 6% of wallet
 FUTURES_MAX_MARGIN_FRACTION = 0.35    # one position's margin ≤ 35% of wallet
 FUTURES_MAX_NOTIONAL_FRACTION = 1.5   # BUG-L4: one position's notional ≤ 1.5× wallet
+# Pemotong risiko saat drawdown — dulu dua angka telanjang di tengah fungsi.
+FUTURES_DRAWDOWN_CUT_PCT    = 10.0    # drawdown dari puncak > ini → risiko dipotong
+FUTURES_DRAWDOWN_RISK_MULT  = 0.5     # …sebesar pengali ini
 
 
 async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -> dict:
@@ -270,6 +284,23 @@ async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -
     Caps total open risk (portfolio heat) and locked margin against ONE wallet so the
     portfolio cannot over-leverage into liquidation. Returns can_open + sizing fields.
     """
+    # Fase 1a: seluruh ambang di bawah dibaca dari `agent_config` lewat
+    # sizing_config; konstanta modul hanya cadangan saat DB tak terbaca.
+    from agents.futures import sizing_config as szcfg
+    await szcfg.refresh()
+
+    _risk_base   = szcfg.risk_fraction_base()
+    _risk_max    = szcfg.risk_fraction_max()
+    _conv_floor  = szcfg.get("size_conviction_floor")
+    _conv_ceil   = szcfg.get("size_conviction_ceil")
+    _max_conc    = int(szcfg.get("max_auto_positions"))   # satu kunci dgn auto_trader
+    _min_not_abs = szcfg.get("size_min_notional_abs")
+    _heat_cap    = szcfg.portfolio_max_risk_fraction()
+    _max_margin  = szcfg.max_margin_fraction()
+    _max_not_mlt = szcfg.get("size_max_notional_mult")
+    _dd_cut      = szcfg.get("size_drawdown_cut_pct")
+    _dd_mult     = szcfg.get("size_drawdown_risk_mult")
+
     bal = await get_or_create_balance("futures")
     lev = max(int(leverage or 1), 1)
 
@@ -287,9 +318,9 @@ async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -
     available     = bal.balance - locked_margin
 
     # Conviction scaling from score (72 → 90 maps base → max)
-    span       = FUTURES_CONVICTION_CEIL - FUTURES_CONVICTION_FLOOR
-    conviction = max(0.0, min(1.0, (score - FUTURES_CONVICTION_FLOOR) / span)) if span > 0 else 0.0
-    risk_fraction = FUTURES_RISK_BASE_FRACTION + (FUTURES_RISK_MAX_FRACTION - FUTURES_RISK_BASE_FRACTION) * conviction
+    span       = _conv_ceil - _conv_floor
+    conviction = max(0.0, min(1.0, (score - _conv_floor) / span)) if span > 0 else 0.0
+    risk_fraction = _risk_base + (_risk_max - _risk_base) * conviction
 
     # Drawdown cut from realized P&L across both agents (mirror of spot §15.5)
     async with AsyncSessionLocal() as dd_session:
@@ -307,8 +338,8 @@ async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -
         equity += p
         peak    = max(peak, equity)
     drawdown_pct = (peak - equity) / peak * 100 if peak > 0 else 0.0
-    if drawdown_pct > 10.0:
-        risk_fraction *= 0.5
+    if drawdown_pct > _dd_cut:
+        risk_fraction *= _dd_mult
 
     rp          = risk_pct if risk_pct and risk_pct > 0 else 2.0
     risk_dollar = bal.balance * risk_fraction
@@ -316,7 +347,7 @@ async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -
 
     # BUG-L4: cap notional per position so a tiny SL can't inflate size to a multiple of
     # the wallet (tiny rp → huge notional → small adverse move = outsized $ loss).
-    max_notional = bal.balance * FUTURES_MAX_NOTIONAL_FRACTION
+    max_notional = bal.balance * _max_not_mlt
     if notional > max_notional:
         notional    = max_notional
         risk_dollar = min(risk_dollar, notional * (rp / 100))
@@ -324,7 +355,7 @@ async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -
 
     # Cap a single position's margin. BUG-L9: use min() so capping never RAISES risk_dollar
     # above the intended fixed-fractional risk (the old code re-derived it upward).
-    max_margin = bal.balance * FUTURES_MAX_MARGIN_FRACTION
+    max_margin = bal.balance * _max_margin
     if margin > max_margin:
         margin      = max_margin
         notional    = margin * lev
@@ -332,20 +363,20 @@ async def compute_futures_sizing(score: float, risk_pct: float, leverage: int) -
 
     can_open = True
     reason   = "ok"
-    if len(open_trades) >= FUTURES_MAX_CONCURRENT:
+    if len(open_trades) >= _max_conc:
         can_open = False
-        reason   = f"max {FUTURES_MAX_CONCURRENT} posisi futures bersamaan (sekarang {len(open_trades)})"
-    elif open_risk + risk_dollar > bal.balance * FUTURES_MAX_PORTFOLIO_RISK:
+        reason   = f"max {_max_conc} posisi futures bersamaan (sekarang {len(open_trades)})"
+    elif open_risk + risk_dollar > bal.balance * _heat_cap:
         can_open = False
         reason   = (f"portfolio heat: risk ${open_risk:,.2f} + ${risk_dollar:,.2f} "
-                    f"> {FUTURES_MAX_PORTFOLIO_RISK:.0%} dari wallet ${bal.balance:,.0f}")
+                    f"> {_heat_cap:.0%} dari wallet ${bal.balance:,.0f}")
     elif margin > available:
         can_open = False
         reason   = (f"margin ${margin:,.0f} > available ${available:,.0f} "
                     f"(wallet ${bal.balance:,.0f}, locked ${locked_margin:,.0f})")
-    elif notional < FUTURES_MIN_NOTIONAL_ABS:
+    elif notional < _min_not_abs:
         can_open = False
-        reason   = f"notional ${notional:,.0f} < minimum ${FUTURES_MIN_NOTIONAL_ABS:,.0f} (anti-debu)"
+        reason   = f"notional ${notional:,.0f} < minimum ${_min_not_abs:,.0f} (anti-debu)"
 
     return {
         "can_open":       can_open,
