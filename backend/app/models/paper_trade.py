@@ -68,3 +68,9 @@ class PaperTrade(Base):
     last_tick_price:   Mapped[float | None] = mapped_column(Float,       nullable=True)
     last_tick_pnl_pct: Mapped[float | None] = mapped_column(Float,       nullable=True)
     last_tick_event:   Mapped[str | None]   = mapped_column(String(40),  nullable=True)
+
+    # Fase 2: keluaran mesin ukuran (agents/futures/sizing.py) apa adanya —
+    # risk_usd, notional, leverage, margin, biaya, TP1/SL bersih, dan alasannya.
+    sizing_json:       Mapped[str | None]   = mapped_column(Text, nullable=True)
+    # Fase 4: penyimpangan fill terhadap SL yang direncanakan (%).
+    sl_breach_pct:     Mapped[float | None] = mapped_column(Float, nullable=True)

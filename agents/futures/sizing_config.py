@@ -63,6 +63,19 @@ _FROZEN: dict[str, float] = {
     # Pemotong risiko saat drawdown (dulu dua angka telanjang di tengah fungsi).
     "size_drawdown_cut_pct":      10.0,
     "size_drawdown_risk_mult":     0.5,
+    # Fase 2 — parameter mesin ukuran `sizing.py`. Keputusan owner 5 Sep 2026.
+    #
+    # `size_margin_loss_at_sl_pct` (K3) adalah kunci yang membuat kerugian
+    # TERUKUR: leverage dipilih supaya rugi margin saat SL selalu sekitar angka
+    # ini, berapa pun jarak SL koinnya. Leverage jadi AKIBAT dari SL, bukan
+    # angka tetap per lane seperti sebelumnya.
+    "size_margin_loss_at_sl_pct": 20.0,
+    "lev_min":                     2.0,
+    "lev_max":                     8.0,     # K4
+    # Gerbang laba: sekali menang harus berarti dalam UANG, bukan hanya persen.
+    # Inilah yang mencegah "masuk cuma 3 dolar".
+    "size_min_profit_usd":         5.0,     # K5
+    "size_min_profit_cost_mult":   4.0,
     # Leverage — sumber: utils.py
     "lev_liq_safety_mult":         2.0,
     "lev_max_default":             6.0,

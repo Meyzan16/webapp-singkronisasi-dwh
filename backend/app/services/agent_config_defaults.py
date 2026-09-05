@@ -177,6 +177,20 @@ DEFAULTS: list[dict] = [
      "description": "Drawdown dari puncak ekuitas di atas %% ini memotong risiko per trade"},
     {"group": "futures", "key": "size_drawdown_risk_mult", "default": 0.5, "category": "sizing",
      "description": "Pengali risiko saat drawdown melewati ambang di atas"},
+    {"group": "futures", "key": "size_margin_loss_at_sl_pct", "default": 20.0, "category": "sizing",
+     "description": ("Fase 2 (K3): target rugi margin (%) saat SL kena. Leverage dipilih "
+                     "supaya angka ini tercapai berapa pun jarak SL koinnya — inilah yang "
+                     "membuat kerugian TERUKUR: satu angka sama untuk semua koin.")},
+    {"group": "futures", "key": "lev_min", "default": 2.0, "category": "sizing",
+     "description": "Fase 2: leverage minimum yang boleh dipilih mesin ukuran"},
+    {"group": "futures", "key": "lev_max", "default": 8.0, "category": "sizing",
+     "description": "Fase 2 (K4): leverage maksimum yang boleh dipilih mesin ukuran"},
+    {"group": "futures", "key": "size_min_profit_usd", "default": 5.0, "category": "sizing",
+     "description": ("Fase 2 (K5): TP1 bersih minimum ($) agar kandidat boleh dibuka. "
+                     "Gerbang yang mencegah posisi 'masuk cuma 3 dolar'.")},
+    {"group": "futures", "key": "size_min_profit_cost_mult", "default": 4.0, "category": "sizing",
+     "description": ("Fase 2: TP1 wajib minimal sekian kali biaya round-trip. Tanpa ini, "
+                     "posisi dibuka untuk peluang yang menang pun hanya sebesar fee.")},
     {"group": "futures", "key": "lev_liq_safety_mult", "default": 2.0, "category": "sizing",
      "description": "Jarak likuidasi wajib ≥ jarak SL × angka ini — wick ke SL tak boleh mendarat di zona likuidasi"},
     {"group": "futures", "key": "lev_max_default", "default": 6.0, "category": "sizing",

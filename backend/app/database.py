@@ -139,6 +139,14 @@ async def _migrate_columns(connection) -> None:
         # partial unique index menutup race manual open vs auto-open
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_open_position_per_symbol "
         "ON paper_trades (style, symbol) WHERE status = 'open'",
+        # PLAN-FUTURES-AGENTIC Fase 2: jejak keputusan ukuran per trade.
+        # Tanpa ini, pertanyaan "kenapa posisi ini segini?" cuma bisa dijawab
+        # dengan menebak ulang keadaan wallet saat itu — dan tebakan itulah yang
+        # membuat enam pengali bertumpuk bisa hidup dua bulan tanpa ketahuan.
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS sizing_json TEXT",
+        # Fase 4 akan mengisinya: seberapa jauh harga fill melewati SL yang
+        # direncanakan. Kolomnya dibuat sekarang supaya migrasi tak menumpuk.
+        "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS sl_breach_pct FLOAT",
         # SP1: signal performance enrichment columns
         "ALTER TABLE agent_signal_weights ADD COLUMN IF NOT EXISTS avg_pnl_pct FLOAT DEFAULT 0.0",
         "ALTER TABLE agent_signal_weights ADD COLUMN IF NOT EXISTS sample_count_raw INTEGER DEFAULT 0",

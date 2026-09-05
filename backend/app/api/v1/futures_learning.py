@@ -427,6 +427,59 @@ async def get_sl_config() -> dict:
     return {"status": "ok", "config": sl_config.snapshot()}
 
 
+# ── PLAN-FUTURES-AGENTIC Fase 2: mesin ukuran yang menjelaskan diri ─────────
+
+@router.get("/futures/sizing/preview", dependencies=[Depends(require_db)])
+async def sizing_preview(
+    sl_pct:   float = Query(..., gt=0, le=50, description="jarak SL dari entry (%)"),
+    tp1_pct:  float = Query(..., gt=0, le=100, description="jarak TP1 dari entry (%)"),
+    cost_pct: float = Query(0.20, ge=0, le=5, description="biaya round-trip (%)"),
+    tier_mult: float = Query(1.0, gt=0, le=1, description="pengali tier (1.0 = penuh)"),
+) -> dict:
+    """Berapa besar posisi yang AKAN dibuka, dan kenapa segitu.
+
+    Memakai wallet dan posisi terbuka yang sebenarnya, jadi angkanya bukan
+    ilustrasi — ia jawaban untuk keadaan saat ini. Dibuat supaya pertanyaan
+    "kenapa cuma masuk 3 dolar?" bisa dijawab SEBELUM posisi dibuka, bukan
+    sesudahnya lewat forensik.
+    """
+    from sqlalchemy import select
+
+    from agents.futures import sizing
+    from agents.futures import sizing_config as szcfg
+    from app.api.v1.balance import (
+        _FUTURES_AGENT_STYLES, _locked_margin, get_or_create_balance,
+    )
+    from app.database import AsyncSessionLocal
+    from app.models.paper_trade import PaperTrade
+
+    await szcfg.refresh()
+    p = sizing.params_from_config()
+
+    bal = await get_or_create_balance("futures")
+    async with AsyncSessionLocal() as session:
+        open_trades = list((await session.execute(
+            select(PaperTrade).where(
+                PaperTrade.style.in_(_FUTURES_AGENT_STYLES),
+                PaperTrade.status == "open",
+            )
+        )).scalars().all())
+
+    hasil = sizing.compute(
+        balance=float(bal.balance), sl_pct=sl_pct, tp1_pct=tp1_pct, cost_pct=cost_pct,
+        p=p, tier_mult=tier_mult,
+        open_positions=len(open_trades),
+        open_risk_usd=sum(float(t.risk_dollar or 0.0) for t in open_trades),
+        locked_margin=_locked_margin(open_trades),
+    )
+    return {
+        "status": "ok",
+        "sizing": hasil.as_dict(),
+        "penjelasan": sizing.explain(hasil),
+        "parameter": p.__dict__,
+    }
+
+
 # ── M5: penyalaan bertahap (shadow → canary → active) ────────────────────────
 
 @router.get("/futures/exit-rollout", dependencies=[Depends(require_db)])
