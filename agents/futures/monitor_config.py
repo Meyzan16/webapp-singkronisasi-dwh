@@ -248,10 +248,16 @@ def tunable_lanes() -> list[str]:
 
 
 def _known_lanes() -> list[str]:
-    """Lane futures dari registry — bukan salinan literal."""
+    """Lane futures PENSIUN dari registry — bukan salinan literal.
+
+    Lane `agentic` sengaja TIDAK di sini: parameter keluarnya datang dari
+    `exit_config` sebagai satu set, bukan per lane. Memberinya baris di sini
+    akan menghidupkan lagi tumpukan tombol yang justru sedang ditinggalkan
+    (38 konstanta monitor + 21 kunci per lane untuk pertanyaan yang sama).
+    """
     try:
-        from app.services.agent_registry import LANE_AGENT
-        return list(LANE_AGENT.keys())
+        from app.services.agent_registry import LEGACY_LANES
+        return list(LEGACY_LANES)
     except Exception:
         return []
 

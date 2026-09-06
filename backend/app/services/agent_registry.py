@@ -20,10 +20,32 @@ from agents.futures.weight_updater import FUTURES_AGENTS as _FUTURES_AGENTS
 SPOT_AGENT = "opportunity_spot"
 CROSS_AGENT = "cross_agent"
 
-#: Lane futures — turunan langsung dari layer agent, bukan salinan.
+#: SEMUA agen futures yang pernah ada — dipakai untuk QUERY RIWAYAT (posisi
+#: terbuka, trade tertutup, bobot, ledger). Turunan langsung dari layer agent.
+#:
+#: Namanya tetap `FUTURES_AGENTS` DENGAN SENGAJA: ~30 tempat sudah mengimpornya
+#: dan semuanya memang bertanya soal riwayat. Mengganti artinya diam-diam akan
+#: membuat 112 trade lama hilang dari laporan, saldo, dan gerbang risiko tanpa
+#: satu pun error — jenis kegagalan senyap yang sudah dua kali memakan waktu
+#: proyek ini (30 Jul: BigMover hilang dari Signal Performance; 29 Jul: bobot
+#: repair tak beririsan).
 FUTURES_AGENTS: list[str] = list(_FUTURES_AGENTS)
 
+#: Agen yang BOLEH MEMINDAI dan membuka posisi baru. Sejak Fase 3 satu.
+#: Pakai daftar ini HANYA untuk pertanyaan "siapa yang bertindak sekarang".
+ACTIVE_FUTURES_AGENTS: list[str] = ["futures_agentic"]
+
+#: Agen yang sudah pensiun: tak memindai lagi, tapi riwayatnya wajib terbaca.
+#: Dihapus di Fase 8, setelah posisi terbuka terakhirnya tutup.
+LEGACY_FUTURES_AGENTS: list[str] = [
+    a for a in FUTURES_AGENTS if a not in ACTIVE_FUTURES_AGENTS
+]
+
+#: Alias eksplisit untuk pemanggil yang ingin niatnya terbaca di tempat.
+ALL_FUTURES_AGENTS: list[str] = FUTURES_AGENTS
+
 #: Agen yang benar-benar men-trade (punya paper_trades sendiri).
+#: Memuat yang pensiun juga — dipakai laporan & agregasi riwayat.
 TRADING_AGENTS: list[str] = [SPOT_AGENT] + FUTURES_AGENTS
 
 #: Semua agen termasuk `cross_agent` (turunan/blending, bukan penerbit trade).
@@ -36,6 +58,7 @@ AGENT_LABELS: dict[str, str] = {
     "futures_agent2":         "Accumulation",
     "futures_agent3":         "Momentum",
     "futures_agent_bigmover": "BigMover",
+    "futures_agentic":        "Agentic",
     CROSS_AGENT:              "Cross-Agent",
 }
 
@@ -46,6 +69,7 @@ AGENT_SHORT: dict[str, str] = {
     "futures_agent2":         "Accum",
     "futures_agent3":         "Momo",
     "futures_agent_bigmover": "BigMover",
+    "futures_agentic":        "Agentic",
     CROSS_AGENT:              "Cross",
 }
 
@@ -59,10 +83,22 @@ AGENT_LANE: dict[str, str] = {
     "futures_agent2":         "accumulation",
     "futures_agent3":         "momentum",
     "futures_agent_bigmover": "bigmover",
+    "futures_agentic":        "agentic",
 }
 
 #: Kebalikannya: lane → agen.
 LANE_AGENT: dict[str, str] = {lane: agent for agent, lane in AGENT_LANE.items()}
+
+#: Lane milik agen PENSIUN. Dipakai generator config per-lane lama
+#: (`sl_config`, `monitor_config`), yang memang hanya melayani jalur monitor lama.
+#:
+#: Lane `agentic` SENGAJA tidak di sini: seluruh parameter keluarnya datang dari
+#: `exit_config` (satu set, bukan per lane). Memberinya baris per-lane akan
+#: menghidupkan kembali persis yang sedang ditinggalkan Fase 4 — 38 konstanta
+#: monitor plus 21 kunci per lane untuk pertanyaan yang sama.
+LEGACY_LANES: list[str] = sorted(
+    lane for agent, lane in AGENT_LANE.items() if agent in LEGACY_FUTURES_AGENTS
+)
 
 
 def agent_market(agent: str) -> str:

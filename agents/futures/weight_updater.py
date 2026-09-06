@@ -106,7 +106,14 @@ PRED_TRADE_FRAC    = 0.85    # keputusan terkunci: 0.85×trade + 0.15×predictiv
 _pred_blend_stats: dict[tuple, float] = {}   # {(agent, signal_key): pred_w}
 _pred_blend_at:    float = 0.0
 
+# Fase 3: `futures_agentic` bergabung sebagai agen AKTIF; empat lane lama tetap
+# di daftar ini karena masih punya posisi terbuka, bobot, dan riwayat yang wajib
+# terbaca — dan selama `agentic_enabled`=0 merekalah yang masih men-trade.
+# Daftar ini berarti "semua agen futures yang pernah ada", dipakai untuk QUERY.
+# Untuk pertanyaan "siapa yang boleh memindai", pakai
+# `agent_registry.ACTIVE_FUTURES_AGENTS`.
 FUTURES_AGENTS = [
+    "futures_agentic",          # Fase 3 — agen tunggal
     "futures_agent1", "futures_agent2", "futures_agent3",
     "futures_agent_bigmover",   # Phase 2 BM1 — tracked but uses fixed threshold (no death spiral)
 ]

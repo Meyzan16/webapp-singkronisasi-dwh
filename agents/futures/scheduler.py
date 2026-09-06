@@ -18,6 +18,7 @@ from app.services.binance_urls import fapi
 from agents.futures import agent2 as a2
 from agents.futures import agent3 as a3
 from agents.futures import agent_bigmover as a_bm   # Phase 2 BM1
+from agents.futures import agentic as ag            # Fase 3 — agen tunggal
 from agents.futures import store as futures_store
 from agents.futures.data import fetch_top100_futures, fetch_symbol_data, fetch_new_listings
 from agents.futures.weight_updater import is_blacklisted   # B4: top-level import
@@ -215,6 +216,7 @@ async def _run_scan() -> dict:
     a2_results: list[dict] = []
     a3_results: list[dict] = []
     bm_results: list[dict] = []   # Phase 2 BM1
+    ag_results: list[dict] = []   # Fase 3 — agen tunggal (kosong selama saklar mati)
 
     # PLAN_v15 P3a: market breadth — of the top gainers (24h > +10%) we scanned,
     # how many are already fading on 1h? High fraction = pump-and-fade day →
@@ -262,11 +264,22 @@ async def _run_scan() -> dict:
             if r_bm:
                 bm_results.extend(r_bm)
 
+        # Fase 3: agen tunggal. `scan_symbol` mengembalikan [] selama
+        # `agentic_enabled`=0, jadi selama saklar mati blok ini nyaris gratis dan
+        # tak mengubah apa pun. Empat lane di atas tetap jalan sampai Fase 7
+        # menyalakan saklarnya — dua-duanya sengaja hidup berdampingan supaya
+        # perbandingan shadow bisa dilakukan atas siklus yang SAMA PERSIS.
+        r_ag = ag.scan_symbol(symbol, tf_map, change_24h,
+                              quote_vol_24h=float(ticker.get("quoteVolume", 0) or 0))
+        if r_ag:
+            ag_results.extend(r_ag)
+
     # Sort by score, take top N
     a1_results.sort(key=lambda x: x["score"], reverse=True)
     a2_results.sort(key=lambda x: x["score"], reverse=True)
     a3_results.sort(key=lambda x: x["score"], reverse=True)
     bm_results.sort(key=lambda x: x["score"], reverse=True)
+    ag_results.sort(key=lambda x: x["score"], reverse=True)
     a1_results_full = a1_results            # PLAN-SIGNAL-GAP P4: keep full list for big-movers match
     a2_results_full = a2_results
     a3_results_full = a3_results
@@ -275,6 +288,8 @@ async def _run_scan() -> dict:
     a2_results = a2_results[:TOP_N]
     a3_results = a3_results[:TOP_N]
     bm_results = bm_results[:TOP_N]
+    ag_results_full = ag_results
+    ag_results = ag_results[:TOP_N]
 
     # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F2: terapkan learning policy per-lane —
     # menempelkan adaptive_score/probability/ban ke tiap kandidat (dict yang sama
@@ -342,6 +357,13 @@ async def _run_scan() -> dict:
         "agent_bigmover": {
             "results":      bm_results,
             "total":        len(bm_results),
+            "scanned":      len(tickers),
+            "generated_at": gen_time,
+            "elapsed_sec":  elapsed,
+        },
+        "agentic": {
+            "results":      ag_results,
+            "total":        len(ag_results),
             "scanned":      len(tickers),
             "generated_at": gen_time,
             "elapsed_sec":  elapsed,
@@ -643,6 +665,20 @@ async def run_futures_loop() -> None:
             # jadi kalau monitor mati atau siklus pertamanya belum selesai,
             # scanner memakai angka hardcode sementara UI menampilkan angka lain.
             try:
+                from agents.futures import agentic as _ag_cfg
+                await _ag_cfg.refresh()
+            except Exception as exc:
+                logger.warning("agentic_config_pull_failed", scope="futures_scheduler",
+                               error=str(exc)[:120])
+
+            try:
+                from agents.futures import exit_config as _ecfg
+                await _ecfg.refresh()
+            except Exception as exc:
+                logger.warning("exit_config_pull_failed", scope="futures_scheduler",
+                               error=str(exc)[:120])
+
+            try:
                 from agents.futures import sizing_config
                 await sizing_config.refresh()
             except Exception as exc:
@@ -657,6 +693,7 @@ async def run_futures_loop() -> None:
             futures_store.set_result("agent2", result["agent2"])
             futures_store.set_result("agent3", result["agent3"])   # Phase 11
             futures_store.set_result("agent_bigmover", result["agent_bigmover"])   # Phase 2 BM1
+            futures_store.set_result("agentic", result["agentic"])                 # Fase 3
             futures_store.set_big_movers(result["big_movers"])     # PLAN-SIGNAL-GAP P4
             futures_store.set_learning_status(result.get("learning_status", "warming"))  # F2
             futures_store.set_scanning(False)

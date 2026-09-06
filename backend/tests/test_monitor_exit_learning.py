@@ -67,11 +67,24 @@ def test_tp_sudah_dekat_tak_disentuh():
 
 
 def test_kunci_config_per_lane_ikut_registry():
-    """Lane baru harus otomatis punya kunci config — tanpa mengedit monitor_config."""
-    from app.services.agent_registry import LANE_AGENT
+    """Lane PENSIUN baru harus otomatis punya kunci config — tanpa mengedit
+    monitor_config. Niat aslinya (lane tak boleh lahir tanpa barisnya) tetap;
+    yang berubah sumbernya sejak Fase 3.
+
+    Lane `agentic` SENGAJA di luar: seluruh parameter keluarnya datang dari
+    `exit_config` sebagai satu set, bukan per lane. Memberinya baris di sini
+    akan menghidupkan lagi persis yang sedang ditinggalkan — 38 konstanta
+    monitor plus 21 kunci per lane untuk pertanyaan yang sama.
+    """
+    from app.services.agent_registry import ACTIVE_FUTURES_AGENTS, LEGACY_LANES
+
     lanes = mcfg._known_lanes()
-    assert set(lanes) == set(LANE_AGENT)
+    assert set(lanes) == set(LEGACY_LANES)
     assert mcfg.tp_lane_key("bigmover") == "monitor_tp_atr_mult_lane_bigmover"
+
+    # Lane agen aktif tak boleh menyelinap masuk ke config per-lane lama.
+    assert ACTIVE_FUTURES_AGENTS == ["futures_agentic"]
+    assert "agentic" not in set(lanes)
 
 
 def test_saklar_terdaftar_di_config_defaults():

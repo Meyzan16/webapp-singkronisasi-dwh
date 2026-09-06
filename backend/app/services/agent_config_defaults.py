@@ -137,6 +137,24 @@ DEFAULTS: list[dict] = [
      "description": ("Fase 0: 0=OFF (4 lane lama). 1 = agen tunggal 'agentic' "
                      "mengambil alih pemindaian & sizing. Lihat PLAN-FUTURES-AGENTIC.md.")},
 
+    # ── FUTURES — Fase 3: agen tunggal (agentic.py) ─────────────────────────
+    {"group": "futures", "key": "agentic_min_score", "default": 65, "category": "threshold",
+     "description": ("Ambang skor TUNGGAL agen agentic. Menggantikan empat ambang lane "
+                     "(60-72) plus adaptive threshold yang mengejar win-rate. Satu angka, "
+                     "bisa diubah operator, tak bergerak sendiri.")},
+    {"group": "futures", "key": "agentic_min_change_24h", "default": 5.0, "category": "threshold",
+     "description": "Gerak 24h minimum agar sebuah koin punya tesis momentum"},
+    {"group": "futures", "key": "agentic_max_change_24h", "default": 150.0, "category": "threshold",
+     "description": "Di atas ini sudah bukan trade — koin dilewati"},
+    {"group": "futures", "key": "agentic_min_liquidity_usd", "default": 5_000_000, "category": "risk",
+     "description": ("Volume 24h minimum ($). Gerbang, bukan bahan skor: koin tipis melompat "
+                     "melewati SL — BLUAI bergerak -8% ke -17,3% di antara dua tick sehingga "
+                     "SL 7,99% jadi rugi 2,16x risiko.")},
+    {"group": "futures", "key": "agentic_max_funding_pct", "default": 0.25, "category": "risk",
+     "description": "Gerbang keras funding (dua arah) — biaya menahan posisi memakan tesisnya"},
+    {"group": "futures", "key": "agentic_min_rr", "default": 2.0, "category": "threshold",
+     "description": "Rasio R:R minimum (TP2 terhadap SL) agar kandidat layak dibuka"},
+
     # ── FUTURES — Fase 4: aturan keluar (exit_rules.py) ─────────────────────
     # Sembilan angka menggantikan 38 konstanta monitor + 21 kunci per lane.
     # Bawaannya dari DATA, bukan selera — lihat agents/futures/exit_config.py.

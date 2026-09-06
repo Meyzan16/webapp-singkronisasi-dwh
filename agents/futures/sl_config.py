@@ -103,8 +103,11 @@ def tunable_lanes() -> list[str]:
     """Lane yang wajib punya baris config SL sendiri — registry ∪ yang sudah
     punya nilai bawaan, supaya lane baru ikut tanpa mengedit file ini."""
     try:
-        from app.services.agent_registry import LANE_AGENT
-        known = set(LANE_AGENT)
+        # Lane PENSIUN saja. Lane `agentic` diatur `exit_config` (satu set
+        # parameter, bukan per lane) — memberinya baris di sini akan
+        # menghidupkan lagi tumpukan tombol yang sedang ditinggalkan.
+        from app.services.agent_registry import LEGACY_LANES
+        known = set(LEGACY_LANES)
     except Exception:
         known = set()
     return sorted(known | set(_FROZEN))
