@@ -137,6 +137,47 @@ DEFAULTS: list[dict] = [
      "description": ("Fase 0: 0=OFF (4 lane lama). 1 = agen tunggal 'agentic' "
                      "mengambil alih pemindaian & sizing. Lihat PLAN-FUTURES-AGENTIC.md.")},
 
+    # ── FUTURES — Fase 4: aturan keluar (exit_rules.py) ─────────────────────
+    # Sembilan angka menggantikan 38 konstanta monitor + 21 kunci per lane.
+    # Bawaannya dari DATA, bukan selera — lihat agents/futures/exit_config.py.
+    {"group": "futures", "key": "exit_tp1_atr_mult", "default": 1.2, "category": "exit",
+     "description": ("Jarak TP1 dalam kelipatan ATR. TP lama dipasang 4-8 ATR dan hanya "
+                     "tersentuh 4% (5 dari 112) karena trade rata-rata cuma bergerak "
+                     "0,67 ATR. 1,2 ATR adalah jarak yang MEMANG pernah dicapai.")},
+    {"group": "futures", "key": "exit_tp2_atr_mult", "default": 2.5, "category": "exit",
+     "description": "Jarak TP2 dalam kelipatan ATR"},
+    {"group": "futures", "key": "exit_tp1_close_frac", "default": 0.50, "category": "exit",
+     "description": "Porsi posisi yang dijual saat TP1 tersentuh"},
+    {"group": "futures", "key": "exit_tp2_close_frac", "default": 0.25, "category": "exit",
+     "description": ("Porsi yang dijual saat TP2. Sisanya (25%) jadi PELARI tanpa plafon — "
+                     "satu-satunya sumber kemenangan besar; trade terbaik riwayat "
+                     "(+13,04%, 3,56 ATR) persis jenis yang dibunuh TP tetap.")},
+    {"group": "futures", "key": "exit_be_arm_cost_mult", "default": 3.0, "category": "exit",
+     "description": ("Breakeven baru menyala setelah untung >= sekian kali biaya. Rem lama "
+                     "menyala di +1,5% absolut lalu ditutup pullback rutin — 31 trade impas "
+                     "rata-rata +$0,25, persis fee.")},
+    {"group": "futures", "key": "exit_be_arm_atr", "default": 0.6, "category": "exit",
+     "description": "…DAN untung juga harus >= sekian ATR, supaya rem tak menyala oleh derau"},
+    {"group": "futures", "key": "exit_be_lock_frac", "default": 0.5, "category": "exit",
+     "description": ("Saat rem breakeven menyala, SL mengunci sekian bagian untung yang "
+                     "sudah dicapai (lantai: entry+biaya). Memindahkan SL tepat ke breakeven "
+                     "membuat tiap sentuhan menghasilkan NOL menurut definisi — itulah 31 "
+                     "trade sl_plus rata-rata +$0,25.")},
+    {"group": "futures", "key": "exit_trail_lock_frac", "default": 0.75, "category": "exit",
+     "description": "Sesudah TP1, trailing mengunci sekian bagian dari puncak"},
+    {"group": "futures", "key": "exit_max_hold_h", "default": 8.0, "category": "exit",
+     "description": ("Batas tahan (jam) sebelum time-stop menilai tesis gagal. Median hold "
+                     "pemenang 7,8 jam; yang lebih lama hampir semua berakhir di SL.")},
+    {"group": "futures", "key": "exit_time_stop_progress", "default": 0.5, "category": "exit",
+     "description": "Progres minimum (x risiko) agar posisi lolos dari time-stop"},
+    {"group": "futures", "key": "exit_sl_atr_mult", "default": 1.2, "category": "exit",
+     "description": "Jarak SL awal dalam kelipatan ATR (dipakai agen saat menyusun level)"},
+    {"group": "futures", "key": "exit_fast_loop_atr", "default": 1.0, "category": "exit",
+     "description": ("Posisi masuk loop cepat saat harga sudah sedekat ini (x ATR) ke SL. "
+                     "Pemicu lama adalah LEVERAGE >=10x, bukan kedekatan ke SL — sehingga "
+                     "BLUAI (leverage 2) dijaga loop lambat dan melompat dari -8% ke -17% "
+                     "di antara dua tick.")},
+
     # Ambang "menang" (bug B1). Sampai 5 Sep 2026 kemenangan cukup `pnl_pct > 0`,
     # sehingga 38 dari 55 "kemenangan" futures membukukan di bawah $0,50 — dan
     # weight_updater melatih tiap bobot sinyal dari label itu. Kini kemenangan

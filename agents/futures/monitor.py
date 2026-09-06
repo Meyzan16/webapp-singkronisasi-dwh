@@ -39,6 +39,7 @@ from app.services.trading_costs import (
 #: menyelesaikan atribut saat DIPANGGIL, setiap titik keputusan otomatis melihat
 #: nilai terbaru tanpa perlu dialirkan lewat argumen.
 from agents.futures import monitor_config as mcfg
+from agents.futures import exit_config as ecfg
 from agents.shared import trail_tracker
 from agents.futures.utils import (
     MAX_LOSS_PCT_OF_MARGIN_BY_LANE, DEFAULT_MAX_LOSS_PCT,
@@ -1772,7 +1773,29 @@ async def check_futures_positions() -> tuple[int, int]:
 
             # ── P5.4: flag high-risk trades for fast loop (30s checks) ──────────
             _margin_loss_pct_now = abs(_pnl_now_pct) * max(leverage, 1) if _pnl_now_pct < 0 else 0.0
+
+            # Fase 4 (bug B2): posisi juga dijaga ketat begitu HARGANYA sudah
+            # dekat ke SL — bukan hanya kalau leveragenya tinggi.
+            #
+            # Sampai 5 Sep 2026 ketiga pemicu di bawah semuanya soal leverage,
+            # rugi margin, atau jarak likuidasi. BLUAI berleverage 2 karena itu
+            # dijaga loop LAMBAT, lalu melompat dari −8% ke −17,30% di antara
+            # dua tick: SL dipasang 7,99%, ruginya jadi 2,16x risiko yang
+            # direncanakan. Leverage rendah bukan berarti aman — yang menentukan
+            # adalah seberapa dekat harga ke SL dan seberapa liar koinnya.
+            _sl_dist_atr = None
+            try:
+                _atr_now = float(meta.get("atr_pct") or 0.0)
+                if _atr_now > 0 and sl and entry:
+                    _sl_dist_pct_now = abs(price - sl) / entry * 100
+                    _sl_dist_atr = _sl_dist_pct_now / _atr_now
+            except (TypeError, ValueError, ZeroDivisionError):
+                _sl_dist_atr = None
+            _dekat_sl = (_sl_dist_atr is not None
+                         and _sl_dist_atr <= ecfg.get("exit_fast_loop_atr"))
+
             _is_high_risk = (
+                _dekat_sl or
                 leverage >= mcfg.FAST_LOOP_LEVERAGE_MIN or
                 _margin_loss_pct_now >= mcfg.FAST_LOOP_MARGIN_LOSS_PCT or
                 (not new_status and _liq_dist_pct(price, _calc_liq_price(entry, leverage, direction,
@@ -1833,10 +1856,17 @@ async def _fetch_futures_klines_15m(client: "httpx.AsyncClient", symbol: str,
     return []
 
 
-def _reconcile_apply_close(trade, meta: dict, close_price: float, status: str,
-                           reason: str, closed_ts: float) -> None:
+async def _reconcile_apply_close(session, trade, meta: dict, close_price: float,
+                                 status: str, reason: str, closed_ts: float) -> None:
     """Close a trade retroactively with the SAME fee/partial accounting as the
-    main loop (banked partials survive, position_size is the post-partial size)."""
+    main loop (banked partials survive, position_size is the post-partial size).
+
+    BUG B3 (5 Sep 2026): jalur ini menutup posisi tapi TIDAK PERNAH menulis
+    `exit_events`. Terukur — dari 5 `offline_reconcile_sl`, hanya 2 punya baris
+    ledger; `stagnant_48h` dan `max_age_expired` nol dari satu. Ledger keluar
+    adalah satu-satunya bahan `exit_learning`, jadi setiap penutupan yang lolos
+    dari sini membuat mesin belajar dari data yang diam-diam tidak lengkap.
+    Sekarang ledger ditulis di transaksi yang SAMA dengan penutupannya."""
     _entry_d = Decimal(str(trade.entry_price))
     _close_d = Decimal(str(close_price))
     pnl_gross = (
@@ -1871,6 +1901,12 @@ def _reconcile_apply_close(trade, meta: dict, close_price: float, status: str,
         Decimal(str(_partials)) + pnl_net / 100 * Decimal(str(_notional)) * _rem
         - Decimal(str(_fund_d)), 2      # PLAN_v16 F1: funding dibayar
     ))
+
+    await _log_exit_event(
+        session, trade, meta,
+        lane=str(meta.get("setup_type") or ""), close_reason=reason,
+        status=status, pnl_net=float(pnl_net), pnl_dollar=trade.pnl_dollar,
+    )
 
 
 async def reconcile_offline_positions() -> int:
@@ -1922,20 +1958,24 @@ async def reconcile_offline_positions() -> int:
                     k_close_ts = k_open_ts + 900
                     if trade.direction == "LONG":
                         if sl and k_low <= sl:      # SL wins on shared candle
-                            _reconcile_apply_close(trade, meta, sl, "sl",
-                                                   "offline_reconcile_sl", k_close_ts)
+                            await _reconcile_apply_close(
+                                session, trade, meta, sl, "sl",
+                                "offline_reconcile_sl", k_close_ts)
                         elif tp2 and k_high >= tp2:
-                            _reconcile_apply_close(trade, meta, tp2, "tp",
-                                                   "offline_reconcile_tp", k_close_ts)
+                            await _reconcile_apply_close(
+                                session, trade, meta, tp2, "tp",
+                                "offline_reconcile_tp", k_close_ts)
                         else:
                             continue
                     else:  # SHORT
                         if sl and k_high >= sl:
-                            _reconcile_apply_close(trade, meta, sl, "sl",
-                                                   "offline_reconcile_sl", k_close_ts)
+                            await _reconcile_apply_close(
+                                session, trade, meta, sl, "sl",
+                                "offline_reconcile_sl", k_close_ts)
                         elif tp2 and k_low <= tp2:
-                            _reconcile_apply_close(trade, meta, tp2, "tp",
-                                                   "offline_reconcile_tp", k_close_ts)
+                            await _reconcile_apply_close(
+                                session, trade, meta, tp2, "tp",
+                                "offline_reconcile_tp", k_close_ts)
                         else:
                             continue
                     closed += 1
@@ -2127,6 +2167,13 @@ async def run_futures_monitor() -> None:
                 await sizing_config.refresh()
             except Exception as exc:
                 logger.warning("sizing_config_pull_failed", scope="futures_monitor",
+                               error=str(exc)[:120])
+
+            # Fase 4: parameter aturan keluar (termasuk pemicu loop cepat).
+            try:
+                await ecfg.refresh()
+            except Exception as exc:
+                logger.warning("exit_config_pull_failed", scope="futures_monitor",
                                error=str(exc)[:120])
 
             try:
