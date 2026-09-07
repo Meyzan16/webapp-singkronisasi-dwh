@@ -173,6 +173,161 @@ def get_state() -> dict:
 _EVENT_LOG_CAP = 30
 
 
+#: Gaya trade yang dikelola aturan keluar BARU (Fase 4). Diturunkan dari
+#: registry supaya agen aktif berikutnya ikut otomatis, bukan lewat daftar
+#: tangan yang bisa ketinggalan.
+def _agentic_styles() -> tuple[str, ...]:
+    try:
+        from app.services.agent_registry import ACTIVE_FUTURES_AGENTS
+        return tuple(ACTIVE_FUTURES_AGENTS)
+    except Exception:
+        return ("futures_agentic",)
+
+
+_AGENTIC_STYLES = _agentic_styles()
+
+
+async def _monitor_agentic(session, trades: list, prices: dict) -> tuple[int, int]:
+    """Kelola posisi agen tunggal dengan `exit_rules` — enam mekanisme, SL dulu.
+
+    Sengaja TIPIS: seluruh keputusan ada di `exit_rules.evaluate` yang murni dan
+    bisa diuji dengan angka. Fungsi ini hanya menerjemahkan keputusan itu jadi
+    perubahan baris DB. Pembagian ini yang membuat aturan keluar bisa diputar
+    ulang atas ledger historis sebelum mengelola satu pun posisi nyata.
+    """
+    if not trades:
+        return 0, 0
+
+    from agents.futures import exit_config as _ecfg
+    from agents.futures import exit_rules as _er
+
+    await _ecfg.refresh()
+    params = _er.params_from_config()
+    closed = updated = 0
+
+    for trade in trades:
+        price = prices.get(trade.symbol)
+        if price is None:
+            continue
+        try:
+            meta = json.loads(trade.signals_json or "{}")
+        except (TypeError, ValueError):
+            meta = {}
+
+        entry = float(trade.entry_price or 0.0)
+        if entry <= 0:
+            continue
+        sl = float(trade.trail_sl or trade.stop_loss or 0.0)
+        direction = trade.direction or "LONG"
+
+        pnl_now = ((price - entry) if direction == "LONG" else (entry - price)) / entry * 100
+        peak = max(float(meta.get("peak_pnl_pct", 0.0)), pnl_now)
+        if peak != meta.get("peak_pnl_pct"):
+            meta["peak_pnl_pct"] = round(peak, 3)
+
+        state = _er.ExitState(
+            direction=direction,
+            entry=entry,
+            price=price,
+            sl=sl,
+            atr_pct=float(meta.get("atr_pct") or 0.0),
+            cost_pct=_cost_floor_pct(meta),
+            risk_pct=float(meta.get("risk_pct") or 0.0),
+            hold_minutes=(time.time() - float(trade.entry_at or time.time())) / 60,
+            peak_pnl_pct=peak,
+            tp1_done=bool(meta.get("tp1_partial_done")),
+            tp2_done=bool(meta.get("tp2_partial_done")),
+            trail_active=bool(trade.trail_active),
+        )
+
+        keputusan = _er.evaluate(state, params)
+
+        if keputusan.action == "hold":
+            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+            continue
+
+        if keputusan.action == "move_sl" and keputusan.new_sl:
+            trade.trail_sl = round(keputusan.new_sl, 8)
+            trade.trail_active = True
+            _append_trade_event(meta, keputusan.reason, {
+                "new_sl": trade.trail_sl, "note": keputusan.note})
+            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+            updated += 1
+            logger.info("agentic_sl_moved", symbol=trade.symbol,
+                        reason=keputusan.reason, new_sl=trade.trail_sl,
+                        note=keputusan.note)
+            continue
+
+        if keputusan.action == "partial":
+            # Parsial: bank sebagian, kecilkan notional sisanya, majukan SL.
+            frac = max(0.0, min(1.0, keputusan.close_frac))
+            harga_tp = float(keputusan.close_price or price)
+            kotor = ((harga_tp - entry) if direction == "LONG"
+                     else (entry - harga_tp)) / entry * 100
+            # Fee dipotong PENUH untuk fraksi yang dijual (masuk + keluar) —
+            # perbaikan B6: jalur lama hanya memotong separuh, sehingga fee
+            # masuk untuk fraksi itu tak pernah terbayar.
+            bersih = kotor - ROUND_TRIP * 100
+            notional = float(trade.position_size or 0.0)
+            dibank = round(bersih / 100 * notional * frac, 2)
+
+            kunci = "tp1_partial_done" if keputusan.reason == _er.TP1_HIT else "tp2_partial_done"
+            meta[kunci] = True
+            meta[f"{kunci}_pnl_dollar"] = dibank
+            trade.pnl_dollar = (trade.pnl_dollar or 0.0) + dibank
+            trade.position_size = round(notional * (1 - frac), 2)
+            if keputusan.new_sl:
+                trade.trail_sl = round(keputusan.new_sl, 8)
+                trade.trail_active = True
+            _append_trade_event(meta, keputusan.reason, {
+                "frac": frac, "banked_dollar": dibank, "note": keputusan.note})
+            trade.signals_json = json.dumps(meta, ensure_ascii=False)
+            updated += 1
+            logger.info("agentic_partial", symbol=trade.symbol,
+                        reason=keputusan.reason, frac=frac, banked=dibank)
+            continue
+
+        # action == "close"
+        harga_tutup = float(keputusan.close_price or price)
+        kotor = ((harga_tutup - entry) if direction == "LONG"
+                 else (entry - harga_tutup)) / entry * 100
+        extra, funding = _true_close_costs(meta, keputusan.reason)
+        bersih = kotor - ROUND_TRIP * 100 - extra
+        notional = float(trade.position_size or 0.0)
+        total = round((trade.pnl_dollar or 0.0) + bersih / 100 * notional - funding, 2)
+
+        meta["close_reason"] = keputusan.reason
+        meta["pnl_gross_pct"] = round(kotor, 3)
+        meta["fee_pct"] = round(ROUND_TRIP * 100, 3)
+        meta["cost_slippage_pct"] = round(extra, 4)
+        meta["cost_funding_dollar"] = round(funding, 4)
+
+        # Fase 4: seberapa jauh fill melewati SL yang direncanakan. Tanpa angka
+        # ini, rugi 2,16x risiko hanya bisa ditemukan lewat forensik manual.
+        if keputusan.note.startswith("sl_breach_pct="):
+            try:
+                trade.sl_breach_pct = round(float(keputusan.note.split("=", 1)[1]), 4)
+            except ValueError:
+                pass
+
+        trade.status = "tp" if keputusan.reason in (_er.TP1_HIT, _er.TP2_HIT) else "sl"
+        trade.close_price = round(harga_tutup, 8)
+        trade.closed_at = time.time()
+        trade.pnl_pct = round(bersih, 2)
+        trade.pnl_dollar = total
+        trade.signals_json = json.dumps(meta, ensure_ascii=False)
+
+        # B3: ledger ditulis di transaksi yang SAMA dengan penutupan.
+        await _log_exit_event(session, trade, meta, lane=str(meta.get("setup_type") or "agentic"),
+                              close_reason=keputusan.reason, status=trade.status,
+                              pnl_net=bersih, pnl_dollar=total)
+        closed += 1
+        logger.info("agentic_closed", symbol=trade.symbol, reason=keputusan.reason,
+                    pnl_pct=round(bersih, 2), pnl_dollar=total, note=keputusan.note)
+
+    return closed, updated
+
+
 async def _log_exit_event(session, trade, meta: dict, *, lane: str, close_reason: str,
                           status: str, pnl_net: float, pnl_dollar: float) -> None:
     """Catat satu keputusan KELUAR. M7: implementasinya bersama dengan monitor
@@ -606,10 +761,22 @@ async def check_futures_positions() -> tuple[int, int]:
         )
         trades = list(result.scalars().all())
 
-        if not trades:
+        # ── Fase 7: posisi agen tunggal dikelola JALUR SENDIRI ───────────────
+        # Bukan sekadar kerapian. Aturan keluar baru (exit_rules) menilai SL
+        # paling pertama dan tak punya `fail_fast`; menyisipkannya sebagai
+        # cabang di tengah loop lama berarti menambal 19 blok bersyarat, dan
+        # satu yang terlewat membuat posisi agentic diam-diam dikelola aturan
+        # lama — termasuk `fail_fast` yang terbukti -$79 dengan nol kemenangan.
+        #
+        # Memisahkan jalurnya membuat kesalahan itu MUSTAHIL: yang tak lewat
+        # sini tak pernah tersentuh aturan baru, dan sebaliknya.
+        agentic_trades = [t for t in trades if t.style in _AGENTIC_STYLES]
+        trades = [t for t in trades if t.style not in _AGENTIC_STYLES]
+
+        if not trades and not agentic_trades:
             return 0, 0   # B3: tuple — caller unpacks (closed, updated)
 
-        symbols = list({t.symbol for t in trades})
+        symbols = list({t.symbol for t in trades} | {t.symbol for t in agentic_trades})
         # EC2: stale price guard — if fetch takes >30s (network stall / retry loop),
         # the prices could already be stale by the time we use them.  Skip the cycle
         # rather than fire a false SL/TP close on stale data.
@@ -621,6 +788,16 @@ async def check_futures_positions() -> tuple[int, int]:
                            age_sec=round(_pf_age, 1),
                            msg="price fetch took >30s — skipping cycle")
             return 0, 0
+
+        # Jalur agentic dijalankan LEBIH DULU: aturannya menilai SL paling
+        # pertama, jadi posisi yang sudah menembus SL ditutup sebelum apa pun
+        # yang lebih lambat sempat menyentuhnya.
+        _ag_closed, _ag_updated = await _monitor_agentic(session, agentic_trades, prices)
+        if _ag_closed or _ag_updated:
+            await session.commit()
+
+        if not trades:
+            return _ag_closed, _ag_updated
 
         # BC1: fetch wallet equity for cross-margin liq calculation
         _wallet_equity = FUTURES_STARTING_BALANCE
@@ -1827,7 +2004,7 @@ async def check_futures_positions() -> tuple[int, int]:
         if closed > 0 or updated > 0 or trades:
             await session.commit()
 
-    return closed, updated   # B3: return tuple so caller can track closes separately
+    return closed + _ag_closed, updated + _ag_updated   # B3: return tuple so caller can track closes separately
 
 
 # ── PLAN_v15 P5: offline catch-up reconciliation ──────────────────────────────

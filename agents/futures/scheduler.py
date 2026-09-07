@@ -218,6 +218,10 @@ async def _run_scan() -> dict:
     bm_results: list[dict] = []   # Phase 2 BM1
     ag_results: list[dict] = []   # Fase 3 — agen tunggal (kosong selama saklar mati)
 
+    # Dibaca SEKALI per scan, bukan per simbol: saklar yang berubah di tengah
+    # siklus akan menghasilkan setengah scan lama + setengah scan baru.
+    _agentic_aktif = ag.enabled()
+
     # PLAN_v15 P3a: market breadth — of the top gainers (24h > +10%) we scanned,
     # how many are already fading on 1h? High fraction = pump-and-fade day →
     # auto_trader blocks new BigMover LONGs. Uses data already in hand (no extra API).
@@ -243,26 +247,32 @@ async def _run_scan() -> dict:
         if is_blacklisted(symbol):
             continue
 
-        # F34/F52: scan_symbol returns list — extend (not append) to get all directions
-        r1_list = a1.scan_symbol(symbol, tf_map, change_24h)
-        if r1_list:
+        # Fase 7: begitu agen tunggal menyala, empat pemindai lama BERHENTI
+        # menghasilkan kandidat baru. Tanpa gerbang ini keduanya memindai
+        # bersamaan dan sama-sama membuka posisi dari SATU dompet — kuota dan
+        # panas portofolio akan terisi dua sumber yang tak saling tahu.
+        #
+        # Posisi lama yang sudah terbuka TIDAK ditinggalkan: monitor memakai
+        # `FUTURES_AGENTS` (memuat lane pensiun) sehingga tetap dikelola sampai
+        # tutup dengan sendirinya.
+        if _agentic_aktif:
+            r1_list = r2_list = r3_list = []
+        else:
+            # F34/F52: scan_symbol returns list — extend (not append) to get all directions
+            r1_list = a1.scan_symbol(symbol, tf_map, change_24h)
+            r2_list = a2.scan_symbol(symbol, tf_map, change_24h)
+            # Phase 11: Agent 3 — Momentum Capture (already-moving coins)
+            r3_list = a3.scan_symbol(symbol, tf_map, change_24h)
             a1_results.extend(r1_list)
-
-        r2_list = a2.scan_symbol(symbol, tf_map, change_24h)
-        if r2_list:
             a2_results.extend(r2_list)
-
-        # Phase 11: Agent 3 — Momentum Capture (already-moving coins)
-        r3_list = a3.scan_symbol(symbol, tf_map, change_24h)
-        if r3_list:
             a3_results.extend(r3_list)
 
-        # Phase 2 BM1: Big Mover lane (≥±15% only — early gate avoids wasted scoring)
-        if abs(change_24h) >= a_bm.MIN_CHANGE_24H:
-            quote_vol = float(ticker.get("quoteVolume", 0) or 0)
-            r_bm = a_bm.scan_symbol(symbol, tf_map, change_24h, quote_vol_24h=quote_vol)
-            if r_bm:
-                bm_results.extend(r_bm)
+            # Phase 2 BM1: Big Mover lane (≥±15% only — early gate avoids wasted scoring)
+            if abs(change_24h) >= a_bm.MIN_CHANGE_24H:
+                quote_vol = float(ticker.get("quoteVolume", 0) or 0)
+                r_bm = a_bm.scan_symbol(symbol, tf_map, change_24h, quote_vol_24h=quote_vol)
+                if r_bm:
+                    bm_results.extend(r_bm)
 
         # Fase 3: agen tunggal. `scan_symbol` mengembalikan [] selama
         # `agentic_enabled`=0, jadi selama saklar mati blok ini nyaris gratis dan
