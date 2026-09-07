@@ -334,6 +334,65 @@ async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
 
 # ── Layer 3: Positions ─────────────────────────────────────────────────────────
 
+def _status_arah(arah: str) -> dict:
+    """Win-rate & status jeda satu sisi pasar (Fase 5). Kosong bila risk_gate
+    belum sempat menilai — lebih baik UI menampilkan "belum ada data" daripada
+    angka nol yang terbaca seperti "WR 0%"."""
+    try:
+        from agents.futures.risk_gate import direction_state
+        st = direction_state().get(arah, {})
+        total = int(st.get("total", 0) or 0)
+        return {
+            "wins":        int(st.get("wins", 0) or 0),
+            "total":       total,
+            "win_rate":    round(st.get("wins", 0) / total * 100, 1) if total else None,
+            "paused":      bool(st.get("paused")),
+            "pause_until": st.get("pause_until") or None,
+        }
+    except Exception:
+        return {"wins": 0, "total": 0, "win_rate": None, "paused": False, "pause_until": None}
+
+
+def _biaya_usd(t, meta: dict) -> float | None:
+    """Biaya round-trip posisi ini dalam dolar."""
+    notional = float(t.position_size or 0.0)
+    if notional <= 0:
+        return None
+    cost_pct = meta.get("cost_floor_pct")
+    if not isinstance(cost_pct, (int, float)) or cost_pct <= 0:
+        cost_pct = 0.10          # fee RT saja — cadangan untuk baris lama
+    return round(notional * float(cost_pct) / 100, 4)
+
+
+def _untung_per_biaya(t, meta: dict) -> float | None:
+    """Berapa kali lipat hasil terhadap biayanya. Inilah angka yang membedakan
+    "menang $14" dari "menang $0,30 yang habis dimakan fee"."""
+    biaya = _biaya_usd(t, meta)
+    if not biaya:
+        return None
+    hasil = t.pnl_dollar if t.pnl_dollar is not None else None
+    if hasil is None:
+        return None
+    return round(hasil / biaya, 2)
+
+
+def _impas(t) -> bool:
+    try:
+        from agents.shared.trade_outcome import is_scratch
+        return bool(is_scratch(t))
+    except Exception:
+        return False
+
+
+def _ambang_menang(t) -> float | None:
+    """Berapa dolar yang harus dibukukan posisi INI agar disebut menang."""
+    try:
+        from agents.shared.trade_outcome import is_futures, win_threshold_usd
+        return round(win_threshold_usd(t), 2) if is_futures(t) else None
+    except Exception:
+        return None
+
+
 @router.get("/futures/positions")
 async def get_futures_positions(
     agent:  str = Query(default="all"),
@@ -447,6 +506,21 @@ async def get_futures_positions(
             "current_price":         cp,
             "unrealized_pnl":        upnl,
             "unrealized_pnl_dollar": upnl_dollar,
+            # ── Fase 6: angka yang membuat "terukur" TERLIHAT ────────────────
+            # Sampai kini UI hanya menampilkan MARGIN dan LEV, sehingga
+            # pertanyaan "kenapa cuma masuk 3 dolar?" tak bisa dijawab dari
+            # layar sama sekali — jawabannya harus digali lewat forensik DB.
+            "risk_usd":              t.risk_dollar,
+            "margin_usd":            (round((t.position_size or 0) / max(t.leverage or 1, 1), 2)
+                                      if t.position_size else None),
+            "cost_usd":              _biaya_usd(t, meta),
+            "profit_to_cost":        _untung_per_biaya(t, meta),
+            # Fase 4: seberapa jauh fill melewati SL yang direncanakan.
+            "sl_breach_pct":         getattr(t, "sl_breach_pct", None),
+            # Fase 1b: hasil di dalam derau biaya — bukan menang, bukan kalah.
+            # UI menandainya "Impas" alih-alih hijau "SL+ Profit" untuk +$0,06.
+            "is_scratch":            _impas(t),
+            "win_threshold_usd":     _ambang_menang(t),
         })
 
     return {"positions": positions, "total": len(positions)}
@@ -810,6 +884,24 @@ async def get_risk_dashboard() -> dict:
                 "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent_bigmover"), 2),
                 "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent_bigmover" and p["risk_status"] == "DANGER"),
             },
+        },
+        # ── Fase 6: rincian per ARAH ────────────────────────────────────────
+        # Agen tunggal tak punya empat lane untuk ditampilkan, tapi tetap punya
+        # dua sisi pasar — dan keduanya bisa berperilaku sangat berbeda pada
+        # rezim yang sama. Dikirim BERDAMPINGAN dengan agent_breakdown selama
+        # masa peralihan: empat lane lama masih men-trade sampai Fase 7, dan UI
+        # butuh keduanya untuk menampilkan riwayat sekaligus keadaan sekarang.
+        "direction_breakdown": {
+            arah: {
+                "open":    sum(1 for p in positions if (p.get("direction") or "").upper() == arah),
+                "margin":  round(sum(p["margin"] for p in positions
+                                     if (p.get("direction") or "").upper() == arah), 2),
+                "at_risk": sum(1 for p in positions
+                               if (p.get("direction") or "").upper() == arah
+                               and p["risk_status"] == "DANGER"),
+                **_status_arah(arah),
+            }
+            for arah in ("LONG", "SHORT")
         },
         "generated_at": time.time(),
         "gate": _gate,   # Phase 10: full gate state — frontend reads from risk dashboard

@@ -31,6 +31,11 @@ interface Trade {
   position_size?: number | null;
   risk_dollar?:   number | null;
   pnl_dollar?:    number | null;
+  // Fase 6 — angka yang membuat "terukur" terlihat, bukan hanya tersimpan.
+  cost_usd?:          number | null;
+  profit_to_cost?:    number | null;
+  is_scratch?:        boolean;
+  win_threshold_usd?: number | null;
 }
 
 interface Summary {
@@ -94,8 +99,25 @@ function TypeBadge({ style }: { style: string }) {
   return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200 shrink-0">{pretty}</span>;
 }
 
-function StatusBadge({ status, pnl }: { status: string; pnl: number | null }) {
+function StatusBadge({ status, pnl, scratch, threshold }: {
+  status: string; pnl: number | null; scratch?: boolean; threshold?: number | null;
+}) {
   if (status === "open") return <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200">🔵 Open</span>;
+
+  // Fase 1b — IMPAS: hasilnya di dalam derau biaya, jadi bukan menang dan bukan
+  // kalah. Sebelum ini trade +$0,06 tampil hijau "SL+ Profit" dan terlihat
+  // seperti kemenangan; 75% trade futures ternyata berakhir di wilayah ini.
+  // Dinilai lebih dulu supaya tak tertutup label lama.
+  if (scratch) {
+    return (
+      <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 border border-amber-200"
+            title={threshold != null
+              ? `Hasil di dalam derau biaya — butuh $${threshold.toFixed(2)} untuk dihitung menang`
+              : "Hasil di dalam derau biaya — bukan menang, bukan kalah"}>
+        ⚪ Impas
+      </span>
+    );
+  }
   if (status === "tp") {
     const isRealWin = (pnl ?? 0) > 0;
     return isRealWin
@@ -187,8 +209,22 @@ const CLOSE_REASON_DESC: Record<string, string> = {
   emergency_close_circuit_breaker: "Circuit-breaker drawdown aktif — tutup darurat semua.",
 };
 
-function CloseReasonBadge({ reason }: { reason: string | null }) {
+function CloseReasonBadge({ reason, scratch }: { reason: string | null; scratch?: boolean }) {
   if (!reason) return <span className="text-neutral-300 text-[10px]">—</span>;
+
+  // Fase 6: trade IMPAS tak boleh dilabeli "Profit". `sl_plus` memang menutup di
+  // atas entry, tapi kalau hasilnya di dalam derau biaya, menyebutnya profit
+  // persis kekeliruan yang membuat 31 trade rata-rata +$0,25 terbaca sebagai
+  // kemenangan selama berbulan-bulan.
+  if (scratch) {
+    return (
+      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200"
+            title="Ditutup di dalam derau biaya — mekanismenya berjalan, hasilnya impas.">
+        ⚪ {reason === "sl_plus" ? "SL+ Impas" : "Impas"}
+      </span>
+    );
+  }
+
   const meta = CLOSE_REASON_META[reason];
   if (!meta) return <span className="text-[9px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-mono">{reason}</span>;
   return (
@@ -424,8 +460,10 @@ export function DBHistoryTable({
             Tutup <SortIcon col="closed_at" active={sortBy} dir={sortDir} />
           </button>
           <span className="w-16 text-center">Durasi</span>
-          {/* PLAN_v14 P1 — futures: Margin·Lev (leverage nyata); spot: Notional */}
-          <span className="w-16 text-right">{reasonScope === "futures" ? "Margin·Lev" : "Notional"}</span>
+          {/* Fase 6 — futures: Risiko yang direncanakan + notional·lev yang dipakai.
+              Dulu hanya "Margin·Lev", sehingga pertanyaan "berapa yang sebenarnya
+              dipertaruhkan?" tak terjawab dari layar sama sekali. */}
+          <span className="w-20 text-right">{reasonScope === "futures" ? "Risk·Notional" : "Notional"}</span>
           <button className="w-20 text-right flex items-center justify-end hover:text-neutral-600" onClick={() => handleSort("pnl_pct")}>
             {reasonScope === "futures" ? "ROI%" : "P&L%"} <SortIcon col="pnl_pct" active={sortBy} dir={sortDir} />
           </button>
@@ -453,9 +491,12 @@ export function DBHistoryTable({
               const duration = fmtDuration(t.entry_at, t.closed_at);
               // §3: pakai pnl_dollar TERSIMPAN dari API (margin riil), bukan rumus hardcode
               const pnl$     = t.pnl_dollar ?? null;
-              // F114: SL+ (trail above entry, closed at profit) counts as win
-              const isWin    = (t.pnl_pct ?? 0) > 0 && (t.status === "tp" || t.status === "sl");
-              const isLoss   = (t.status === "sl" && (t.pnl_pct ?? 0) <= 0) || (t.status === "tp" && (t.pnl_pct ?? 0) <= 0);
+              // F114: SL+ (trail above entry, closed at profit) counts as win.
+              // Fase 1b: trade IMPAS bukan menang dan bukan kalah — mewarnainya
+              // hijau membuat 75% trade futures terlihat seperti kemenangan.
+              const isScratch = !!t.is_scratch;
+              const isWin    = !isScratch && (t.pnl_pct ?? 0) > 0 && (t.status === "tp" || t.status === "sl");
+              const isLoss   = !isScratch && ((t.status === "sl" && (t.pnl_pct ?? 0) <= 0) || (t.status === "tp" && (t.pnl_pct ?? 0) <= 0));
               const isOpen   = t.status === "open";
               const isExpanded = expanded === t.id;
 
@@ -494,7 +535,8 @@ export function DBHistoryTable({
 
                     {/* Status */}
                     <div className="w-16">
-                      <StatusBadge status={t.status} pnl={t.pnl_pct} />
+                      <StatusBadge status={t.status} pnl={t.pnl_pct}
+                                   scratch={t.is_scratch} threshold={t.win_threshold_usd} />
                     </div>
 
                     {/* Entry time */}
@@ -522,15 +564,22 @@ export function DBHistoryTable({
                       </span>
                     </div>
 
-                    {/* PLAN_v14 P1 — futures: Margin (jaminan) + Lev; spot: Notional */}
-                    <div className="w-16 text-right">
+                    {/* Fase 6 — futures: risiko yang DIRENCANAKAN di atas, ukuran
+                        yang DIPAKAI di bawah. Dua angka berbeda yang selama ini
+                        diringkas jadi satu (margin), padahal justru selisihnya
+                        yang menjelaskan kenapa hasilnya sekecil itu. */}
+                    <div className="w-20 text-right">
                       {t.position_size != null ? (
                         reasonScope === "futures" && t.leverage != null ? (
                           <div>
-                            <p className="text-[10px] font-mono font-bold text-blue-600 tabular-nums">
-                              ${Math.round(t.position_size / t.leverage)}
+                            <p className="text-[10px] font-mono font-bold text-blue-600 tabular-nums"
+                               title="Risiko yang direncanakan bila SL kena">
+                              {t.risk_dollar != null ? `$${t.risk_dollar.toFixed(2)}` : "—"}
                             </p>
-                            <p className="text-[9px] text-neutral-400 tabular-nums">{t.leverage}×</p>
+                            <p className="text-[9px] text-neutral-400 tabular-nums"
+                               title={`Notional $${t.position_size.toFixed(0)} · margin $${Math.round(t.position_size / t.leverage)}`}>
+                              ${t.position_size.toFixed(0)} · {t.leverage}×
+                            </p>
                           </div>
                         ) : (
                           <p className="text-[10px] font-mono font-bold text-neutral-600 tabular-nums">
@@ -572,9 +621,25 @@ export function DBHistoryTable({
                             ~{pnl$ >= 0 ? "+" : ""}${Math.abs(pnl$).toFixed(2)}
                           </span>
                         ) : (
-                          <span className={`text-xs font-black tabular-nums ${pnl$ > 0 ? "text-green-600" : pnl$ < 0 ? "text-red-500" : "text-neutral-400"}`}>
-                            {pnl$ >= 0 ? "+" : ""}${Math.abs(pnl$).toFixed(2)}
-                          </span>
+                          <div>
+                            <span className={`text-xs font-black tabular-nums ${
+                              t.is_scratch ? "text-amber-600"
+                              : pnl$ > 0 ? "text-green-600"
+                              : pnl$ < 0 ? "text-red-500" : "text-neutral-400"}`}>
+                              {pnl$ >= 0 ? "+" : ""}${Math.abs(pnl$).toFixed(2)}
+                            </span>
+                            {/* Biaya yang memakannya. Tanpa angka ini, menang
+                                $0,30 tampak sama saja dengan menang $14. */}
+                            {t.cost_usd != null && (
+                              <p className={`text-[8px] tabular-nums ${
+                                (t.profit_to_cost ?? 0) >= 3 ? "text-green-500"
+                                : (t.profit_to_cost ?? 0) > 0 ? "text-amber-500" : "text-neutral-400"}`}
+                                 title={`Biaya round-trip $${t.cost_usd.toFixed(2)}`}>
+                                biaya ${t.cost_usd.toFixed(2)}
+                                {t.profit_to_cost != null && ` · ${t.profit_to_cost.toFixed(1)}×`}
+                              </p>
+                            )}
+                          </div>
                         )
                       ) : (
                         <span className="text-neutral-300 text-xs">—</span>
@@ -583,7 +648,7 @@ export function DBHistoryTable({
 
                     {/* Close reason */}
                     <div className="w-28 flex justify-center">
-                      <CloseReasonBadge reason={t.close_reason} />
+                      <CloseReasonBadge reason={t.close_reason} scratch={t.is_scratch} />
                     </div>
                   </div>
 

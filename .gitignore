@@ -71,3 +71,4 @@ ops/forward-baseline.json
 backups/
 backend/reco.json
 -w
+ops/*.pid

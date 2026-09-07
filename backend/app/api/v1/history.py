@@ -56,6 +56,52 @@ def _apply_trade_filters(q, style: Optional[str], search: Optional[str]):
     return q
 
 
+def _biaya_usd(t) -> float | None:
+    """Biaya round-trip trade ini ($). Cadangan fee-saja untuk baris lama yang
+    tak menyimpan `cost_floor_pct` — cadangan yang LEBIH KECIL dari biaya
+    sebenarnya, jadi rasionya tampak lebih baik, bukan lebih buruk."""
+    import json as _json
+
+    notional = float(getattr(t, "position_size", 0.0) or 0.0)
+    if notional <= 0:
+        return None
+    cost_pct = 0.10
+    try:
+        meta = _json.loads(getattr(t, "signals_json", None) or "{}") or {}
+        raw = meta.get("cost_floor_pct")
+        if isinstance(raw, (int, float)) and raw > 0:
+            cost_pct = float(raw)
+    except (TypeError, ValueError):
+        pass
+    return round(notional * cost_pct / 100, 4)
+
+
+def _untung_per_biaya(t) -> float | None:
+    """Berapa kali lipat hasil terhadap biayanya — angka yang membedakan
+    "menang $14" dari "menang $0,30 yang habis dimakan fee"."""
+    biaya = _biaya_usd(t)
+    if not biaya or getattr(t, "pnl_dollar", None) is None:
+        return None
+    return round(float(t.pnl_dollar) / biaya, 2)
+
+
+def _impas(t) -> bool:
+    """Hasil di dalam derau biaya — bukan menang, bukan kalah (Fase 1b)."""
+    try:
+        from agents.shared.trade_outcome import is_scratch
+        return bool(is_scratch(t))
+    except Exception:
+        return False
+
+
+def _ambang_menang(t) -> float | None:
+    try:
+        from agents.shared.trade_outcome import is_futures, win_threshold_usd
+        return round(win_threshold_usd(t), 2) if is_futures(t) else None
+    except Exception:
+        return None
+
+
 def _trade_dict(t: PaperTrade) -> dict:
     import json
     try:
@@ -100,6 +146,14 @@ def _trade_dict(t: PaperTrade) -> dict:
         "risk_dollar":    t.risk_dollar,
         "balance_snapshot": t.balance_snapshot,
         "pnl_dollar":     t.pnl_dollar,
+        # ── Fase 6: angka yang membuat "terukur" terlihat di tabel riwayat ──
+        # Sebelum ini kolomnya hanya Margin-Lev dan P&L $, sehingga trade yang
+        # menang $0,30 tampak sama saja dengan yang menang $14 — dan biaya yang
+        # memakannya tak terlihat sama sekali.
+        "cost_usd":       _biaya_usd(t),
+        "profit_to_cost": _untung_per_biaya(t),
+        "is_scratch":     _impas(t),
+        "win_threshold_usd": _ambang_menang(t),
     }
 
 

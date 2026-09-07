@@ -28,6 +28,7 @@ const LABELS: Record<string, string> = {
   futures_agent2:           "Accumulation",
   futures_agent3:           "Momentum",
   futures_agent_bigmover:   "BigMover",
+  futures_agentic:          "Agentic",
   [CROSS_AGENT]:            "Cross-Agent",
 };
 
@@ -37,6 +38,7 @@ const SHORT: Record<string, string> = {
   futures_agent2:           "Accum",
   futures_agent3:           "Momo",
   futures_agent_bigmover:   "BigMover",
+  futures_agentic:          "Agentic",
   [CROSS_AGENT]:            "Cross",
 };
 
@@ -47,6 +49,7 @@ const COLORS: Record<string, string> = {
   futures_agent2:           "text-purple-700",
   futures_agent3:           "text-orange-700",
   futures_agent_bigmover:   "text-amber-700",
+  futures_agentic:          "text-emerald-700",
   [CROSS_AGENT]:            "text-neutral-700",
 };
 
@@ -75,6 +78,7 @@ const LANE_AGENT: Record<string, string> = {
   accumulation: "futures_agent2",
   momentum:     "futures_agent3",
   bigmover:     "futures_agent_bigmover",
+  agentic:      "futures_agentic",
   pre_move:     "futures_agent1",   // alias lama
 };
 
@@ -90,3 +94,25 @@ export const futuresLaneLabel = (lane: string): string => {
 
 export const futuresLaneColor = (lane: string): string =>
   agentColor(LANE_AGENT[lane] ?? "");
+
+
+/**
+ * Agen yang MASIH memindai (Fase 3). Empat lane lama sudah pensiun: mereka tak
+ * membuka posisi baru, tapi riwayatnya tetap harus terbaca.
+ *
+ * Dipakai untuk memilih apa yang ditampilkan sebagai KEADAAN SEKARANG vs
+ * RIWAYAT. Cermin `ACTIVE_FUTURES_AGENTS` di
+ * `backend/app/services/agent_registry.py`.
+ */
+export const ACTIVE_FUTURES_AGENTS = ["futures_agentic"] as const;
+
+export const LEGACY_FUTURES_AGENTS = [
+  "futures_agent1",
+  "futures_agent2",
+  "futures_agent3",
+  "futures_agent_bigmover",
+] as const;
+
+/** Apakah agen ini sudah pensiun (hanya muncul di riwayat). */
+export const isLegacyFuturesAgent = (agent: string): boolean =>
+  (LEGACY_FUTURES_AGENTS as readonly string[]).includes(agent);
