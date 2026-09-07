@@ -387,6 +387,7 @@ async def _run_scan() -> dict:
         agent2=len(a2_results),
         agent3=len(a3_results),
         agent_bigmover=len(bm_results),
+        agentic=len(ag_results),      # Fase 3 — tanpa ini, agen tunggal tak terlihat di log
         big_movers=len(big_movers),
         scanned=len(tickers),
         elapsed_sec=elapsed,
@@ -737,6 +738,7 @@ async def run_futures_loop() -> None:
             logger.info(
                 "futures_cycle_done",
                 cycle=_cycle_count,
+                agentic=result["agentic"]["total"],   # Fase 3
                 agent1=result["agent1"]["total"],
                 agent2=result["agent2"]["total"],
                 agent3=result["agent3"]["total"],

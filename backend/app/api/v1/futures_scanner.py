@@ -534,16 +534,22 @@ async def get_futures_status() -> dict:
     from agents.futures.scheduler import get_state
 
     state   = get_state()
+    ts_ag   = fs.last_scan_ts("agentic")      # Fase 3 — agen tunggal
     ts_a1   = fs.last_scan_ts("agent1")
     ts_a2   = fs.last_scan_ts("agent2")
     ts_a3   = fs.last_scan_ts("agent3")   # BUG-L21: agent3 was missing
-    last_ts = max(ts_a1 or 0, ts_a2 or 0, ts_a3 or 0) or None
+    last_ts = max(ts_ag or 0, ts_a1 or 0, ts_a2 or 0, ts_a3 or 0) or None
     from agents.futures.scheduler import INTERVAL_SEC as _SCHED_INTERVAL
     next_in = max(0, round((_SCHED_INTERVAL - (time.time() - last_ts)) / 60, 1)) if last_ts else None
 
     return {
         **state,
         "next_scan_in_min":  next_in,
+        # Fase 3 — agen tunggal. Tanpa baris ini ia tak terlihat sama sekali di
+        # status: scan bisa berjalan sempurna atau tak berjalan sama sekali dan
+        # keduanya tampak identik dari luar.
+        "agentic_last_scan": ts_ag,
+        "agentic_results":   len((fs.get_result("agentic") or {}).get("results", [])),
         "agent1_last_scan":  ts_a1,
         "agent2_last_scan":  ts_a2,
         "agent3_last_scan":  ts_a3,
@@ -1008,6 +1014,7 @@ def _filter_results(
     min_score: float,
     limit: int,
 ) -> dict:
+    ag = cached.get("agentic", {})      # Fase 3 — agen tunggal
     a1 = cached.get("agent1", {})
     a2 = cached.get("agent2", {})
     a3 = cached.get("agent3", {})
@@ -1018,11 +1025,15 @@ def _filter_results(
             out = [r for r in out if r.get("direction") == direction]
         return out[:limit]
 
+    # Sejak Fase 3 `agentic` yang menghasilkan kandidat; agent1-3 tetap dikirim
+    # supaya UI lama tak pecah selama masa peralihan (isinya kosong).
+    semua = (ag, a1, a2, a3)
     return {
+        "agentic":      _apply(ag.get("results", [])) if agent in ("all", "agentic") else [],
         "agent1":       _apply(a1.get("results", [])) if agent in ("all", "agent1") else [],
         "agent2":       _apply(a2.get("results", [])) if agent in ("all", "agent2") else [],
         "agent3":       _apply(a3.get("results", [])) if agent in ("all", "agent3") else [],
-        "scanned":      max(a1.get("scanned", 0), a2.get("scanned", 0), a3.get("scanned", 0)),
-        "generated_at": max(a1.get("generated_at", 0), a2.get("generated_at", 0), a3.get("generated_at", 0)),
-        "elapsed_sec":  max(a1.get("elapsed_sec", 0), a2.get("elapsed_sec", 0), a3.get("elapsed_sec", 0)),
+        "scanned":      max(x.get("scanned", 0) for x in semua),
+        "generated_at": max(x.get("generated_at", 0) for x in semua),
+        "elapsed_sec":  max(x.get("elapsed_sec", 0) for x in semua),
     }
