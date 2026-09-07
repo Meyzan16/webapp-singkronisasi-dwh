@@ -60,3 +60,16 @@ class FuturesDecisionEvent(Base):
     close_reason: Mapped[str | None] = mapped_column(String(60), nullable=True)
     closed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     outcome_updated_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # ── Fase 5: jejak keputusan UKURAN ──────────────────────────────────────
+    # Sampai kini ledger menyimpan KENAPA sebuah kandidat dipilih, tapi tidak
+    # SEBERAPA BESAR ia dimasuki. Padahal itulah yang ingin diukur owner: dua
+    # kandidat berskor sama tapi berukuran beda punya hasil dolar yang sama
+    # sekali berbeda, dan tanpa kolom ini mesin belajar tak bisa melihatnya —
+    # ia hanya melihat persen, yang justru menyamarkan perbedaannya.
+    risk_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notional_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    margin_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tp1_net_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sl_net_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)

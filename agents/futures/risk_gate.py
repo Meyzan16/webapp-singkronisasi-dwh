@@ -340,6 +340,15 @@ _lane_paused_until: dict[str, float] = {}
 # P6.4: per-lane rolling WR state — {lane: {wins, total}}
 _lane_wr: dict[str, dict] = {}
 
+# ── Fase 5: penilaian per ARAH (LONG/SHORT) ──────────────────────────────────
+# Agen tunggal tak punya empat lane untuk dinilai, tapi ia tetap punya dua sisi
+# pasar — dan keduanya bisa berperilaku sangat berbeda pada rezim yang sama.
+# Ini MENDAMPINGI jeda per lane, bukan menggantikannya: selama `agentic_enabled`
+# masih 0, empat lane lama yang men-trade dan jeda lane tetap satu-satunya rem
+# yang berlaku bagi mereka.
+_dir_wr: dict[str, dict] = {}            # {"LONG"|"SHORT": {"wins": n, "total": n}}
+_dir_paused_until: dict[str, float] = {}
+
 
 def update_gate_state(drawdown_pct: float, rar: float, n_trades: int,
                       regime: str = "ranging") -> None:
@@ -531,6 +540,17 @@ async def evaluate_risk_gate() -> None:
             wins  = sum(1 for t in tegas if _is_win(t))
             update_lane_wr(lane_name, wins, len(tegas))
 
+        # Fase 5: penilaian per ARAH, atas SELURUH trade (bukan per lane).
+        # Dihitung selalu — juga selama agen lama masih men-trade — supaya saat
+        # Fase 7 menyalakan agen tunggal, remnya sudah punya sejarah, bukan
+        # mulai dari nol persis ketika ia paling dibutuhkan.
+        for arah in ("LONG", "SHORT"):
+            _dt = [t for t in closed_trades
+                   if (t.direction or "").upper() == arah and not _is_scratch(t)]
+            _recent = _dt[-LANE_WR_MIN_SAMPLE:]
+            if _recent:
+                update_direction_wr(arah, sum(1 for t in _recent if _is_win(t)), len(_recent))
+
         # F4: simpan sesudah SELURUH lane dinilai — satu tulisan per evaluasi,
         # bukan satu per lane.
         await save_lane_pause_state()
@@ -695,6 +715,64 @@ async def save_lane_pause_state() -> None:
             await session.commit()
     except Exception as exc:
         logger.warning("lane_pause_state_save_failed", error=str(exc)[:120])
+
+
+def update_direction_wr(direction: str, wins: int, total: int) -> None:
+    """Perbarui WR per arah dan jeda arah itu bila jatuh di bawah ambang.
+
+    Memakai ambang & durasi yang SAMA dengan jeda lane — satu angka untuk satu
+    gagasan ("berhenti sebentar kalau sedang salah"), bukan dua set tombol yang
+    harus dijaga sinkron manual.
+    """
+    arah = (direction or "").upper()
+    if arah not in ("LONG", "SHORT"):
+        return
+    _dir_wr[arah] = {"wins": wins, "total": total}
+    if total < LANE_WR_MIN_SAMPLE:
+        return
+    wr = wins / total
+    if wr < LANE_WR_PAUSE_THRESHOLD:
+        if time.time() >= _dir_paused_until.get(arah, 0.0):
+            _dir_paused_until[arah] = time.time() + LANE_PAUSE_HOURS * 3600
+            logger.warning("direction_auto_paused", direction=arah,
+                           wr=round(wr, 3), total=total,
+                           pause_hours=LANE_PAUSE_HOURS)
+    elif time.time() >= _dir_paused_until.get(arah, 0.0):
+        _dir_paused_until.pop(arah, None)
+
+
+def is_direction_paused(direction: str) -> tuple[bool, str]:
+    """Apakah sisi pasar ini sedang dijeda."""
+    arah = (direction or "").upper()
+    until = _dir_paused_until.get(arah, 0.0)
+    if time.time() < until:
+        d = _dir_wr.get(arah, {})
+        wr = d.get("wins", 0) / d["total"] if d.get("total") else 0.0
+        sisa = (until - time.time()) / 3600
+        return True, (f"Arah {arah} dijeda: WR {wr:.0%} < {LANE_WR_PAUSE_THRESHOLD:.0%} "
+                      f"({d.get('total', 0)} trade tegas). Aktif lagi {sisa:.1f} jam.")
+    return False, ""
+
+
+def get_direction_wr(direction: str) -> tuple[float, int]:
+    """(win_rate, jumlah_sampel) untuk satu arah."""
+    d = _dir_wr.get((direction or "").upper()) or {}
+    total = int(d.get("total", 0) or 0)
+    return ((d.get("wins", 0) / total) if total else 0.0), total
+
+
+def direction_state() -> dict:
+    """Status kedua arah — untuk /futures/monitor/risk & UI."""
+    now = time.time()
+    return {
+        arah: {
+            "wins":  _dir_wr.get(arah, {}).get("wins", 0),
+            "total": _dir_wr.get(arah, {}).get("total", 0),
+            "paused": now < _dir_paused_until.get(arah, 0.0),
+            "pause_until": _dir_paused_until.get(arah, 0.0),
+        }
+        for arah in ("LONG", "SHORT")
+    }
 
 
 def update_lane_wr(lane: str, wins: int, total: int) -> None:

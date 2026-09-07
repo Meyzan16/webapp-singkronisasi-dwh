@@ -147,6 +147,13 @@ async def _migrate_columns(connection) -> None:
         # Fase 4 akan mengisinya: seberapa jauh harga fill melewati SL yang
         # direncanakan. Kolomnya dibuat sekarang supaya migrasi tak menumpuk.
         "ALTER TABLE paper_trades ADD COLUMN IF NOT EXISTS sl_breach_pct FLOAT",
+        # Fase 5: jejak keputusan ukuran per baris ledger keputusan.
+        "ALTER TABLE futures_decision_events ADD COLUMN IF NOT EXISTS risk_usd FLOAT",
+        "ALTER TABLE futures_decision_events ADD COLUMN IF NOT EXISTS notional_usd FLOAT",
+        "ALTER TABLE futures_decision_events ADD COLUMN IF NOT EXISTS margin_usd FLOAT",
+        "ALTER TABLE futures_decision_events ADD COLUMN IF NOT EXISTS tp1_net_usd FLOAT",
+        "ALTER TABLE futures_decision_events ADD COLUMN IF NOT EXISTS sl_net_usd FLOAT",
+        "ALTER TABLE futures_decision_events ADD COLUMN IF NOT EXISTS cost_usd FLOAT",
         # SP1: signal performance enrichment columns
         "ALTER TABLE agent_signal_weights ADD COLUMN IF NOT EXISTS avg_pnl_pct FLOAT DEFAULT 0.0",
         "ALTER TABLE agent_signal_weights ADD COLUMN IF NOT EXISTS sample_count_raw INTEGER DEFAULT 0",

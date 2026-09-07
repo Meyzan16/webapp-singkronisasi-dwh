@@ -28,7 +28,12 @@ from app.database import AsyncSessionLocal, is_db_available
 from app.models.futures_decision_event import FuturesDecisionEvent
 from app.models.futures_model_version import FuturesModelVersion
 
-FEATURE_SCHEMA_VERSION = "futures_features_v1"
+# Fase 5: naik ke v2. Skema v1 dilatih dari ledger empat lane dengan label
+# "menang" yang lama (pnl_pct > 0) — dan 75% barisnya ternyata impas selevel
+# fee (bug B1). Melatih model baru di atas campuran v1+v2 berarti mewarisi
+# label yang sudah diketahui salah, jadi versinya dinaikkan agar pemisahannya
+# tegas: model v1 diretire, v2 mulai dari ledger yang labelnya benar.
+FEATURE_SCHEMA_VERSION = "futures_features_v2"
 # Field yang DIKELUARKAN dari fitur challenger — output learning (sirkular) atau
 # komponen biaya (dipakai mendefinisikan label, jadi bocor bila jadi fitur).
 _EXCLUDE_FEATURES = {

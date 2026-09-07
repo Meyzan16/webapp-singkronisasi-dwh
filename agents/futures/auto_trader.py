@@ -611,6 +611,21 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             risk_dollar_val = sizing["risk_dollar"]
             bal_snapshot    = sizing["balance"]
 
+            # Fase 5: simpan jejak ukuran di kandidat supaya `decision_ledger`
+            # bisa mencatatnya sebagai kolom. Tanpa ini ledger tahu KENAPA sebuah
+            # kandidat dipilih tapi tidak SEBERAPA BESAR ia dimasuki — dan dua
+            # kandidat berskor sama dengan ukuran berbeda punya hasil dolar yang
+            # sama sekali berbeda.
+            _cost_usd = pos_size * _cost_floor / 100 if pos_size else 0.0
+            sig["sizing"] = {
+                "risk_usd":    risk_dollar_val,
+                "notional":    pos_size,
+                "margin":      sizing.get("margin", 0.0),
+                "cost_usd":    round(_cost_usd, 4),
+                "tp1_net_usd": round(pos_size * _tp1_pct_sig / 100 - _cost_usd, 4),
+                "sl_net_usd":  round(-(risk_dollar_val + _cost_usd), 4),
+            }
+
             # PLAN_v11 A2: probe = ½-risk (batasi kerugian saat gate RAR masih aktif)
             if _is_probe:
                 pos_size        = round(pos_size * 0.5, 2)

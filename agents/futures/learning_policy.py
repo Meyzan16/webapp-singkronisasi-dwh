@@ -39,6 +39,38 @@ def signal_key(raw: str) -> str:
 # Sumber copy: agent1 (pre-gainer/pre-dump), agent2 (accumulation/distribution),
 # agent3 (momentum LONG/SHORT), agent_bigmover — kondisi pasca item H.
 _SIGNAL_ID_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    # ── Agentic (Fase 3) — PALING ATAS, sebelum rule generik ────────────────
+    # Kenapa harus punya identitasnya sendiri, diukur 6 Sep 2026:
+    #   * tiga tingkat momentum semuanya jatuh ke `bm.magnitude` karena teksnya
+    #     memuat "Δ24h" — resolusi tingkat hilang, padahal justru itu yang
+    #     membedakan gerak awal dari yang sudah parabolik;
+    #   * `arah_1h_konfirmasi +2,5%` dan `-2,5%` menghasilkan DUA kunci berbeda
+    #     lewat jalur fallback (`+n%` vs `-n%`), sehingga sampel LONG dan SHORT
+    #     tak pernah menyatu;
+    #   * sisanya sama sekali tak punya canonical ID, jadi TAK TERLIHAT oleh
+    #     Predictive Repair — persis bug 29 Jul 2026 ketika 49 aksi perbaikan
+    #     tercatat "berhasil" tapi berdampak nol karena namespace-nya tak
+    #     beririsan.
+    # Urutan di dalam blok ini juga penting: yang lebih spesifik lebih dulu
+    # (`oi_naik_tipis` sebelum `oi_naik`, `volume_naik` sesudah `volume_konfirmasi`).
+    (("momentum_awal",),      "ag.momentum_awal"),
+    (("momentum_mapan",),     "ag.momentum_mapan"),
+    (("momentum_kuat",),      "ag.momentum_kuat"),
+    (("momentum_ekstrem",),   "ag.momentum_ekstrem"),
+    (("arah_1h_konfirmasi",), "ag.arah_konfirmasi"),
+    (("arah_1h_datar",),      "ag.arah_datar"),
+    (("arah_1h_berlawanan",), "ag.arah_berlawanan"),
+    (("volume_konfirmasi",),  "ag.volume_konfirmasi"),
+    (("volume_memudar",),     "ag.volume_memudar"),
+    (("volume_naik",),        "ag.volume_naik"),
+    (("oi_naik_tipis",),      "ag.oi_naik_tipis"),
+    (("oi_turun",),           "ag.oi_turun"),
+    (("oi_naik",),            "ag.oi_naik"),
+    (("funding_netral",),     "ag.funding_netral"),
+    (("funding_wajar",),      "ag.funding_wajar"),
+    (("funding_sesak",),      "ag.funding_sesak"),
+    (("rsi_sehat",),          "ag.rsi_sehat"),
+    (("rsi_jenuh",),          "ag.rsi_jenuh"),
     # ── BigMover (Δ24h khas lane ini — sebelum rule momentum generik) ────────
     (("δ24h",), "bm.magnitude"),
     (("kontra arah",), "bm.reverse_1h"),

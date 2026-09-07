@@ -135,8 +135,39 @@ def build_event_rows(
             "feature_snapshot_json":  json.dumps(feats, ensure_ascii=False),
             "created_at":     now,
             "outcome_status": "pending",
+            # Fase 5: jejak ukuran, diambil dari keluaran `sizing.compute` yang
+            # ditempelkan auto_trader ke kandidat. Sengaja disimpan sebagai KOLOM,
+            # bukan di dalam feature_snapshot_json: ini bukan fitur untuk melatih
+            # model (ukuran adalah AKIBAT keputusan, bukan sebabnya), melainkan
+            # bahan untuk menilai apakah "terukur" benar-benar tercapai.
+            **_jejak_ukuran(c),
         })
     return rows
+
+
+def _jejak_ukuran(c: dict) -> dict:
+    """Ambil angka ukuran dari kandidat bila `sizing.compute` sudah berjalan.
+
+    Semuanya None bila belum — kandidat yang ditolak SEBELUM tahap sizing memang
+    tak punya ukuran, dan menuliskan nol di situ akan membuatnya tampak seperti
+    posisi berukuran nol yang pernah dipertimbangkan.
+    """
+    sz = c.get("sizing") or {}
+    if not isinstance(sz, dict) or not sz:
+        return {}
+
+    def _f(key: str):
+        v = sz.get(key)
+        return float(v) if isinstance(v, (int, float)) else None
+
+    return {
+        "risk_usd":     _f("risk_usd"),
+        "notional_usd": _f("notional"),
+        "margin_usd":   _f("margin"),
+        "tp1_net_usd":  _f("tp1_net_usd"),
+        "sl_net_usd":   _f("sl_net_usd"),
+        "cost_usd":     _f("cost_usd"),
+    }
 
 
 async def log_scan_decisions(candidates: list[dict], scan_ts: float | None = None) -> int:

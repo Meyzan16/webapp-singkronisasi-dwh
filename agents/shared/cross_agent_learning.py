@@ -38,12 +38,29 @@ _last_run:    Optional[float]       = None
 _last_error:  Optional[str]         = None
 _cross_cache: dict[str, float]      = {}   # {signal_key: cross_weight}
 
-ALL_AGENTS = [
-    "opportunity_spot",
-    "futures_agent1",
-    "futures_agent2",
-    "futures_agent3",
-]
+def _all_agents() -> list[str]:
+    """Agen yang ikut blending lintas-agen — DITURUNKAN dari registry.
+
+    Dulu daftar ini literal, dan literalnya sudah ketinggalan DUA kali:
+      * `futures_agent_bigmover` tak pernah masuk sejak lahir (Phase 2 BM1),
+        padahal lane itu menghasilkan 81% dari seluruh trade futures — jadi
+        pelajaran dari mayoritas trade tak pernah menyeberang ke agen lain;
+      * `futures_agentic` (Fase 3) akan terlewat dengan cara yang sama.
+    Keduanya gagal SENYAP: tak ada error, hanya bobot lintas-agen yang diam-diam
+    dihitung dari sebagian data. Menurunkannya dari registry menutup kelasnya,
+    bukan cuma dua kejadiannya.
+    """
+    try:
+        from app.services.agent_registry import FUTURES_AGENTS, SPOT_AGENT
+        return [SPOT_AGENT, *FUTURES_AGENTS]
+    except Exception:
+        return ["opportunity_spot", "futures_agent1", "futures_agent2",
+                "futures_agent3", "futures_agent_bigmover", "futures_agentic"]
+
+
+#: Dipertahankan sebagai nama modul karena sudah diimpor di beberapa tempat;
+#: isinya kini mengikuti registry, bukan salinan tangan.
+ALL_AGENTS = _all_agents()
 
 
 # ── Public accessors ───────────────────────────────────────────────────────────
