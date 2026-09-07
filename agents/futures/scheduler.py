@@ -288,7 +288,6 @@ async def _run_scan() -> dict:
     a2_results = a2_results[:TOP_N]
     a3_results = a3_results[:TOP_N]
     bm_results = bm_results[:TOP_N]
-    ag_results_full = ag_results
     ag_results = ag_results[:TOP_N]
 
     # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F2: terapkan learning policy per-lane —
@@ -527,15 +526,9 @@ async def _log_predictive_snapshot(scan_result: dict) -> None:
         session.add_all(rows_to_add)
         await session.commit()
 
-    # Prune predictive_log entries older than 30 days every 1000 cycles
-    global _cycle_count
-    if _cycle_count % 1000 == 0:
-        from sqlalchemy import delete as _del
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                _del(PredictiveLog).where(PredictiveLog.scanned_at < now - 30 * 86400)
-            )
-            await session.commit()
+    # Pemangkasan predictive_log kini pekerjaan berjadwal (jobs.prune_predictive_log).
+    # Dulu dipicu `% 1000` siklus — dengan hitungan yang kembali nol tiap restart,
+    # ia praktis tak pernah sampai giliran.
 
 
 async def _resolve_predictive_logs() -> None:
@@ -709,6 +702,26 @@ async def run_futures_loop() -> None:
 
             _last_scan   = time.time()
             _cycle_count += 1
+
+            # ── Pekerjaan berkala ────────────────────────────────────────────
+            # Dulu sembilan blok terpisah di sepanjang loop ini, masing-masing
+            # dipicu `_cycle_count % N` atau jendela kalender dua menit. Dua-duanya
+            # gagal SENYAP: hitungan siklus kembali nol tiap restart, dan jendela
+            # kalender hanya menyala bila sebuah siklus scan kebetulan mendarat di
+            # dalamnya — kalau scanner sedang berhenti, backtest mingguan terlewat
+            # SEMINGGU PENUH tanpa satu baris log pun.
+            #
+            # Sekarang jadwalnya dinyatakan dalam WAKTU dan waktu jalan terakhirnya
+            # disimpan di DB. Lihat agents/futures/jobs.py.
+            try:
+                from agents.futures import jobs as _jobs
+                _hasil_jobs = await _jobs.run_due()
+                if _hasil_jobs["dijalankan"]:
+                    logger.info("futures_jobs_ran", jobs=_hasil_jobs["dijalankan"])
+                if _jobs.ambil_outcome_baru():
+                    _outcomes_baru = True
+            except Exception as exc:
+                logger.warning("futures_jobs_failed", error=str(exc)[:200])
             _last_error   = None
 
             logger.info(
@@ -724,18 +737,6 @@ async def run_futures_loop() -> None:
                 await _log_predictive_snapshot(result)
             except Exception as exc:
                 logger.warning("predictive_log_failed", error=str(exc)[:400])
-
-            # D4.1: resolve stale predictions every 12 cycles (~24 min)
-            if _cycle_count % 12 == 0:
-                try:
-                    from app.database import AsyncSessionLocal, is_db_available
-                    if is_db_available():
-                        import httpx as _httpx
-                        from sqlalchemy import select as _select, update as _update
-                        from app.models.predictive_log import PredictiveLog
-                        await _resolve_predictive_logs()
-                except Exception as exc:
-                    logger.warning("predictive_resolve_failed", error=str(exc)[:80])
 
             # P2: UNIFIED auto-open — one ranked pool across all lanes, global dedup (BUG-L1)
             # Phase 2 BM3: include agent_bigmover candidates
@@ -794,17 +795,8 @@ async def run_futures_loop() -> None:
                             for _r in _rejections:
                                 _rsess.add(RejectionLog(**_r))
                             await _rsess.commit()
-                        # Prune rejection_log > 7 days to keep table small
-                        if _cycle_count % 100 == 0:
-                            from sqlalchemy import delete as _sql_del
-                            import time as _t
-                            async with AsyncSessionLocal() as _rsess2:
-                                await _rsess2.execute(
-                                    _sql_del(RejectionLog).where(
-                                        RejectionLog.rejected_at < _t.time() - 7 * 86400
-                                    )
-                                )
-                                await _rsess2.commit()
+                        # Pemangkasan rejection_log kini pekerjaan berjadwal
+                        # (jobs.prune_rejection_log) — lihat catatan di jobs.py.
             except Exception as exc:
                 logger.warning("rejection_log_flush_failed", error=str(exc)[:80])
 
@@ -812,30 +804,6 @@ async def run_futures_loop() -> None:
             # cycle, jadi tanpa nilai awal ini siklus lain akan menabrak NameError
             # saat memeriksanya.
             _outcomes_baru = False
-
-            # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F1: outcome pass tiap ~10 cycle
-            # (offset +5 dari backfill big_mover supaya beban API tidak menumpuk).
-            if _cycle_count % 10 == 5:
-                try:
-                    from agents.futures.outcome_tracker import (
-                        update_decision_outcomes, backfill_closed_futures_trades,
-                        prune_old_events,
-                    )
-                    _n_lbl = await update_decision_outcomes()
-                    _n_lnk = await backfill_closed_futures_trades()
-                    if _cycle_count % 100 == 5:
-                        await prune_old_events()
-                    if _n_lbl or _n_lnk:
-                        logger.info("futures_outcome_pass",
-                                    price_labels=_n_lbl, trade_links=_n_lnk)
-                        # Ada bukti baru → coba latih. Lihat catatan di blok
-                        # training di bawah: memicu HANYA dari `_cycle_count`
-                        # membuat training futures hilang tiap kali backend
-                        # restart. Sisi SPOT sudah lama dipicu dari kedatangan
-                        # outcome; ini menyamakannya.
-                        _outcomes_baru = True
-                except Exception as exc:
-                    logger.warning("futures_outcome_tracker_failed", error=str(exc)[:200])
 
             # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F3: coba latih challenger.
             # Self-gating: no-op sampai ≥60 sampel 4h-matang & +50 evidence baru.
@@ -891,28 +859,6 @@ async def run_futures_loop() -> None:
                 except Exception as exc:
                     logger.warning("futures_challenger_train_failed", error=str(exc)[:200])
 
-            # PLAN_SIGNAL_REPAIR_LIVE R2: Predictive Repair Agent — refleks cepat
-            # (~30 mnt); guard internal 20 mnt mencegah dobel. Semua aksi bounded
-            # + cooldown 24h/target + tercatat di futures_repair_actions.
-            if _cycle_count % 15 == 7:
-                try:
-                    from agents.learning.predictive_repair import run_predictive_repair
-                    _rep = await run_predictive_repair()
-                    if _rep.get("actions"):
-                        logger.info("predictive_repair_pass",
-                                    actions=len(_rep["actions"]), checked=_rep.get("checked"))
-                except Exception as exc:
-                    logger.warning("predictive_repair_failed", error=str(exc)[:160])
-
-            # PLAN_SIGNAL_REPAIR_LIVE R3: verifier progress (~6 jam) — before/after
-            # + auto-revert bila aksi terbukti salah.
-            if _cycle_count % 180 == 20:
-                try:
-                    from agents.learning.repair_verifier import verify_repairs
-                    await verify_repairs()
-                except Exception as exc:
-                    logger.warning("repair_verifier_failed", error=str(exc)[:160])
-
                 # M5: evaluasi canary parameter KELUAR di irama yang sama dengan
                 # verifier sisi masuk. Hanya MENGEVALUASI dan membalik bila
                 # memburuk — menaikkan shadow→canary tetap butuh perintah
@@ -946,51 +892,6 @@ async def run_futures_loop() -> None:
                 except Exception as exc:
                     logger.warning("exit_rollout_advance_failed", error=str(exc)[:160])
 
-            # Phase 1 T4: backfill forward-pnl on big_mover_log every 10 cycles (~20 min)
-            if _cycle_count % 10 == 0:
-                try:
-                    from app.services.big_mover_logger import backfill_pending
-                    # PLAN_v15 R0a: 150 rows × weight-2 klines per 20 min — clears the
-                    # exact-horizon backlog in ~2 hari tanpa menyentuh rate limit.
-                    await backfill_pending(max_rows=150)
-                except Exception as exc:
-                    logger.warning("big_mover_backfill_failed", error=str(exc)[:80])
-
-            # P3: weekly backtest — Sunday 00:00-00:02 UTC
-            try:
-                import datetime as _dt
-                _now_utc = _dt.datetime.utcnow()
-                if _now_utc.weekday() == 6 and _now_utc.hour == 0 and _now_utc.minute < 2:
-                    from agents.learning.weekly_backtest import run_weekly_backtest
-                    await run_weekly_backtest()
-            except Exception as exc:
-                logger.warning("weekly_backtest_error", error=str(exc)[:80])
-
-            # PLAN_FUTURES item C (v4 P2.1): weekly signal review — Senin 00:10-00:15
-            # UTC. Guard dobel-run ada di dalam modul (MIN_RUN_GAP 20 jam).
-            try:
-                import datetime as _dtc
-                _now_c = _dtc.datetime.utcnow()
-                if _now_c.weekday() == 0 and _now_c.hour == 0 and 10 <= _now_c.minute < 15:
-                    from agents.learning.weekly_signal_review import run_weekly_signal_review
-                    _rev = await run_weekly_signal_review()
-                    if _rev.get("adjustments"):
-                        logger.info("weekly_signal_review_adjustments",
-                                    n=len(_rev["adjustments"]))
-            except Exception as exc:
-                logger.warning("weekly_signal_review_error", error=str(exc)[:120])
-
-            # P7 D7.2: monthly threshold calibration — 1st of each month 00:00-00:10 UTC
-            try:
-                import datetime as _dt2
-                _now2 = _dt2.datetime.utcnow()
-                if _now2.day == 1 and _now2.hour == 0 and _now2.minute < 10:
-                    from agents.learning.monthly_calibration import run_monthly_calibration
-                    _cal = await run_monthly_calibration()
-                    if _cal.get("changes"):
-                        logger.info("monthly_calibration_done", changes=_cal["changes"])
-            except Exception as exc:
-                logger.warning("monthly_calibration_error", error=str(exc)[:80])
 
         except asyncio.CancelledError:
             futures_store.set_scanning(False)
