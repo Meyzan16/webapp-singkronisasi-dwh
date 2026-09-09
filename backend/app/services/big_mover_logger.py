@@ -7,6 +7,7 @@ B1.1: multi-horizon (1h, 4h, 24h, 7d) — bukan 24h saja.
 B1.1: simpan slip-adjusted entry assumption (0.3% slippage @ ATR×1.5 SL).
 """
 
+import asyncio
 import time
 from typing import Optional
 
@@ -100,6 +101,43 @@ async def log_big_movers(
     if inserted:
         logger.info("big_mover_log_inserted", count=inserted, market=market)
     return inserted
+
+
+#: Berapa permintaan klines boleh terbang bersamaan saat backfill.
+#:
+#: Sengaja konstanta, bukan kunci `agent_config`: ini soal kesopanan terhadap API
+#: Binance, bukan parameter keputusan trading. Menaruhnya di config berarti
+#: mengundangnya diputar tanpa memikirkan rate limit.
+#:
+#: 8 dipilih konservatif — bobot API-nya sama persis dengan cara berurutan
+#: (2 per baris, tak peduli kapan dikirim); yang berubah hanya lama menunggunya.
+_BACKFILL_CONCURRENCY = 8
+
+
+async def _ambil_klines_serentak(client: httpx.AsyncClient, rows: list) -> list:
+    """Ambil klines untuk semua baris sekaligus, dibatasi semafor.
+
+    Cara lama mengambil satu per satu di dalam `for` — 150 baris x ~300 ms =
+    45 detik, dan terukur 9 Sep 2026 memang persis segitu. Docstring aslinya
+    menyebutnya "trivial", dan itu benar untuk BOBOT API; yang tidak trivial
+    adalah waktunya, karena `run_due()` ditunggu di dalam loop scan sehingga
+    tiap detik di sini adalah detik saat agen tidak menilai harga.
+
+    Ini justru kasus di mana konkurensi benar-benar menolong: semuanya menunggu
+    jaringan, bukan CPU — jadi tak terbentur GIL seperti kerja pembelajaran yang
+    terpaksa dipindah ke proses sendiri.
+
+    `_fetch_klines_1h` sudah menelan kegagalannya sendiri dan mengembalikan [],
+    jadi satu simbol bermasalah tak menggagalkan seluruh angkatan. Urutan hasil
+    dijamin sama dengan urutan `rows` — pemanggilnya memasangkannya dengan `zip`.
+    """
+    sem = asyncio.Semaphore(_BACKFILL_CONCURRENCY)
+
+    async def satu(row) -> list:
+        async with sem:
+            return await _fetch_klines_1h(client, row.symbol, row.market, row.ts)
+
+    return list(await asyncio.gather(*(satu(r) for r in rows)))
 
 
 async def _fetch_klines_1h(
@@ -207,7 +245,10 @@ async def backfill_pending(max_rows: int = 50) -> int:
          NULL until the 7d pass — now any row with a due-but-NULL horizon qualifies.
       3. Path-aware would_be bracket: SL/TP decided by walking candles, not by
          the 24h endpoint price.
-    One klines request per row (weight 2) — max_rows=150 per 20-min cycle ≈ trivial.
+    One klines request per row (weight 2) — max_rows=150 per 20-min cycle. Bobot
+    API-nya memang trivial, dan kalimat itu dulu berhenti di situ; WAKTUNYA tidak.
+    Berurutan, 150 baris memakan 45 detik (terukur 9 Sep 2026) di dalam loop scan.
+    Pengambilannya kini serentak — lihat `_ambil_klines_serentak`.
     """
     if not is_db_available():
         return 0
@@ -233,8 +274,10 @@ async def backfill_pending(max_rows: int = 50) -> int:
             return 0
 
         async with httpx.AsyncClient(timeout=15) as client:
-            for row in rows:
-                klines = await _fetch_klines_1h(client, row.symbol, row.market, row.ts)
+            # Jaringan dulu, serentak; sisanya tetap berurutan seperti semula.
+            semua_klines = await _ambil_klines_serentak(client, rows)
+
+            for row, klines in zip(rows, semua_klines):
                 patch: dict = {"last_backfill_at": now}
                 age = now - row.ts
 
