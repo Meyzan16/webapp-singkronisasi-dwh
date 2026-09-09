@@ -147,10 +147,31 @@ FAST_INTERVAL_SEC = 30   # check high-risk positions every 30s (was never checke
 NTP_CHECK_INTERVAL_SEC = 1800   # every 30 min
 _last_ntp_check: float = 0.0
 
-_FUTURES_STYLES = (
-    "futures_agent1", "futures_agent2", "futures_agent3",
-    "futures_agent_bigmover",   # Phase 2 BM1 — monitor BM positions same as others
-)
+def _semua_gaya_futures() -> tuple[str, ...]:
+    """Gaya yang DIAWASI monitor — dari registry, termasuk agen aktif.
+
+    Terukur 9 Sep 2026, dan ini kegagalan paling berbahaya yang ditemukan
+    sepanjang penulisan ulang FUTURES: daftar ini dipaku empat gaya lama, dan
+    query monitor menyaring dengan daftar itu. Posisi `futures_agentic` karena
+    itu TIDAK PERNAH masuk loop — `agentic_trades` selalu kosong dan
+    `_monitor_agentic` tak pernah dipanggil satu kali pun.
+    Tiga posisi nyata berjalan tanpa pengecekan SL, TP, trailing, maupun
+    time-stop. Tak ada error, tak ada log, tak ada satu pun tanda: monitor
+    melaporkan dirinya "aktif" karena loopnya memang berputar — hanya saja
+    daftar yang diawasinya tak memuat posisi yang sedang hidup.
+
+    Diturunkan dari registry supaya agen aktif berikutnya ikut terawasi tanpa
+    ada yang perlu mengingat menyunting baris ini.
+    """
+    try:
+        from app.services.agent_registry import FUTURES_AGENTS
+        return tuple(FUTURES_AGENTS)
+    except Exception:      # noqa: BLE001 — monitor tak boleh mati karena impor
+        return ("futures_agent1", "futures_agent2", "futures_agent3",
+                "futures_agent_bigmover", "futures_agentic")
+
+
+_FUTURES_STYLES = _semua_gaya_futures()
 
 
 def get_state() -> dict:
@@ -241,6 +262,12 @@ async def _monitor_agentic(session, trades: list, prices: dict) -> tuple[int, in
         )
 
         keputusan = _er.evaluate(state, params)
+
+        # Baris lama bisa punya `setup_type` kosong (sebelum penulisan saat
+        # dibuat). Tambal di sini juga supaya pengelompokan per-lane di
+        # `risk_gate` tak melewatkannya diam-diam.
+        if not trade.setup_type:
+            trade.setup_type = str(meta.get("setup_type") or "agentic")
 
         if keputusan.action == "hold":
             trade.signals_json = json.dumps(meta, ensure_ascii=False)
@@ -811,7 +838,18 @@ async def check_futures_positions() -> tuple[int, int]:
         # pertama, jadi posisi yang sudah menembus SL ditutup sebelum apa pun
         # yang lebih lambat sempat menyentuhnya.
         _ag_closed, _ag_updated = await _monitor_agentic(session, agentic_trades, prices)
-        if _ag_closed or _ag_updated:
+        # Commit bila ADA posisi agentic yang diproses — bukan hanya saat ada
+        # yang ditutup atau dipindah SL-nya.
+        #
+        # Keputusan `hold` mengembalikan (0, 0), padahal jalur itu TETAP menulis:
+        # `peak_pnl_pct` ke `signals_json` dan `setup_type` ke kolomnya. Dengan
+        # syarat lama, tulisan itu hilang tiap siklus tenang — dan `peak_pnl_pct`
+        # adalah bahan trailing SEKALIGUS kolom `mfe_atr` di ledger exit.
+        #
+        # Jadi puncak untung hanya tersimpan bila kebetulan ada kejadian LAIN
+        # yang memicu commit. Tak ada error, tak ada log — hanya angka yang
+        # diam-diam mundur ke nol.
+        if agentic_trades:
             await session.commit()
 
         if not trades:

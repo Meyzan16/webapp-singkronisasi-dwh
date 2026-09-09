@@ -36,9 +36,35 @@ LANE_QUOTAS: dict[str, int] = {
 
 # P2: all futures lane styles share ONE wallet → dedup & limits are GLOBAL (BUG-L1).
 # Phase 2 BM3: include futures_agent_bigmover — shares wallet but has separate slot quota.
-_FUTURES_STYLES = (
-    "futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover",
-)
+def _semua_gaya_futures() -> tuple[str, ...]:
+    """Semua gaya futures — dari registry, termasuk agen aktif.
+
+    Daftar ini dipakai untuk dedup simbol, hitungan posisi terbuka, cooldown SL,
+    dan kuota lane. Sampai 9 Sep 2026 isinya hanya EMPAT gaya lama, sehingga
+    posisi agen tunggal tak terhitung oleh satu pun batas itu: dua posisi pada
+    simbol yang sama jadi mungkin, dan `MAX_AUTO_POSITIONS` bisa terlampaui
+    tanpa ada yang menahannya.
+    """
+    try:
+        from app.services.agent_registry import FUTURES_AGENTS
+        return tuple(FUTURES_AGENTS)
+    except Exception:      # noqa: BLE001
+        return ("futures_agent1", "futures_agent2", "futures_agent3",
+                "futures_agent_bigmover", "futures_agentic")
+
+
+_FUTURES_STYLES = _semua_gaya_futures()
+
+
+def _agen_aktif() -> frozenset[str]:
+    try:
+        from app.services.agent_registry import ACTIVE_FUTURES_AGENTS
+        return frozenset(ACTIVE_FUTURES_AGENTS)
+    except Exception:      # noqa: BLE001
+        return frozenset({"futures_agentic"})
+
+
+_AGEN_AKTIF = _agen_aktif()
 
 # Phase 2 BM1: dedicated quota for Big Mover lane (separate from MAX_AUTO_POSITIONS=6).
 MAX_BIGMOVER_POSITIONS = 2
@@ -152,38 +178,23 @@ def _effective_threshold(agent: str) -> int:
     """Base threshold for an agent: manual override wins, else adaptive (F69).
     Phase 2 BM1: bigmover lane uses FIXED threshold (60) to avoid the A2 death-spiral.
     """
-    if agent == "futures_agent_bigmover":
-        # P4.6: BigMover threshold adaptive based on 14d win rate
-        # 60 (WR≥45%), 65 (35–45%), 70 (<35%) — prevents fixed threshold death spiral
-        from agents.futures.weight_updater import get_state as _wstate
-        from agents.futures.agent_bigmover import MIN_SCORE
+    # Agen tunggal punya ambangnya sendiri (`agentic_min_score`) dan skornya
+    # lahir dari fungsi penilai yang BERBEDA — angka 72 hasil kalibrasi adaptif
+    # lane lama tak berarti apa-apa pada skala itu. Membiarkannya lewat jalur
+    # adaptif lama berarti menilai agen baru dengan penggaris agen lama.
+    if agent in _AGEN_AKTIF:
         try:
-            wst      = _wstate()
-            bm_wr    = wst.get("coin_win_rates", {})
-            # Rough BM win rate: use global futures win rate as proxy when BM-specific absent
-            from agents.futures.weight_updater import _coin_win_rates as _cwr
-            total    = sum(d.get("total", 0) for d in _cwr.values())
-            wins     = sum(d.get("wins", 0)  for d in _cwr.values())
-            wr_14d   = wins / total if total >= 10 else 0.45  # fallback neutral
-            if wr_14d >= 0.45:
-                return 60
-            elif wr_14d >= 0.35:
-                return 65
-            else:
-                return 70
-        except Exception:
-            return int(MIN_SCORE)
+            from agents.futures.agentic import get as _ag_get
+            return int(_ag_get("agentic_min_score"))
+        except Exception:      # noqa: BLE001
+            return 65
     if _manual_threshold is not None:
         return _manual_threshold
     from agents.futures.weight_updater import get_adaptive_thresholds
     _base = get_adaptive_thresholds(agent)["auto_threshold"]
-    # PLAN_v14 P2-B1: Pre-Gainer & Accumulation nyaris dormant di default 72, jadi
-    # floor-nya diturunkan supaya lane aktif. Diagnostik 23 Jul (n=1640): floor 65
-    # membiarkan band 65-70 yang rugi (pf 0.29/0.45) — dinaikkan ke WEAK_LANE_FLOOR
-    # (default 70). Tetap hanya override default 72; jika adaptif menaikkan (WR
-    # jelek) biarkan (jangan lawan proteksi).
-    if agent in ("futures_agent1", "futures_agent2") and _base == 72:
-        _base = WEAK_LANE_FLOOR
+    # Fase 8: lantai lane lemah (Pre-Gainer/Accumulation) ikut dibongkar bersama
+    # lane-nya. Yang tersisa hanya jalur adaptif biasa — dan agen tunggal tak
+    # pernah sampai ke sini karena punya ambangnya sendiri di atas.
     return _base
 
 
@@ -328,7 +339,17 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             continue
         # Overextension guard: skor ekstrem = setup overextended yang reversal keras
         # (diagnostik 23 Jul: >=80 exp -11.28%). Veto auto-open; 0 = nonaktif.
-        if OVEREXTENSION_CEILING and r.get("score", 0) >= OVEREXTENSION_CEILING:
+        # Plafon ini dikalibrasi atas skor LANE LAMA (diagnostik 23 Jul: skor >=80
+        # berekspektasi -11,28%). Agen tunggal memakai fungsi penilai yang berbeda,
+        # jadi angka 80 di sana bukan besaran yang sama — memakainya berarti
+        # memveto justru setup dengan konfirmasi terbanyak.
+        #
+        # Overekstensi tetap ditangani, hanya dengan cara lain: `agentic` memberi
+        # `momentum_ekstrem` skor lebih RENDAH (18, bukan 30) dan memangkas
+        # `size_mult` jadi 0,5 — mengecilkan ukuran alih-alih memveto. Mekanisme
+        # itu tak dimiliki lane lama, dan itulah sebabnya mereka butuh plafon.
+        if (OVEREXTENSION_CEILING and r.get("agent") not in _AGEN_AKTIF
+                and r.get("score", 0) >= OVEREXTENSION_CEILING):
             _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"), "overextension_veto")
             continue
         # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
@@ -696,6 +717,19 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 symbol           = symbol,
                 direction        = sig.get("direction", "LONG"),
                 style            = agent,                # lane identity preserved for win-rate
+                # Lane DITULIS SAAT DIBUAT, bukan ditambal belakangan.
+                #
+                # Sampai 9 Sep 2026 kolom ini dibiarkan NULL di sini dan diisi
+                # oleh backfill di loop monitor LAMA. Posisi agen tunggal lewat
+                # `_monitor_agentic` — jalur terpisah sejak Fase 7 — jadi tak
+                # pernah kebagian backfill itu dan kolomnya kosong selamanya.
+                #
+                # Akibatnya senyap: `risk_gate` mengelompokkan win-rate per lane
+                # lewat `t.setup_type or ""`, sehingga trade agen tunggal tak
+                # pernah terhitung — proteksi jeda-lane tak melihatnya sama
+                # sekali. Mengisinya di sini menutup seluruh kelas masalah itu,
+                # bukan hanya kejadian pada satu jalur.
+                setup_type       = sig.get("setup_type") or None,
                 entry_price      = sig.get("entry", sig.get("price", 0)),
                 stop_loss        = sig.get("sl", 0),
                 take_profit      = sig.get("tp2", 0),

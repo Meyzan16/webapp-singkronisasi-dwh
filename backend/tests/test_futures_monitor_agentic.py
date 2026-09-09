@@ -17,6 +17,11 @@ class FakeTrade:
         self.id = kw.get("id", 1)
         self.symbol = kw.get("symbol", "XUSDT")
         self.style = kw.get("style", "futures_agentic")
+        # Kolom lane. Sengaja None secara bawaan: itulah keadaan baris yang
+        # dibuat SEBELUM lane ditulis saat pembuatan, dan jalur ini wajib
+        # menambalnya — kalau tidak, `risk_gate` melewatkan trade agen tunggal
+        # dari pengelompokan win-rate per lane tanpa satu pun error.
+        self.setup_type = kw.get("setup_type")
         self.direction = kw.get("direction", "LONG")
         self.entry_price = kw.get("entry_price", 100.0)
         self.stop_loss = kw.get("stop_loss", 95.0)
@@ -196,3 +201,73 @@ def test_hanya_agen_aktif_yang_masuk_jalur_baru():
     assert set(M._AGENTIC_STYLES) == set(ACTIVE_FUTURES_AGENTS)
     for lama in LEGACY_FUTURES_AGENTS:
         assert lama not in M._AGENTIC_STYLES
+
+
+@pytest.mark.asyncio
+async def test_lane_kosong_ditambal_dari_meta():
+    """Baris agentic dibuat dengan `setup_type` NULL sampai 9 Sep 2026.
+    `risk_gate` mengelompokkan win-rate lewat `t.setup_type or ""`, jadi baris
+    tanpa lane hilang dari proteksi jeda-lane — tanpa error, tanpa log."""
+    t = FakeTrade(setup_type=None)
+    await M._monitor_agentic(FakeSession(), [t], {"XUSDT": 100.5})
+    assert t.setup_type == "agentic"
+
+
+@pytest.mark.asyncio
+async def test_lane_yang_sudah_ada_tak_ditimpa():
+    t = FakeTrade(setup_type="lane_lain")
+    await M._monitor_agentic(FakeSession(), [t], {"XUSDT": 100.5})
+    assert t.setup_type == "lane_lain"
+
+
+@pytest.mark.asyncio
+async def test_tulisan_saat_hold_ikut_tersimpan(monkeypatch):
+    """Keputusan `hold` mengembalikan (0, 0) tapi TETAP menulis `peak_pnl_pct`
+    dan `setup_type`. Syarat commit lama (`if closed or updated`) membuang
+    tulisan itu tiap siklus tenang — dan `peak_pnl_pct` adalah bahan trailing
+    sekaligus kolom `mfe_atr` di ledger exit."""
+    import inspect
+
+    sumber = inspect.getsource(M.check_futures_positions)
+    assert "if agentic_trades:" in sumber, (
+        "commit masih bersyarat closed/updated — tulisan saat hold akan hilang")
+
+
+# ── Posisi agen aktif WAJIB masuk daftar yang diawasi ────────────────────────
+
+def test_monitor_mengawasi_gaya_agen_aktif():
+    """Kegagalan paling berbahaya sepanjang penulisan ulang FUTURES (9 Sep 2026).
+
+    `_FUTURES_STYLES` di monitor dipaku empat gaya lama, dan query monitor
+    menyaring dengan daftar itu. Posisi `futures_agentic` karena itu tak pernah
+    masuk loop: `agentic_trades` selalu kosong, `_monitor_agentic` tak pernah
+    dipanggil, dan tiga posisi nyata berjalan TANPA pengecekan SL, TP, trailing,
+    maupun time-stop.
+
+    Tak ada error dan tak ada log. Monitor melaporkan dirinya "aktif" karena
+    loopnya memang berputar — hanya daftar yang diawasinya yang tak memuat
+    posisi yang sedang hidup.
+    """
+    from app.services.agent_registry import ACTIVE_FUTURES_AGENTS
+
+    for agen in ACTIVE_FUTURES_AGENTS:
+        assert agen in M._FUTURES_STYLES, (
+            f"{agen} tak diawasi monitor — posisinya berjalan tanpa SL")
+
+
+def test_monitor_tetap_mengawasi_lane_lama():
+    """Lane lama masih memegang riwayat; posisi lama yang tersisa harus tetap
+    terkelola sampai yang terakhir tutup."""
+    for lama in ("futures_agent1", "futures_agent2", "futures_agent3",
+                 "futures_agent_bigmover"):
+        assert lama in M._FUTURES_STYLES
+
+
+def test_gaya_yang_diawasi_mencakup_yang_diperdagangkan():
+    """Monitor dan auto_trader harus melihat POPULASI YANG SAMA. Kalau
+    auto_trader boleh membuka gaya yang tak diawasi monitor, posisi itu lahir
+    tanpa penjaga."""
+    from agents.futures import auto_trader as AT
+
+    assert set(AT._FUTURES_STYLES) <= set(M._FUTURES_STYLES), (
+        "ada gaya yang bisa dibuka tapi tidak diawasi")
