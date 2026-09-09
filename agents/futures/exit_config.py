@@ -72,11 +72,39 @@ def get(key: str) -> float:
     return _LIVE[key]
 
 
+#: Kunci yang BOLEH ditala oleh exit-learning, dan hanya ini.
+#:
+#: Nilai hasil belajar TIDAK ditulis ke kunci aslinya, melainkan ke
+#: `<kunci>_learned`. Pemisahan ini yang menjaga dua lapis pengaman
+#: `exit_learning`: nilai yang disetel manusia dan nilai yang diusulkan mesin
+#: tak pernah saling menimpa, dan mematikan saklar mengembalikan angka manusia
+#: apa adanya — bukan angka mesin yang kebetulan tertulis terakhir.
+_LEARNABLE = ("exit_tp1_atr_mult", "exit_tp2_atr_mult")
+
+#: Saklar milik pemilik. Selama 0, angka hasil belajar boleh tersimpan tapi
+#: tidak boleh menyentuh satu pun keputusan.
+_LEARNING_SWITCH = "monitor_exit_learning_enabled"
+
+
 async def refresh() -> None:
     """Tarik override dari `agent_config`. Gagal = pakai nilai terakhir."""
     try:
         from agents.shared.config_reader import cfg
         _LIVE.update({k: await cfg.get("futures", k, v) for k, v in _FROZEN.items()})
+
+        # Lapis kedua: hasil belajar hanya dipakai bila pemiliknya menyalakan.
+        #
+        # Sampai 9 Sep 2026 modul ini tak mengenal saklar itu sama sekali,
+        # sementara `exit_learning` menulis usulannya ke kunci per-lane milik
+        # monitor LAMA yang tak lagi dibaca jalur agen tunggal. Hasilnya
+        # kegagalan senyap dua arah: pembelajaran keluar berjalan, menghitung,
+        # menulis — dan tak ada yang membacanya.
+        if float(await cfg.get("futures", _LEARNING_SWITCH, 0.0)) >= 1.0:
+            for k in _LEARNABLE:
+                # 0 = belum ada usulan; konvensi yang sama dengan kunci per-lane.
+                usulan = float(await cfg.get("futures", f"{k}_learned", 0.0))
+                if usulan > 0:
+                    _LIVE[k] = usulan
     except Exception as exc:      # noqa: BLE001 — monitor tak boleh berhenti
         logger.warning("exit_config_refresh_failed", error=str(exc)[:120])
 

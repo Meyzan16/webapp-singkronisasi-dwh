@@ -1084,6 +1084,38 @@ async def recommend_entry_tp_ladder(days: int = 90, market: str = "futures",
 
 # ── Penerapan ─────────────────────────────────────────────────────────────────
 
+def _lane_agen_aktif(lane: str) -> bool:
+    """Apakah lane ini milik agen tunggal yang sedang berdagang?
+
+    Diturunkan dari registry, bukan dibandingkan dengan teks "agentic": agen
+    aktif berikutnya harus ikut terbawa tanpa menyunting modul ini.
+    """
+    try:
+        from app.services.agent_registry import ACTIVE_FUTURES_AGENTS
+        aktif = {a.removeprefix("futures_") for a in ACTIVE_FUTURES_AGENTS}
+    except Exception:      # noqa: BLE001
+        aktif = {"agentic"}
+    return (lane or "").strip() in aktif
+
+
+def _kunci_tp(lane: str, kunci_lane_lama) -> str:
+    """Ke mana usulan TP lane ini ditulis.
+
+    Lane LAMA tetap ke kunci per-lane monitor lama — jalur itu masih mengelola
+    posisi era lane sampai yang terakhir tutup (syarat Fase 8).
+
+    Agen tunggal membaca `exit_config`, bukan kunci per-lane. Sampai 9 Sep 2026
+    usulannya tetap ditulis ke `monitor_tp_atr_mult_lane_agentic` — kunci yang
+    tak dibaca siapa pun. Pembelajaran keluar berjalan penuh lalu hasilnya
+    menguap, dan dari luar itu tak terbedakan dari pembelajaran yang bekerja.
+
+    Ditulis ke kunci `_learned` yang TERPISAH, bukan ke `exit_tp1_atr_mult`
+    langsung, supaya saklar `monitor_exit_learning_enabled` tetap berarti dan
+    angka yang disetel manusia tak tertimpa mesin.
+    """
+    return "exit_tp1_atr_mult_learned" if _lane_agen_aktif(lane) else kunci_lane_lama(lane)
+
+
 async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
                                      market: str = "futures") -> dict:
     """Tulis usulan batas TP per lane ke `agent_config` (PRIORITAS 2).
@@ -1118,6 +1150,14 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
     ff = await recommend_failfast_params(days=days, market=market)
     for rec in ff.get("recommendations", []):
         lane = rec["lane"]
+        # `fail_fast` DIHAPUS dari jalur agen tunggal di Fase 4 — terukur -$79
+        # dengan nol kemenangan. Menulis usulannya untuk lane ini berarti menala
+        # mekanisme yang tak ada lagi: angkanya tersimpan, tak pernah dibaca,
+        # dan menambah persis kunci per-lane yang Fase 8 justru mau buang.
+        if _lane_agen_aktif(lane):
+            skipped.append({"lane": lane, "target": "failfast_gap",
+                            "reason": "fail_fast_dihapus_fase4"})
+            continue
         if rec.get("status") != "ok":
             skipped.append({"lane": lane, "target": "failfast_gap",
                             "reason": rec.get("status"), "n": rec.get("n")})
@@ -1140,7 +1180,8 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
         if not rec.get("suggested_tp_atr"):
             skipped.append({"lane": lane, "target": "tp_atr", "reason": "usulan_kosong"})
             continue
-        planned.append({"lane": lane, "key": tp_lane_key(lane), "target": "tp_atr",
+        planned.append({"lane": lane, "key": _kunci_tp(lane, tp_lane_key),
+                        "target": "tp_atr",
                         "value": rec["suggested_tp_atr"],
                         "current_tp_atr": rec.get("current_tp_atr"),
                         "would_be_reached_pct": rec.get("would_be_reached_pct"),

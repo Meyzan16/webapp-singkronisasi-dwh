@@ -220,6 +220,66 @@ _CATEGORY_BY_PREFIX = {
     "fund":     "funding",
     "wyckoff":  "wyckoff",
     "oi":       "open interest",
+    # Keluarga sinyal agen tunggal (`ag.*`). Lihat `_kategori_untuk`.
+    "funding":  "funding",
+    "rsi":      "teknikal",
+    "volume":   "aliran dana",
+    "arah":     "momentum",
+}
+
+#: Agen tunggal Fase 3. Semua ID `ag.*` lahir dari satu fungsi penilai, jadi
+#: pemetaan agennya adalah ATURAN, bukan daftar yang harus disunting tiap kali
+#: sinyal baru muncul — persis alasan katalog ini dibuat dinamis.
+_AGENTIC_SOURCE = {
+    "agent": "futures_agentic",
+    "label": "Agen Tunggal",
+    "file":  "agents/futures/agentic.py",
+    "fn":    "_skor",
+}
+
+
+def _kategori_untuk(stable_id: str) -> str:
+    """Kategori sebuah ID stabil.
+
+    ID agen tunggal berbentuk `ag.<keluarga>_<rincian>` — `ag.momentum_mapan`,
+    `ag.oi_naik_tipis`. Mengambil bagian PERTAMA (`ag`) membuat ke-18 sinyalnya
+    jatuh ke "lainnya" sekaligus: terdaftar di katalog, tapi tak terkelompokkan,
+    yang di layar Analysis tak terbedakan dari sinyal yang memang tak dikenal.
+
+    Jadi untuk `ag.*` yang menentukan adalah KELUARGANYA. Sinyal `ag.*` baru
+    otomatis ikut terkelompok selama keluarganya sudah dikenal di atas.
+    """
+    bagian = stable_id.split(".")
+    if bagian[0] == "ag" and len(bagian) > 1:
+        keluarga = bagian[1].split("_")[0]
+        return _CATEGORY_BY_PREFIX.get(keluarga, "lainnya")
+    return _CATEGORY_BY_PREFIX.get(bagian[0], "lainnya")
+
+
+#: Apa arti tiap sinyal agen tunggal. Angka POINnya sengaja TIDAK ditulis ulang
+#: di sini: nilainya hidup di `agentic._skor`, dan menyalinnya ke katalog akan
+#: melahirkan dua kebenaran yang menyimpang diam-diam begitu salah satu disetel.
+_AGENTIC_DESCRIPTIONS = {
+    "ag.momentum_awal":      "Gerak 24h di bawah 10% — masih dini, tesisnya belum ramai.",
+    "ag.momentum_mapan":     "Gerak 24h 10-20% — tren sudah terbentuk dan masih punya ruang.",
+    "ag.momentum_kuat":      "Gerak 24h 20-50% — bobot tertinggi untuk besaran gerak.",
+    "ag.momentum_ekstrem":   "Gerak 24h di atas 50%. Sengaja tidak dinolkan: masih bisa "
+                             "ditradingkan, tapi UKURANNYA yang dikecilkan, bukan skornya.",
+    "ag.arah_konfirmasi":    "Gerak 1h searah dengan 24h dan cukup besar — tren masih hidup.",
+    "ag.arah_datar":         "Gerak 1h nyaris rata: zona re-entry, bukan pembalikan.",
+    "ag.arah_berlawanan":    "Gerak 1h melawan arah 24h — kemungkinan sudah balik arah.",
+    "ag.volume_konfirmasi":  "Volume 2x lipat rata-rata 20 bar — geraknya didukung uang nyata.",
+    "ag.volume_naik":        "Volume 1,3-2x rata-rata — dukungan ada tapi belum tegas.",
+    "ag.volume_memudar":     "Volume di bawah 0,7x rata-rata — pembeli menghilang. NEGATIF.",
+    "ag.oi_naik":            "Open interest naik >3% — uang baru masuk searah, bukan sekadar "
+                             "posisi lama ditutup.",
+    "ag.oi_naik_tipis":      "Open interest naik 0,5-3% — searah, tapi tipis.",
+    "ag.oi_turun":           "Open interest turun >3% — posisi ditutup, momentum memudar. NEGATIF.",
+    "ag.funding_netral":     "Funding di bawah 0,05% — bahan bakar belum terpakai.",
+    "ag.funding_wajar":      "Funding belum sesak untuk arah ini.",
+    "ag.funding_sesak":      "Funding melawan arah posisi — sisi ini sudah ramai. NEGATIF.",
+    "ag.rsi_sehat":          "RSI di pita sehat (55-72 LONG / 28-45 SHORT) — masih ada ruang.",
+    "ag.rsi_jenuh":          "RSI ekstrem (>80 LONG / <20 SHORT) — ruang geraknya habis. NEGATIF.",
 }
 
 
@@ -264,12 +324,14 @@ def _build_catalog() -> dict[str, dict]:
             entry = out.get(key)
             if entry is None:
                 legacy = desc.get(key, {})
+                agentic = stable_id.startswith("ag.")
                 entry = {
                     "label":       legacy.get("label") or _humanize(stable_id),
-                    "category":    legacy.get("category")
-                                   or _CATEGORY_BY_PREFIX.get(stable_id.split(".")[0], "lainnya"),
-                    "description": legacy.get("description", ""),
-                    "agents":      legacy.get("agents", []),
+                    "category":    legacy.get("category") or _kategori_untuk(stable_id),
+                    "description": legacy.get("description")
+                                   or _AGENTIC_DESCRIPTIONS.get(stable_id, ""),
+                    "agents":      legacy.get("agents")
+                                   or ([dict(_AGENTIC_SOURCE)] if agentic else []),
                     "score_impact_formula": legacy.get(
                         "score_impact_formula", "(weight − 1.0) × 7.0 per kemunculan"),
                     # Pemetaan market — inilah yang membuat Formulas bisa
