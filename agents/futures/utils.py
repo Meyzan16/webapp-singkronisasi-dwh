@@ -278,3 +278,33 @@ def _atr(highs: list[float], lows: list[float], closes: list[float], period: int
     ]
     tail = trs[-period:] if len(trs) >= period else trs
     return sum(tail) / len(tail) if tail else 0.0
+
+
+# ── Helper harga & momentum ───────────────────────────────────────────────────
+# Dipindah dari `agent1.py` saat Fase 8 membongkar lane lama. Keduanya dipakai
+# agen tunggal, jadi membiarkannya di modul agen yang dihapus akan menyeret
+# agen aktif ikut mati — sekaligus alasan kenapa `agent1.py` tak bisa sekadar
+# dihapus tanpa langkah ini.
+
+def _rsi(closes: list[float], period: int = 14) -> float:
+    """RSI sederhana. Data kurang -> 50 (netral), bukan menebak."""
+    if len(closes) < period + 1:
+        return 50.0
+    gains, losses = [], []
+    for i in range(len(closes) - period, len(closes)):
+        d = closes[i] - closes[i - 1]
+        gains.append(max(d, 0))
+        losses.append(max(-d, 0))
+    ag = sum(gains) / period
+    al = sum(losses) / period
+    return 100 - (100 / (1 + ag / al)) if al > 0 else 100.0
+
+
+def _round_price(price: float, ref: float) -> float:
+    """Bulatkan harga mengikuti besaran acuannya — koin $0,00001 dan $60.000
+    tak bisa dibulatkan dengan jumlah desimal yang sama."""
+    if ref >= 1000:  return round(price, 2)
+    if ref >= 10:    return round(price, 4)
+    if ref >= 0.1:   return round(price, 5)
+    if ref >= 0.001: return round(price, 7)
+    return round(price, 8)

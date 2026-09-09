@@ -1,9 +1,10 @@
 """
-Futures Scanner Scheduler — runs Agent 1 + Agent 2 every cycle.
+Futures Scanner Scheduler — menjalankan AGEN TUNGGAL tiap siklus.
 
-Both agents score the same universe sequentially per symbol (F113: not concurrent —
-one for-loop calls a1.scan_symbol() then a2.scan_symbol() per ticker).
-Results go into futures store (separate per agent).
+Fase 8: empat lane lama (pre_gainer, accumulation, momentum, bigmover) dihapus
+setelah trade era mereka tutup semuanya. Riwayatnya tidak ikut hilang —
+`FUTURES_AGENTS` di registry tetap memuat nama lane pensiun, jadi monitor dan
+endpoint riwayat masih bisa membaca 112 trade tertutup itu.
 """
 
 import asyncio
@@ -13,11 +14,7 @@ from typing import Optional
 import httpx
 import structlog
 
-from agents.futures import agent1 as a1
 from app.services.binance_urls import fapi
-from agents.futures import agent2 as a2
-from agents.futures import agent3 as a3
-from agents.futures import agent_bigmover as a_bm   # Phase 2 BM1
 from agents.futures import agentic as ag            # Fase 3 — agen tunggal
 from agents.futures import store as futures_store
 from agents.futures.data import fetch_top100_futures, fetch_symbol_data, fetch_new_listings
@@ -140,7 +137,7 @@ async def _fetch_extreme_funding_tickers(existing: list[dict]) -> list[dict]:
 async def _run_scan() -> dict:
     """
     Full scan cycle: fetch data for all 100 symbols, run both agents.
-    Returns {"agent1": {...}, "agent2": {...}}.
+    Returns {"agentic": {...}, "big_movers": [...]}.
     """
     start = time.time()
     logger.info("futures_scan_start")
@@ -162,7 +159,7 @@ async def _run_scan() -> dict:
                     tickers.append(et)
             logger.info("added_extreme_funding_coins", count=len(extreme_tickers))
     except Exception:
-        pass  # non-critical — agent2 still scans top-100
+        pass  # non-critical — pemindaian utama tetap jalan
 
     # Step 1b2: P4.1 / PLAN_v3 D1.1 — inject top gainers+losers (early-stage movers).
     # Uses the all-symbols /ticker/24hr endpoint (weight=40). These coins are NOT in
@@ -212,10 +209,6 @@ async def _run_scan() -> dict:
             await asyncio.sleep(BATCH_SLEEP)
 
     # Step 3: score all agents
-    a1_results: list[dict] = []
-    a2_results: list[dict] = []
-    a3_results: list[dict] = []
-    bm_results: list[dict] = []   # Phase 2 BM1
     ag_results: list[dict] = []   # Fase 3 — agen tunggal (kosong selama saklar mati)
 
     # Dibaca SEKALI per scan, bukan per simbol: saklar yang berubah di tengah
@@ -252,52 +245,19 @@ async def _run_scan() -> dict:
         # bersamaan dan sama-sama membuka posisi dari SATU dompet — kuota dan
         # panas portofolio akan terisi dua sumber yang tak saling tahu.
         #
-        # Posisi lama yang sudah terbuka TIDAK ditinggalkan: monitor memakai
-        # `FUTURES_AGENTS` (memuat lane pensiun) sehingga tetap dikelola sampai
-        # tutup dengan sendirinya.
-        if _agentic_aktif:
-            r1_list = r2_list = r3_list = []
-        else:
-            # F34/F52: scan_symbol returns list — extend (not append) to get all directions
-            r1_list = a1.scan_symbol(symbol, tf_map, change_24h)
-            r2_list = a2.scan_symbol(symbol, tf_map, change_24h)
-            # Phase 11: Agent 3 — Momentum Capture (already-moving coins)
-            r3_list = a3.scan_symbol(symbol, tf_map, change_24h)
-            a1_results.extend(r1_list)
-            a2_results.extend(r2_list)
-            a3_results.extend(r3_list)
-
-            # Phase 2 BM1: Big Mover lane (≥±15% only — early gate avoids wasted scoring)
-            if abs(change_24h) >= a_bm.MIN_CHANGE_24H:
-                quote_vol = float(ticker.get("quoteVolume", 0) or 0)
-                r_bm = a_bm.scan_symbol(symbol, tf_map, change_24h, quote_vol_24h=quote_vol)
-                if r_bm:
-                    bm_results.extend(r_bm)
-
-        # Fase 3: agen tunggal. `scan_symbol` mengembalikan [] selama
-        # `agentic_enabled`=0, jadi selama saklar mati blok ini nyaris gratis dan
-        # tak mengubah apa pun. Empat lane di atas tetap jalan sampai Fase 7
-        # menyalakan saklarnya — dua-duanya sengaja hidup berdampingan supaya
-        # perbandingan shadow bisa dilakukan atas siklus yang SAMA PERSIS.
+        # Fase 8: agen tunggal adalah SATU-SATUNYA yang memindai.
+        # Empat lane lama (pre_gainer, accumulation, momentum, bigmover) dihapus
+        # setelah trade era mereka tutup semua. Riwayatnya tetap utuh: monitor
+        # dan endpoint riwayat memakai `FUTURES_AGENTS` yang masih memuat nama
+        # lane pensiun, jadi 112 trade tertutup tetap terbaca.
         r_ag = ag.scan_symbol(symbol, tf_map, change_24h,
                               quote_vol_24h=float(ticker.get("quoteVolume", 0) or 0))
         if r_ag:
             ag_results.extend(r_ag)
 
     # Sort by score, take top N
-    a1_results.sort(key=lambda x: x["score"], reverse=True)
-    a2_results.sort(key=lambda x: x["score"], reverse=True)
-    a3_results.sort(key=lambda x: x["score"], reverse=True)
-    bm_results.sort(key=lambda x: x["score"], reverse=True)
     ag_results.sort(key=lambda x: x["score"], reverse=True)
-    a1_results_full = a1_results            # PLAN-SIGNAL-GAP P4: keep full list for big-movers match
-    a2_results_full = a2_results
-    a3_results_full = a3_results
-    bm_results_full = bm_results
-    a1_results = a1_results[:TOP_N]
-    a2_results = a2_results[:TOP_N]
-    a3_results = a3_results[:TOP_N]
-    bm_results = bm_results[:TOP_N]
+    ag_results_full = ag_results            # PLAN-SIGNAL-GAP P4: daftar penuh utk pencocokan big-movers
     ag_results = ag_results[:TOP_N]
 
     # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F2: terapkan learning policy per-lane —
@@ -308,10 +268,11 @@ async def _run_scan() -> dict:
         from agents.futures.learning_loader import load_futures_learning, apply_lane_learning
         from agents.futures.weight_updater import get_adaptive_thresholds
         _lw, _lp, _lsc, _lban, learning_status, _lerr = await load_futures_learning()
-        for _res, _agent in (
-            (a1_results, "futures_agent1"), (a2_results, "futures_agent2"),
-            (a3_results, "futures_agent3"), (bm_results, "futures_agent_bigmover"),
-        ):
+        # Veto & skor pembelajaran diterapkan ke agen yang BENAR-BENAR berdagang.
+        # Sampai Fase 8 loop ini hanya menyentuh empat lane lama, sehingga
+        # `banned_by_learning` tak pernah berlaku untuk agen tunggal — auto_trader
+        # memeriksanya, tapi tak ada yang pernah menyalakannya.
+        for _res, _agent in ((ag_results, "futures_agentic"),):
             _thr = get_adaptive_thresholds(_agent).get("auto_threshold", 72)
             apply_lane_learning(_res, _lw, _lp, _lsc, _lban, _thr, learning_status)
         if _lerr:
@@ -324,7 +285,7 @@ async def _run_scan() -> dict:
     # Lets the frontend show WHY a 50%+ gainer didn't open a position, instead of nothing.
     big_movers = _build_big_movers(
         tickers,
-        a1_results_full + a2_results_full + a3_results_full + bm_results_full,
+        ag_results_full,
     )
 
     # PLAN_v15 P3a: publish breadth for auto_trader's fade-day gate
@@ -342,34 +303,6 @@ async def _run_scan() -> dict:
     gen_time = int(time.time())
 
     result = {
-        "agent1": {
-            "results":      a1_results,
-            "total":        len(a1_results),
-            "scanned":      len(tickers),
-            "generated_at": gen_time,
-            "elapsed_sec":  elapsed,
-        },
-        "agent2": {
-            "results":      a2_results,
-            "total":        len(a2_results),
-            "scanned":      len(tickers),
-            "generated_at": gen_time,
-            "elapsed_sec":  elapsed,
-        },
-        "agent3": {
-            "results":      a3_results,
-            "total":        len(a3_results),
-            "scanned":      len(tickers),
-            "generated_at": gen_time,
-            "elapsed_sec":  elapsed,
-        },
-        "agent_bigmover": {
-            "results":      bm_results,
-            "total":        len(bm_results),
-            "scanned":      len(tickers),
-            "generated_at": gen_time,
-            "elapsed_sec":  elapsed,
-        },
         "agentic": {
             "results":      ag_results,
             "total":        len(ag_results),
@@ -383,11 +316,7 @@ async def _run_scan() -> dict:
 
     logger.info(
         "futures_scan_done",
-        agent1=len(a1_results),
-        agent2=len(a2_results),
-        agent3=len(a3_results),
-        agent_bigmover=len(bm_results),
-        agentic=len(ag_results),      # Fase 3 — tanpa ini, agen tunggal tak terlihat di log
+        agentic=len(ag_results),
         big_movers=len(big_movers),
         scanned=len(tickers),
         elapsed_sec=elapsed,
@@ -512,7 +441,7 @@ async def _log_predictive_snapshot(scan_result: dict) -> None:
     now = time.time()
     rows_to_add = []
 
-    for agent_key in ["agent1", "agent2", "agent3", "agent_bigmover"]:
+    for agent_key in ["agentic"]:
         agent_data = scan_result.get(agent_key, {})
         # Log top 10 per agent (don't flood the DB)
         for r in agent_data.get("results", [])[:10]:
@@ -693,10 +622,6 @@ async def run_futures_loop() -> None:
             result = await _run_scan()
 
             # Store results per agent — then signal scanning done (F107)
-            futures_store.set_result("agent1", result["agent1"])
-            futures_store.set_result("agent2", result["agent2"])
-            futures_store.set_result("agent3", result["agent3"])   # Phase 11
-            futures_store.set_result("agent_bigmover", result["agent_bigmover"])   # Phase 2 BM1
             futures_store.set_result("agentic", result["agentic"])                 # Fase 3
             futures_store.set_big_movers(result["big_movers"])     # PLAN-SIGNAL-GAP P4
             futures_store.set_learning_status(result.get("learning_status", "warming"))  # F2
@@ -706,7 +631,7 @@ async def run_futures_loop() -> None:
             try:
                 from app.services.big_mover_logger import log_big_movers
                 from agents.futures.weight_updater import get_adaptive_thresholds
-                a3_thr = get_adaptive_thresholds("futures_agent3").get("auto_threshold", 72)
+                a3_thr = get_adaptive_thresholds("futures_agentic").get("auto_threshold", 72)
                 await log_big_movers(result["big_movers"], market="futures", threshold=a3_thr)
             except Exception as exc:
                 logger.warning("big_mover_log_insert_failed", error=str(exc)[:80])
@@ -736,7 +661,15 @@ async def run_futures_loop() -> None:
                 _hasil_jobs = await _jobs.run_due(
                     lingkup="ringan" if LEARNING_STANDALONE else "semua")
                 if _hasil_jobs["dijalankan"]:
-                    logger.info("futures_jobs_ran", jobs=_hasil_jobs["dijalankan"])
+                    # Durasinya ikut DI SETIAP kali jalan, bukan hanya saat sudah
+                    # terlanjur lambat. Ambang WARNING memberi tahu ketika sesuatu
+                    # sudah buruk; ia tak pernah memberi tahu bahwa perbaikan
+                    # BERHASIL — sukses hanya tampak sebagai hilangnya peringatan,
+                    # dan kesunyian sama saja bentuknya dengan pekerjaan yang tak
+                    # pernah jalan.
+                    logger.info("futures_jobs_ran", jobs=_hasil_jobs["dijalankan"],
+                                total_detik=_hasil_jobs.get("total_detik"),
+                                durasi=_hasil_jobs.get("durasi"))
                 if _jobs.ambil_outcome_baru():
                     _outcomes_baru = True
             except Exception as exc:
@@ -747,9 +680,6 @@ async def run_futures_loop() -> None:
                 "futures_cycle_done",
                 cycle=_cycle_count,
                 agentic=result["agentic"]["total"],   # Fase 3
-                agent1=result["agent1"]["total"],
-                agent2=result["agent2"]["total"],
-                agent3=result["agent3"]["total"],
             )
 
             # D4.1 (PLAN_v3): log top candidates to predictive_log for accuracy measurement
@@ -759,15 +689,22 @@ async def run_futures_loop() -> None:
                 logger.warning("predictive_log_failed", error=str(exc)[:400])
 
             # P2: UNIFIED auto-open — one ranked pool across all lanes, global dedup (BUG-L1)
-            # Phase 2 BM3: include agent_bigmover candidates
+            # Fase 8: hanya agen tunggal yang mengisi kolam
             try:
                 from agents.futures.auto_trader import auto_open_positions
-                all_candidates = (
-                    result["agent1"]["results"]
-                    + result["agent2"]["results"]
-                    + result["agent3"]["results"]
-                    + result["agent_bigmover"]["results"]
-                )
+                # Kandidat agen tunggal WAJIB ikut kolam ini.
+                #
+                # Sampai 9 Sep 2026 baris `result["agentic"]` hanya disimpan ke
+                # store dan dicatat ke log — tak pernah diteruskan ke sini, dan
+                # tak ada jalur pembukaan lain di seluruh repo. Jadi agen tunggal
+                # memindai 290 simbol, memberi skor, memeringkat, menampilkan
+                # 9-18 kandidat tiap siklus, lalu hasilnya berhenti di layar.
+                #
+                # Ia terlihat bekerja sempurna dari luar: saklar menyala, gerbang
+                # risiko terbuka, kandidat berlimpah, nol posisi. Yang hilang
+                # bukan pengaman yang menolak — melainkan sambungan yang tak
+                # pernah ada.
+                all_candidates = result["agentic"]["results"]
                 total_auto = await auto_open_positions(all_candidates)
                 if total_auto:
                     logger.info("auto_positions_opened", opened=total_auto,
@@ -783,7 +720,7 @@ async def run_futures_loop() -> None:
                     await score_shadow_candidates(all_candidates)
                     await log_scan_decisions(
                         all_candidates,
-                        scan_ts=result["agent1"].get("generated_at"),
+                        scan_ts=result["agentic"].get("generated_at"),
                     )
                 except Exception as exc:
                     logger.warning("futures_decision_ledger_failed", error=str(exc)[:200])

@@ -34,17 +34,13 @@ interface Props {
   stats: {
     open: number; closed: number; wins: number; losses: number; winRate: number;
     currentBalance: number; totalPnl$: number;
-    a1Open: FuturesPosition[]; a2Open: FuturesPosition[]; a3Open: FuturesPosition[];
-    bmOpen: FuturesPosition[];
-    a1: { total: number; wins: number; rate: number; pnl$: number };
-    a2: { total: number; wins: number; rate: number; pnl$: number };
-    a3: { total: number; wins: number; rate: number; pnl$: number };
-    bm: { total: number; wins: number; rate: number; pnl$: number };
+    agOpen: FuturesPosition[];
+    ag: { total: number; wins: number; rate: number; pnl$: number };
   };
   autoThreshold:   number | null;
   autoPerAgent:    Record<string, number>;   // PLAN_v12 P2-B4
-  agentFilter:     "all" | "agent1" | "agent2" | "agent3" | "agent_bigmover";
-  setAgentFilter:  (f: "all" | "agent1" | "agent2" | "agent3" | "agent_bigmover") => void;
+  agentFilter:     "all" | AgentKey;
+  setAgentFilter:  (f: "all" | AgentKey) => void;
   countdown:       number;
   lastUpdated:     Date | null;
   loading:         boolean;
@@ -54,11 +50,11 @@ interface Props {
   onWalletChanged: () => void;
 }
 
-type AgentKey = "agent1" | "agent2" | "agent3" | "agent_bigmover";
+type AgentKey = "agentic";
 
 export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
-  equityPoints, stats, agentFilter, setAgentFilter,
-  countdown, lastUpdated, loading, calendarMap, closedTrades, autoPerAgent, onRefresh, onWalletChanged }: Props) {
+  equityPoints, stats,
+  countdown, lastUpdated, loading, calendarMap, closedTrades, onRefresh, onWalletChanged }: Props) {
 
   const [selectedMonth, setSelectedMonth] = useState("all");
 
@@ -69,13 +65,12 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
   (riskDash?.positions ?? []).forEach(rp => { riskMap[rp.id] = rp; });
 
   const AGENTS = [
-    { key: "agent1" as AgentKey,         label: "Pre-Gainer",   color: "blue",   emoji: "🎯", data: stats.a1, positions: stats.a1Open, bg: "bg-blue-50 border-blue-100",     txt: "text-blue-700" },
-    { key: "agent2" as AgentKey,         label: "Accumulation", color: "purple", emoji: "📦", data: stats.a2, positions: stats.a2Open, bg: "bg-purple-50 border-purple-100", txt: "text-purple-700" },
-    { key: "agent3" as AgentKey,         label: "Momentum",     color: "orange", emoji: "🔥", data: stats.a3, positions: stats.a3Open, bg: "bg-orange-50 border-orange-100", txt: "text-orange-700" },
-    { key: "agent_bigmover" as AgentKey, label: "Big Mover",    color: "amber",  emoji: "💥", data: stats.bm, positions: stats.bmOpen, bg: "bg-amber-50 border-amber-100",   txt: "text-amber-700" },
+    // Fase 8: satu agen. Empat lane lama dihapus bersama modulnya setelah
+    // trade era mereka tutup semuanya.
+    { key: "agentic" as AgentKey,        label: "Agentic",      color: "teal",   emoji: "🧠", data: stats.ag, positions: stats.agOpen, bg: "bg-teal-50 border-teal-100",     txt: "text-teal-700" },
   ];
 
-  const hasOpen = stats.a1Open.length > 0 || stats.a2Open.length > 0 || stats.a3Open.length > 0 || stats.bmOpen.length > 0;
+  const hasOpen = AGENTS.some(a => a.positions.length > 0);
 
   return (
     <div className="space-y-5">
@@ -139,87 +134,23 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
       {/* Open positions */}
       {hasOpen && (
         <div>
-          <h3 className="text-sm font-bold text-neutral-700 mb-3 flex items-center gap-2">
+          {/* Satu agen, jadi tak ada lagi yang perlu "dipisah per strategi".
+              Pembungkus per-kategori tinggal satu kotak yang membungkus dirinya
+              sendiri — dan kartunya melebar penuh karena grid-nya per-lane. */}
+          <h3 className="text-sm font-bold text-neutral-700 mb-3">
             🔵 Posisi Terbuka ({stats.open})
-            <span className="text-[10px] text-neutral-400 font-normal">— Dipisah per strategi</span>
-            {agentFilter !== "all" && (
-              <button onClick={() => setAgentFilter("all")} className="text-[10px] text-teal-600 font-semibold underline ml-1">
-                Filter: {agentFilter === "agent1" ? "Pre-Gainer" : agentFilter === "agent2" ? "Accumulation" : agentFilter === "agent3" ? "Momentum" : "Big Mover"} ✕
-              </button>
-            )}
           </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {AGENTS.map(a => {
-              if (agentFilter !== "all" && agentFilter !== a.key) return null;
-              const atRisk =
-                a.key === "agent1" ? riskDash?.agent_breakdown.agent1.at_risk
-                : a.key === "agent2" ? riskDash?.agent_breakdown.agent2.at_risk
-                : a.key === "agent3" ? riskDash?.agent_breakdown.agent3?.at_risk
-                : riskDash?.agent_breakdown.agent_bigmover?.at_risk;
-              return (
-                <div key={a.key} className={`border rounded-2xl overflow-hidden ${a.bg}`}>
-                  <div className="px-4 py-2.5 border-b flex items-center gap-2" style={{ borderColor: "inherit" }}>
-                    <span className={`text-xs font-bold ${a.txt}`}>{a.emoji} {a.label}</span>
-                    <span className="ml-auto text-[10px] text-neutral-500">{a.positions.length} open</span>
-                    {(atRisk ?? 0) > 0 && <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1.5 py-0.5 rounded">⚠️ AT RISK</span>}
-                  </div>
-                  {a.positions.length === 0
-                    ? <div className="text-center py-6 text-neutral-400 text-xs">Tidak ada posisi terbuka</div>
-                    : <div className="p-2 space-y-1.5">{a.positions.map(p => <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />)}</div>
-                  }
-                </div>
-              );
-            })}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
+            {stats.agOpen.map(p => (
+              <OpenPosCard key={p.id} p={p} risk={riskMap[p.id]} riskDollar={riskDollar} />
+            ))}
           </div>
         </div>
       )}
 
-      {/* Agent comparison */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {AGENTS.map(a => {
-          const rateColor = a.data.rate >= 60 ? "text-green-600" : a.data.rate >= 50 ? "text-yellow-600" : a.data.total > 0 ? "text-red-500" : "text-neutral-400";
-          const borderCls =
-            a.color === "blue"   ? "border-blue-200 bg-blue-50"     :
-            a.color === "purple" ? "border-purple-200 bg-purple-50" :
-            a.color === "orange" ? "border-orange-200 bg-orange-50" :
-                                   "border-amber-200 bg-amber-50";
-          const badgeCls =
-            a.color === "blue"   ? "bg-blue-100 text-blue-700"     :
-            a.color === "purple" ? "bg-purple-100 text-purple-700" :
-            a.color === "orange" ? "bg-orange-100 text-orange-700" :
-                                   "bg-amber-100 text-amber-700";
-          const ringCls =
-            a.color === "blue"   ? "ring-blue-400"   :
-            a.color === "purple" ? "ring-purple-400" :
-            a.color === "orange" ? "ring-orange-400" :
-                                   "ring-amber-400";
-          return (
-            <div key={a.key} onClick={() => setAgentFilter(agentFilter === a.key ? "all" : a.key)}
-              className={`rounded-2xl border-2 p-4 cursor-pointer transition-all ${agentFilter === a.key ? `${borderCls} ring-2 ring-offset-1 ${ringCls}` : "border-neutral-200 bg-white hover:border-neutral-300"}`}>
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <span className="text-lg">{a.emoji}</span>
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${badgeCls}`}>{a.label}</span>
-                {/* PLAN_v12 P2-B4: threshold auto-open ADAPTIF per-agent (bukan "≥72" tunggal) */}
-                {autoPerAgent[`futures_${a.key}`] != null && (
-                  <span className="text-[9px] font-semibold text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded"
-                    title="Threshold auto-open adaptif untuk agent ini">
-                    auto ≥{autoPerAgent[`futures_${a.key}`]}
-                  </span>
-                )}
-              </div>
-              {a.data.total > 0 ? (
-                <>
-                  <p className={`text-3xl font-black ${rateColor}`}>{a.data.rate.toFixed(0)}%</p>
-                  <p className="text-[10px] text-neutral-400">{a.data.wins}/{a.data.total} trades closed</p>
-                  <p className={`text-sm font-bold mt-1 ${a.data.pnl$ >= 0 ? "text-green-600" : "text-red-500"}`}>
-                    {a.data.pnl$ >= 0 ? "+" : ""}${a.data.pnl$.toFixed(2)}
-                  </p>
-                </>
-              ) : <p className="text-sm text-neutral-400 mt-1">Belum ada trades</p>}
-            </div>
-          );
-        })}
-      </div>
+      {/* Kartu "perbandingan antar-agen" dibuang: dengan satu agen tak ada yang
+          dibandingkan, dan kartunya hanya mengulang angka yang sudah ada di
+          banner saldo persis di atasnya. */}
 
       {/* Regime + monitor status — chip ringkas (di luar carousel) */}
       {learning && (
@@ -380,10 +311,7 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
             reasonScope="futures"
             styleOptions={[
               { key: "futures",        label: "Semua" },
-              { key: "agent1",         label: "🎯 Pre-Gainer" },
-              { key: "agent2",         label: "📦 Accumulation" },
-              { key: "agent3",         label: "🔥 Momentum" },
-              { key: "agent_bigmover", label: "💥 Big Mover" },
+              { key: "agentic",        label: "🧠 Agentic" },
             ]}
           />
         </div>

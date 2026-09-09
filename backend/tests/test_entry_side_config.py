@@ -38,19 +38,6 @@ def test_tangga_tp_spot_benar_benar_di_refresh_loop():
     assert "refresh_tp_ladder()" in src
 
 
-def test_bawaan_dibekukan_bukan_nilai_berjalan():
-    """`cfg.get(..., NILAI_BERJALAN)` membuat bawaan hanyut mengikuti override
-    sampai titik pulang hilang. Sudah tiga kali jadi bug di proyek ini."""
-    from agents.futures import auto_trader as at, agent_bigmover as bm
-    from agents.opportunity import scheduler as ssch
-    assert at._FROZEN["BIGMOVER_DAILY_BUDGET"] == 6
-    assert ssch._FROZEN["MAX_AUTO_OPENS_PER_DAY"] == 6
-    assert bm._FROZEN_TP == {"TP1_ATR_MULT": 2.0, "TP2_ATR_MULT": 4.0, "TP3_ATR_MULT": 6.0}
-    from agents.opportunity import scanner as sc
-    assert sc._FROZEN_TP == {"BIGMOVER_TP1_PCT": 5.0, "BIGMOVER_TP2_PCT": 12.0,
-                             "BIGMOVER_TP3_PCT": 25.0}
-
-
 @pytest.mark.parametrize("modul,var", [
     ("../agents/futures/scheduler.py", "a_bm._FROZEN_TP"),
     ("../agents/opportunity/scanner.py", "_FROZEN_TP"),
@@ -129,3 +116,13 @@ def test_jeda_lane_bisa_ditala():
     for k in ("lane_pause_hours", "lane_pause_escalation", "lane_pause_max_hours"):
         assert k in src, f"{k} tak pernah ditarik"
     assert "_FROZEN_PAUSE[" in src, "cadangan memakai nilai berjalan"
+
+
+# ── Fase 8 ───────────────────────────────────────────────────────────────────
+# Tes untuk lane lama (pre_gainer / accumulation / momentum / bigmover) dibuang
+# bersama modul agennya: `agent1.py`, `agent2.py`, `agent3.py`,
+# `agent_bigmover.py` dihapus setelah trade era mereka tutup semuanya.
+#
+# Yang TIDAK dibuang: tes yang menjaga perilaku modul yang masih hidup. Riwayat
+# 112 trade lane lama juga tetap utuh di DB — `FUTURES_AGENTS` masih memuat nama
+# mereka supaya endpoint riwayat bisa membacanya.

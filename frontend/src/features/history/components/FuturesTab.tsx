@@ -33,7 +33,7 @@ export function FuturesTab() {
   const [riskDash,     setRiskDash]     = useState<RiskDashboard | null>(null);
   const [loading,      setLoading]      = useState(true);
   const [lastUpdated,  setLastUpdated]  = useState<Date | null>(null);
-  const [agentFilter,  setAgentFilter]  = useState<"all" | "agent1" | "agent2" | "agent3" | "agent_bigmover">("all");
+  const [agentFilter,  setAgentFilter]  = useState<"all" | "agentic">("all");
   const [countdown,    setCountdown]    = useState(REFRESH_MS / 1000);
   const [autoThreshold, setAutoThreshold] = useState<number | null>(null);
   const [autoPerAgent,  setAutoPerAgent]  = useState<Record<string, number>>({});   // PLAN_v12 P2-B4
@@ -140,23 +140,46 @@ export function FuturesTab() {
   const riskDollar      = startingBalance * RISK_PCT;
 
   const stats = useMemo(() => {
-    const open   = positions.filter(p => p.status === "open");
-    const closed = positions.filter(p => p.status === "tp" || p.status === "sl");
+    // Statistik kartu Overview dihitung dari ERA YANG SAMA dengan saldonya.
+    //
+    // Sampai 9 Sep 2026 kartu ini menampilkan saldo era berjalan ($1000) tapi
+    // P&L, jumlah trade, dan win-rate dari SELURUH riwayat: "$1000.00" bersanding
+    // dengan "−$145,47", "110 Closed", dan "WR 5%". Ketiganya milik lane lama yang
+    // sudah dihapus, dan tak satu pun keterangan menjelaskan itu — pembacanya
+    // wajar menyimpulkan salah satu angkanya bug.
+    //
+    // Yang benar bukan memilih salah satu, melainkan menyamakan lingkupnya.
+    // Riwayat lane lama tidak hilang: ia tetap utuh di tabel riwayat di bawah.
+    const eraIni = positions.filter(p => p.agent === "futures_agentic");
+    const open   = eraIni.filter(p => p.status === "open");
+    const closed = eraIni.filter(p => p.status === "tp" || p.status === "sl");
     const wins   = closed.filter(isRealWin);
     const losses = closed.filter(p => !isRealWin(p));
     const totalPnl$ = closed.reduce((acc, p) => acc + (tradePnlDollar(p, riskDollar) ?? 0), 0);
     // OV2: paper balance only — never use real Binance balance (futBal) for paper simulation
-    const currentBalance = learning?.balance?.current ?? (startingBalance + totalPnl$);
+    //
+    // Saldo diambil dari SERVER, bukan dijumlah ulang di browser.
+    //
+    // Cara lama (`startingBalance + totalPnl$`) menjumlahkan P&L seluruh trade
+    // yang kebetulan sedang dimuat halaman ini — sepanjang masa. Monitor membaca
+    // `portfolio.current_balance` dari server, yang menghormati epoch risiko.
+    // Selama keduanya kebetulan sama, tak ada yang sadar ada DUA perhitungan
+    // untuk satu angka; begitu dompet kertas di-reset 9 Sep 2026, Overview
+    // menampilkan $854,39 sementara Monitor $997,81 di layar yang sama.
+    //
+    // Satu sumber menghapus kelas kesalahan ini, bukan sekadar kejadiannya.
+    const currentBalance =
+      riskDash?.portfolio?.current_balance
+      ?? learning?.balance?.current
+      ?? (startingBalance + totalPnl$);
     const winRate = closed.length > 0 ? (wins.length / closed.length) * 100 : 0;
 
-    const a1Closed = closed.filter(p => p.agent === "futures_agent1");
-    const a2Closed = closed.filter(p => p.agent === "futures_agent2");
-    const a3Closed = closed.filter(p => p.agent === "futures_agent3");
-    const bmClosed = closed.filter(p => p.agent === "futures_agent_bigmover");
-    const a1Open   = open.filter(p => p.agent === "futures_agent1");
-    const a2Open   = open.filter(p => p.agent === "futures_agent2");
-    const a3Open   = open.filter(p => p.agent === "futures_agent3");
-    const bmOpen   = open.filter(p => p.agent === "futures_agent_bigmover");
+    // Agen tunggal Fase 3. Tanpa baris ini posisinya ikut terhitung di TOTAL
+    // (margin, notional, jumlah open) tapi tak muncul di satu pun kartu lane —
+    // persis yang terlihat di layar: "Total Margin $184" sementara keempat
+    // kartu lane melaporkan "Open: 0, Margin: $0".
+    const agClosed = closed.filter(p => p.agent === "futures_agentic");
+    const agOpen   = open.filter(p => p.agent === "futures_agentic");
 
     // OV3: per-agent P&L in dollars
     const pnlSum = (arr: FuturesPosition[]) => arr.reduce((s, p) => s + (tradePnlDollar(p, riskDollar) ?? 0), 0);
@@ -164,13 +187,10 @@ export function FuturesTab() {
     return {
       open: open.length, closed: closed.length, wins: wins.length, losses: losses.length,
       winRate, currentBalance, totalPnl$,
-      a1Open, a2Open, a3Open, bmOpen,
-      a1: { total: a1Closed.length, wins: a1Closed.filter(isRealWin).length, rate: a1Closed.length > 0 ? a1Closed.filter(isRealWin).length / a1Closed.length * 100 : 0, pnl$: pnlSum(a1Closed) },
-      a2: { total: a2Closed.length, wins: a2Closed.filter(isRealWin).length, rate: a2Closed.length > 0 ? a2Closed.filter(isRealWin).length / a2Closed.length * 100 : 0, pnl$: pnlSum(a2Closed) },
-      a3: { total: a3Closed.length, wins: a3Closed.filter(isRealWin).length, rate: a3Closed.length > 0 ? a3Closed.filter(isRealWin).length / a3Closed.length * 100 : 0, pnl$: pnlSum(a3Closed) },
-      bm: { total: bmClosed.length, wins: bmClosed.filter(isRealWin).length, rate: bmClosed.length > 0 ? bmClosed.filter(isRealWin).length / bmClosed.length * 100 : 0, pnl$: pnlSum(bmClosed) },
+      agOpen,
+      ag: { total: agClosed.length, wins: agClosed.filter(isRealWin).length, rate: agClosed.length > 0 ? agClosed.filter(isRealWin).length / agClosed.length * 100 : 0, pnl$: pnlSum(agClosed) },
     };
-  }, [positions, learning, startingBalance, riskDollar]);
+  }, [positions, learning, startingBalance, riskDollar, riskDash]);
 
   // OV1: equity chart uses same set as win rate (tp|sl only) — expired excluded from both
   const closedTrades = useMemo(

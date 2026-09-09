@@ -46,61 +46,12 @@ def test_kejadian_dicatat_bukan_dibuang_diam_diam():
 
 # ── 2. tangga TP SHORT tak boleh menembus nol ────────────────────────────────
 
-def test_target_short_tak_pernah_negatif():
-    """SHORT untung maksimum 100% (harga ke nol). Target di bawah nol MUSTAHIL
-    tersentuh — posisi hanya bisa keluar lewat SL.
-
-    Terukur 11 Agu: TUTUSDT ber-ATR 26,67% -> tp2 = -0,0076, tp3 = -0,0685.
-    """
-    from agents.futures import agent_bigmover as bm
-    assert 0.0 < bm.SHORT_TP_MAX_DROP_FRAC < 1.0
-    harga, atr = 0.11412, 0.11412 * 0.2667      # kasus TUTUSDT yang nyata
-    lantai = harga * (1 - bm.SHORT_TP_MAX_DROP_FRAC)
-    for mult in (bm.TP1_ATR_MULT, bm.TP2_ATR_MULT, bm.TP3_ATR_MULT):
-        assert max(harga - atr * mult, lantai) > 0, f"target masih negatif di {mult}x"
-
-
-def test_lantai_tak_menyentuh_koin_normal():
-    """Lantai ini HANYA boleh menggigit pada kasus yang sudah rusak. Kalau ia
-    ikut memotong target koin biasa, ia diam-diam mengubah strategi."""
-    from agents.futures import agent_bigmover as bm
-    harga, atr = 100.0, 3.0                      # ATR 3% — koin lazim
-    lantai = harga * (1 - bm.SHORT_TP_MAX_DROP_FRAC)
-    for mult in (bm.TP1_ATR_MULT, bm.TP2_ATR_MULT, bm.TP3_ATR_MULT):
-        mentah = harga - atr * mult
-        assert mentah > lantai, "lantai menggigit koin normal — strategi berubah"
-
-
-def test_lantai_benar_benar_diterapkan_di_kode():
-    from agents.futures import agent_bigmover as bm
-    src = inspect.getsource(bm)
-    assert "_lantai_short" in src
-    for tp in ("tp1", "tp2", "tp3"):
-        assert f"{tp} = max({tp}, _lantai_short)" in src, f"{tp} tak diberi lantai"
-
-
 def test_lantai_short_bisa_ditala_lewat_config():
     """Konstanta modul tanpa kunci config = tombol yang tak bisa diputar. Kunci
     ini ditarik scheduler tiap siklus, sama seperti MIN_SCORE."""
     src = pathlib.Path("../agents/futures/scheduler.py").read_text(encoding="utf-8")
     assert "bigmover_short_tp_max_drop_frac" in src, "override tak pernah ditarik"
     assert "a_bm.SHORT_TP_MAX_DROP_FRAC =" in src
-
-
-def test_bawaan_lantai_short_dibekukan():
-    """Cadangan `cfg.get()` HARUS nilai beku, bukan nilai modul yang sudah
-    ditimpa siklus sebelumnya — kalau tidak bawaan hanyut mengikuti override.
-    Pola ini sudah dua kali jadi bug di proyek ini."""
-    from agents.futures import agent_bigmover as bm
-    asli = bm.SHORT_TP_MAX_DROP_FRAC
-    try:
-        bm.SHORT_TP_MAX_DROP_FRAC = 0.5          # tiruan override
-        assert bm._FROZEN_SHORT_TP_MAX_DROP_FRAC == 0.90
-    finally:
-        bm.SHORT_TP_MAX_DROP_FRAC = asli
-    src = pathlib.Path("../agents/futures/scheduler.py").read_text(encoding="utf-8")
-    assert "a_bm._FROZEN_SHORT_TP_MAX_DROP_FRAC" in src, \
-        "scheduler memakai nilai modul sbg cadangan — bawaan akan hanyut"
 
 
 def test_baris_config_lantai_short_tersedia():
@@ -168,3 +119,13 @@ def test_watchdog_memaksa_probe_bukan_menunggu_cooldown():
     punya iramanya sendiri, jadi menunggu cooldown akan melewatkan giliran."""
     from app.services import binance_urls as bu
     assert "refresh_spot_host(force=True)" in inspect.getsource(bu.run_host_watchdog)
+
+
+# ── Fase 8 ───────────────────────────────────────────────────────────────────
+# Tes untuk lane lama (pre_gainer / accumulation / momentum / bigmover) dibuang
+# bersama modul agennya: `agent1.py`, `agent2.py`, `agent3.py`,
+# `agent_bigmover.py` dihapus setelah trade era mereka tutup semuanya.
+#
+# Yang TIDAK dibuang: tes yang menjaga perilaku modul yang masih hidup. Riwayat
+# 112 trade lane lama juga tetap utuh di DB — `FUTURES_AGENTS` masih memuat nama
+# mereka supaya endpoint riwayat bisa membacanya.

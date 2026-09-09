@@ -130,27 +130,20 @@ async def _futures_config() -> dict:
     from agents.futures import monitor_config as fmcfg
     from agents.futures import auto_trader as at
     from agents.futures import risk_gate as rg
-    from agents.futures import agent1, agent2, agent3, agent_bigmover
+    from agents.futures import agentic as fag
     from agents.futures import weight_updater as fwu
     from agents.futures.utils import MAX_SL_MARGIN_PCT_BY_LANE
     from agents.shared.config_reader import cfg
 
-    # pre_gainer/accumulation score thresholds are adaptive (F69) — read the LIVE
-    # value from weight_updater, not a hardcoded default. Falls back to 52/72
-    # (weight_updater's own default) when no adaptive data has accumulated yet.
-    t1 = fwu.get_adaptive_thresholds(agent1.AGENT_NAME)
-    t2 = fwu.get_adaptive_thresholds(agent2.AGENT_NAME)
+    # Ambang agen tunggal — dibaca HIDUP dari weight_updater, bukan angka mati.
+    t_ag = fwu.get_adaptive_thresholds(fag.AGENT_NAME)
 
     # PLAN_v5 Group C fix: read through cfg.get() (queries DB directly) rather
     # than the module attribute — backend and the `agents` container are
     # separate processes, so a `global` reassignment in the agents process
     # never reaches this one. See _spot_config() for the full rationale.
-    bigmover_min_score  = await cfg.get("futures", "bigmover_min_score", agent_bigmover.MIN_SCORE)
+    agentic_min_score   = await cfg.get("futures", "agentic_min_score", fag.get("agentic_min_score"))
     max_auto_positions  = await cfg.get("futures", "max_auto_positions", at.MAX_AUTO_POSITIONS)
-    lane_quota_momentum = await cfg.get("futures", "lane_quota_momentum", at.LANE_QUOTAS["momentum"])
-    lane_quota_pregain  = await cfg.get("futures", "lane_quota_pre_gainer", at.LANE_QUOTAS["pre_gainer"])
-    lane_quota_accum    = await cfg.get("futures", "lane_quota_accumulation", at.LANE_QUOTAS["accumulation"])
-    max_bigmover_pos    = await cfg.get("futures", "max_bigmover_positions", at.MAX_BIGMOVER_POSITIONS)
     cooldown_hours      = await cfg.get("futures", "cooldown_hours", at.FUTURES_COOLDOWN_HOURS)
     max_wallet_margin   = await cfg.get("futures", "max_wallet_margin_pct", at.MAX_WALLET_MARGIN_PCT)
     lane_cap_accum      = await cfg.get("futures", "lane_cap_accumulation", MAX_SL_MARGIN_PCT_BY_LANE["accumulation"])
@@ -164,8 +157,6 @@ async def _futures_config() -> dict:
     daily_loss_limit    = await cfg.get("futures", "daily_loss_limit_pct", rg.DAILY_LOSS_LIMIT_PCT)
     daily_profit_lock   = await cfg.get("futures", "daily_profit_lock_pct", rg.DAILY_PROFIT_LOCK_PCT)
     lane_consec_sl      = await cfg.get("futures", "lane_consec_sl_pause", rg.CONSEC_SL_LANE_LIMIT)
-    bm_daily_sl_stop    = await cfg.get("futures", "bigmover_daily_sl_stop", at.BIGMOVER_DAILY_SL_STOP)
-    weekend_size_mult   = await cfg.get("futures", "weekend_size_mult", agent_bigmover.WEEKEND_SIZE_MULT)
     max_same_direction  = await cfg.get("futures", "max_same_direction", at.MAX_SAME_DIRECTION)
     failfast_atr_mult   = await cfg.get("futures", "failfast_atr_mult", fmcfg.FAILFAST_ATR_MULT)
     max_age_days        = await cfg.get("futures", "monitor_max_age_days", fmcfg.MAX_AGE_DAYS)
@@ -176,28 +167,22 @@ async def _futures_config() -> dict:
         "monitor_interval_sec": fmon.INTERVAL_SEC,
         "universe_cap": fsched.UNIVERSE_CAP,
         "big_mover_threshold_pct": fsched.BIG_MOVER_THRESHOLD,
+        # Fase 8: satu agen. Empat lane lama dihapus bersama modulnya setelah
+        # trade era mereka tutup semuanya; riwayatnya tetap terbaca lewat
+        # `FUTURES_AGENTS` yang masih memuat namanya.
         "agents": {
-            "pre_gainer":   {"min_score": t1["min_score"], "auto_score": t1["auto_threshold"], "min_rr": agent1.MIN_RR, "adaptive": True},
-            "accumulation": {"min_score": t2["min_score"], "auto_score": t2["auto_threshold"], "min_rr": 3.0, "adaptive": True},
-            "momentum":     {"min_score": agent3.MIN_SCORE, "min_rr": agent3.MIN_RR, "leverage_max": agent3._MAX_LEV, "adaptive": False},
-            "bigmover":     {
-                "min_score": bigmover_min_score,
-                "min_rr": agent_bigmover.MIN_RR,
-                "leverage_fixed": agent_bigmover.FIXED_LEVERAGE,
-                "risk_pct": agent_bigmover.RISK_PCT_DEFAULT,
-                "min_change_24h_pct": agent_bigmover.MIN_CHANGE_24H,
-                "max_change_24h_pct": agent_bigmover.MAX_CHANGE_24H,
-                "adaptive": False,
+            "agentic": {
+                "min_score":   agentic_min_score,
+                "auto_score":  t_ag["auto_threshold"],
+                "adaptive":    True,
             },
         },
         "auto_trader": {
             "max_positions_global": int(max_auto_positions),
-            "lane_quotas": {
-                "momentum":     int(lane_quota_momentum),
-                "pre_gainer":   int(lane_quota_pregain),
-                "accumulation": int(lane_quota_accum),
-            },
-            "max_bigmover_positions": int(max_bigmover_pos),
+            # `lane_quotas` sengaja KOSONG, bukan dihapus: `useLaneStatus` di FE
+            # membacanya untuk memutuskan lane mana yang disembunyikan, dan
+            # menghapus kuncinya membuat hook itu jatuh ke "tak ada yang mati".
+            "lane_quotas": {},
             "cooldown_hours":        cooldown_hours,
             "max_wallet_margin_pct": max_wallet_margin,
             "funding_gate_long_pct":  at.MAX_LONG_FUNDING_PCT,
@@ -229,9 +214,7 @@ async def _futures_config() -> dict:
             "profit_giveback_floor_pct": rg.PROFIT_GIVEBACK_FLOOR_PCT,
             "lane_consec_sl_pause":      int(lane_consec_sl),
             "consec_sl_window_h":        rg.CONSEC_SL_WINDOW_H,
-            "bigmover_daily_sl_stop":    int(bm_daily_sl_stop),
             "bigmover_daily_budget":     at.BIGMOVER_DAILY_BUDGET,
-            "weekend_size_mult":         weekend_size_mult,
             "max_same_direction":        int(max_same_direction),
             "failfast_atr_mult":         failfast_atr_mult,
             "breadth_fade_frac":         at.BREADTH_FADE_FRAC,

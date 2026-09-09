@@ -48,9 +48,8 @@ from typing import Optional
 
 import structlog
 
-from .agent1 import _rsi, _round_price
 from .data import FuturesData
-from .utils import _atr, cap_leverage_by_lane
+from .utils import _atr, _round_price, _rsi, cap_leverage_by_lane
 
 logger = structlog.get_logger(__name__)
 

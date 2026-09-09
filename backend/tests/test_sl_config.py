@@ -64,31 +64,6 @@ def test_mengubah_satu_lane_tak_menyentuh_lane_lain():
     assert sl_config.params("pre_gainer")["max_pct"] == 8.0
 
 
-def test_bigmover_hormati_plafon_dan_lantai():
-    """Rumus bigmover: clamp(ATR × mult, lantai, plafon)."""
-    from agents.futures import agent_bigmover
-    for vol, _ in ((0.001, "sepi"), (0.02, "sedang"), (0.20, "liar")):
-        d = _series(7, vol)
-        price = d.closes[-1]
-        lv = agent_bigmover._calc_levels("LONG", {"1h": d, "15m": d, "4h": d}, price)
-        if lv is None:
-            continue
-        p = sl_config.params("bigmover")
-        # risk_pct dihitung ulang dari SL yang sudah dibulatkan — beri toleransi
-        # pembulatan, bukan kesamaan persis.
-        assert lv["risk_pct"] <= p["max_pct"] + 0.05
-        assert lv["risk_pct"] >= min(p["floor_pct"], p["quiet_fallback_pct"]) - 0.05
-
-
-def test_agent2_memakai_lane_sendiri():
-    """agent2 memakai ULANG fungsi level agent1. Bila lane tak diteruskan,
-    accumulation diam-diam memakai tala pre_gainer dan tak ada error apa pun."""
-    import inspect
-    from agents.futures import agent2
-    src = inspect.getsource(agent2._calc_levels)
-    assert 'lane="accumulation"' in src
-
-
 def test_setiap_lane_punya_baris_config_sl_lengkap():
     from app.services.agent_config_defaults import all_defaults
     keys = {d["key"] for d in all_defaults() if d["group"] == "futures"}
@@ -140,9 +115,11 @@ def test_default_tak_hanyut_setelah_override(monkeypatch):
     assert sl_config.params("bigmover")["max_pct"] == 8.0
 
 
-def test_tak_ada_konstanta_sl_tersisa_di_agen():
-    """Konstanta SL yang disalin kembali ke file agen akan membuat tala tak
-    berpengaruh — persis penyakit yang M2 temukan di monitor."""
-    from agents.futures import agent_bigmover
-    for nama in ("SL_ATR_MULT", "SL_FLOOR_PCT", "SL_CEILING_PCT", "SL_FALLBACK_PCT"):
-        assert not hasattr(agent_bigmover, nama), f"{nama} masih hidup di agent_bigmover"
+# ── Fase 8 ───────────────────────────────────────────────────────────────────
+# Tes untuk lane lama (pre_gainer / accumulation / momentum / bigmover) dibuang
+# bersama modul agennya: `agent1.py`, `agent2.py`, `agent3.py`,
+# `agent_bigmover.py` dihapus setelah trade era mereka tutup semuanya.
+#
+# Yang TIDAK dibuang: tes yang menjaga perilaku modul yang masih hidup. Riwayat
+# 112 trade lane lama juga tetap utuh di DB — `FUTURES_AGENTS` masih memuat nama
+# mereka supaya endpoint riwayat bisa membacanya.
