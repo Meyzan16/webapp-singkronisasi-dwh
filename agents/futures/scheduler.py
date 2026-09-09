@@ -726,7 +726,15 @@ async def run_futures_loop() -> None:
             # disimpan di DB. Lihat agents/futures/jobs.py.
             try:
                 from agents.futures import jobs as _jobs
-                _hasil_jobs = await _jobs.run_due()
+                from agents.learning.mode import LEARNING_STANDALONE
+
+                # Kerja belajar berat (backtest mingguan, kalibrasi bulanan)
+                # BUKAN milik proses ini. Terukur 8 Sep 2026: dijalankan di sini
+                # ia membekukan event loop lima menit penuh — denyut `ws_feed`
+                # sepuluh detik pun berhenti. Proses `agents.learning` yang
+                # menjalankannya; lihat catatan `Pekerjaan.berat`.
+                _hasil_jobs = await _jobs.run_due(
+                    lingkup="ringan" if LEARNING_STANDALONE else "semua")
                 if _hasil_jobs["dijalankan"]:
                     logger.info("futures_jobs_ran", jobs=_hasil_jobs["dijalankan"])
                 if _jobs.ambil_outcome_baru():

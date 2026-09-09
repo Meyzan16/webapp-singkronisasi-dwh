@@ -84,6 +84,29 @@ async def _run_futures() -> dict:
     return out
 
 
+async def _run_jobs_berat() -> dict:
+    """Jalankan pekerjaan belajar berkala yang berat — di SINI, bukan di backend.
+
+    Jadwal dan catatan waktu jalannya tetap satu-satunya sumber di
+    `agents.futures.jobs`; yang pindah hanyalah proses yang mengeksekusinya.
+    Memisahkan jadwalnya juga akan berarti dua kebenaran tentang "kapan terakhir
+    jalan", dan kebenaran kedua itu pasti akan menyimpang diam-diam.
+
+    Satu pekerjaan per siklus. Pada jalan pertama `_last_run` masih kosong,
+    jadi ketiganya terhitung terlambat sekaligus — menjalankan semuanya
+    berbarengan persis yang membekukan backend 8 Sep 2026. Yang belum kebagian
+    tidak hilang: ia tetap terlambat dan diambil siklus berikutnya.
+    """
+    from agents.futures import jobs as _jobs
+
+    hasil = await _jobs.run_due(lingkup="berat", maks=1)
+    if hasil["dijalankan"]:
+        logger.info("learning_jobs_ran", jobs=hasil["dijalankan"])
+    if hasil["gagal"]:
+        logger.warning("learning_jobs_failed", jobs=hasil["gagal"])
+    return hasil
+
+
 async def run_learning_loop() -> None:
     """Loop utama proses pembelajaran."""
     from app.database import is_db_available
@@ -105,6 +128,7 @@ async def run_learning_loop() -> None:
                 # dan melipatgandakan puncak memori atas ledger ratusan ribu baris.
                 _state["last_spot"] = await _run_spot()
                 _state["last_futures"] = await _run_futures()
+                _state["last_jobs"] = await _run_jobs_berat()
                 _state["last_error"] = None
             except asyncio.CancelledError:
                 raise

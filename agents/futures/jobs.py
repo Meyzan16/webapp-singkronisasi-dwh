@@ -56,6 +56,11 @@ _SETTINGS_KEY = "futures_jobs_last_run"
 MENIT = 60.0
 JAM = 3600.0
 
+#: Di atas ini sebuah pekerjaan dianggap MENAHAN loop scan, bukan sekadar lambat.
+#: Siklus scan berjadwal 2 menit; satu pekerjaan yang memakan 30 detik sudah
+#: memakan seperempat jatah siklus, dan selama itu tak ada harga yang dinilai.
+AMBANG_LAMBAT_DETIK = 30.0
+
 
 # ── Jadwal ────────────────────────────────────────────────────────────────────
 
@@ -105,6 +110,19 @@ class Pekerjaan:
     #: Pekerjaan penting yang kegagalannya wajib WARNING, bukan sekadar info.
     kritis: bool = False
     catatan: str = ""
+    #: Kerja BELAJAR berat — milik proses `agents.learning`, bukan backend.
+    #:
+    #: Terukur 8 Sep 2026: ketiga pekerjaan bertanda ini dipanggil dari dalam
+    #: proses backend dan membekukan event loop-nya LIMA MENIT penuh — bahkan
+    #: denyut `ws_feed` sepuluh detik ikut berhenti. Sebabnya sama persis dengan
+    #: temuan 4 Sep yang melahirkan proses pembelajaran terpisah: kerja Python
+    #: murni atas ledger ratusan ribu baris tak pernah benar-benar paralel
+    #: dengan event loop di proses yang sama, karena GIL.
+    #:
+    #: `scheduler.py` dan `opportunity/scheduler.py` sudah menjaga
+    #: LEARNING_STANDALONE sebelum menyentuh kerja belajar. Modul ini dulu tidak
+    #: — jadi ia menerobos pemisahan proses yang justru dibuat untuk ini.
+    berat: bool = False
 
 
 # ── Ingatan waktu jalan terakhir ──────────────────────────────────────────────
@@ -164,7 +182,30 @@ async def simpan_state() -> None:
             row = (await session.execute(
                 select(AppSettings).where(AppSettings.key == _SETTINGS_KEY)
             )).scalar_one_or_none()
-            payload = json.dumps({k: round(v, 1) for k, v in _last_run.items()})
+
+            # Baris ini ditulis DUA proses: backend (pekerjaan ringan) dan
+            # `agents.learning` (pekerjaan berat). Menulis `_last_run` apa adanya
+            # berarti proses yang menyimpan belakangan MENGHAPUS catatan proses
+            # lain — dan pekerjaan yang catatannya hilang akan dianggap terlambat
+            # lalu jalan lagi. Untuk backtest mingguan atas ratusan ribu baris,
+            # "jalan lagi" bukan gangguan kecil.
+            #
+            # Jadi gabungkan, dan ambil yang TERBARU per pekerjaan: satu proses
+            # tak pernah bisa memundurkan jam milik proses lain.
+            tergabung: dict[str, float] = {}
+            if row and row.value:
+                try:
+                    lama = json.loads(row.value)
+                    if isinstance(lama, dict):
+                        tergabung.update({k: float(v) for k, v in lama.items()
+                                          if isinstance(v, (int, float))})
+                except (TypeError, ValueError):
+                    pass          # baris rusak bukan alasan kehilangan simpanan
+            for k, v in _last_run.items():
+                tergabung[k] = max(v, tergabung.get(k, 0.0))
+            _last_run.update(tergabung)
+
+            payload = json.dumps({k: round(v, 1) for k, v in tergabung.items()})
             if row is None:
                 session.add(AppSettings(key=_SETTINGS_KEY, value=payload,
                                         updated_at=time.time()))
@@ -202,21 +243,41 @@ def status() -> dict:
 
 # ── Pelaksana ─────────────────────────────────────────────────────────────────
 
-async def run_due(sekarang: Optional[float] = None) -> dict:
-    """Jalankan semua pekerjaan yang sudah terlambat. Dipanggil sekali/siklus.
+async def run_due(sekarang: Optional[float] = None, *,
+                  lingkup: str = "semua", maks: Optional[int] = None) -> dict:
+    """Jalankan pekerjaan yang sudah terlambat. Dipanggil sekali/siklus.
 
     Kegagalan satu pekerjaan TIDAK menghentikan yang lain, dan TIDAK menandainya
     sudah jalan — supaya ia dicoba lagi siklus berikutnya alih-alih terlewat
     sampai jadwal berikutnya.
+
+    `lingkup` memilih pekerjaan milik siapa:
+      "ringan" — backend: semuanya KECUALI kerja belajar berat
+      "berat"  — proses `agents.learning`: HANYA kerja belajar berat
+      "semua"  — mode embedded (LEARNING_STANDALONE mati), perilaku lama
+
+    `maks` membatasi berapa yang boleh jalan dalam satu panggilan. Ini bukan
+    hiasan: `_last_run` kosong pada jalan PERTAMA, jadi setiap pekerjaan
+    terhitung terlambat sekaligus. Pada 8 Sep 2026 itu menyalakan tiga backtest
+    berat berbarengan sesudah satu restart biasa. Sisanya tidak hilang — hanya
+    menunggu siklus berikutnya, dan `status()` tetap memperlihatkannya terlambat.
     """
     await muat_state()
     now = time.time() if sekarang is None else sekarang
     dijalankan: list[str] = []
     gagal: list[str] = []
+    durasi: dict[str, float] = {}
 
     for p in daftar_pekerjaan():
+        if lingkup == "ringan" and p.berat:
+            continue
+        if lingkup == "berat" and not p.berat:
+            continue
+        if maks is not None and len(dijalankan) >= maks:
+            break
         if not terlambat(p, now):
             continue
+        mulai = time.monotonic()
         try:
             await p.jalankan()
             _last_run[p.nama] = now
@@ -225,10 +286,28 @@ async def run_due(sekarang: Optional[float] = None) -> dict:
             gagal.append(p.nama)
             (logger.warning if p.kritis else logger.info)(
                 "futures_job_failed", job=p.nama, error=str(exc)[:200])
+        finally:
+            # Lama tiap pekerjaan DICATAT, bukan disimpulkan.
+            #
+            # Terukur 8 Sep 2026: `run_due()` menahan loop scan 19 MENIT dan
+            # meninggalkan NOL baris log — jadi mustahil tahu pekerjaan mana
+            # penyebabnya tanpa menjalankan ulang satu per satu. Yang berjalan
+            # di sini dipanggil dari dalam loop scan, jadi setiap detiknya
+            # adalah detik saat agen tak menilai harga.
+            durasi[p.nama] = round(time.monotonic() - mulai, 2)
+            if durasi[p.nama] >= AMBANG_LAMBAT_DETIK:
+                logger.warning("futures_job_lambat", job=p.nama,
+                               durasi_detik=durasi[p.nama],
+                               catatan=p.catatan)
 
     if dijalankan:
         await simpan_state()
-    return {"dijalankan": dijalankan, "gagal": gagal}
+    total = round(sum(durasi.values()), 2)
+    if total >= AMBANG_LAMBAT_DETIK:
+        logger.warning("futures_jobs_menahan_loop", total_detik=total,
+                       rincian=durasi)
+    return {"dijalankan": dijalankan, "gagal": gagal, "durasi": durasi,
+            "total_detik": total}
 
 
 # ── Daftar pekerjaan ──────────────────────────────────────────────────────────
@@ -289,6 +368,7 @@ def daftar_pekerjaan() -> list[Pekerjaan]:
         ),
         Pekerjaan(
             nama="weekly_backtest",
+            berat=True,
             jadwal=Jadwal(weekly_on=6, weekly_hour=0),    # Minggu 00:00 UTC
             kritis=True,
             catatan="Replay big_mover_log mingguan",
@@ -296,6 +376,7 @@ def daftar_pekerjaan() -> list[Pekerjaan]:
         ),
         Pekerjaan(
             nama="weekly_signal_review",
+            berat=True,
             jadwal=Jadwal(weekly_on=0, weekly_hour=0),    # Senin 00:00 UTC
             kritis=True,
             catatan="Tinjau sinyal mingguan + sesuaikan bobot",
@@ -303,6 +384,7 @@ def daftar_pekerjaan() -> list[Pekerjaan]:
         ),
         Pekerjaan(
             nama="monthly_calibration",
+            berat=True,
             jadwal=Jadwal(monthly_day=1, monthly_hour=0),
             kritis=True,
             catatan="Kalibrasi ambang adaptif bulanan",

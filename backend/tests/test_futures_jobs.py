@@ -193,3 +193,132 @@ def test_status_melaporkan_semua_pekerjaan():
     assert set(st) == {p.nama for p in J.daftar_pekerjaan()}
     for v in st.values():
         assert set(v) == {"terakhir_jalan", "umur_jam", "terlambat", "catatan"}
+
+
+# ── Lingkup proses: kerja berat BUKAN milik backend ──────────────────────────
+
+def test_tiga_pekerjaan_belajar_ditandai_berat():
+    """Regresi 8 Sep 2026. Ketiganya dipanggil dari dalam proses backend dan
+    membekukan event loop-nya lima menit — denyut ws_feed pun berhenti."""
+    berat = {p.nama for p in J.daftar_pekerjaan() if p.berat}
+    assert berat == {"weekly_backtest", "weekly_signal_review", "monthly_calibration"}
+
+
+def _pekerjaan_uji(jalan: list[str]):
+    async def ringan():
+        jalan.append("ringan")
+
+    async def berat_a():
+        jalan.append("berat_a")
+
+    async def berat_b():
+        jalan.append("berat_b")
+
+    return [
+        J.Pekerjaan(nama="ringan", jadwal=J.Jadwal(every_sec=60), jalankan=ringan),
+        J.Pekerjaan(nama="berat_a", jadwal=J.Jadwal(every_sec=60), jalankan=berat_a,
+                    berat=True),
+        J.Pekerjaan(nama="berat_b", jadwal=J.Jadwal(every_sec=60), jalankan=berat_b,
+                    berat=True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lingkup_ringan_tak_menyentuh_kerja_berat(monkeypatch):
+    jalan: list[str] = []
+    monkeypatch.setattr(J, "daftar_pekerjaan", lambda: _pekerjaan_uji(jalan))
+    monkeypatch.setattr(J, "simpan_state", lambda: _noop())
+
+    hasil = await J.run_due(ts(2026, 9, 8, 12), lingkup="ringan")
+    assert jalan == ["ringan"]
+    assert hasil["dijalankan"] == ["ringan"]
+
+
+@pytest.mark.asyncio
+async def test_lingkup_berat_hanya_kerja_berat(monkeypatch):
+    jalan: list[str] = []
+    monkeypatch.setattr(J, "daftar_pekerjaan", lambda: _pekerjaan_uji(jalan))
+    monkeypatch.setattr(J, "simpan_state", lambda: _noop())
+
+    await J.run_due(ts(2026, 9, 8, 12), lingkup="berat")
+    assert "ringan" not in jalan
+
+
+@pytest.mark.asyncio
+async def test_maks_membatasi_banjir_jalan_pertama(monkeypatch):
+    """`_last_run` kosong pada jalan pertama, jadi SEMUA terhitung terlambat.
+    Tanpa batas ini, satu restart biasa menyalakan tiga backtest sekaligus."""
+    jalan: list[str] = []
+    monkeypatch.setattr(J, "daftar_pekerjaan", lambda: _pekerjaan_uji(jalan))
+    monkeypatch.setattr(J, "simpan_state", lambda: _noop())
+
+    hasil = await J.run_due(ts(2026, 9, 8, 12), lingkup="berat", maks=1)
+    assert len(hasil["dijalankan"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_yang_tak_kebagian_tetap_terlambat(monkeypatch):
+    """Dibatasi bukan berarti dilewati — sisanya wajib terambil siklus berikutnya."""
+    jalan: list[str] = []
+    monkeypatch.setattr(J, "daftar_pekerjaan", lambda: _pekerjaan_uji(jalan))
+    monkeypatch.setattr(J, "simpan_state", lambda: _noop())
+
+    now = ts(2026, 9, 8, 12)
+    await J.run_due(now, lingkup="berat", maks=1)
+    await J.run_due(now, lingkup="berat", maks=1)
+    assert sorted(jalan) == ["berat_a", "berat_b"]
+
+
+# ── Lama tiap pekerjaan tercatat ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_durasi_tiap_pekerjaan_dilaporkan(monkeypatch):
+    """8 Sep 2026: run_due menahan loop 19 menit dan meninggalkan NOL baris log,
+    jadi pekerjaan penyebabnya tak bisa ditunjuk tanpa menjalankan ulang satu
+    per satu."""
+    async def kerja():
+        return None
+
+    monkeypatch.setattr(J, "daftar_pekerjaan", lambda: [
+        J.Pekerjaan(nama="a", jadwal=J.Jadwal(every_sec=60), jalankan=kerja)])
+    monkeypatch.setattr(J, "simpan_state", lambda: _noop())
+
+    hasil = await J.run_due(ts(2026, 9, 8, 12))
+    assert "a" in hasil["durasi"]
+    assert hasil["total_detik"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_pekerjaan_gagal_tetap_tercatat_lamanya(monkeypatch):
+    """Pekerjaan yang meledak SESUDAH lama menggantung adalah justru kasus yang
+    paling perlu terlihat."""
+    async def meledak():
+        raise RuntimeError("gagal")
+
+    monkeypatch.setattr(J, "daftar_pekerjaan", lambda: [
+        J.Pekerjaan(nama="rusak", jadwal=J.Jadwal(every_sec=60), jalankan=meledak)])
+    monkeypatch.setattr(J, "simpan_state", lambda: _noop())
+
+    hasil = await J.run_due(ts(2026, 9, 8, 12))
+    assert hasil["gagal"] == ["rusak"]
+    assert "rusak" in hasil["durasi"]
+
+
+@pytest.mark.asyncio
+async def test_pekerjaan_lambat_memicu_peringatan(monkeypatch):
+    peringatan: list[dict] = []
+
+    async def lambat():
+        return None
+
+    monkeypatch.setattr(J, "AMBANG_LAMBAT_DETIK", -1.0)   # apa pun terhitung lambat
+    monkeypatch.setattr(J, "daftar_pekerjaan", lambda: [
+        J.Pekerjaan(nama="a", jadwal=J.Jadwal(every_sec=60), jalankan=lambat)])
+    monkeypatch.setattr(J, "simpan_state", lambda: _noop())
+    monkeypatch.setattr(J.logger, "warning",
+                        lambda ev, **kw: peringatan.append({"ev": ev, **kw}))
+
+    await J.run_due(ts(2026, 9, 8, 12))
+    nama_ev = {p["ev"] for p in peringatan}
+    assert "futures_job_lambat" in nama_ev
+    assert "futures_jobs_menahan_loop" in nama_ev
