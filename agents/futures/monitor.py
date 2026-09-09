@@ -679,13 +679,31 @@ async def _update_futures_balance() -> None:
     if not is_db_available():
         return
 
+    # Saldo dompet DITURUNKAN dari trade, tidak disimpan — jadi ia harus
+    # menghormati epoch risiko yang sama dengan gerbang.
+    #
+    # Terukur 9 Sep 2026: reset dompet ditulis ke DB, lalu fungsi ini menjumlahkan
+    # SELURUH riwayat dan mengembalikannya ke angka lama 18 detik kemudian.
+    # Resetnya tak "gagal" — ia dibatalkan diam-diam, dan satu-satunya jejak yang
+    # tersisa adalah kolom `notes` yang tak ikut dihitung ulang.
+    #
+    # Tanpa ini ada dua kebenaran sekaligus: gerbang menilai dari basis pasca-epoch
+    # sementara penentuan ukuran memakai saldo pra-epoch. Keduanya masuk akal
+    # sendiri-sendiri, dan justru itu yang membuat selisihnya sulit terlihat.
+    from agents.futures.risk_gate import _risk_epoch_ts
+
+    epoch = await _risk_epoch_ts()
+
     async with AsyncSessionLocal() as session:
+        syarat = [
+            PaperTrade.style.in_(list(_FUTURES_STYLES)),
+            PaperTrade.status.in_(list(FUTURES_BALANCE_STATUSES)),   # BUG-L19: include expired
+            PaperTrade.pnl_dollar.isnot(None),
+        ]
+        if epoch > 0:
+            syarat.append(PaperTrade.closed_at >= epoch)
         total = (await session.execute(
-            select(func.coalesce(func.sum(PaperTrade.pnl_dollar), 0.0)).where(
-                PaperTrade.style.in_(list(_FUTURES_STYLES)),
-                PaperTrade.status.in_(list(FUTURES_BALANCE_STATUSES)),   # BUG-L19: include expired
-                PaperTrade.pnl_dollar.isnot(None),
-            )
+            select(func.coalesce(func.sum(PaperTrade.pnl_dollar), 0.0)).where(*syarat)
         )).scalar() or 0.0
 
         bal = (await session.execute(

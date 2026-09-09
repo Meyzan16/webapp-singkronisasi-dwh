@@ -620,11 +620,19 @@ async def get_risk_dashboard() -> dict:
         open_trades = list(result.scalars().all())
 
         # Also get all closed for risk-adjusted return (include expired so balance matches Overview)
+        # Epoch yang SAMA dengan risk_gate: kedua jalur ini menulis ke state
+        # gerbang yang sama, jadi populasi yang berbeda membuat gerbangnya
+        # berkedip mengikuti siapa yang menulis terakhir.
+        from agents.futures.risk_gate import _risk_epoch_ts
+        _epoch = await _risk_epoch_ts()
+        _syarat = [
+            PaperTrade.style.in_(_ALL_STYLES),
+            PaperTrade.status.in_(["tp", "sl", "expired"]),
+        ]
+        if _epoch > 0:
+            _syarat.append(PaperTrade.closed_at >= _epoch)
         closed_result = await session.execute(
-            select(PaperTrade).where(
-                PaperTrade.style.in_(_ALL_STYLES),
-                PaperTrade.status.in_(["tp", "sl", "expired"]),
-            ).order_by(PaperTrade.entry_at)
+            select(PaperTrade).where(*_syarat).order_by(PaperTrade.entry_at)
         )
         closed_trades = list(closed_result.scalars().all())
 
@@ -821,7 +829,13 @@ async def get_risk_dashboard() -> dict:
 
     # Phase 10: refresh risk gate state with fresh metrics (frontend polls this every 15 s)
     from agents.futures.risk_gate import update_gate_state, get_gate_state
-    update_gate_state(max_dd, sharpe, len(pnl_series))
+    # Drawdown BERJALAN, bukan rekor terburuk — lihat catatan panjang di
+    # agents/futures/risk_gate.py. `max_dd` tak pernah turun, jadi breaker yang
+    # menilainya tak pernah bisa terbuka lagi walau saldo sudah pulih penuh.
+    # Jalur ini menghitung metrik yang sama dengan risk_gate; kalau hanya satu
+    # yang diperbaiki, gate akan berkedip mengikuti siapa yang menulis terakhir.
+    cur_dd = (peak_bal - balance) / peak_bal * 100 if peak_bal > 0 else 0.0
+    update_gate_state(cur_dd, sharpe, len(pnl_series))
     _gate = get_gate_state()
 
     total_closed_pnl = balance - wallet_base

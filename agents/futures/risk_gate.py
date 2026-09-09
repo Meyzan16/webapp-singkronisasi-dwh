@@ -35,7 +35,12 @@ logger = structlog.get_logger(__name__)
 # P6.2: DD threshold is now scaled per wallet size in evaluate_risk_gate; the constant
 # below is the default for ~$1000 wallet.
 DD_HARD_STOP_PCT   = 15.0   # P6.2: was 20%; scaled in evaluate_risk_gate by wallet size
-DD_RECOVER_PCT     = 8.0    # P6.2: scaled hysteresis (was 10%)
+#: DIHITUNG dan DIPAPARKAN ke dashboard, tapi TIDAK dipakai satu kondisi pun.
+#: Histeresis yang dijanjikan namanya tak pernah diimplementasikan: satu-satunya
+#: syarat breaker adalah `drawdown_pct > DD_HARD_STOP_PCT`. Jangan menyambungkannya
+#: tanpa keputusan sadar — melepas breaker baru di bawah 8% justru memperdalam
+#: kebuntuan yang sudah ada (drawdown hanya bisa turun lewat trade yang diblokir).
+DD_RECOVER_PCT     = 8.0    # P6.2: scaled hysteresis (was 10%) — lihat catatan di atas
 RAR_GATE_THRESHOLD = -0.5   # Sharpe proxy < −0.5 → RAR gate closes
 RAR_MIN_TRADES     = 10     # P6.3: was 12 → 10 (more responsive to early bad runs)
 STATE_TTL          = 5 * 60 # state older than 5 min is considered stale
@@ -324,7 +329,11 @@ _state: dict = {
     "active":        False,  # True = gate CLOSED (no new positions allowed)
     "gate_type":     "none", # "none" | "circuit_breaker" | "rar" | "override" | "lane_pause"
     "reason":        "ok",
-    "drawdown_pct":  0.0,
+    "drawdown_pct":  0.0,     # BERJALAN — dasar keputusan circuit breaker
+    #: Rekor terdalam sepanjang sejarah. Dilaporkan saja; JANGAN dipakai sebagai
+    #: syarat gate — ia tak pernah turun, jadi gate yang memakainya tak pernah
+    #: bisa dibuka lagi oleh pemulihan.
+    "max_drawdown_pct": 0.0,
     "rar":           0.0,
     "n_trades":      0,
     "updated_at":    0.0,
@@ -387,10 +396,28 @@ def update_gate_state(drawdown_pct: float, rar: float, n_trades: int,
         _prev_circuit_breaker_active = True
         _state["active"]    = True
         _state["gate_type"] = "circuit_breaker"
+        # Pesan ini WAJIB menyebut syarat lepas yang SEBENARNYA.
+        #
+        # Sampai 9 Sep 2026 ia menjanjikan "hingga drawdown < DD_RECOVER_PCT"
+        # (8%), padahal satu-satunya syarat di kode adalah `> DD_HARD_STOP_PCT`
+        # — histeresisnya tak pernah diimplementasikan. `_scaled_dd_threshold()`
+        # memang MENGHITUNG nilai pulih itu, tapi tak ada kondisi yang membacanya.
+        #
+        # Akibatnya bukan sepele: saat drawdown 15,4% pesan ini menyuruh menunggu
+        # pemulihan 7,4 poin, padahal yang dibutuhkan 0,4 poin. Seorang manusia
+        # yang membacanya akan menyimpulkan sistemnya jauh lebih dalam terkubur
+        # daripada kenyataannya, lalu mengambil keputusan besar atas dasar itu.
+        #
+        # Kebuntuannya sendiri DIBIARKAN dengan sadar: `probe_allowed()` sengaja
+        # menolak memprobe circuit-breaker DD ("risiko nyata"). Hard stop memang
+        # berarti berhenti sampai manusia memutuskan — lewat `override` manual.
         _state["reason"]    = (
             f"Circuit breaker aktif: drawdown {drawdown_pct:.1f}% "
-            f"melampaui batas keras {DD_HARD_STOP_PCT:.0f}%. "
-            f"Agen berhenti buka posisi baru hingga drawdown < {DD_RECOVER_PCT:.0f}%."
+            f"melampaui batas keras {DD_HARD_STOP_PCT:.1f}%. "
+            f"Agen berhenti buka posisi baru sampai drawdown turun ke "
+            f"{DD_HARD_STOP_PCT:.1f}% atau kurang. Karena drawdown hanya bergerak "
+            f"lewat trade, pemulihan menuntut keputusan manusia: reset saldo, "
+            f"ubah batas, atau buka gate lewat override manual."
         )
     elif n_trades >= RAR_MIN_TRADES and rar < _rar_thr:
         _state["active"]    = True
@@ -492,15 +519,31 @@ async def evaluate_risk_gate() -> None:
         _hard_stop, _recover = _scaled_dd_threshold(current_bal)
 
         async with AsyncSessionLocal() as session:
+            # Populasi diambil dari REGISTRY, bukan daftar tangan.
+            #
+            # Daftar lama memaku empat lane — agent1/2/3/bigmover — dan
+            # `futures_agentic` tak ada di dalamnya. Dua akibatnya sama-sama
+            # buruk: breaker dikemudikan sepenuhnya oleh riwayat lane yang sudah
+            # dihapus, DAN kerugian agen yang sekarang benar-benar berdagang tak
+            # pernah terhitung, sehingga gerbang ini tak bisa melindungi apa pun
+            # darinya. Penjaga yang mengawasi pintu yang sudah dibongkar.
+            #
+            # `futures_scanner.py` sudah memakai registry di jalur yang sama dan
+            # menulis ke state yang sama — jadi keduanya dulu menghitung populasi
+            # berbeda dan gerbangnya berkedip mengikuti penulis terakhir.
+            from app.services.agent_registry import FUTURES_AGENTS
+
+            epoch = await _risk_epoch_ts()
+            syarat = [
+                PaperTrade.style.in_(list(FUTURES_AGENTS)),
+                PaperTrade.status.in_(list(FUTURES_BALANCE_STATUSES)),   # BUG-L19: include expired
+                PaperTrade.pnl_dollar.isnot(None),
+            ]
+            if epoch > 0:
+                syarat.append(PaperTrade.closed_at >= epoch)
             closed_trades = list((await session.execute(
-                select(PaperTrade).where(
-                    PaperTrade.style.in_([
-                        "futures_agent1", "futures_agent2", "futures_agent3",
-                        "futures_agent_bigmover",   # Phase 2 BM1
-                    ]),
-                    PaperTrade.status.in_(list(FUTURES_BALANCE_STATUSES)),   # BUG-L19: include expired
-                    PaperTrade.pnl_dollar.isnot(None),
-                ).order_by(PaperTrade.closed_at.asc())
+                select(PaperTrade).where(*syarat)
+                .order_by(PaperTrade.closed_at.asc())
             )).scalars().all())
 
         pnl_series: list[float] = []
@@ -524,6 +567,12 @@ async def evaluate_risk_gate() -> None:
             _lane = t.setup_type or ""
             if _lane:
                 lane_trades[_lane].append(t)
+
+        # Drawdown BERJALAN: jarak saldo sekarang dari puncaknya. Tidak seperti
+        # `max_dd`, angka ini turun ketika agen memulihkan diri — itulah yang
+        # membuat breaker bisa dilepas oleh hasil trading, bukan hanya oleh
+        # campur tangan manusia.
+        cur_dd = (peak_bal - balance) / peak_bal * 100 if peak_bal > 0 else 0.0
 
         # P6.4: compute per-lane WR and trigger pauses
         for lane_name, lts in lane_trades.items():
@@ -579,7 +628,22 @@ async def evaluate_risk_gate() -> None:
             _regime = get_cached_regime()
         except Exception:
             pass
-        update_gate_state(max_dd, sharpe, len(_window), regime=_regime)
+        # Breaker dinilai dari drawdown SEKARANG, bukan rekor terburuk.
+        #
+        # Sampai 9 Sep 2026 yang dikirim adalah `max_dd` — maksimum sepanjang
+        # sejarah, dihitung `if dd > max_dd`. Nilai itu MUSTAHIL turun: seuntung
+        # apa pun agen berdagang sesudahnya, rekornya tetap. Jadi sekali breaker
+        # menutup, ia menutup SELAMANYA — bahkan setelah saldo pulih penuh.
+        #
+        # Pesan gate menjanjikan pemulihan, dan docstring modul ini menulis
+        # syaratnya "drawdown from peak". Keduanya menggambarkan drawdown
+        # berjalan. Yang dikirim justru rekornya.
+        #
+        # Rekornya tetap dilaporkan (`max_drawdown_pct`) karena ia informasi
+        # yang sah tentang seberapa dalam sistem pernah terjatuh — ia hanya
+        # bukan alat yang benar untuk memutuskan boleh-tidaknya buka posisi.
+        _state["max_drawdown_pct"] = max_dd
+        update_gate_state(cur_dd, sharpe, len(_window), regime=_regime)
 
     except Exception as exc:
         logger.warning("risk_gate_evaluate_failed", error=str(exc))
@@ -805,6 +869,29 @@ def update_lane_wr(lane: str, wins: int, total: int) -> None:
 def is_state_stale() -> bool:
     """True if gate state has never been evaluated or is older than STATE_TTL."""
     return _state["updated_at"] == 0.0 or (time.time() - _state["updated_at"]) > STATE_TTL
+
+
+async def _risk_epoch_ts() -> float:
+    """Sejak kapan kurva risiko dihitung. 0 = seluruh riwayat.
+
+    Saldo dan drawdown gerbang ini TIDAK disimpan — keduanya dibangun ulang dari
+    `paper_trades` tiap evaluasi. Jadi "reset dompet kertas" tak bisa dilakukan
+    dengan mengubah satu angka saldo: kurvanya akan langsung dihitung ulang dari
+    trade lama dan kembali ke keadaan semula.
+
+    Dua cara lain sama-sama merusak. Menghapus trade menghilangkan bukti; mengganti
+    `style`-nya mengeluarkannya dari tab History, padahal `FUTURES_AGENTS` sengaja
+    berarti "semua agen yang pernah ada" supaya pertanyaan riwayat tetap terjawab.
+
+    Epoch memisahkan dua pertanyaan yang memang berbeda: "berapa risiko ERA yang
+    berjalan" (gerbang) dan "apa yang pernah terjadi" (riwayat). Tak ada baris
+    yang hilang, dan resetnya bisa dibatalkan dengan mengembalikan nilainya ke 0.
+    """
+    try:
+        from agents.shared.config_reader import cfg
+        return float(await cfg.get("futures", "risk_epoch_ts", 0.0) or 0.0)
+    except Exception:      # noqa: BLE001 — gagal baca config tak boleh membutakan gerbang
+        return 0.0
 
 
 def probe_allowed() -> bool:
