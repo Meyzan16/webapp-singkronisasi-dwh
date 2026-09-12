@@ -8,10 +8,8 @@ interface LearningStats {
   regime:          string;
   target_win_rate: number;
   overall:         { total: number; open: number; closed: number; wins: number; losses: number; win_rate: number };
-  agent1:           { total: number; wins: number; losses: number; win_rate: number };
-  agent2:           { total: number; wins: number; losses: number; win_rate: number };
-  agent3?:          { total: number; wins: number; losses: number; win_rate: number };
-  agent_bigmover?:  { total: number; wins: number; losses: number; win_rate: number };  // EC6
+  /** Per-agen dari registry; Fase 8 menyisakan `agentic`. */
+  agents:           Record<string, { total: number; wins: number; losses: number; win_rate: number }>;
   balance:         { starting: number; current: number; total_pnl: number; roi_pct: number };
   equity_points:   { trade_n: number; balance: number; symbol: string; win: boolean; agent: string; ts: number | null }[];
   conservative_equity: { trade_n: number; balance: number }[];
@@ -207,22 +205,20 @@ export function FuturesAnalytics() {
       ══════════════════════════════════════════════════════════════════════ */}
       <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-neutral-100 bg-neutral-50">
-          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">🎯 Pre-Gainer vs 📦 Accumulation vs 🔥 Momentum</p>
+          <p className="text-xs font-bold text-neutral-500 uppercase tracking-wider">🧠 Agen Tunggal</p>
         </div>
         <div className="p-5 space-y-5">
 
-          {/* Head-to-head summary cards (3 lanes) */}
+          {/* Fase 8: kartu per-agen dibangun dari `stats.agents` (registry), bukan
+              empat lane yang dipaku. Hari ini isinya satu; kalau ada agen berikutnya
+              ia muncul sendiri tanpa menyunting berkas ini. */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              { key: "agent1", label: "Pre-Gainer", emoji: "🎯",
-                data: stats.agent1, color: "border-blue-200 bg-blue-50", badge: "bg-blue-100 text-blue-700" },
-              { key: "agent2", label: "Accumulation", emoji: "📦",
-                data: stats.agent2, color: "border-purple-200 bg-purple-50", badge: "bg-purple-100 text-purple-700" },
-              ...(stats.agent3 ? [{ key: "agent3", label: "Momentum", emoji: "🔥",
-                data: stats.agent3, color: "border-orange-200 bg-orange-50", badge: "bg-orange-100 text-orange-700" }] : []),
-              ...(stats.agent_bigmover ? [{ key: "agent_bigmover", label: "Big Mover", emoji: "🚀",
-                data: stats.agent_bigmover, color: "border-yellow-200 bg-yellow-50", badge: "bg-yellow-100 text-yellow-700" }] : []),
-            ].map(a => {
+            {Object.entries(stats.agents ?? {}).filter(([, d]) => d.total > 0 || Object.keys(stats.agents).length === 1).map(([key, data]) => ({
+              key, data,
+              label: key === "agentic" ? "Agentic" : key,
+              emoji: key === "agentic" ? "🧠" : "🤖",
+              color: "border-teal-200 bg-teal-50", badge: "bg-teal-100 text-teal-700",
+            })).map(a => {
               const wr = a.data.win_rate;
               const wrColor = wr >= TARGET ? "text-green-600" : wr >= 50 ? "text-yellow-600" : "text-red-500";
               return (
@@ -331,12 +327,9 @@ export function FuturesAnalytics() {
 
           {/* Per-agent progress */}
           <div className="space-y-3 pt-1 border-t border-neutral-100">
-            {[
-              { label: "Pre-Gainer",   data: stats.agent1, bar: "bg-blue-500" },
-              { label: "Accumulation", data: stats.agent2, bar: "bg-purple-500" },
-              ...(stats.agent3 ? [{ label: "Momentum",  data: stats.agent3,        bar: "bg-orange-500" }] : []),
-              ...(stats.agent_bigmover ? [{ label: "Big Mover", data: stats.agent_bigmover, bar: "bg-yellow-500" }] : []),
-            ].map(a => (
+            {Object.entries(stats.agents ?? {}).map(([key, data]) => ({
+              label: key === "agentic" ? "Agentic" : key, data, bar: "bg-teal-500",
+            })).map(a => (
               <div key={a.label}>
                 <div className="flex justify-between text-xs mb-1">
                   <span className="text-neutral-600 font-semibold">{a.label}</span>

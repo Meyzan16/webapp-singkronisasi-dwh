@@ -6,8 +6,8 @@ import type { AgentState } from "@/types/health";
 
 interface FuturesStatus {
   next_scan_in_min: number | null;
-  agent1_results: number; agent2_results: number; agent3_results?: number;
-  agent1_last_scan: number | null; agent2_last_scan: number | null; agent3_last_scan?: number | null;
+  agentic_results: number;
+  agentic_last_scan: number | null;
 }
 
 function PulseNext({ min, color }: { min: number; color: string }) {
@@ -41,9 +41,7 @@ export function ScannerStatusPanel({ futStatus, futCount, oppCount, schedulerSta
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs">
             {[
-              { label: "🎯 Pre-Gainer",    count: futStatus?.agent1_results ?? 0, ts: futStatus?.agent1_last_scan ?? null, color: "text-blue-600"   },
-              { label: "📦 Accumulation",  count: futStatus?.agent2_results ?? 0, ts: futStatus?.agent2_last_scan ?? null, color: "text-purple-600" },
-              { label: "🔥 Momentum",      count: futStatus?.agent3_results ?? 0, ts: futStatus?.agent3_last_scan ?? null, color: "text-orange-600" },
+              { label: "🧠 Agentic", count: futStatus?.agentic_results ?? 0, ts: futStatus?.agentic_last_scan ?? null, color: "text-teal-600" },
             ].map(a => (
               <div key={a.label}>
                 <p className="text-neutral-400 text-[10px]">{a.label}</p>

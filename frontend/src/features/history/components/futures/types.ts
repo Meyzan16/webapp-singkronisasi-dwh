@@ -102,15 +102,14 @@ export interface LearningStats {
   regime:          string;
   target_win_rate: number;
   overall:         { total: number; open: number; closed: number; wins: number; losses: number; win_rate: number };
-  agent1:          { total: number; wins: number; losses: number; win_rate: number };
-  agent2:          { total: number; wins: number; losses: number; win_rate: number };
-  agent3?:         { total: number; wins: number; losses: number; win_rate: number };
-  agent_bigmover?: { total: number; wins: number; losses: number; win_rate: number };   // Phase 2 BM1
+  /** Per-agen dari registry: kunci = nama gaya tanpa awalan "futures_". */
+  agents:          Record<string, { total: number; wins: number; losses: number; win_rate: number }>;
   balance:         { starting: number; current: number; total_pnl: number; roi_pct: number };
   win_rate_trend:  { trade_n: number; win_rate: number; win: boolean }[];
   top_signals:     { key: string; agent: string; win_rate: number; weight: number; total: number; wins: number }[];
   bottom_signals:  { key: string; agent: string; win_rate: number; weight: number; total: number }[];
-  monthly_stats?:  { month: string; agent1: { total: number; wins: number; win_rate: number }; agent2: { total: number; wins: number; win_rate: number }; agent3?: { total: number; wins: number; win_rate: number }; bigmover?: { total: number; wins: number; win_rate: number } }[];
+  /** Per bulan; selain `month`, tiap kunci adalah bucket per-agen. */
+  monthly_stats?:  ({ month: string } & Record<string, { total: number; wins: number; win_rate: number } | string>)[];
   monitor:         { running: boolean; cycle_count: number; closed_today: number; liq_guards?: number; tp_extended?: number };
 }
 
@@ -132,10 +131,7 @@ export interface RiskDashboard {
     } | null;
   };
   agent_breakdown: {
-    agent1: { open: number; margin: number; at_risk: number };
-    agent2: { open: number; margin: number; at_risk: number };
-    agent3?: { open: number; margin: number; at_risk: number };
-    agent_bigmover?: { open: number; margin: number; at_risk: number };   // Phase 2 BM1
+    [agent: string]: { open: number; margin: number; at_risk: number } | undefined;
   };
   gate?: GateState;
 }

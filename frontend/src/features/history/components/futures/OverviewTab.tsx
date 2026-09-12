@@ -7,6 +7,7 @@ import { GateBanner } from "./GateBanner";
 import { OpenPosCard } from "./OpenPosCard";
 import { PnlCalendar } from "../PnlCalendar";
 import { FuturesWalletChips } from "./FuturesWalletChips";
+import { useLaneStatus } from "@/features/shared/useLaneStatus";
 import type { OppPosition } from "../OppSpotTypes";
 import type { FuturesPosition, RiskDashboard, LearningStats, RiskPosition } from "./types";
 
@@ -58,6 +59,17 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
 
   const [selectedMonth, setSelectedMonth] = useState("all");
 
+  // Nilai BERLAKU dari sizing_config / exit_config lewat /agent/config — sumber
+  // yang sama dengan scanner dan monitor. Kartu di bawah dulu memaku "1%",
+  // "fixed per trade", dan "R:R 1:3" sementara mesin nyata memakai risk dinamis
+  // per koin dan R:R 2,08; tak ada satu pun angka itu yang datang dari config.
+  const { futures: futCfg } = useLaneStatus();
+  const sizing = (futCfg?.sizing ?? {}) as Record<string, number>;
+  const exitCfg = (futCfg?.exit ?? {}) as Record<string, number>;
+  const riskPct = sizing.size_risk_base_pct;
+  const rrNyata = exitCfg.exit_tp2_atr_mult && exitCfg.exit_sl_atr_mult
+    ? exitCfg.exit_tp2_atr_mult / exitCfg.exit_sl_atr_mult : null;
+
   const balanceColor = stats.currentBalance >= startingBalance ? "text-green-600" : "text-red-500";
   const pnlColor     = stats.totalPnl$ >= 0 ? "text-green-600" : "text-red-500";
 
@@ -87,8 +99,8 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
             </div>
             <p className="text-xs text-neutral-400 mt-1">
               Modal awal <strong className="text-neutral-200">${startingBalance.toLocaleString()}</strong>
-              {" · "}Risk <strong className="text-yellow-300">${riskDollar.toFixed(0)}/trade (1%)</strong>
-              {" · "}Target R:R ≥ 1:3
+              {" · "}Risk <strong className="text-yellow-300">{riskPct != null ? `${riskPct}% × tier` : "dinamis"}</strong>
+              {" · "}R:R <strong className="text-neutral-200">{rrNyata ? `1:${rrNyata.toFixed(2)}` : "—"}</strong>
             </p>
             {/* PLAN_v12 P6-F0 — Bebas/Terkunci + Deposit/Withdraw (ganti panel Dompet penuh) */}
             <div className="mt-2">
@@ -244,18 +256,15 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
                     <div className="flex items-center justify-between mb-2">
                       <p className="text-xs font-bold text-neutral-700">{fmtMonth(m.month)}</p>
                       <div className="flex gap-3 text-[10px] text-neutral-500">
-                        <span>Pre: {m.agent1.wins}/{m.agent1.total}</span>
-                        <span>Acc: {m.agent2.wins}/{m.agent2.total}</span>
-                        {m.agent3 && <span>Momo: {m.agent3.wins}/{m.agent3.total}</span>}
-                        {m.bigmover && <span>BM: {m.bigmover.wins}/{m.bigmover.total}</span>}
+                        {m.agentic && typeof m.agentic !== "string" && <span>{m.agentic.wins}/{m.agentic.total} trade</span>}
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <WinRateBar rate={m.agent1.win_rate} label={`🎯 Pre-Gainer: ${m.agent1.win_rate.toFixed(0)}%`} />
-                      <WinRateBar rate={m.agent2.win_rate} label={`📦 Accumulation: ${m.agent2.win_rate.toFixed(0)}%`} />
-                      {m.agent3 && <WinRateBar rate={m.agent3.win_rate} label={`🔥 Momentum: ${m.agent3.win_rate.toFixed(0)}%`} />}
-                      {/* PLAN_v13 P3 — line ke-4 Big Mover (backend sudah kirim, dulu tak dirender) */}
-                      {m.bigmover && <WinRateBar rate={m.bigmover.win_rate} label={`💥 Big Mover: ${m.bigmover.win_rate.toFixed(0)}%`} />}
+                      {/* Fase 8: satu agen. Bucket per-bulan lain (lane lama) hanya ada
+                          pada bulan sebelum epoch dan sengaja tak dirender. */}
+                      {m.agentic && typeof m.agentic !== "string" && (
+                        <WinRateBar rate={m.agentic.win_rate} label={`🧠 Agentic: ${m.agentic.win_rate.toFixed(0)}%`} />
+                      )}
                     </div>
                   </div>
                 ))}
@@ -271,9 +280,17 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
         <p className="text-xs font-bold text-amber-700 uppercase tracking-wider mb-2">💡 Logika Position Sizing (real-wallet + portfolio heat)</p>
         <div className="grid grid-cols-3 gap-3 text-center">
           {[
-            { label: "Modal Awal",   value: `$${startingBalance.toLocaleString()}`,          sub: "paper balance"   },
-            { label: "Risk/Trade",   value: `$${riskDollar.toFixed(0)} (1%)`,                sub: "fixed per trade" },
-            { label: "R:R Minimum",  value: "1 : 3",                                         sub: `win $${(riskDollar * 3).toFixed(0)}, lose $${riskDollar.toFixed(0)}` },
+            { label: "Modal Awal",   value: `$${startingBalance.toLocaleString()}`, sub: "paper balance" },
+            { label: "Risk/Trade",
+              value: riskPct != null ? `${riskPct}% × tier` : "dinamis",
+              sub: riskPct != null
+                ? `≈ $${(startingBalance * riskPct / 100).toFixed(0)} dasar · dikecilkan saat gerak ekstrem`
+                : "risk_pct × pengali tier" },
+            { label: "R:R (TP2 : SL)",
+              value: rrNyata ? `1 : ${rrNyata.toFixed(2)}` : "—",
+              sub: rrNyata
+                ? `TP2 ${exitCfg.exit_tp2_atr_mult}×ATR · SL ${exitCfg.exit_sl_atr_mult}×ATR`
+                : "dari exit_config" },
           ].map(x => (
             <div key={x.label} className="bg-white/60 rounded-xl p-2.5">
               <p className="text-[10px] text-amber-600 font-semibold">{x.label}</p>
@@ -300,7 +317,7 @@ export function OverviewTab({ riskDash, learning, startingBalance, riskDollar,
       {/* DB History */}
       <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
         <div className="px-5 py-3 border-b border-neutral-100 bg-neutral-50">
-          <h3 className="font-bold text-sm text-neutral-700">🗄 Riwayat Database — Futures Agents 1, 2, 3</h3>
+          <h3 className="font-bold text-sm text-neutral-700">🗄 Riwayat Database — Futures</h3>
           <p className="text-[10px] text-neutral-400 mt-0.5">Semua trade · search simbol · pagination · alasan tutup posisi lengkap</p>
         </div>
         <div className="p-4">

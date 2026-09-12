@@ -28,6 +28,8 @@ import { useEffect, useState } from "react";
 export interface LaneStatus {
   /** {lane: quota} dari /agent/config. `null` selagi dimuat / bila gagal. */
   quotas: Record<string, number> | null;
+  /** Seksi `futures` utuh dari /agent/config — sizing, exit, agents. */
+  futures: Record<string, unknown> | null;
   /** True hanya bila lane TERDAFTAR di quota DAN nilainya 0. */
   isDisabled: (lane: string) => boolean;
   loading: boolean;
@@ -40,6 +42,7 @@ export function laneOfAgent(agent: string): string {
 
 export function useLaneStatus(): LaneStatus {
   const [quotas, setQuotas] = useState<Record<string, number> | null>(null);
+  const [futures, setFutures] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -50,6 +53,7 @@ export function useLaneStatus(): LaneStatus {
         if (batal) return;
         const q = d?.futures?.auto_trader?.lane_quotas;
         setQuotas(q && typeof q === "object" ? (q as Record<string, number>) : null);
+        setFutures(d?.futures && typeof d.futures === "object" ? (d.futures as Record<string, unknown>) : null);
       })
       .catch(() => { if (!batal) setQuotas(null); })
       .finally(() => { if (!batal) setLoading(false); });
@@ -58,6 +62,7 @@ export function useLaneStatus(): LaneStatus {
 
   return {
     quotas,
+    futures,
     loading,
     // Selagi quota belum termuat, TIDAK ada yang disembunyikan. Menyembunyikan
     // lane karena permintaan gagal akan membuat lane hidup ikut lenyap.

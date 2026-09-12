@@ -123,6 +123,27 @@ async def _spot_config() -> dict:
     }
 
 
+def _sizing_snapshot() -> dict:
+    try:
+        from agents.futures import sizing_config as _fut_sizing
+        snap = _fut_sizing.snapshot()
+        # `snapshot()` sizing bersarang ({scalar: {...}, lev_max_by_lane: {...}});
+        # ratakan skalarnya supaya FE membaca bentuk yang sama dengan `exit`.
+        datar = dict(snap.get("scalar", {}))
+        datar["lev_max_by_lane"] = snap.get("lev_max_by_lane", {})
+        return datar
+    except Exception:      # noqa: BLE001
+        return {}
+
+
+def _exit_snapshot() -> dict:
+    try:
+        from agents.futures import exit_config as _fut_exit
+        return dict(_fut_exit.snapshot())
+    except Exception:      # noqa: BLE001
+        return {}
+
+
 async def _futures_config() -> dict:
     from agents.futures import scheduler as fsched
     from agents.futures import monitor as fmon
@@ -177,6 +198,13 @@ async def _futures_config() -> dict:
                 "adaptive":    True,
             },
         },
+        # Rantai ukuran & aturan keluar — nilai BERLAKU dari modul yang sama
+        # yang dipakai scanner dan monitor. Sampai 12 Sep 2026 kartu "Logika
+        # Position Sizing" di UI memaku "1%", "fixed per trade", dan "R:R 1:3"
+        # sementara mesin nyata memakai risk dinamis per koin dan R:R 2,08 —
+        # tak ada satu pun kunci config yang sampai ke FE.
+        "sizing": _sizing_snapshot(),
+        "exit":   _exit_snapshot(),
         "auto_trader": {
             "max_positions_global": int(max_auto_positions),
             # `lane_quotas` sengaja KOSONG, bukan dihapus: `useLaneStatus` di FE

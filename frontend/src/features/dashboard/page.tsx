@@ -47,8 +47,8 @@ interface LearningStats {
 
 interface FuturesStatus {
   next_scan_in_min: number | null;
-  agent1_results: number; agent2_results: number; agent3_results?: number;
-  agent1_last_scan: number | null; agent2_last_scan: number | null; agent3_last_scan?: number | null;
+  agentic_results: number;
+  agentic_last_scan: number | null;
 }
 
 interface SpotBalance {
@@ -337,8 +337,7 @@ export default function DashboardPage() {
         <SystemHealthPanel
           health={health} binance={binance}
           closedToday={learning?.monitor.closed_today}
-          futResultsA2={futStatus?.agent2_results}
-          futResultsA3={futStatus?.agent3_results}
+          futResults={futStatus?.agentic_results}
         />
       </div>
 

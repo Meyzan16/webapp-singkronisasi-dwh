@@ -75,9 +75,7 @@ async def get_futures_scan(
         fs.set_scanning(True)
         try:
             result = await _run_scan()
-            fs.set_result("agent1", result["agent1"])
-            fs.set_result("agent2", result["agent2"])
-            fs.set_result("agent3", result["agent3"])
+            fs.set_result("agentic", result["agentic"])   # Fase 8: satu agen
             fs.set_big_movers(result["big_movers"])   # PLAN-SIGNAL-GAP P4
             cached = fs.get_all_results()
         except Exception as exc:
@@ -105,9 +103,7 @@ async def force_futures_scan(
     fs.set_scanning(True)
     try:
         result = await _run_scan()
-        fs.set_result("agent1", result["agent1"])
-        fs.set_result("agent2", result["agent2"])
-        fs.set_result("agent3", result["agent3"])
+        fs.set_result("agentic", result["agentic"])   # Fase 8: satu agen
         fs.set_big_movers(result["big_movers"])   # PLAN-SIGNAL-GAP P4
         return _filter_results(fs.get_all_results(), agent, direction, min_score, limit)
     except Exception as exc:
@@ -412,12 +408,12 @@ async def get_futures_positions(
     conditions = [
         PaperTrade.style.in_(_ALL_STYLES)
     ]
-    if agent == "agent1":
-        conditions = [PaperTrade.style == "futures_agent1"]
-    elif agent == "agent2":
-        conditions = [PaperTrade.style == "futures_agent2"]
-    elif agent == "agent3":
-        conditions = [PaperTrade.style == "futures_agent3"]
+    # Alias pendek ("agentic", "agent1") -> nama gaya penuh, lewat registry —
+    # bukan cabang `elif` per agen yang tak pernah belajar ada agen baru.
+    if agent and agent != "all":
+        _penuh = next((a for a in _ALL_STYLES if a in (agent, f"futures_{agent}", f"futures_agent_{agent}")), None)
+        if _penuh:
+            conditions = [PaperTrade.style == _penuh]
     if status != "all":
         conditions.append(PaperTrade.status == status)
 
@@ -883,27 +879,16 @@ async def get_risk_dashboard() -> dict:
             "current_balance":  round(balance, 2),
             "margin_ratio":     _margin_ratio,   # G7: effective_margin / wallet %
         },
+        # Rincian per-agen dari REGISTRY. Dulu empat blok yang dipaku ke agen
+        # lama — agen tunggal tak punya entri, jadi kartu per-agen di Monitor
+        # kosong sementara total margin di kartu yang sama terisi dari posisinya.
         "agent_breakdown": {
-            "agent1": {
-                "open": sum(1 for p in positions if p["agent"] == "futures_agent1"),
-                "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent1"), 2),
-                "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent1" and p["risk_status"] == "DANGER"),
-            },
-            "agent2": {
-                "open": sum(1 for p in positions if p["agent"] == "futures_agent2"),
-                "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent2"), 2),
-                "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent2" and p["risk_status"] == "DANGER"),
-            },
-            "agent3": {
-                "open": sum(1 for p in positions if p["agent"] == "futures_agent3"),
-                "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent3"), 2),
-                "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent3" and p["risk_status"] == "DANGER"),
-            },
-            "agent_bigmover": {
-                "open": sum(1 for p in positions if p["agent"] == "futures_agent_bigmover"),
-                "margin": round(sum(p["margin"] for p in positions if p["agent"] == "futures_agent_bigmover"), 2),
-                "at_risk": sum(1 for p in positions if p["agent"] == "futures_agent_bigmover" and p["risk_status"] == "DANGER"),
-            },
+            _ag.removeprefix("futures_"): {
+                "open":    sum(1 for p in positions if p["agent"] == _ag),
+                "margin":  round(sum(p["margin"] for p in positions if p["agent"] == _ag), 2),
+                "at_risk": sum(1 for p in positions if p["agent"] == _ag and p["risk_status"] == "DANGER"),
+            }
+            for _ag in _ALL_FUTURES_STYLES
         },
         # ── Fase 6: rincian per ARAH ────────────────────────────────────────
         # Agen tunggal tak punya empat lane untuk ditampilkan, tapi tetap punya
@@ -992,7 +977,7 @@ async def get_auto_status() -> dict:
     # PLAN_v12 P2-B4: threshold auto-open BEDA per-agent & adaptif — "≥72" tunggal
     # menyesatkan. Kembalikan per-agent supaya UI bisa tampil badge "auto ≥N".
     per_agent: dict[str, int] = {}
-    for _a in ("futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover"):
+    for _a in _ALL_FUTURES_STYLES:
         try:
             per_agent[_a] = int(_effective_threshold(_a))
         except Exception:

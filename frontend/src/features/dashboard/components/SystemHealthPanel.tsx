@@ -68,12 +68,11 @@ function BinanceApiRow({ label, ok, latency, weightPct, weightUsed, bannedUntil,
   );
 }
 
-export function SystemHealthPanel({ health, binance, closedToday, futResultsA2, futResultsA3 }: {
+export function SystemHealthPanel({ health, binance, closedToday, futResults }: {
   health: Health | null;
   binance: BinanceStatus | null;
   closedToday?: number;
-  futResultsA2?: number;
-  futResultsA3?: number;
+  futResults?: number;
 }) {
   return (
     <div className="bg-white rounded-2xl border border-neutral-200 p-4">
@@ -122,14 +121,11 @@ export function SystemHealthPanel({ health, binance, closedToday, futResultsA2, 
       {/* Futures Agents */}
       <p className="text-[9px] font-black text-blue-600 uppercase tracking-widest mb-1.5">⚡ Futures</p>
       <div className="space-y-1.5">
-        <AgentRow label="Futures Scanner — Pre-Gainer" sub="Funding · OI · Liquidation · S/R"
+        {/* Fase 8: satu agen. Tiga baris lane lama diganti satu — dan sekarang
+            baris ini yang membawa cycle/error scanner, bukan lane yang sudah tiada. */}
+        <AgentRow label="Futures Scanner — Agentic"
+          sub={`Momentum · Arah · Volume · OI · Funding · RSI${futResults != null ? ` · ${futResults} sinyal` : ""}`}
           ok={!!health?.futures_scanner?.running} cycle={health?.futures_scanner?.cycle_count} err={health?.futures_scanner?.last_error} color="text-blue-600" />
-        <AgentRow label="Futures Scanner — Accumulation"
-          sub={`Wyckoff · Trend · Pattern · Trigger${futResultsA2 != null ? ` · ${futResultsA2} sinyal` : ""}`}
-          ok={!!health?.futures_scanner?.running} color="text-blue-600" />
-        <AgentRow label="Futures Scanner — Momentum"
-          sub={`Breakout · Momentum · Trigger${futResultsA3 != null ? ` · ${futResultsA3} sinyal` : ""}`}
-          ok={!!health?.futures_scanner?.running} color="text-blue-600" />
         <AgentRow label="Futures Position Monitor" sub="Monitor TP/SL posisi futures"
           ok={!!health?.futures_monitor?.running} cycle={health?.futures_monitor?.cycle_count} err={health?.futures_monitor?.last_error} color="text-blue-600" />
         <AgentRow label="Weight Updater" sub="Adaptive learning — bobot sinyal"

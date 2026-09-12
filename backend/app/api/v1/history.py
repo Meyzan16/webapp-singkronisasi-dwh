@@ -20,10 +20,38 @@ logger = structlog.get_logger(__name__)
 
 _db = Depends(require_db)
 
-_FUTURES_STYLES = [
-    "futures_agent1", "futures_agent2", "futures_agent3",
-    "futures_agent_bigmover",   # Phase 2 BM1
-]
+# Dari REGISTRY, bukan daftar tangan.
+#
+# Terukur 12 Sep 2026: daftar ini dipaku empat agen lama, jadi `style=futures`
+# mengembalikan 112 trade lane lama dan TIDAK SATU PUN trade agen tunggal —
+# sementara kalender di halaman yang sama (dari /futures/positions) menampilkan
+# semuanya. LITE ada di kalender, tak pernah bisa muncul di tabel di bawahnya.
+# Ini tempat KELIMA dengan daftar agen yang dipaku sendiri-sendiri; empat
+# sebelumnya (auto_trader, monitor, risk_gate, agent_config) sudah diturunkan
+# dari registry, dan kelas kesalahannya baru benar-benar hilang bila tak ada
+# yang tersisa.
+from app.services.agent_registry import FUTURES_AGENTS as _FUTURES_STYLES
+
+
+def _resolve_style(style: str) -> list[str] | None:
+    """Nama `style` dari FE -> daftar gaya `paper_trades`. None = semua.
+
+    Alias pendek (`agentic`, `agent1`, `bigmover`) dipetakan lewat registry
+    supaya agen baru otomatis ikut dikenal tanpa menambah cabang `elif`.
+    """
+    if not style or style == "all":
+        return None
+    if style == "spot":
+        return ["opportunity_spot"]
+    if style == "futures":
+        return list(_FUTURES_STYLES)
+    if style in _FUTURES_STYLES:
+        return [style]
+    # alias pendek: "agentic" -> "futures_agentic", "bigmover" -> "futures_agent_bigmover"
+    for penuh in _FUTURES_STYLES:
+        if penuh in (f"futures_{style}", f"futures_agent_{style}"):
+            return [penuh]
+    return [style]     # tak dikenal: biarkan query menjawab kosong, jangan diam-diam "semua"
 
 
 def _parse_rr(rr: Optional[str]) -> float:
@@ -38,19 +66,9 @@ def _parse_rr(rr: Optional[str]) -> float:
 
 def _apply_trade_filters(q, style: Optional[str], search: Optional[str]):
     """F45: shared style + symbol-search filter so paginated and summary queries match."""
-    if style and style != "all":
-        if style == "spot":
-            q = q.where(PaperTrade.style == "opportunity_spot")
-        elif style == "agent1":
-            q = q.where(PaperTrade.style == "futures_agent1")
-        elif style == "agent2":
-            q = q.where(PaperTrade.style == "futures_agent2")
-        elif style == "agent3":
-            q = q.where(PaperTrade.style == "futures_agent3")
-        elif style == "futures":
-            q = q.where(PaperTrade.style.in_(_FUTURES_STYLES))
-        else:
-            q = q.where(PaperTrade.style == style)
+    gaya = _resolve_style(style)
+    if gaya is not None:
+        q = q.where(PaperTrade.style.in_(gaya))
     if search and search.strip():
         q = q.where(PaperTrade.symbol.like(f"%{search.strip().upper()}%"))
     return q
@@ -391,18 +409,8 @@ async def get_equity(style: str = Query("futures")) -> dict:
     import json
 
     # F103: filter by style so the curve isn't a mix of futures + spot
-    if style == "spot":
-        style_filter = [PaperTrade.style == "opportunity_spot"]
-    elif style == "agent1":
-        style_filter = [PaperTrade.style == "futures_agent1"]
-    elif style == "agent2":
-        style_filter = [PaperTrade.style == "futures_agent2"]
-    elif style == "agent3":
-        style_filter = [PaperTrade.style == "futures_agent3"]
-    elif style == "all":
-        style_filter = []
-    else:  # "futures" (default)
-        style_filter = [PaperTrade.style.in_(_FUTURES_STYLES)]
+    gaya = _resolve_style(style)
+    style_filter = [] if gaya is None else [PaperTrade.style.in_(gaya)]
 
     async with AsyncSessionLocal() as s:
         result = await s.execute(

@@ -13,9 +13,10 @@ import { BigMoversPanel } from "./components/BigMoversPanel";
  *  Nama agen (`agent3`) dan nama lane (`momentum`) BEDA; pemetaan ini yang
  *  menyambungkannya, jadi status pakai lane bisa dibaca dari keadaan. */
 const LANE_TABS = [
-  { key: "agent1" as const, lane: "pre_gainer",   name: "Pre-Gainer",   label: "🎯 Pre-Gainer",   cls: "bg-blue-500/20 border-blue-400/40 text-blue-300"       },
-  { key: "agent2" as const, lane: "accumulation", name: "Accumulation", label: "📦 Accumulation", cls: "bg-purple-500/20 border-purple-400/40 text-purple-300" },
-  { key: "agent3" as const, lane: "momentum",     name: "Momentum",     label: "🔥 Momentum",     cls: "bg-orange-500/20 border-orange-400/40 text-orange-300" },
+  // Fase 8: satu agen. Empat lane lama dihapus bersama modulnya; halaman ini
+  // dulu membaca `data.agent1/2/3.results` yang kini kosong — jadi bagian
+  // futures-nya diam-diam tak menampilkan apa pun.
+  { key: "agentic" as const, lane: "agentic", name: "Agentic", label: "🧠 Agentic", cls: "bg-teal-500/20 border-teal-400/40 text-teal-300" },
 ];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -277,8 +278,8 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
               <div className="flex gap-2 flex-wrap">
                 <DirBadge dir={s.direction} />
                 <span className="text-[11px] bg-white/10 text-white px-2 py-0.5 rounded font-bold">{s.leverage}x Cross Margin</span>
-                <span className={`text-[11px] px-2 py-0.5 rounded font-bold border ${s.agent === "futures_agent1" ? "bg-blue-600/30 text-blue-300 border-blue-500/30" : s.agent === "futures_agent3" ? "bg-orange-600/30 text-orange-300 border-orange-500/30" : s.agent === "futures_agent_bigmover" ? "bg-amber-600/30 text-amber-300 border-amber-500/30" : "bg-purple-600/30 text-purple-300 border-purple-500/30"}`}>
-                  {s.agent === "futures_agent1" ? "Pre-Gainer" : s.agent === "futures_agent3" ? "Momentum" : s.agent === "futures_agent_bigmover" ? "Big Mover" : "Accumulation"}
+                <span className="text-[11px] px-2 py-0.5 rounded font-bold border bg-teal-600/30 text-teal-300 border-teal-500/30">
+                  Agentic
                 </span>
               </div>
             </div>
@@ -415,16 +416,14 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ScannerFuturesPage() {
-  const [agent1, setAgent1]           = useState<FuturesSignal[]>([]);
-  const [agent2, setAgent2]           = useState<FuturesSignal[]>([]);
-  const [agent3, setAgent3]           = useState<FuturesSignal[]>([]);
+  const [agentic, setAgentic]         = useState<FuturesSignal[]>([]);
   const [loading, setLoading]         = useState(true);
   const [scanning, setScanning]       = useState(false);
   const [connState, setConnState]     = useState<ConnState>("connecting");
   const [isLive, setIsLive]           = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [scanned, setScanned]         = useState(0);
-  const [activeAgent, setActiveAgent] = useState<"all" | "agent1" | "agent2" | "agent3">("all");
+  const [activeAgent, setActiveAgent] = useState<"all" | "agentic">("all");
   const { isDisabled } = useLaneStatus();
   const [dirFilter, setDirFilter]     = useState<"ALL" | "LONG" | "SHORT">("ALL");
   const [minScore, setMinScore]       = useState(52);
@@ -509,16 +508,14 @@ export default function ScannerFuturesPage() {
   }, []);
 
   const applySnapshot = useCallback((data: Record<string, unknown>) => {
-    const a1 = ((data.agent1 as Record<string, unknown> | undefined)?.results ?? []) as FuturesSignal[];
-    const a2 = ((data.agent2 as Record<string, unknown> | undefined)?.results ?? []) as FuturesSignal[];
-    const a3 = ((data.agent3 as Record<string, unknown> | undefined)?.results ?? []) as FuturesSignal[];
-    const allSyms = new Set([...a1.map(r => r.symbol), ...a2.map(r => r.symbol), ...a3.map(r => r.symbol)]);
+    const ag = ((data.agentic as Record<string, unknown> | undefined)?.results ?? []) as FuturesSignal[];
+    const allSyms = new Set(ag.map(r => r.symbol));
     const prev    = prevSymsRef.current;
     const fresh   = new Set<string>();
     if (prev.size > 0) allSyms.forEach(s => { if (!prev.has(s)) fresh.add(s); });
     prevSymsRef.current = allSyms;
-    setAgent1(a1); setAgent2(a2); setAgent3(a3);
-    setScanned(((data.agent1 as Record<string, unknown>)?.scanned as number) ?? 0);
+    setAgentic(ag);
+    setScanned(((data.agentic as Record<string, unknown>)?.scanned as number) ?? 0);
     setLastUpdated(new Date()); setLoading(false); setScanning(false);
     if (typeof data.next_scan_in === "number") {
       nextScanRef.current = data.next_scan_in;
@@ -579,26 +576,18 @@ export default function ScannerFuturesPage() {
 
   const sinyalLaneAktif = useMemo(() => {
     const mati = new Set(laneMatiKey ? laneMatiKey.split(",") : []);
-    return [
-      ...(mati.has("agent1") ? [] : agent1),
-      ...(mati.has("agent2") ? [] : agent2),
-      ...(mati.has("agent3") ? [] : agent3),
-    ];
-  }, [agent1, agent2, agent3, laneMatiKey]);
+    return mati.has("agentic") ? [] : agentic;
+  }, [agentic, laneMatiKey]);
 
   const filtered = useMemo(() => {
-    const mati = new Set(laneMatiKey ? laneMatiKey.split(",") : []);
-    const all: FuturesSignal[] =
-      activeAgent !== "all" && !mati.has(activeAgent)
-        ? (activeAgent === "agent1" ? agent1 : activeAgent === "agent2" ? agent2 : agent3)
-        : sinyalLaneAktif;
+    const all: FuturesSignal[] = sinyalLaneAktif;
     const q = search.trim().toLowerCase();
     return all.filter(s =>
       s.score >= minScore &&
       (dirFilter === "ALL" || s.direction === dirFilter) &&
       (!q || s.symbol.toLowerCase().includes(q))
     );
-  }, [agent1, agent2, agent3, sinyalLaneAktif, laneMatiKey, activeAgent, minScore, dirFilter, search]);
+  }, [sinyalLaneAktif, minScore, dirFilter, search]);
 
   const cm = CONN_META[connState];
   const scanProg = nextScanDisplay != null
@@ -783,7 +772,7 @@ export default function ScannerFuturesPage() {
       </div>
 
       {/* Loading */}
-      {loading && !agent1.length && !agent2.length && !agent3.length && (
+      {loading && !agentic.length && (
         <div className="py-20 text-center space-y-3">
           <div className="w-14 h-14 rounded-full bg-teal-100 flex items-center justify-center mx-auto">
             <span className="text-3xl animate-bounce">⚡</span>

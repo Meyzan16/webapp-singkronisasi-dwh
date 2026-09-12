@@ -50,12 +50,19 @@ async def get_learning_stats() -> dict:
     if not is_db_available():
         return {"error": "db_unavailable"}
 
+    # Era yang SAMA dengan risk_gate, saldo, dan monitor. Tanpa ini endpoint
+    # ini menghitung saldo dari seluruh riwayat sementara tiga jalur lain sudah
+    # menghormati epoch — dan Analytics menampilkan angka yang tak cocok dengan
+    # Overview di halaman yang sama.
+    from agents.futures.risk_gate import _risk_epoch_ts
+    _epoch = await _risk_epoch_ts()
+    _syarat = [PaperTrade.style.in_(_REG_FUTURES_AGENTS)]
+    if _epoch > 0:
+        _syarat.append(PaperTrade.entry_at >= _epoch)
+
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(PaperTrade).where(
-                # Registry tunggal — lane baru otomatis ikut terhitung.
-                PaperTrade.style.in_(_REG_FUTURES_AGENTS),
-            ).order_by(PaperTrade.entry_at)
+            select(PaperTrade).where(*_syarat).order_by(PaperTrade.entry_at)
         )
         all_trades = list(result.scalars().all())
 
@@ -191,21 +198,14 @@ async def get_learning_stats() -> dict:
         if not t.entry_at:
             continue
         month_key = dt.datetime.utcfromtimestamp(t.entry_at).strftime("%Y-%m")
-        entry = monthly.setdefault(month_key, {
-            "month":    month_key,
-            "agent1":   {"wins": 0, "total": 0},
-            "agent2":   {"wins": 0, "total": 0},
-            "agent3":   {"wins": 0, "total": 0},
-            "bigmover": {"wins": 0, "total": 0},
-        })
-        if t.style == "futures_agent1":
-            ak = "agent1"
-        elif t.style == "futures_agent2":
-            ak = "agent2"
-        elif t.style == "futures_agent3":
-            ak = "agent3"
-        else:
-            ak = "bigmover"   # futures_agent_bigmover
+        # Bucket per gaya dari REGISTRY. Cabang lama `else: ak = "bigmover"`
+        # membuat trade agen tunggal DIHITUNG SEBAGAI Big Mover — angka yang
+        # salah, bukan sekadar label yang usang.
+        entry = monthly.setdefault(month_key, {"month": month_key, **{
+            a.removeprefix("futures_agent_").removeprefix("futures_"): {"wins": 0, "total": 0}
+            for a in _REG_FUTURES_AGENTS}})
+        ak = t.style.removeprefix("futures_agent_").removeprefix("futures_")
+        entry.setdefault(ak, {"wins": 0, "total": 0})
         entry[ak]["total"] += 1
         if _is_real_win(t):
             entry[ak]["wins"] += 1
@@ -221,13 +221,8 @@ async def get_learning_stats() -> dict:
     monthly_stats = []
     for month_key in sorted(monthly.keys())[-6:]:  # last 6 months
         v = monthly[month_key]
-        monthly_stats.append({
-            "month":    month_key,
-            "agent1":   _month_bucket(v, "agent1"),
-            "agent2":   _month_bucket(v, "agent2"),
-            "agent3":   _month_bucket(v, "agent3"),
-            "bigmover": _month_bucket(v, "bigmover"),
-        })
+        monthly_stats.append({"month": month_key, **{
+            k: _month_bucket(v, k) for k in v if k != "month"}})
 
     # Conservative (flat R:R 1:3) equity — F65: derive from constants, not hardcoded $30/$10.
     # Phase 9: scale off the real wallet base so it sits alongside the actual curve.
@@ -251,10 +246,8 @@ async def get_learning_stats() -> dict:
             "losses":    len(losses),
             "win_rate":  round(wr, 1),
         },
-        "agent1":        agent_stats("futures_agent1"),
-        "agent2":        agent_stats("futures_agent2"),
-        "agent3":        agent_stats("futures_agent3"),
-        "agent_bigmover": agent_stats("futures_agent_bigmover"),  # EC6
+        # Per-agen dari REGISTRY — agen tunggal ikut, agen berikutnya pun ikut.
+        "agents": {a.removeprefix("futures_"): agent_stats(a) for a in _REG_FUTURES_AGENTS},
         "balance": {
             "starting":  round(wallet_base, 2),                     # Phase 9: real base (incl. deposits)
             "current":   round(balance, 2),
