@@ -380,6 +380,22 @@ def _impas(t) -> bool:
         return False
 
 
+def _menang(t) -> bool:
+    """SATU definisi menang — `trade_outcome.is_win` (Fase 1b, bug B1).
+
+    Sampai 12 Sep 2026 FE menghitung ulang dengan `status == "tp" && pnl > 0`:
+    definisi PRA-B1 yang membuang `sl_plus` (trailing yang menutup di atas
+    entry). Hasilnya dua angka untuk 16 trade yang sama di dua tab bersebelahan:
+    Overview 1W/15L (6%), Analytics 3/16 (19%). Kirim flagnya dari sini supaya
+    FE tak punya alasan menghitung sendiri.
+    """
+    try:
+        from agents.shared.trade_outcome import is_win
+        return bool(is_win(t))
+    except Exception:
+        return False
+
+
 def _ambang_menang(t) -> float | None:
     """Berapa dolar yang harus dibukukan posisi INI agar disebut menang."""
     try:
@@ -516,6 +532,7 @@ async def get_futures_positions(
             # Fase 1b: hasil di dalam derau biaya — bukan menang, bukan kalah.
             # UI menandainya "Impas" alih-alih hijau "SL+ Profit" untuk +$0,06.
             "is_scratch":            _impas(t),
+            "is_win":                _menang(t),
             "win_threshold_usd":     _ambang_menang(t),
         })
 

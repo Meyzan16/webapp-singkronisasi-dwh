@@ -1,4 +1,6 @@
 export interface FuturesPosition {
+  /** Dari server: `trade_outcome.is_win`. Satu definisi menang untuk semua tab. */
+  is_win?: boolean;
   id:             number;
   symbol:         string;
   direction:      "LONG" | "SHORT";
@@ -137,7 +139,12 @@ export interface RiskDashboard {
 }
 
 export function isRealWin(p: FuturesPosition): boolean {
-  return p.status === "tp" && (p.pnl_pct ?? 0) > 0;
+  // Definisi menang datang dari SERVER (`trade_outcome.is_win`, Fase 1b).
+  // Rumus lama di bawah adalah definisi pra-B1 yang membuang `sl_plus` —
+  // trailing yang menutup di atas entry — dan membuat Overview melapor 1W/15L
+  // sementara Analytics melapor 3/16 untuk 16 trade yang sama.
+  if (typeof p.is_win === "boolean") return p.is_win;
+  return p.status === "tp" && (p.pnl_pct ?? 0) > 0;   // cadangan untuk payload lama
 }
 
 export function calcNotional(riskPct: number, riskDollar: number): number {

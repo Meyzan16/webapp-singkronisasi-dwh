@@ -85,6 +85,10 @@ function fmtDuration(entry_at: number, closed_at: number | null): string {
 function TypeBadge({ style }: { style: string }) {
   if (style === "opportunity_spot")
     return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200 shrink-0">🎯 SPOT</span>;
+  // Agen tunggal HARUS punya cabang sendiri: regex cadangan di bawah memakan
+  // "futures_agent" dari "futures_agentic" dan menyisakan "ic" -> lencana "Ic".
+  if (style === "futures_agentic")
+    return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-teal-100 text-teal-700 border border-teal-200 shrink-0">🧠 Agentic</span>;
   if (style === "futures_agent1")
     return <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 shrink-0">🎯 Pre-Gainer</span>;
   if (style === "futures_agent2")
