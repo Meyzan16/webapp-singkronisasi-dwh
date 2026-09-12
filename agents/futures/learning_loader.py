@@ -28,9 +28,21 @@ from agents.futures.learning_policy import apply_learning_policy
 
 logger = structlog.get_logger(__name__)
 
-_FUTURES_AGENTS = (
-    "futures_agent1", "futures_agent2", "futures_agent3", "futures_agent_bigmover",
-)
+# Dari REGISTRY. Terukur 12 Sep 2026: daftar ini dipaku empat agen lama, jadi
+# bobot sinyal `futures_agentic` — yang ditulis weight_updater tiap siklus —
+# TAK PERNAH DIMUAT KEMBALI. `apply_lane_learning` untuk agen tunggal menerima
+# bobot kosong: pembelajaran menulis, tak ada yang membaca, dan agen yang
+# benar-benar berdagang tak pernah belajar dari hasilnya sendiri.
+def _semua_agen_futures() -> tuple[str, ...]:
+    try:
+        from app.services.agent_registry import FUTURES_AGENTS
+        return tuple(FUTURES_AGENTS)
+    except Exception:      # noqa: BLE001
+        return ("futures_agentic", "futures_agent1", "futures_agent2",
+                "futures_agent3", "futures_agent_bigmover")
+
+
+_FUTURES_AGENTS = _semua_agen_futures()
 
 # PLAN_SIGNAL_REPAIR_LIVE R1: deteksi transisi ban/unban antar-load supaya
 # perubahan status ban tercatat di repair ledger (bukan senyap).

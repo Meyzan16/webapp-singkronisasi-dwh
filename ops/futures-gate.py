@@ -62,7 +62,13 @@ async def kumpulkan() -> dict:
             "SELECT value_num FROM agent_config WHERE agent_group='futures' AND key='dd_hard_stop_pct'"
         ))).scalar() or 15.0
 
-    return {"trades": trades, "alasan": alasan, "dd_cap": float(dd_cap)}
+        modal = (await s.execute(text(
+            "SELECT initial_balance + deposited_total - withdrawn_total "
+            "FROM paper_balances WHERE style='futures'"
+        ))).scalar() or 1000.0
+
+    return {"trades": trades, "alasan": alasan, "dd_cap": float(dd_cap),
+            "modal": float(modal)}
 
 
 def nilai(bahan: dict) -> list[dict]:
@@ -81,7 +87,17 @@ def nilai(bahan: dict) -> list[dict]:
     pnl = [float(t.pnl_dollar or 0.0) for t in trades]
     ekspektasi = statistics.mean(pnl) if pnl else 0.0
 
-    tp1 = bahan["alasan"].get("tp1_hit", 0) + bahan["alasan"].get("tp2_hit", 0)
+    # "TP tersentuh" dihitung dari META trade, bukan hanya `close_reason` ledger.
+    #
+    # TP1 pada agen tunggal adalah PARSIAL: separuh dibank, sisanya lanjut dengan
+    # SL yang sudah dimajukan, dan posisi biasanya tutup belakangan lewat
+    # trailing (`sl_plus`). `close_reason`-nya karena itu bukan `tp1_hit` —
+    # padahal TP1-nya BENAR-BENAR tercapai. Terukur 12 Sep 2026: ledger bilang
+    # 0 dari 18, meta bilang 3 dari 18. Gerbang yang tak melihat TP yang
+    # tercapai akan menolak selamanya.
+    tp1 = sum(1 for t in trades
+              if _meta(t).get("tp1_partial_done") or _meta(t).get("tp2_partial_done")
+              or _meta(t).get("close_reason") in ("tp1_hit", "tp2_hit"))
     tp1_frac = tp1 / n if n else 0.0
 
     rasio_menang = []
@@ -101,8 +117,13 @@ def nilai(bahan: dict) -> list[dict]:
         and -float(t.pnl_dollar) > 1.3 * float(t.risk_dollar)
     ]
 
-    # Drawdown puncak dari kurva ekuitas trade agen aktif.
-    ekuitas = puncak = 0.0
+    # Drawdown puncak dari kurva ekuitas — dimulai dari MODAL, bukan dari nol.
+    #
+    # Terukur 12 Sep 2026: dimulai dari 0, puncak +$1,41 lalu turun ke -$4
+    # terbaca sebagai drawdown 396%, dan pada 17 trade skrip ini melaporkan
+    # 777% — mustahil untuk dompet yang kehilangan kurang dari 1%. Gerbang yang
+    # salah hitung ini akan menolak selamanya, apa pun hasil agennya.
+    ekuitas = puncak = bahan["modal"]
     dd_maks = 0.0
     for p in pnl:
         ekuitas += p
