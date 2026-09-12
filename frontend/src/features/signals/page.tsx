@@ -1,7 +1,7 @@
 "use client";
 import { apiFetch, HEAVY_TIMEOUT_MS } from "@/lib/api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isFuturesAgent, agentLabel as agentLabelOf, SPOT_AGENT } from "@/lib/agents";
+import { isFuturesAgent, agentLabel as agentLabelOf, SPOT_AGENT, isLegacyFuturesAgent } from "@/lib/agents";
 import { ExitSection, type ExitSubTab } from "./components/ExitSection";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -360,12 +360,11 @@ const SUBTABS_OF: Record<Section, { key: SubTab; label: string }[]> = {
 // jadi lane BigMover (14 sinyal lolos ambang) tak punya tab dan tak pernah bisa
 // dilihat pengguna. Agen yang lahir kemudian akan mengalami nasib sama bila
 // daftar ini diperlakukan sebagai final.
+// Fase 8: empat lane lama dihapus bersama modulnya. Bobot lamanya masih ada
+// di DB tapi tak ada agen yang memakainya — tab untuknya hanya jadi derau.
 const AGENT_TABS = [
-  { key: "opportunity_spot",       label: "SPOT",         color: "text-teal-700",   bg: "bg-teal-100 border-teal-200" },
-  { key: "futures_agent1",         label: "Pre-Gainer",   color: "text-blue-700",   bg: "bg-blue-100 border-blue-200" },
-  { key: "futures_agent2",         label: "Accumulation", color: "text-purple-700", bg: "bg-purple-100 border-purple-200" },
-  { key: "futures_agent3",         label: "Momentum",     color: "text-orange-700", bg: "bg-orange-100 border-orange-200" },
-  { key: "futures_agent_bigmover", label: "BigMover",     color: "text-amber-700",  bg: "bg-amber-100 border-amber-200" },
+  { key: "opportunity_spot", label: "SPOT",    color: "text-teal-700", bg: "bg-teal-100 border-teal-200" },
+  { key: "futures_agentic",  label: "Agentic", color: "text-teal-700", bg: "bg-teal-100 border-teal-200" },
 ];
 
 // `isFuturesAgent` & label agen berasal dari registry bersama (@/lib/agents)
@@ -718,9 +717,10 @@ function PipelineLive({ spot, futures, health, updater }: {
 // ── ImprovementsTab (P4) — apa yang sedang diperbaiki sistem, live ────────────
 
 const AGENT_LABEL: Record<string, string> = {
-  opportunity_spot: "SPOT", futures_agent1: "Pre-Gainer",
-  futures_agent2: "Accumulation", futures_agent3: "Momentum",
-  futures_agent_bigmover: "BigMover",
+  opportunity_spot: "SPOT", futures_agentic: "Agentic",
+  // label lane lama dipertahankan untuk baris riwayat perbaikan yang sudah ada
+  futures_agent1: "Pre-Gainer", futures_agent2: "Accumulation",
+  futures_agent3: "Momentum", futures_agent_bigmover: "BigMover",
 };
 
 // PLAN_PERFORMANCE_INTEGRATION — per-agent live scorecard (menggantikan movers table
@@ -1305,8 +1305,8 @@ const SEVERITY_META: Record<RecoSuggestion["severity"], { label: string; chip: s
 };
 
 const RECO_ICONS: Record<string, string> = {
-  opportunity_spot: "🎯", futures_agent1: "🎯", futures_agent2: "🪣",
-  futures_agent3: "⚡", futures_agent_bigmover: "🚀",
+  opportunity_spot: "🎯", futures_agentic: "🧠",
+  futures_agent1: "🎯", futures_agent2: "🪣", futures_agent3: "⚡", futures_agent_bigmover: "🚀",
 };
 
 function SuggestionsTab({ data, onApply, applyMsg, spotReco, repairs, spotRepairs, onNavigate }: {
@@ -2587,7 +2587,7 @@ export default function SignalsPage() {
   // PLAN_PERFORMANCE_INTEGRATION — filter agent yg dipilih dari Improvements tab
   const [progressAgentFilter, setProgressAgentFilter] = useState<string | null>(null);
   const [subTab,      setSubTab]      = useState<SubTab>("overview");
-  const [agentFilter, setAgentFilter] = useState("futures_agent1");
+  const [agentFilter, setAgentFilter] = useState("futures_agentic");
   const [sortBy,      setSortBy]      = useState<SortBy>("win_rate");
   const [sortDir,     setSortDir]     = useState<"desc" | "asc">("desc");
   const [minTrades,   setMinTrades]   = useState(3);
@@ -2789,9 +2789,12 @@ export default function SignalsPage() {
   const futAgentTabs = useMemo(() => {
     const known = AGENT_TABS.filter(a => isFuturesAgent(a.key));
     const seen  = new Set(known.map(a => a.key));
+    // Agen yang muncul di DATA tapi belum dikatalogkan ikut jadi tab — kecuali
+    // lane lama Fase 8: bobotnya masih tersimpan, tapi tak ada agen yang
+    // memakainya, dan tab untuk agen mati hanya menyesatkan.
     const extra = Array.from(
       new Set(allSignals.flatMap(s => Object.keys(s.agents).filter(isFuturesAgent)))
-    ).filter(k => !seen.has(k))
+    ).filter(k => !seen.has(k) && !isLegacyFuturesAgent(k))
      .map(k => ({ key: k, label: k.replace(/^futures_agent_?/, "") || k,
                   color: "text-neutral-700", bg: "bg-neutral-100 border-neutral-200" }));
     return [...known, ...extra];

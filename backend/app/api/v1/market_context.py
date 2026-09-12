@@ -118,10 +118,8 @@ def _get_futures_count() -> int:
     try:
         from agents.futures import store as fs
         cached = fs.get_all_results()
-        a1 = len((cached.get("agent1") or {}).get("results", []))
-        a2 = len((cached.get("agent2") or {}).get("results", []))
-        a3 = len((cached.get("agent3") or {}).get("results", []))
-        return a1 + a2 + a3
+        # Fase 8: satu agen — hitung dari kunci store yang benar-benar diisi.
+        return len((cached.get("agentic") or {}).get("results", []))
     except Exception:
         return -1  # -1 = not scanned yet
 

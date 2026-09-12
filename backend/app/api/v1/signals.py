@@ -741,8 +741,12 @@ async def get_agent_health() -> dict:
 
     # Diturunkan dari registry — dulu salinan manual yang harus dijaga sinkron
     # dengan _RECO_CATEGORIES di file yang sama.
-    from app.services.agent_registry import LANE_AGENT, agent_label
-    lane_map = {lane: (agent, agent_label(agent)) for lane, agent in LANE_AGENT.items()}
+    from app.services.agent_registry import LANE_AGENT, ACTIVE_FUTURES_AGENTS, agent_label
+    # Hanya lane agen AKTIF. Fase 8 menghapus empat lane lama; menampilkannya di
+    # scorecard berlabel "ACTIVE" dengan 0 trade menyesatkan — mereka tak
+    # berdagang lagi, dan tak akan pernah.
+    lane_map = {lane: (agent, agent_label(agent)) for lane, agent in LANE_AGENT.items()
+                if agent in ACTIVE_FUTURES_AGENTS}
     lanes = []
     for lane, (agent, label) in lane_map.items():
         paused_info = gate_state.get("lane_pauses", {}).get(lane, {})

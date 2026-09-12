@@ -12,8 +12,10 @@ HEARTBEAT_SEC = 5
 # F29: single source of truth — import instead of duplicating the value
 from agents.futures.scheduler import INTERVAL_SEC
 
-# BUG-L20: all lanes streamed (agent3 was dropped → momentum wiped from the live UI each tick)
-_WS_AGENTS = ["agent1", "agent2", "agent3"]
+# Fase 8: satu agen. Sampai 12 Sep 2026 daftar ini masih tiga lane lama yang
+# store-nya kosong — jadi stream WS mengirim nol sinyal tiap tick sementara
+# scanner menghasilkan 8-18 kandidat agentic per siklus.
+_WS_AGENTS = ["agentic"]
 
 
 def _next_scan_in(last_ts: Optional[float]) -> Optional[int]:

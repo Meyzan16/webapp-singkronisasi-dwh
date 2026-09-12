@@ -196,7 +196,7 @@ async def get_eligibility(symbol: str) -> dict:
     from agents.futures import store as fs
     in_universe = False
     matched_score: Optional[float] = None
-    for agent_key in ("agent1", "agent2", "agent3"):
+    for agent_key in ("agentic",):   # Fase 8: satu agen
         res = fs.get_result(agent_key) or {}
         for r in res.get("results", []):
             if r.get("symbol") == sym:
@@ -217,9 +217,9 @@ async def get_eligibility(symbol: str) -> dict:
     short_max, short_label = _max_achievable_a3("SHORT", change_24h) if change_24h is not None else (None, "no data")
     max_score = max(long_max or 0, short_max or 0)
 
-    # 5) Threshold (Agent 3 adaptive)
+    # 5) Ambang agen tunggal
     from agents.futures import weight_updater
-    thr = weight_updater.get_adaptive_thresholds("futures_agent3")
+    thr = weight_updater.get_adaptive_thresholds("futures_agentic")
     auto_threshold = thr.get("auto_threshold", 72)
 
     scoring_gap = round(max_score - auto_threshold, 1) if change_24h is not None else None

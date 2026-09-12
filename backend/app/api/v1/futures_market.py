@@ -237,10 +237,10 @@ async def _fetch_overview() -> dict:
                 row["open_interest"]      = round(oi_base, 2)
                 row["open_interest_usdt"] = oi_usdt
 
-        # ── F98: attach Agent 1 pre-gainer score so overview links to the scanner ──
+        # ── F98: sematkan skor agen tunggal supaya overview tersambung ke scanner ──
         try:
             from agents.futures import store as _futures_store
-            a1_cache = _futures_store.get_result("agent1") or {}
+            a1_cache = _futures_store.get_result("agentic") or {}
             score_map: dict[str, float] = {}
             for r in a1_cache.get("results", []):
                 _sym = r.get("symbol")
