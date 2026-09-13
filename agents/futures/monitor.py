@@ -141,6 +141,9 @@ _today: Optional[str] = None  # F61: track date for daily closed_today reset
 
 # P5.4: fast loop — trade IDs identified as high-risk in the last main cycle
 _fast_loop_trade_ids: set[int] = set()
+# Himpunan posisi agen aktif yang terakhir dilihat jalur cepat — dicatat ke log
+# hanya saat berubah, supaya ada bukti jalur ini hidup tanpa banjir log.
+_fast_loop_agentic_seen: frozenset[int] = frozenset()
 FAST_INTERVAL_SEC = 30   # check high-risk positions every 30s (was never checked)
 
 # EC5: server-time drift check
@@ -2290,6 +2293,14 @@ async def _run_fast_loop() -> None:
 
                 agentic_fast = [t for t in fast_trades if t.style in _AGENTIC_STYLES]
                 legacy_fast  = [t for t in fast_trades if t.style not in _AGENTIC_STYLES]
+
+                global _fast_loop_agentic_seen
+                _kini = frozenset(t.id for t in agentic_fast)
+                if _kini != _fast_loop_agentic_seen:
+                    logger.info("fast_loop_agentic_watch", n=len(_kini),
+                                symbols=sorted(t.symbol for t in agentic_fast),
+                                interval_sec=FAST_INTERVAL_SEC)
+                    _fast_loop_agentic_seen = _kini
 
                 # Jalur agentic menulis `peak_pnl_pct` bahkan saat `hold`, jadi
                 # commit diperlukan begitu ADA posisi agentic yang diproses.
