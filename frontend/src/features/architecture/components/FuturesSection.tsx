@@ -12,14 +12,6 @@ import {
 import { useAgentConfig } from "../hooks/useAgentConfig";
 import { useAgentConfigDbKeys } from "../hooks/useAgentConfigDbKeys";
 
-// data.ts lane key ("agent1") → live API agent key ("pre_gainer")
-const LIVE_AGENT_KEY: Record<string, string> = {
-  agent1: "pre_gainer",
-  agent2: "accumulation",
-  agent3: "momentum",
-  bigmover: "bigmover",
-};
-
 // ─── SYSTEM STATS ─────────────────────────────────────────────────────────────
 function FuturesStatsBar() {
   const { data, loading } = useAgentConfig();
@@ -30,11 +22,11 @@ function FuturesStatsBar() {
   const stats: { label: string; val: string; dbKey?: string }[] = [
     { label: "Scan Interval",   val: live?.scan_interval_sec != null ? `${Math.round(live.scan_interval_sec / 60)} menit` : o.scanInterval },
     { label: "Monitor",         val: live?.monitor_interval_sec != null ? `${Math.round(live.monitor_interval_sec / 60)} menit` : o.monitorInterval },
-    { label: "Fast Monitor",    val: o.fastMonitorInterval.replace(" (high-risk)", "") },
+    { label: "Fast Monitor",    val: o.fastMonitorInterval },
     { label: "Max Positions",   val: live ? `${live.auto_trader?.max_positions_global} global` : `${o.maxPositions} global`, dbKey: "futures.max_auto_positions" },
-    { label: "Min Score",       val: String(o.minScore) },
-    { label: "Auto-Open",       val: o.autoOpenScore },
-    { label: "Max Age",         val: live ? `${live.monitor?.max_age_days}–${(live.monitor?.max_age_days ?? 0) + (live.monitor?.max_age_extensions ?? 0)} hari` : o.maxAge },
+    { label: "Min Score",       val: live?.agents?.agentic?.min_score != null ? String(live.agents.agentic.min_score) : String(o.minScore), dbKey: "futures.agentic_min_score" },
+    { label: "Auto-Open",       val: live?.agents?.agentic?.min_score != null ? `≥ ${live.agents.agentic.min_score}` : o.autoOpenScore },
+    { label: "Time-stop",       val: live?.exit?.exit_max_hold_h != null ? `${live.exit.exit_max_hold_h} jam` : o.maxHold, dbKey: "futures.exit_max_hold_h" },
     { label: "Circuit Breaker", val: live ? `−${live.risk_gate?.dd_hard_stop_pct}%` : `−${o.circuitBreakerPct}%` },
   ];
   return (
@@ -58,34 +50,18 @@ function FuturesStatsBar() {
   );
 }
 
-// ─── 4 AGENTS ────────────────────────────────────────────────────────────────
+// ─── AGEN TUNGGAL ────────────────────────────────────────────────────────────
 function AgentsSection() {
-  const [active, setActive] = useState(FUTURES_AGENTS[0].key);
-  const agent = FUTURES_AGENTS.find(a => a.key === active)!;
+  const agent = FUTURES_AGENTS[0];
   const { data } = useAgentConfig();
   const dbKeys = useAgentConfigDbKeys();
-  const liveAgent = data?.futures?.agents?.[LIVE_AGENT_KEY[active] ?? active];
+  const liveAgent = data?.futures?.agents?.agentic;
   const minScore = (liveAgent?.min_score as number | undefined) ?? agent.minScore;
-  // Only bigmover's min_score is DB-wired (fixed threshold) — agent1/2/3 use
-  // adaptive thresholds from weight_updater, which aren't a static agent_config row.
-  const minScoreDbKey = active === "bigmover" ? "futures.bigmover_min_score" : undefined;
+  const minScoreDbKey = "futures.agentic_min_score";
 
   return (
     <div className="mb-6">
-      <SectionTitle icon="🤖" title="4 Futures Agents" sub="Setiap agent punya filosofi, scoring, dan risk budget berbeda" />
-
-      <div className="flex gap-2 mb-4 flex-wrap">
-        {FUTURES_AGENTS.map(a => (
-          <button key={a.key} onClick={() => setActive(a.key)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${
-              active === a.key
-                ? "bg-blue-600 text-white border-blue-600"
-                : "bg-white border-neutral-200 text-neutral-600 hover:border-blue-300"
-            }`}>
-            {a.emoji} {a.label}
-          </button>
-        ))}
-      </div>
+      <SectionTitle icon="🧠" title="Futures — Agen Tunggal" sub="Empat lane lama (Pre-Gainer, Accumulation, Momentum, BigMover) dibongkar; satu skor, satu ambang, satu set aturan keluar" />
 
       <div className={`rounded-xl border p-4 bg-gradient-to-br ${agent.color}`}>
         {/* Header */}
@@ -94,16 +70,16 @@ function AgentsSection() {
             <p className="text-lg font-bold flex items-center gap-2">{agent.emoji} {agent.label}</p>
             <p className="text-xs text-neutral-600 mt-1 max-w-lg">{agent.philosophy}</p>
             <div className="flex gap-1.5 mt-2">
-              <Badge label={`Max ${agent.leverageMax}×`} color={agent.badgeColor} />
+              <Badge label={`Basis ${agent.leverageMax}×`} color={agent.badgeColor} />
               <Badge label={agent.direction} color="bg-neutral-100 text-neutral-700" />
               <Badge label={`Min ${minScore} pts`} color={agent.badgeColor} />
               {minScoreDbKey && <SourceBadge dbKey={minScoreDbKey} dbKeys={dbKeys} />}
             </div>
           </div>
           <div className="text-xs text-neutral-600 bg-white/60 rounded-xl p-3 space-y-1 shrink-0">
-            <p><span className="font-semibold">SL Method:</span> {agent.slMethod}</p>
-            <p><span className="font-semibold">SL Cap:</span> {agent.slCap}</p>
-            <p><span className="font-semibold">Max Margin Loss:</span> {agent.maxMarginLoss}</p>
+            <p><span className="font-semibold">SL:</span> {agent.slMethod}</p>
+            <p><span className="font-semibold">TP:</span> {agent.slCap}</p>
+            <p><span className="font-semibold">Ukuran:</span> {agent.maxMarginLoss}</p>
             <p className="text-[10px] text-neutral-400 font-mono">{agent.file}</p>
           </div>
         </div>
@@ -127,7 +103,7 @@ function AgentsSection() {
         {/* Penalties */}
         {agent.penalties.length > 0 && (
           <div className="mt-3 pt-3 border-t border-neutral-200">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-red-600 mb-2">Penalties & Skip Conditions</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-red-600 mb-2">Gerbang & Pengecilan Ukuran</p>
             <div className="space-y-1">
               {agent.penalties.map((p, i) => (
                 <p key={i} className="text-xs text-red-700 flex items-start gap-1.5">
@@ -142,59 +118,36 @@ function AgentsSection() {
   );
 }
 
-// ─── LEVERAGE CALC ────────────────────────────────────────────────────────────
+// ─── LEVERAGE & UKURAN ───────────────────────────────────────────────────────
 function LeverageSection() {
   return (
     <div className="mb-6">
-      <SectionTitle icon="📐" title="Leverage Calculation" sub="Base dari ATR volatilitas, lalu score bonus, lalu di-cap per lane" />
-      <div className="grid md:grid-cols-3 gap-4">
-        {/* Base */}
+      <SectionTitle icon="📐" title="Leverage & Ukuran Posisi" sub="Basis 6×, lalu empat batas — yang TERKECIL menang. Semua angka dari sizing_config (dapat ditala)" />
+      <div className="grid md:grid-cols-2 gap-4">
         <div className="bg-neutral-50 border rounded-xl p-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Base Leverage (dari ATR 15m)</p>
-          <div className="space-y-1.5">
-            {LEVERAGE_CALC.base.map((r, i) => (
-              <div key={i} className="flex items-center justify-between text-xs">
-                <span className="text-neutral-600">ATR {r.atr}</span>
-                <Badge label={`${r.base}×`} color="bg-blue-50 text-blue-700" />
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 pt-2 border-t space-y-1">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-1">Score Bonus</p>
-            {LEVERAGE_CALC.scoreBonus.map((b, i) => (
-              <div key={i} className="flex items-center justify-between text-xs">
-                <span className="text-neutral-600">Score {b.score}</span>
-                <span className="font-bold text-teal-600">{b.bonus}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Lane Caps */}
-        <div className="bg-neutral-50 border rounded-xl p-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Lane Caps</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Batas Leverage</p>
           <div className="space-y-2">
-            {LEVERAGE_CALC.laneCaps.map((l, i) => (
-              <div key={i} className="flex items-start justify-between text-xs gap-2">
-                <span className="text-neutral-600 font-mono">{l.lane}</span>
-                <div className="text-right">
-                  <p className="font-bold text-blue-700">{l.maxLev}× max</p>
-                  <p className="text-[10px] text-neutral-500">SL Margin {l.slMargin}</p>
+            {LEVERAGE_CALC.caps.map((c, i) => (
+              <div key={i} className="text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-neutral-700 font-semibold">{c.rule}</span>
+                  <span className="font-mono text-[10px] text-blue-700">{c.formula}</span>
                 </div>
+                <p className="text-[10px] text-neutral-500">{c.note}</p>
               </div>
             ))}
           </div>
         </div>
-
-        {/* Liq Guard */}
         <div className="bg-neutral-50 border rounded-xl p-3">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Liquidation Guard</p>
-          <p className="text-[11px] text-neutral-500 mb-2">Tutup posisi darurat jika harga mendekati likuidasi</p>
-          <div className="space-y-1.5">
-            {LEVERAGE_CALC.liqGuard.map((g, i) => (
-              <div key={i} className="flex items-center justify-between text-xs">
-                <span className="text-neutral-600">{g.leverage}</span>
-                <Badge label={`≤ ${g.guardPct}`} color="bg-red-50 text-red-700" />
+          <p className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Ukuran Posisi</p>
+          <div className="space-y-2">
+            {LEVERAGE_CALC.sizing.map((c, i) => (
+              <div key={i} className="text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-neutral-700 font-semibold">{c.rule}</span>
+                  <span className="font-mono text-[10px] text-blue-700">{c.formula}</span>
+                </div>
+                <p className="text-[10px] text-neutral-500">{c.note}</p>
               </div>
             ))}
           </div>
@@ -206,10 +159,10 @@ function LeverageSection() {
 
 // ─── MONITOR WATERFALL ────────────────────────────────────────────────────────
 function MonitorSection() {
-  const [open, setOpen] = useState<string | null>("TP1 Partial");
+  const [open, setOpen] = useState<string | null>(FUTURES_MONITOR_LAYERS[0].label);
   return (
     <div className="mb-6">
-      <SectionTitle icon="👁" title="Futures Monitor — Exit Waterfall" sub="Proses trail SL, TP extensions, emergency exits. Berjalan setiap 2 menit." />
+      <SectionTitle icon="👁" title="Aturan Keluar — exit_rules.py" sub="Urutannya adalah aturannya. Loop utama 2 menit + jalur cepat 30 detik atas SEMUA posisi." />
       <div className="space-y-2">
         {FUTURES_MONITOR_LAYERS.map(layer => (
           <div key={layer.label} className={`rounded-xl border overflow-hidden ${layer.color}`}>

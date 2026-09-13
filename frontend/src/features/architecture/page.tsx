@@ -7,7 +7,7 @@ import { LearningSection } from "./components/LearningSection";
 
 const TOP_TABS = [
   { key: "spot",    label: "🎯 SPOT",      sub: "5 Lanes · 12 Signals · 5 Exit Layers" },
-  { key: "futures", label: "⚡ FUTURES",   sub: "4 Agents · Leverage · Monitor · Risk Gate" },
+  { key: "futures", label: "⚡ FUTURES",   sub: "Agen Tunggal · Leverage · Aturan Keluar · Risk Gate" },
   { key: "learning",label: "🧠 Learning",  sub: "Adaptive Weights · Auto-Threshold · Blacklist · Tech" },
 ] as const;
 
@@ -30,15 +30,15 @@ export default function ArchitecturePage() {
                 <strong className="text-teal-400">Spot Opportunity</strong>{" "}
                 (4 lanes, 12 sinyal, adaptive scoring) dan{" "}
                 <strong className="text-blue-400">Futures</strong>{" "}
-                (4 agents, ATR leverage, risk gate, circuit breaker).
-                Total <strong className="text-white">7 autonomous agents</strong> + adaptive signal weighting.
+                (agen tunggal momentum, aturan keluar ATR, risk gate, circuit breaker).
+                Total <strong className="text-white">4 proses otonom</strong> + pembelajaran adaptif terpisah.
               </p>
             </div>
             <div className="flex gap-3 flex-wrap">
               {[
-                { n: "7", lbl: "Agents" },
+                { n: "4", lbl: "Proses otonom" },
                 { n: "12", lbl: "SPOT Signals" },
-                { n: "4+4", lbl: "Lanes/Agents" },
+                { n: "4+1", lbl: "Lane SPOT / Agen Futures" },
                 { n: "≥3.5×", lbl: "R:R SPOT" },
               ].map(s => (
                 <div key={s.lbl} className="text-center bg-white/5 border border-white/10 rounded-xl px-4 py-2">
@@ -54,10 +54,8 @@ export default function ArchitecturePage() {
             {[
               { icon: "🎯", label: "Spot Scanner",    sub: "3 min cycle",    color: "bg-teal-500/20 border-teal-400/30"    },
               { icon: "📍", label: "Spot Monitor",    sub: "60s · L0–L4",   color: "bg-amber-500/20 border-amber-400/30"  },
-              { icon: "⚡", label: "Pre-Gainer",      sub: "Futures · 2min", color: "bg-blue-500/20 border-blue-400/30"    },
-              { icon: "📦", label: "Accumulation",    sub: "Futures · T0-T4",color: "bg-purple-500/20 border-purple-400/30"},
-              { icon: "🔥", label: "Momentum",        sub: "Futures · 2min", color: "bg-orange-500/20 border-orange-400/30"},
-              { icon: "💥", label: "Big Mover",       sub: "Futures · 2min", color: "bg-yellow-500/20 border-yellow-400/30"},
+              { icon: "🧠", label: "Futures Agentic", sub: "scan 2 mnt · agen tunggal", color: "bg-blue-500/20 border-blue-400/30" },
+              { icon: "👁", label: "Futures Monitor", sub: "2 mnt + jalur cepat 30 dtk", color: "bg-orange-500/20 border-orange-400/30" },
               { icon: "🧠", label: "Weight Updater",  sub: "Learning · 6h",  color: "bg-green-500/20 border-green-400/30"  },
             ].map(a => (
               <div key={a.label} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border ${a.color}`}>

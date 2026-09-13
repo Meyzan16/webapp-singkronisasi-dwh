@@ -412,14 +412,6 @@ async def spot_exit_learning_trail(days: int = Query(90, ge=1, le=365)) -> dict:
     return await recommend_trail_params(days=days, market="spot")
 
 
-@router.get("/futures/sl-config", dependencies=[Depends(require_db)])
-async def get_sl_config() -> dict:
-    """Lebar SL per lane yang SEDANG berlaku."""
-    from agents.futures import sl_config
-    await sl_config.refresh()
-    return {"status": "ok", "config": sl_config.snapshot()}
-
-
 # ── PLAN-FUTURES-AGENTIC Fase 2: mesin ukuran yang menjelaskan diri ─────────
 
 @router.get("/futures/sizing/preview", dependencies=[Depends(require_db)])
@@ -609,7 +601,8 @@ async def spot_exit_learning_recommendations(days: int = Query(90, ge=1, le=365)
 
 @router.get("/futures/exit-learning/config", dependencies=[Depends(require_db)])
 async def exit_learning_config() -> dict:
-    """Ambang monitor yang SEDANG berlaku, termasuk batas TP per lane."""
-    from agents.futures import monitor_config as mcfg
-    await mcfg.refresh()
-    return {"status": "ok", "config": mcfg.snapshot()}
+    """Aturan keluar agen tunggal yang SEDANG berlaku (`exit_config`) — termasuk
+    nilai hasil belajar `exit_tp1_atr_mult_learned` bila ada."""
+    from agents.futures import exit_config as ecfg
+    await ecfg.refresh()
+    return {"status": "ok", "config": ecfg.snapshot()}

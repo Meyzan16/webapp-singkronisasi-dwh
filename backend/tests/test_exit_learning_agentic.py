@@ -36,13 +36,15 @@ def test_lane_lama_bukan_agen_aktif():
 
 
 def test_usulan_agen_aktif_ke_kunci_yang_dibaca():
-    assert EL._kunci_tp("agentic", kunci_lama) == "exit_tp1_atr_mult_learned"
+    assert EL._kunci_tp("agentic") == "exit_tp1_atr_mult_learned"
 
 
-def test_usulan_lane_lama_tetap_ke_kunci_lamanya():
-    """Jalur lama masih mengelola posisi era lane sampai yang terakhir tutup —
-    syarat Fase 8. Memindahkannya sekarang membuat posisi itu tak tertala."""
-    assert EL._kunci_tp("bigmover", kunci_lama) == "monitor_tp_atr_mult_lane_bigmover"
+def test_lane_lama_tak_punya_kunci_tujuan():
+    """Jalur lane lama dibongkar 13 Sep 2026 — kunci per-lane monitornya tak
+    dibaca siapa pun. Menulis ke sana harus berisik, bukan "berhasil" diam."""
+    import pytest
+    with pytest.raises(ValueError):
+        EL._kunci_tp("bigmover")
 
 
 def test_lane_kosong_tak_dianggap_agen_aktif():

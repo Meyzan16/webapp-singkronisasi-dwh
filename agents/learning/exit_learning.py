@@ -596,13 +596,12 @@ async def analyze_sl_width(days: int = 90, market: str = "futures") -> dict:
     """
     if not is_db_available():
         return {"status": "db_unavailable"}
-    # Batas SL yang dikonfigurasi baru ada untuk FUTURES (`sl_config`). Untuk
-    # market lain kolom "plafon/lantai/mentok" DIKOSONGKAN — meminjam angka
-    # futures akan menghasilkan vonis "mentok plafon" yang sepenuhnya karangan.
+    # Kolom "plafon/lantai/mentok" DIKOSONGKAN: agen tunggal futures menyusun
+    # SL dari kelipatan ATR (`exit_sl_atr_mult`), tanpa plafon/lantai dalam
+    # persen — `sl_config` per lane lama dibongkar 13 Sep 2026. SPOT memang
+    # tak pernah punya. Meminjam angka akan menghasilkan vonis "mentok plafon"
+    # yang sepenuhnya karangan.
     sl_params = None
-    if market == "futures":
-        from agents.futures import sl_config
-        sl_params = sl_config.params
 
     cutoff = time.time() - days * 86400
     async with AsyncSessionLocal() as session:
@@ -1006,9 +1005,10 @@ def _trail_config(market: str) -> dict:
         from agents.opportunity import monitor_config as scfg
         return {"lock": scfg.TRAIL_LOCK_AFTER_TP1_FRAC,
                 "advance": scfg.TRAIL_ADVANCE_TP1_TP2_FRAC, "applicable": True}
-    from agents.futures import monitor_config as mcfg
-    return {"lock": mcfg.TRAIL_LOCK_AFTER_TP1_FRAC,
-            "advance": mcfg.TRAIL_ADVANCE_TP1_TP2_FRAC, "applicable": True}
+    # FUTURES: agen tunggal mengunci `exit_trail_lock_frac` dari puncak sesudah
+    # TP1 dan tak punya konsep "maju ke TP1" — kedua parameter monitor lama
+    # (`monitor_trail_*`) dibongkar 13 Sep 2026 bersama jalurnya.
+    return {"lock": None, "advance": None, "applicable": False}
 
 
 # ── M9: tangga TP sisi MASUK, diturunkan dari MFE ────────────────────────────
@@ -1098,11 +1098,11 @@ def _lane_agen_aktif(lane: str) -> bool:
     return (lane or "").strip() in aktif
 
 
-def _kunci_tp(lane: str, kunci_lane_lama) -> str:
+def _kunci_tp(lane: str) -> str:
     """Ke mana usulan TP lane ini ditulis.
 
-    Lane LAMA tetap ke kunci per-lane monitor lama — jalur itu masih mengelola
-    posisi era lane sampai yang terakhir tutup (syarat Fase 8).
+    Hanya lane agen aktif yang punya tujuan; lane lama dibongkar 13 Sep 2026
+    bersama kunci per-lane monitornya (pemanggil menyaring lebih dulu).
 
     Agen tunggal membaca `exit_config`, bukan kunci per-lane. Sampai 9 Sep 2026
     usulannya tetap ditulis ke `monitor_tp_atr_mult_lane_agentic` — kunci yang
@@ -1113,7 +1113,9 @@ def _kunci_tp(lane: str, kunci_lane_lama) -> str:
     langsung, supaya saklar `monitor_exit_learning_enabled` tetap berarti dan
     angka yang disetel manusia tak tertimpa mesin.
     """
-    return "exit_tp1_atr_mult_learned" if _lane_agen_aktif(lane) else kunci_lane_lama(lane)
+    if not _lane_agen_aktif(lane):
+        raise ValueError(f"lane {lane!r} tak punya kunci TP — lane lama dibongkar")
+    return "exit_tp1_atr_mult_learned"
 
 
 async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
@@ -1137,7 +1139,6 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
     mengusulkan, penyalaan tetap keputusan pemilik.
     """
     from app.models.agent_config import AgentConfig
-    from agents.futures.monitor_config import tp_lane_key, failfast_gap_key
 
     reco = await recommend_exit_params(days=days, market=market)
     if reco.get("status") != "ok":
@@ -1145,29 +1146,18 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
 
     planned, skipped = [], []
 
-    # M3 — gap fail-fast per lane. Dipasang lewat jalur yang sama supaya satu
-    # tombol menerapkan seluruh hasil belajar sisi keluar, bukan tersebar.
-    ff = await recommend_failfast_params(days=days, market=market)
-    for rec in ff.get("recommendations", []):
-        lane = rec["lane"]
-        # `fail_fast` DIHAPUS dari jalur agen tunggal di Fase 4 — terukur -$79
-        # dengan nol kemenangan. Menulis usulannya untuk lane ini berarti menala
-        # mekanisme yang tak ada lagi: angkanya tersimpan, tak pernah dibaca,
-        # dan menambah persis kunci per-lane yang Fase 8 justru mau buang.
-        if _lane_agen_aktif(lane):
-            skipped.append({"lane": lane, "target": "failfast_gap",
-                            "reason": "fail_fast_dihapus_fase4"})
-            continue
-        if rec.get("status") != "ok":
-            skipped.append({"lane": lane, "target": "failfast_gap",
-                            "reason": rec.get("status"), "n": rec.get("n")})
-            continue
-        planned.append({"lane": lane, "key": failfast_gap_key(lane),
-                        "value": rec["suggested_gap"], "target": "failfast_gap",
-                        "n": rec["n"], "note": rec["note"]})
+    # Fail-fast TIDAK lagi diusulkan: mekanismenya dihapus dari jalur agen
+    # tunggal di Fase 4 (terukur -$79, nol kemenangan) dan kunci per-lane
+    # monitor lama tempat usulannya dulu ditulis dibongkar 13 Sep 2026.
 
     for rec in reco["recommendations"]:
         lane = rec["lane"]
+        # Hanya lane agen aktif yang punya kunci tujuan (`exit_tp1_atr_mult_learned`).
+        # Lane lama tak punya pembaca lagi — menulis untuknya berarti kunci mati.
+        if not _lane_agen_aktif(lane):
+            skipped.append({"lane": lane, "target": "tp_atr",
+                            "reason": "lane_lama_dibongkar"})
+            continue
         if rec.get("status") != "ok":
             skipped.append({"lane": lane, "target": "tp_atr",
                             "reason": "sampel_kurang", "n": rec.get("n")})
@@ -1180,7 +1170,7 @@ async def apply_exit_recommendations(days: int = 90, dry_run: bool = True,
         if not rec.get("suggested_tp_atr"):
             skipped.append({"lane": lane, "target": "tp_atr", "reason": "usulan_kosong"})
             continue
-        planned.append({"lane": lane, "key": _kunci_tp(lane, tp_lane_key),
+        planned.append({"lane": lane, "key": _kunci_tp(lane),
                         "target": "tp_atr",
                         "value": rec["suggested_tp_atr"],
                         "current_tp_atr": rec.get("current_tp_atr"),

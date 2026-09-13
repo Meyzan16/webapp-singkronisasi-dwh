@@ -45,20 +45,17 @@ export interface AgentConfigFutures {
   monitor_interval_sec: number;
   universe_cap: number;
   agents: Record<string, Record<string, number | boolean | string>>;
+  /** Nilai BERLAKU dari sizing_config / exit_config (flat: kunci → angka). */
+  sizing?: Record<string, number>;
+  exit?: Record<string, number>;
   auto_trader: {
     max_positions_global: number;
     lane_quotas: Record<string, number>;
-    max_bigmover_positions: number;
     cooldown_hours: number;
     max_wallet_margin_pct: number;
     funding_gate_long_pct: number;
     funding_gate_short_pct: number;
     auto_open_threshold_fallback: number;
-  };
-  monitor: {
-    max_age_days: number;
-    max_age_extensions: number;
-    lane_margin_caps_pct: Record<string, number>;
   };
   risk_gate: {
     dd_hard_stop_pct: number;

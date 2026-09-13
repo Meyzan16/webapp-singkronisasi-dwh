@@ -77,16 +77,15 @@ def test_tp2_tak_di_luar_tp1_membuat_ext_kosong_bukan_nol():
 
 # ── Jalur penerapan ──────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("market,alias", [("futures", "mcfg"), ("spot", "scfg")])
+# FUTURES: kedua parameter trailing monitor lama dibongkar 13 Sep 2026 bersama
+# jalurnya — agen tunggal mengunci `exit_trail_lock_frac` dari puncak sesudah
+# TP1 (exit_rules), tanpa konsep "maju ke TP1". Rekomendernya kini SPOT saja.
+@pytest.mark.parametrize("market,alias", [("spot", "scfg")])
 def test_kunci_config_yang_diusulkan_benar_benar_dibaca_monitor(market, alias):
     """Penyakit berulang: hasil belajar tersimpan rapi di kunci yang tak dibaca
     siapa pun (lane SPOT `squeeze` vs `accumulation`, 8 Agu)."""
-    if market == "futures":
-        from agents.futures import monitor_config as cfg
-        import agents.futures.monitor as mon
-    else:
-        from agents.opportunity import monitor_config as cfg
-        import agents.opportunity.monitor as mon
+    from agents.opportunity import monitor_config as cfg
+    import agents.opportunity.monitor as mon
     src = inspect.getsource(mon)
     for param, key in er.GLOBAL_PARAMS.items():
         grup, k = er.param_config_key(param, er.GLOBAL_LANE, market)
@@ -95,19 +94,17 @@ def test_kunci_config_yang_diusulkan_benar_benar_dibaca_monitor(market, alias):
         assert f"{alias}.{var}" in src, f"{key} tak dibaca monitor {market}"
 
 
-@pytest.mark.parametrize("market", ["futures", "spot"])
-def test_parameter_trailing_terdaftar_di_rollout(market):
+def test_parameter_trailing_terdaftar_di_rollout_spot_saja():
     for p in er.GLOBAL_PARAMS:
-        assert p in er.SUPPORTED_PARAMS_BY_MARKET[market]
-    # Fail-fast tetap khusus futures — monitor SPOT memakai pemicu lain.
-    assert "failfast_min_sl_gap" not in er.SUPPORTED_PARAMS_BY_MARKET["spot"]
+        assert p in er.SUPPORTED_PARAMS_BY_MARKET["spot"]
+        assert p not in er.SUPPORTED_PARAMS_BY_MARKET["futures"]
 
 
 @pytest.mark.asyncio
 async def test_parameter_global_menolak_lane_per_koin():
     """Pemeriksaan duplikat memakai (market, lane, param). Tanpa sentinel, empat
     lane bisa punya baris sendiri yang semuanya menulis SATU kunci config."""
-    hasil = await er.propose("bigmover", "trail_lock_after_tp1", 0.9)
+    hasil = await er.propose("bigmover", "trail_lock_after_tp1", 0.9, market="spot")
     assert hasil["status"] == "lane_salah"
     assert hasil["harus"] == er.GLOBAL_LANE
 
@@ -142,9 +139,9 @@ def test_usulan_ditahan_sampai_sampel_cukup():
     assert "TRAIL_MIN_LIFT" in src
 
 
-def test_kedua_market_kini_bisa_menerima_usulan():
-    for market in ("futures", "spot"):
-        assert el._trail_config(market)["applicable"] is True
+def test_hanya_spot_yang_menerima_usulan_trailing():
+    assert el._trail_config("spot")["applicable"] is True
+    assert el._trail_config("futures")["applicable"] is False
 
 
 def test_bawaan_trailing_spot_sama_persis_dengan_perilaku_lama():
@@ -193,8 +190,8 @@ def test_nilai_berjalan_dibaca_dari_config_bukan_disalin():
     """Angka pembanding yang disalin akan basi diam-diam begitu canary berjalan,
     dan seluruh perhitungan lift jadi salah tanpa ada yang tahu."""
     src = inspect.getsource(el._trail_config)
-    assert "mcfg.TRAIL_LOCK_AFTER_TP1_FRAC" in src
-    assert "mcfg.TRAIL_ADVANCE_TP1_TP2_FRAC" in src
+    assert "scfg.TRAIL_LOCK_AFTER_TP1_FRAC" in src
+    assert "scfg.TRAIL_ADVANCE_TP1_TP2_FRAC" in src
 
 
 def test_counterfactual_memakai_biaya_bersih():
@@ -252,10 +249,10 @@ def test_kedua_monitor_merekam_gerak_sesudah_tp1():
     jatuh SEBELUM TP1, saat kedua parameter belum berlaku sama sekali."""
     import agents.futures.monitor as fut_mon
     import agents.opportunity.monitor as spot_mon
-    for mod in (fut_mon, spot_mon):
-        src = inspect.getsource(mod)
-        assert "trail_tracker.arm_tp1(" in src, f"{mod.__name__} tak membekukan acuan"
-        assert "trail_tracker.track(" in src, f"{mod.__name__} tak melacak sesudah TP1"
+    for src, nama in ((inspect.getsource(fut_mon._monitor_agentic), "futures"),
+                      (inspect.getsource(spot_mon), "spot")):
+        assert "trail_tracker.arm_tp1(" in src, f"{nama} tak membekukan acuan"
+        assert "trail_tracker.track(" in src, f"{nama} tak melacak sesudah TP1"
 
 
 def test_ledger_menulis_ketiga_kolom():

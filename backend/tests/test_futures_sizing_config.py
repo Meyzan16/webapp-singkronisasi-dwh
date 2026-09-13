@@ -15,28 +15,30 @@ monitor yang kebetulan sudah jalan.
 import pytest
 
 from agents.futures import sizing_config as szcfg
-from agents.futures.utils import (
-    DEFAULT_LANE_CAP,
-    DEFAULT_MAX_LEVERAGE,
-    EXTENDED_CHANGE_24H_PCT,
-    LIQ_SAFETY_MULT,
-    MAX_LEVERAGE_BY_LANE,
-    cap_leverage_by_lane,
-)
+from agents.futures.utils import cap_leverage_by_lane
+
+# Konstanta lama dari utils.py (dibongkar 13 Sep 2026 bersama dict per-lane
+# lane lama) — disalin di sini sebagai pembanding independen rumus lama.
+DEFAULT_LANE_CAP        = 25.0
+DEFAULT_MAX_LEVERAGE    = 6
+LIQ_SAFETY_MULT         = 2.0
+EXTENDED_CHANGE_24H_PCT = 15.0
 
 
 # ── 1. Nilai beku harus cermin konstanta lama ────────────────────────────────
 
-def test_frozen_leverage_cocok_dengan_konstanta_utils():
+def test_frozen_leverage_cocok_dengan_konstanta_lama():
     assert szcfg._FROZEN["lev_liq_safety_mult"] == LIQ_SAFETY_MULT
     assert szcfg._FROZEN["lev_max_default"] == float(DEFAULT_MAX_LEVERAGE)
     assert szcfg._FROZEN["lev_lane_cap_default"] == DEFAULT_LANE_CAP
     assert szcfg._FROZEN["lev_extended_change_24h_pct"] == EXTENDED_CHANGE_24H_PCT
 
 
-def test_frozen_lane_cocok_dengan_dict_lama():
-    for lane, lev in MAX_LEVERAGE_BY_LANE.items():
-        assert szcfg._FROZEN_LEV_MAX_LANE[lane] == float(lev), lane
+def test_hanya_lane_agen_aktif_yang_ditala():
+    """Lane lama tak lagi punya baris `lev_max_*` — 5 tombol tala tanpa pembaca."""
+    from app.services.agent_registry import ACTIVE_FUTURES_AGENTS, AGENT_LANE
+    aktif = {AGENT_LANE[a] for a in ACTIVE_FUTURES_AGENTS}
+    assert set(szcfg.tunable_lanes()) == aktif
 
 
 def test_frozen_sizing_cocok_dengan_konstanta_balance():
@@ -70,12 +72,11 @@ def test_frozen_sizing_cocok_dengan_konstanta_balance():
 
 def _leverage_rumus_lama(base_lev, risk_pct, lane, change_24h=0.0):
     """Salinan verbatim rumus sebelum Fase 1a — pembanding independen."""
-    hard_cap = MAX_LEVERAGE_BY_LANE.get(lane, DEFAULT_MAX_LEVERAGE)
+    hard_cap = DEFAULT_MAX_LEVERAGE
     if not risk_pct or risk_pct <= 0:
         lev = min(int(base_lev), hard_cap)
     else:
-        from agents.futures.utils import MAX_SL_MARGIN_PCT_BY_LANE
-        lane_cap = MAX_SL_MARGIN_PCT_BY_LANE.get(lane, DEFAULT_LANE_CAP)
+        lane_cap = DEFAULT_LANE_CAP
         sl_cap = max(1, int(lane_cap / risk_pct))
         liq_cap = max(1, int(95.0 / LIQ_SAFETY_MULT / risk_pct))
         lev = min(int(base_lev), sl_cap, liq_cap, hard_cap)
@@ -84,7 +85,7 @@ def _leverage_rumus_lama(base_lev, risk_pct, lane, change_24h=0.0):
     return max(1, lev)
 
 
-@pytest.mark.parametrize("lane", ["accumulation", "pre_gainer", "momentum", "bigmover", "lane_asing"])
+@pytest.mark.parametrize("lane", ["agentic", "lane_asing"])
 @pytest.mark.parametrize("risk_pct", [0.0, 0.5, 1.5, 2.0, 3.0, 5.0, 8.0])
 @pytest.mark.parametrize("change_24h", [0.0, 20.0])
 def test_leverage_identik_dengan_rumus_lama(lane, risk_pct, change_24h):
@@ -96,7 +97,7 @@ def test_leverage_identik_dengan_rumus_lama(lane, risk_pct, change_24h):
 def test_leverage_tak_pernah_nol():
     """max(1, …) adalah janji: leverage 0 akan membagi-nol di rumus margin."""
     for risk in (0.1, 50.0, 200.0):
-        assert cap_leverage_by_lane(1, risk, "bigmover", 99.0) >= 1
+        assert cap_leverage_by_lane(1, risk, "agentic", 99.0) >= 1
 
 
 # ── 3. B8 — scanner tak boleh bergantung pada loop monitor ───────────────────
@@ -108,8 +109,7 @@ def test_plafon_leverage_tersedia_tanpa_loop_monitor():
     monitor. Tanpa ini, plafon leverage scanner hanya benar setelah monitor
     menyelesaikan siklus pertamanya — dan salah, diam-diam, sebelum itu.
     """
-    assert szcfg.lev_max_for_lane("bigmover") == 3
-    assert szcfg.lev_max_for_lane("momentum") == 6
+    assert szcfg.lev_max_for_lane("agentic") == int(szcfg.get("lev_max_default"))
     # Lane tak dikenal memakai BAWAAN, bukan angka lane tetangga.
     assert szcfg.lev_max_for_lane("lane_yang_belum_ada") == int(szcfg.get("lev_max_default"))
 

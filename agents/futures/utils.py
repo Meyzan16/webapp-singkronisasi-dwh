@@ -9,42 +9,10 @@ agent + monitor + risk_gate all reason about the same caps.
 """
 
 
-# ── PLAN_v2 P1.3 — per-lane max margin loss at SL hit ─────────────────────────
-# Tighter caps for lanes that hold longer (more black-swan window).
-MAX_SL_MARGIN_PCT_BY_LANE: dict[str, float] = {
-    "accumulation":  15.0,
-    "pre_gainer":    18.0,
-    "pre_move":      18.0,    # legacy alias
-    "momentum":      25.0,
-    "bigmover":      20.0,
-}
-DEFAULT_LANE_CAP = 25.0
-
-
-# ── PLAN_v2 P1.2 — liquidation-safe sizing multiplier ─────────────────────────
-# liq_dist_pct ≈ 95 / leverage (1% MMR). Require liq_dist ≥ SL_dist × SAFETY_MULT
-# so a wick to SL never lands the trade inside liquidation territory.
-LIQ_SAFETY_MULT = 2.0
-
-
-# ── PLAN_v6 P1a — HARD leverage ceiling per lane ──────────────────────────────
-# BUG-fix: the margin-based cap alone allowed e.g. accumulation 10× (15% / 1.5% SL),
-# far too high for a slow "hold" lane — one of those SL'd at −16% margin. This is an
-# ABSOLUTE ceiling applied on top of the margin/liq caps: leverage never exceeds this
-# regardless of how tight the SL is.
-MAX_LEVERAGE_BY_LANE: dict[str, int] = {
-    "accumulation":  5,
-    "pre_gainer":    5,
-    "pre_move":      5,    # legacy alias
-    "momentum":      6,
-    "bigmover":      3,
-}
-DEFAULT_MAX_LEVERAGE = 6
-
-# ── PLAN_v6 P1b — extended-entry leverage cut ─────────────────────────────────
-# Entry into an already-extended move (high |change_24h|) carries higher reversal
-# risk, so halve leverage there — smaller margin loss when the late entry reverses.
-EXTENDED_CHANGE_24H_PCT = 15.0
+# Batas-batas ukuran (plafon leverage per lane, pengali aman likuidasi, batas
+# rugi margin di SL, potongan entry terlambat) hidup di `sizing_config` dan
+# dapat ditala lewat agent_config. Dict per-lane lama (accumulation/pre_gainer/
+# momentum/bigmover) dibongkar 13 Sep 2026 bersama lane-nya.
 
 
 def cap_leverage_by_lane(
@@ -55,21 +23,12 @@ def cap_leverage_by_lane(
 ) -> int:
     """
     Apply caps to a base leverage choice, smallest wins:
-      1. Lane SL-margin cap   → L ≤ MAX_SL_MARGIN_PCT_LANE / risk_pct
-      2. Liquidation safety   → L ≤ (95 / SAFETY_MULT) / risk_pct  = 47.5 / risk_pct
-      3. PLAN_v6 P1a hard ceiling → L ≤ MAX_LEVERAGE_BY_LANE[lane]  (absolute)
-      4. PLAN_v6 P1b → halve when entering an already-extended move (|change_24h| high)
+      1. Lane SL-margin cap   → L ≤ lev_lane_cap_default / risk_pct
+      2. Liquidation safety   → L ≤ (95 / lev_liq_safety_mult) / risk_pct
+      3. Hard ceiling         → L ≤ lev_max_<lane> (absolute)
+      4. Halve when entering an already-extended move (|change_24h| high)
+    Semua angka dari `sizing_config` (dapat ditala lewat agent_config).
     """
-    # Fase 1a: angka-angka di bawah datang dari `sizing_config` (dapat ditala
-    # lewat agent_config tanpa deploy). Konstanta modul di atas TETAP ada sebagai
-    # cadangan beku — dipakai persis saat DB tak terbaca, sehingga nilainya
-    # identik dengan perilaku sebelum fase ini.
-    #
-    # Kenapa lewat modul sendiri, bukan membaca dict `MAX_SL_MARGIN_PCT_BY_LANE`
-    # yang dimutasi monitor: plafon leverage milik SCANNER tak boleh bergantung
-    # pada loop MONITOR yang kebetulan sudah jalan. Sampai 5 Sep 2026 memang
-    # begitu — dan saat monitor belum menyelesaikan siklus pertamanya, scanner
-    # diam-diam memakai angka hardcode sementara UI menampilkan angka lain.
     from agents.futures import sizing_config as szcfg
 
     hard_cap = szcfg.lev_max_for_lane(lane)
@@ -77,7 +36,7 @@ def cap_leverage_by_lane(
     if not risk_pct or risk_pct <= 0:
         lev = min(int(base_lev), hard_cap)
     else:
-        lane_cap = MAX_SL_MARGIN_PCT_BY_LANE.get(lane, szcfg.get("lev_lane_cap_default"))
+        lane_cap = szcfg.get("lev_lane_cap_default")
         sl_cap   = max(1, int(lane_cap / risk_pct))
         # liq_dist_pct ≈ 95 / leverage; syaratnya liq_dist ≥ SL_dist × safety
         liq_cap  = max(1, int(95.0 / szcfg.get("lev_liq_safety_mult") / risk_pct))
@@ -88,32 +47,6 @@ def cap_leverage_by_lane(
         lev = lev // 2
 
     return max(1, lev)
-
-
-# ── PLAN_v2 P1.1 / P1.5 — per-lane max margin loss (live-monitor gate) ────────
-# Stricter than the entry sizing caps because slippage past SL or regime-widened
-# SL can blow through the static sizing assumption.
-MAX_LOSS_PCT_OF_MARGIN_BY_LANE: dict[str, float] = {
-    "accumulation":  35.0,
-    "pre_gainer":    30.0,
-    "pre_move":      30.0,    # legacy alias
-    "momentum":      50.0,
-    "bigmover":      40.0,
-}
-DEFAULT_MAX_LOSS_PCT = 50.0
-
-
-# ── PLAN_v2 — agent style → lane mapping (used by monitor) ────────────────────
-STYLE_TO_LANE: dict[str, str] = {
-    "futures_agent1":          "pre_gainer",
-    "futures_agent2":          "accumulation",
-    "futures_agent3":          "momentum",
-    "futures_agent_bigmover":  "bigmover",
-}
-
-
-def lane_for_style(style: str) -> str:
-    return STYLE_TO_LANE.get(style, "momentum")
 
 
 # ── PLAN_v6 P4b — momentum health check ───────────────────────────────────────

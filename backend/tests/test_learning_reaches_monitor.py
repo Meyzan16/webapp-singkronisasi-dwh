@@ -19,11 +19,13 @@ import pathlib
 
 import pytest
 
-from agents.futures import monitor_config as mcfg, monitor as fut_mon
 from agents.opportunity import monitor_config as scfg, monitor as spot_mon
 
+# FUTURES tak lagi punya `monitor_config` per-lane: jalur monitor lane lama
+# dibongkar 13 Sep 2026. Agen tunggal membaca `exit_config` (satu set kunci
+# `exit_*`) yang dijaga test_futures_exit_rules.py. Rantai struktural di bawah
+# kini hanya menjaga SPOT.
 PASANGAN = [
-    pytest.param(mcfg, fut_mon, "mcfg", "futures", id="futures"),
     pytest.param(scfg, spot_mon, "scfg", "spot", id="spot"),
 ]
 
@@ -163,12 +165,7 @@ def test_tak_ada_ambang_telanjang_di_ekspresi(cfgmod, mon, alias, market):
 
 def test_ambang_baru_punya_bawaan_perilaku_lama():
     """Memberi kunci config TIDAK BOLEH mengubah satu pun keputusan."""
-    from agents.futures import monitor_config as m
     from agents.opportunity import monitor_config as s
-    assert m._FROZEN.get("AGE_EXTEND_COOLDOWN_HOURS", 20.0) == 20.0 or True
-    src_m = inspect.getsource(m)
-    assert "AGE_EXTEND_COOLDOWN_HOURS = 20.0" in src_m
-    assert "STUCK_NEAR_SL_BAND_PCT = 2.0" in src_m
     assert "STRUCT_SL_BUFFER_FRAC = 0.99" in inspect.getsource(s)
     assert s.default_of("STRUCT_SL_BUFFER_FRAC") == 0.99
 
@@ -242,11 +239,11 @@ def test_ingatan_hanya_memblokir_arah_yang_sudah_diuji():
     dari ketiadaan bukti — kesalahan yang sama seperti mengevaluasi kandidat di
     sisi tersensor pada recommender trailing."""
     from agents.learning import exit_rollout as er
-    for p in er.SUPPORTED_PARAMS_BY_MARKET["futures"]:
-        assert p in er._ARAH_AGRESIF, f"{p} tak punya arah agresif"
-    # tp lebih KECIL = lebih agresif; gap fail-fast lebih BESAR = lebih agresif
+    for m in ("futures", "spot"):
+        for p in er.SUPPORTED_PARAMS_BY_MARKET[m]:
+            assert p in er._ARAH_AGRESIF, f"{m}/{p} tak punya arah agresif"
+    # tp lebih KECIL = lebih agresif
     assert er._ARAH_AGRESIF["tp_atr_mult"] < 0
-    assert er._ARAH_AGRESIF["failfast_min_sl_gap"] > 0
 
 
 def test_ingatan_tidak_berlaku_selamanya():

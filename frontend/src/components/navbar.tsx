@@ -36,7 +36,7 @@ const pathnameMap = {
   },
   "architecture": {
     title: "📐 Architecture",
-    description: "6 autonomous agents · 2 sistem independen · Futures AI + T0-T4 · Spot Opportunity",
+    description: "2 sistem independen · Futures agen tunggal · Spot Opportunity 4 lane · learning terpisah",
   },
   "settings": {
     title: "Settings",

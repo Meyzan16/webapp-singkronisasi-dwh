@@ -237,9 +237,11 @@ async def test_tulisan_saat_hold_ikut_tersimpan(monkeypatch):
     sekaligus kolom `mfe_atr` di ledger exit."""
     import inspect
 
-    sumber = inspect.getsource(M.check_futures_positions)
-    assert "if agentic_trades:" in sumber, (
-        "commit masih bersyarat closed/updated — tulisan saat hold akan hilang")
+    for fn in (M.check_futures_positions, M._run_fast_loop):
+        sumber = inspect.getsource(fn)
+        assert "await session.commit()" in sumber
+        assert "if closed" not in sumber.split("await session.commit()")[0].splitlines()[-1], (
+            "commit masih bersyarat closed/updated — tulisan saat hold akan hilang")
 
 
 # ── Posisi agen aktif WAJIB masuk daftar yang diawasi ────────────────────────
@@ -292,18 +294,32 @@ def test_jalur_cepat_memuat_agen_aktif_tanpa_penandaan():
     """Penandaan "berisiko" tak cukup: ARKUSDT jatuh dari +10% ke SL dalam
     satu jeda. Seluruh posisi terbuka agen aktif harus ikut, selalu."""
     import inspect
-    sumber = inspect.getsource(M._ambil_trade_jalur_cepat)
-    assert "PaperTrade.style.in_(_AGENTIC_STYLES)" in sumber
+    sumber = inspect.getsource(M._run_fast_loop)
+    assert "PaperTrade.style.in_(list(_AGENTIC_STYLES))" in sumber
+    assert "_fast_loop_trade_ids" not in sumber, "penandaan berisiko kembali"
 
 
-def test_jalur_cepat_memakai_aturan_agentic_bukan_lane_lama():
-    """`_fast_close` menilai dengan aturan lane lama (status dari tanda PnL,
-    fraksi TP1 0,33). Posisi agen tunggal wajib lewat `_monitor_agentic`."""
+def test_jalur_cepat_memakai_aturan_agentic():
+    """Dulu `_fast_close` menilai dengan aturan lane lama (status dari tanda
+    PnL, fraksi TP1 0,33). Jalur lane lama dibongkar 13 Sep 2026; satu-satunya
+    aturan yang tersisa adalah `_monitor_agentic`."""
     import inspect
     sumber = inspect.getsource(M._run_fast_loop)
-    assert "_monitor_agentic(session, agentic_fast, prices)" in sumber
-    # lane lama tetap lewat jalur lamanya
-    assert "for trade in legacy_fast:" in sumber
+    assert "_monitor_agentic(session, trades, prices)" in sumber
+    assert "_fast_close" not in sumber
+
+
+def test_jalur_agentic_mencatat_denyut_dan_mae():
+    """Dua kolom yang dulu hanya ditulis loop lama:
+    - `last_tick_at`: tanpanya rekonsiliasi offline memutar ulang sejak ENTRY
+      terhadap SL yang sudah dinaikkan dan menutup posisi sehat;
+    - `trough_pnl_pct`: tanpanya `mae_atr` di ledger kosong dan usulan lebar
+      SL tak punya bahan."""
+    import inspect
+    sumber = inspect.getsource(M._monitor_agentic)
+    for kolom in ("last_tick_at", "last_tick_price", "last_tick_pnl_pct",
+                  "last_tick_event", "trough_pnl_pct"):
+        assert kolom in sumber, kolom
 
 
 @pytest.mark.asyncio
@@ -354,3 +370,32 @@ async def test_trailing_tak_memindahkan_sl_ke_tempat_yang_sama():
     _, u2 = await M._monitor_agentic(sess, [t], {"XUSDT": 106.5})
     assert u2 == 0, "pemindahan SL dicatat padahal SL tak berubah"
     assert t.trail_sl == sl_pertama
+
+
+# ── Sumbu lilin: SL dinilai dari ekstrem, bukan harga sesaat ─────────────────
+
+@pytest.mark.asyncio
+async def test_sl_tertembus_oleh_sumbu_walau_harga_sudah_kembali():
+    """PONSUSDT 13 Sep 2026: lilin 12:30 high 0,5630 ≥ SL 0,5627 (SHORT) —
+    harga sesaat tak pernah di atas SL saat monitor melihat, jadi posisi paper
+    bertahan; stop order nyata sudah terisi. `ExitState.low/high` ada sejak B2
+    tapi tak pernah diisi jalur ini."""
+    t = FakeTrade(direction="LONG", entry_price=100.0, stop_loss=95.0)
+    sess = FakeSession()
+    closed, _ = await M._monitor_agentic(sess, [t], {"XUSDT": 99.0},
+                                         wicks={"XUSDT": (94.8, 99.5)})
+    assert closed == 1 and t.status == "sl"
+    assert t.close_price == pytest.approx(95.0)          # di harga SL, bukan 94.8
+    assert t.sl_breach_pct == pytest.approx(0.2, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_tanpa_sumbu_tetap_bekerja_dari_harga():
+    t = FakeTrade(direction="LONG", entry_price=100.0, stop_loss=95.0)
+    closed, _ = await M._monitor_agentic(FakeSession(), [t], {"XUSDT": 99.0})
+    assert closed == 0 and t.status == "open"
+
+
+def test_loop_utama_mengambil_sumbu():
+    import inspect
+    assert "_fetch_wicks(" in inspect.getsource(M.check_futures_positions)

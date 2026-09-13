@@ -83,14 +83,10 @@ _FROZEN: dict[str, float] = {
     "lev_extended_change_24h_pct": 15.0,
 }
 
-#: Plafon leverage ABSOLUT per lane (utils.MAX_LEVERAGE_BY_LANE).
-_FROZEN_LEV_MAX_LANE: dict[str, float] = {
-    "accumulation": 5.0,
-    "pre_gainer":   5.0,
-    "pre_move":     5.0,     # alias lama
-    "momentum":     6.0,
-    "bigmover":     3.0,
-}
+#: Plafon leverage ABSOLUT per lane. Lane lama (accumulation 5, pre_gainer 5,
+#: momentum 6, bigmover 3) dibongkar 13 Sep 2026; lane agen aktif memakai
+#: `lev_max_default` kecuali diberi baris sendiri di sini.
+_FROZEN_LEV_MAX_LANE: dict[str, float] = {}
 
 # Nilai yang SEDANG berlaku — dibaca sinkron oleh jalur panas (per simbol).
 _LIVE: dict[str, float] = dict(_FROZEN)
@@ -106,8 +102,8 @@ def tunable_lanes() -> list[str]:
     """Lane yang wajib punya baris config sendiri — registry ∪ yang sudah punya
     nilai beku, supaya lane baru ikut tanpa mengedit berkas ini."""
     try:
-        from app.services.agent_registry import LANE_AGENT
-        known = set(LANE_AGENT)
+        from app.services.agent_registry import ACTIVE_FUTURES_AGENTS, AGENT_LANE
+        known = {AGENT_LANE[a] for a in ACTIVE_FUTURES_AGENTS if a in AGENT_LANE}
     except Exception:
         known = set()
     return sorted(known | set(_FROZEN_LEV_MAX_LANE))

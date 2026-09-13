@@ -12,36 +12,21 @@ import pytest
 
 # ── 1. fail-fast tak boleh membukukan kerugian melewati SL ───────────────────
 
-def test_failfast_mundur_bila_sl_sudah_tertembus():
-    """Terukur 11 Agu: BLUAIUSDT ber-SL 7,99% dibukukan di −16,96%.
+def test_sl_dibukukan_di_harga_sl_dan_dinilai_pertama():
+    """Terukur 11 Agu: BLUAIUSDT ber-SL 7,99% dibukukan di −16,96% karena
+    fail-fast dievaluasi SEBELUM blok SL dan menutup di harga pasar.
 
-    Sebabnya urutan: fail-fast dievaluasi (~baris 985) SEBELUM blok SL (~1187),
-    lalu menutup di harga pasar berjalan. Blok SL sengaja memakai
-    `close_price = sl` karena stop order sungguhan terisi di harga stop.
+    Jalur lane lama (dengan fail-fast-nya) dibongkar 13 Sep 2026. Jaminannya
+    kini struktural di `exit_rules.evaluate`: SL dinilai PALING PERTAMA dan
+    menutup di `close_price=s.sl` — stop order sungguhan terisi di harga stop.
     """
+    from agents.futures import exit_rules as er
+    src = inspect.getsource(er.evaluate)
+    assert src.index("sl_breached(s)") < src.index("TP1_HIT"), "SL bukan yang pertama"
+    assert "close_price=s.sl" in src
+    # Monitor tak lagi punya jalur lain yang bisa menutup di harga pasar.
     from agents.futures import monitor as fut_mon
-    src = inspect.getsource(fut_mon)
-    assert "_sl_tertembus" in src, "penjaga SL pada fail-fast hilang"
-    assert "and not _sl_tertembus" in src, \
-        "fail-fast masih bisa menutup walau SL sudah tertembus"
-    # Harus memakai harga sadar-sumbu yang sama dengan blok SL, bukan `price`
-    # polos — kalau tidak, sumbu candle yang menembus SL akan terlewat.
-    assert "eff_low <= sl" in src and "eff_high >= sl" in src
-
-
-def test_blok_sl_tetap_membukukan_di_harga_sl():
-    """Ini yang membuat perbaikan di atas berarti. Kalau blok SL ikut memakai
-    harga pasar, memindahkan penanganan ke sana tak memperbaiki apa pun."""
-    from agents.futures import monitor as fut_mon
-    src = inspect.getsource(fut_mon)
-    assert src.count("close_price  = sl") >= 2, "LONG dan SHORT harus dua-duanya"
-
-
-def test_kejadian_dicatat_bukan_dibuang_diam_diam():
-    """Kalau fail-fast mundur tanpa jejak, tak ada cara tahu seberapa sering
-    aturan ini menggigit — dan bug serupa berikutnya kembali tak terlihat."""
-    from agents.futures import monitor as fut_mon
-    assert "fail_fast_after_sl" in inspect.getsource(fut_mon)
+    assert "fail_fast" not in inspect.getsource(fut_mon._monitor_agentic)
 
 
 # ── 2. tangga TP SHORT tak boleh menembus nol ────────────────────────────────

@@ -60,8 +60,8 @@ def test_lebar_sl_tak_meminjam_config_futures_untuk_spot():
     """`sl_config` hanya milik futures. Memakainya untuk spot akan melaporkan
     'mentok plafon' terhadap plafon yang tak pernah berlaku di sana."""
     src = inspect.getsource(el.analyze_sl_width)
-    assert 'market == "futures"' in src
     assert "sl_params = None" in src
+    assert "sl_config" not in src.replace("`sl_config`", "")
 
 
 def test_alasan_asli_tak_diberi_awalan_hist():
@@ -100,7 +100,7 @@ def test_kedua_monitor_merekam_gerak_merugikan_terjauh():
     SL jadi tebakan yang bisa mengubah pemenang jadi pecundang."""
     import agents.futures.monitor as fut_mon
     import agents.opportunity.monitor as spot_mon
-    assert "trough_pnl_pct" in inspect.getsource(fut_mon.check_futures_positions)
+    assert "trough_pnl_pct" in inspect.getsource(fut_mon._monitor_agentic)
     assert "trough_pnl_pct" in inspect.getsource(spot_mon._process_trade)
 
 
@@ -188,11 +188,14 @@ def test_monitor_spot_benar_benar_memanggil_kompresi_tp():
     assert "lane=_lane_tp" in src
 
 
-def test_kedua_monitor_memanggil_kompresi_tp():
-    """Padanan di sisi futures — supaya salah satu tak diam-diam kehilangannya."""
+def test_futures_memakai_tp_hasil_belajar_lewat_exit_config():
+    """Padanan di sisi futures: agen tunggal tak memanggil `effective_take_profit`
+    per lane — batas TP hasil belajar masuk lewat `exit_tp1_atr_mult_learned`
+    yang dibaca `exit_config` di balik saklar `monitor_exit_learning_enabled`."""
     import inspect
-    from agents.futures import monitor as fut_mon
-    assert "effective_take_profit(" in inspect.getsource(fut_mon.check_futures_positions)
+    from agents.futures import exit_config as ecfg
+    src = inspect.getsource(ecfg)
+    assert "_learned" in src and "monitor_exit_learning_enabled" in src
 
 
 def test_pemicu_trend_reversal_bisa_ditala():

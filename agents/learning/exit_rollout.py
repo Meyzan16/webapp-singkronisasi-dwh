@@ -61,22 +61,14 @@ def param_config_key(param: str, lane: str, market: str = "futures") -> tuple[st
             return "spot", COMPOSITE_PARAMS[param]["spot"][0]
         raise ValueError(f"parameter keluar SPOT tak dikenal: {param}")
 
-    from agents.futures import monitor_config as mcfg
+    # FUTURES: satu-satunya parameter keluar yang punya pembaca adalah batas
+    # TP agen tunggal (`exit_tp1_atr_mult_learned`, dibaca `exit_config`).
+    # Fail-fast, plafon SL per lane, dan kedua parameter trailing monitor lama
+    # dibongkar 13 Sep 2026 bersama jalur lane lama — kuncinya tak dibaca lagi.
     if param == "tp_atr_mult":
-        return "futures", mcfg.tp_lane_key(lane)
-    if param == "failfast_min_sl_gap":
-        return "futures", mcfg.failfast_gap_key(lane)
-    if param == "sl_max_pct":
-        # Plafon lebar SL (% harga). Untuk bigmover inilah yang benar-benar
-        # menentukan: 56% posisinya mentok plafon, sehingga `fallback_atr_mult`
-        # yang dimaksudkan sadar-volatilitas jarang berlaku.
-        from agents.futures import sl_config
-        return "futures", sl_config.sl_key("max_pct", lane)
-    if param in GLOBAL_PARAMS:
-        return "futures", GLOBAL_PARAMS[param]
-    if param in COMPOSITE_PARAMS:
-        return "futures", COMPOSITE_PARAMS[param]["futures"][0]
-    raise ValueError(f"parameter keluar tak dikenal: {param}")
+        from agents.learning.exit_learning import _kunci_tp
+        return "futures", _kunci_tp(lane)
+    raise ValueError(f"parameter keluar FUTURES tak didukung: {param}")
 
 
 # ── Parameter MAJEMUK: satu baris rollout, beberapa kunci config ─────────────
@@ -202,9 +194,7 @@ async def _ditolak_dgn_bukti(session, market: str, lane: str, param: str,
 #: fail-fast — monitornya memakai pemicu lain (rotasi, trend_reversal), dan
 #: memaksakan parameter futures ke sana akan menulis kunci yang tak pernah dibaca.
 SUPPORTED_PARAMS_BY_MARKET: dict[str, tuple[str, ...]] = {
-    "futures": ("tp_atr_mult", "failfast_min_sl_gap",
-                "trail_lock_after_tp1", "trail_advance_tp1_tp2",
-                "sl_max_pct"),
+    "futures": ("tp_atr_mult",),
     # SPOT kini punya kunci config sendiri untuk kedua parameter trailing, jadi
     # usulannya benar-benar sampai ke monitor. Fail-fast tetap khusus futures —
     # monitor SPOT memakai pemicu lain (rotasi, trend_reversal).

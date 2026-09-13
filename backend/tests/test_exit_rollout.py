@@ -11,14 +11,15 @@ import pytest
 from agents.learning import exit_rollout as roll
 
 
-def test_parameter_dipetakan_ke_kunci_config_yang_dibaca_monitor():
-    """Kunci diturunkan dari monitor_config, bukan ditulis ulang — kalau ditulis
-    ulang, ledger dan monitor bisa menunjuk kunci berbeda tanpa error."""
-    from agents.futures import monitor_config as mcfg
-    assert roll.param_config_key("tp_atr_mult", "bigmover") == \
-        ("futures", mcfg.tp_lane_key("bigmover"))
-    assert roll.param_config_key("failfast_min_sl_gap", "momentum") == \
-        ("futures", mcfg.failfast_gap_key("momentum"))
+def test_parameter_dipetakan_ke_kunci_config_yang_dibaca_agen():
+    """FUTURES: satu-satunya kunci tujuan adalah `exit_tp1_atr_mult_learned`
+    (dibaca `exit_config`). Lane lama tak punya pembaca → harus berisik."""
+    assert roll.param_config_key("tp_atr_mult", "agentic") == \
+        ("futures", "exit_tp1_atr_mult_learned")
+    with pytest.raises(ValueError):
+        roll.param_config_key("tp_atr_mult", "bigmover")
+    with pytest.raises(ValueError):
+        roll.param_config_key("failfast_min_sl_gap", "agentic")
 
 
 def test_grup_config_ikut_dikembalikan_per_market():
@@ -29,28 +30,24 @@ def test_grup_config_ikut_dikembalikan_per_market():
     grup, kunci = roll.param_config_key("tp_atr_mult", "bigmover", market="spot")
     assert grup == "spot"
     assert kunci == scfg.tp_lane_key("bigmover")
-    # Lane `bigmover` ada di KEDUA market — grupnya yang membedakan, bukan namanya.
-    assert roll.param_config_key("tp_atr_mult", "bigmover")[0] == "futures"
+    assert roll.param_config_key("tp_atr_mult", "agentic")[0] == "futures"
 
 
-def test_failfast_tak_ditawarkan_ke_spot():
-    """Monitor SPOT tak punya fail-fast; menawarkannya berarti menulis kunci yang
-    tak pernah dibaca monitornya."""
-    assert "failfast_min_sl_gap" in roll.SUPPORTED_PARAMS_BY_MARKET["futures"]
-    assert "failfast_min_sl_gap" not in roll.SUPPORTED_PARAMS_BY_MARKET["spot"]
+def test_failfast_tak_ditawarkan_ke_market_mana_pun():
+    """Monitor SPOT tak punya fail-fast; agen tunggal futures membuangnya di
+    Fase 4 (terukur -$79, nol kemenangan). Menawarkannya berarti menulis
+    kunci yang tak pernah dibaca."""
+    for m in ("futures", "spot"):
+        assert "failfast_min_sl_gap" not in roll.SUPPORTED_PARAMS_BY_MARKET[m]
     with pytest.raises(ValueError):
         roll.param_config_key("failfast_min_sl_gap", "bigmover", market="spot")
 
 
 def test_market_disimpan_eksplisit_bukan_ditebak_dari_lane():
-    """Lane `accumulation` dan `bigmover` ada di kedua market, jadi market mustahil
-    ditebak dari nama lane — menebak salah berarti menulis ke monitor yang salah."""
+    """Nama lane tak cukup untuk menebak market — menebak salah berarti
+    menulis ke monitor yang salah."""
     from app.models.futures_exit_rollout import FuturesExitRollout
-    from agents.futures import monitor_config as mcfg
-    from agents.opportunity import monitor_config as scfg
     assert hasattr(FuturesExitRollout, "market")
-    assert set(mcfg.tunable_lanes()) & set(scfg.tunable_lanes()), \
-        "uji ini kehilangan maknanya bila tak ada lane yang beririsan"
 
 
 def test_parameter_tak_dikenal_ditolak():
@@ -83,8 +80,9 @@ def test_tahapan_hanya_yang_dikenal():
 
 def test_semua_parameter_didukung_punya_kunci():
     for param in roll.SUPPORTED_PARAMS:
-        for lane in ("bigmover", "momentum"):
-            assert roll.param_config_key(param, lane)
+        assert roll.param_config_key(param, "agentic")
+    for param in roll.SUPPORTED_PARAMS_BY_MARKET["spot"]:
+        assert roll.param_config_key(param, "bigmover", market="spot")
 
 
 def test_model_rollout_terdaftar():

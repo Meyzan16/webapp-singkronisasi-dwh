@@ -147,17 +147,10 @@ def _exit_snapshot() -> dict:
 async def _futures_config() -> dict:
     from agents.futures import scheduler as fsched
     from agents.futures import monitor as fmon
-    # M2: 24 konstanta keputusan dihapus dari monitor.py dan dipusatkan di sini.
-    from agents.futures import monitor_config as fmcfg
     from agents.futures import auto_trader as at
     from agents.futures import risk_gate as rg
     from agents.futures import agentic as fag
-    from agents.futures import weight_updater as fwu
-    from agents.futures.utils import MAX_SL_MARGIN_PCT_BY_LANE
     from agents.shared.config_reader import cfg
-
-    # Ambang agen tunggal — dibaca HIDUP dari weight_updater, bukan angka mati.
-    t_ag = fwu.get_adaptive_thresholds(fag.AGENT_NAME)
 
     # PLAN_v5 Group C fix: read through cfg.get() (queries DB directly) rather
     # than the module attribute — backend and the `agents` container are
@@ -167,10 +160,6 @@ async def _futures_config() -> dict:
     max_auto_positions  = await cfg.get("futures", "max_auto_positions", at.MAX_AUTO_POSITIONS)
     cooldown_hours      = await cfg.get("futures", "cooldown_hours", at.FUTURES_COOLDOWN_HOURS)
     max_wallet_margin   = await cfg.get("futures", "max_wallet_margin_pct", at.MAX_WALLET_MARGIN_PCT)
-    lane_cap_accum      = await cfg.get("futures", "lane_cap_accumulation", MAX_SL_MARGIN_PCT_BY_LANE["accumulation"])
-    lane_cap_pregain    = await cfg.get("futures", "lane_cap_pre_gainer", MAX_SL_MARGIN_PCT_BY_LANE["pre_gainer"])
-    lane_cap_momentum   = await cfg.get("futures", "lane_cap_momentum", MAX_SL_MARGIN_PCT_BY_LANE["momentum"])
-    lane_cap_bigmover   = await cfg.get("futures", "lane_cap_bigmover", MAX_SL_MARGIN_PCT_BY_LANE["bigmover"])
     rar_threshold       = await cfg.get("futures", "rar_threshold", rg.RAR_GATE_THRESHOLD)
     lane_wr_pause       = await cfg.get("futures", "lane_wr_pause_threshold", rg.LANE_WR_PAUSE_THRESHOLD)
     lane_wr_min_sample  = await cfg.get("futures", "lane_wr_min_sample", rg.LANE_WR_MIN_SAMPLE)
@@ -179,9 +168,6 @@ async def _futures_config() -> dict:
     daily_profit_lock   = await cfg.get("futures", "daily_profit_lock_pct", rg.DAILY_PROFIT_LOCK_PCT)
     lane_consec_sl      = await cfg.get("futures", "lane_consec_sl_pause", rg.CONSEC_SL_LANE_LIMIT)
     max_same_direction  = await cfg.get("futures", "max_same_direction", at.MAX_SAME_DIRECTION)
-    failfast_atr_mult   = await cfg.get("futures", "failfast_atr_mult", fmcfg.FAILFAST_ATR_MULT)
-    max_age_days        = await cfg.get("futures", "monitor_max_age_days", fmcfg.MAX_AGE_DAYS)
-    max_age_extensions  = await cfg.get("futures", "monitor_max_age_extensions", fmcfg.MAX_AGE_EXTENSIONS)
 
     return {
         "scan_interval_sec": fsched.INTERVAL_SEC,
@@ -193,8 +179,10 @@ async def _futures_config() -> dict:
         "agents": {
             "agentic": {
                 "min_score":   agentic_min_score,
-                "auto_score":  t_ag["auto_threshold"],
-                "adaptive":    True,
+                # Satu penggaris: auto-open memakai `agentic_min_score` juga —
+                # dulu di sini 72 dari ambang adaptif lane lama.
+                "auto_score":  agentic_min_score,
+                "adaptive":    False,
             },
         },
         # Rantai ukuran & aturan keluar — nilai BERLAKU dari modul yang sama
@@ -216,17 +204,6 @@ async def _futures_config() -> dict:
             "funding_gate_short_pct": at.MIN_SHORT_FUNDING_PCT,
             "auto_open_threshold_fallback": at.AUTO_OPEN_THRESHOLD,
         },
-        "monitor": {
-            "max_age_days":       max_age_days,
-            "max_age_extensions": int(max_age_extensions),
-            "lane_margin_caps_pct": {
-                "accumulation": lane_cap_accum,
-                "pre_gainer":   lane_cap_pregain,
-                "pre_move":     lane_cap_pregain,   # legacy alias
-                "momentum":     lane_cap_momentum,
-                "bigmover":     lane_cap_bigmover,
-            },
-        },
         "risk_gate": {
             "dd_hard_stop_pct":       rg.DD_HARD_STOP_PCT,   # computed live from wallet size — see PLAN_v5
             "dd_recover_pct":         rg.DD_RECOVER_PCT,
@@ -242,7 +219,6 @@ async def _futures_config() -> dict:
             "lane_consec_sl_pause":      int(lane_consec_sl),
             "consec_sl_window_h":        rg.CONSEC_SL_WINDOW_H,
             "max_same_direction":        int(max_same_direction),
-            "failfast_atr_mult":         failfast_atr_mult,
             "daily_gates":               rg.get_daily_gates(),
         },
     }
