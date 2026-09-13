@@ -22,7 +22,7 @@ from agents.futures.weight_updater import is_blacklisted   # B4: top-level impor
 
 logger = structlog.get_logger(__name__)
 
-INTERVAL_SEC  = 2 * 60    # scan every 2 minutes — pre-gainer signals can form fast
+INTERVAL_SEC  = 2 * 60    # pindai tiap 2 menit
 STARTUP_DELAY = 30        # start after main scanner
 TOP_N         = 30        # top results per agent
 TIMEFRAMES    = ["15m", "1h", "4h"]
@@ -136,19 +136,19 @@ async def _fetch_extreme_funding_tickers(existing: list[dict]) -> list[dict]:
 
 async def _run_scan() -> dict:
     """
-    Full scan cycle: fetch data for all 100 symbols, run both agents.
-    Returns {"agentic": {...}, "big_movers": [...]}.
+    Satu siklus pindai: ambil data seluruh semesta simbol, nilai dengan agen
+    tunggal. Mengembalikan {"agentic": {...}, "learning_status": ...}.
     """
     start = time.time()
     logger.info("futures_scan_start")
 
-    # Step 1: top-N futures tickers by volume (expanded for pre-gainer coverage)
+    # Step 1: top-N futures tickers by volume
     tickers = await fetch_top100_futures()
     if not tickers:
         raise RuntimeError("Could not fetch Futures tickers from Binance")
     tickers = tickers[:UNIVERSE_CAP]
 
-    # Step 1b: add extreme funding rate coins for Agent 1 (not always in top-100 volume)
+    # Step 1b: tambahkan koin dengan funding ekstrem (tak selalu di top-volume)
     # premiumIndex endpoint is weight=~2, very cheap
     try:
         extreme_tickers = await _fetch_extreme_funding_tickers(tickers)
@@ -163,7 +163,7 @@ async def _run_scan() -> dict:
 
     # Step 1b2: P4.1 / PLAN_v3 D1.1 — inject top gainers+losers (early-stage movers).
     # Uses the all-symbols /ticker/24hr endpoint (weight=40). These coins are NOT in
-    # top-250 volume yet but are just starting to move — prime pre-gainer territory.
+    # top-250 volume yet but are just starting to move.
     try:
         change_tickers = await _fetch_top_change_tickers(tickers)
         if change_tickers:
@@ -217,7 +217,7 @@ async def _run_scan() -> dict:
 
     # PLAN_v15 P3a: market breadth — of the top gainers (24h > +10%) we scanned,
     # how many are already fading on 1h? High fraction = pump-and-fade day →
-    # auto_trader blocks new BigMover LONGs. Uses data already in hand (no extra API).
+    # dicatat ke ledger keputusan sebagai konteks pasar. Uses data already in hand.
     _breadth_gainers = 0
     _breadth_fading  = 0
 
@@ -257,7 +257,6 @@ async def _run_scan() -> dict:
 
     # Sort by score, take top N
     ag_results.sort(key=lambda x: x["score"], reverse=True)
-    ag_results_full = ag_results            # PLAN-SIGNAL-GAP P4: daftar penuh utk pencocokan big-movers
     ag_results = ag_results[:TOP_N]
 
     # PLAN_ADAPTIVE_LEARNING_FUTURES_10X F2: terapkan learning policy per-lane —
@@ -266,27 +265,21 @@ async def _run_scan() -> dict:
     learning_status = "warming"
     try:
         from agents.futures.learning_loader import load_futures_learning, apply_lane_learning
-        from agents.futures.weight_updater import get_adaptive_thresholds
         _lw, _lp, _lsc, _lban, learning_status, _lerr = await load_futures_learning()
         # Veto & skor pembelajaran diterapkan ke agen yang BENAR-BENAR berdagang.
         # Sampai Fase 8 loop ini hanya menyentuh empat lane lama, sehingga
         # `banned_by_learning` tak pernah berlaku untuk agen tunggal — auto_trader
         # memeriksanya, tapi tak ada yang pernah menyalakannya.
-        for _res, _agent in ((ag_results, "futures_agentic"),):
-            _thr = get_adaptive_thresholds(_agent).get("auto_threshold", 72)
-            apply_lane_learning(_res, _lw, _lp, _lsc, _lban, _thr, learning_status)
+        #
+        # Ambangnya `agentic_min_score`, bukan ambang adaptif lane lama (72):
+        # `auto_eligible` di learning_policy dihitung dari angka ini, dan skor agen
+        # tunggal lahir dari penilai yang berbeda skalanya.
+        _thr = float(ag.get("agentic_min_score"))
+        apply_lane_learning(ag_results, _lw, _lp, _lsc, _lban, _thr, learning_status)
         if _lerr:
             logger.warning("futures_learning_apply_degraded", error=_lerr)
     except Exception as exc:
         logger.warning("futures_learning_apply_failed", error=str(exc)[:160])
-
-    # PLAN-SIGNAL-GAP P4: Big Movers — every scanned coin with |change_24h| >= threshold,
-    # tagged with whether it qualified for any lane (and at what score) or not.
-    # Lets the frontend show WHY a 50%+ gainer didn't open a position, instead of nothing.
-    big_movers = _build_big_movers(
-        tickers,
-        ag_results_full,
-    )
 
     # PLAN_v15 P3a: publish breadth for auto_trader's fade-day gate
     _fade_frac = round(_breadth_fading / _breadth_gainers, 3) if _breadth_gainers else 0.0
@@ -310,121 +303,16 @@ async def _run_scan() -> dict:
             "generated_at": gen_time,
             "elapsed_sec":  elapsed,
         },
-        "big_movers": big_movers,   # PLAN-SIGNAL-GAP P4
         "learning_status": learning_status,   # F2: warming | active | degraded
     }
 
     logger.info(
         "futures_scan_done",
         agentic=len(ag_results),
-        big_movers=len(big_movers),
         scanned=len(tickers),
         elapsed_sec=elapsed,
     )
     return result
-
-
-# ── Market Pulse helper (PLAN-SIGNAL-GAP P4 + PLAN_v3 D1.4) ─────────────────────
-
-BIG_MOVER_THRESHOLD = 10.0   # |change_24h| % — matches the screenshot's "Big Movers" panel
-
-
-def _classify_tier(change_pct: float, vol_ratio: float, bb_squeeze: bool) -> str:
-    """PLAN_v3 D1.4: classify coin into market pulse tier.
-
-    Tier "big_mover"   — already ≥10% 24h (reactive)
-    Tier "rising_star" — 6-10% 24h AND volume 2×+ (early-stage gainer)
-    Tier "coiling"     — |change_24h| ≤ 3% AND BB squeeze detected (pre-breakout)
-    Tier "other"       — everything else (no special tier)
-    """
-    abs_chg = abs(change_pct)
-    if abs_chg >= BIG_MOVER_THRESHOLD:
-        return "big_mover"
-    if 6 <= abs_chg < BIG_MOVER_THRESHOLD and vol_ratio >= 2.0:
-        return "rising_star"
-    if abs_chg <= 3.0 and bb_squeeze:
-        return "coiling"
-    return "other"
-
-
-def _build_big_movers(tickers: list[dict], all_results: list[dict]) -> list[dict]:
-    """
-    Build the Big Movers list: every scanned ticker with |change_24h| >= threshold,
-    tagged with whether it qualified for any lane this cycle (and at what score),
-    or a heuristic reason why not — so the frontend can explain "kenapa tidak masuk posisi"
-    instead of just showing nothing.
-    """
-    matched: dict[str, list[dict]] = {}
-    for r in all_results:
-        matched.setdefault(r["symbol"], []).append({
-            "agent":     r["agent"],
-            "direction": r["direction"],
-            "score":     r["score"],
-        })
-
-    movers = []
-    for ticker in tickers:
-        symbol = ticker.get("symbol", "")
-        try:
-            change_24h = float(ticker.get("priceChangePercent", 0))
-        except (TypeError, ValueError):
-            continue
-        if abs(change_24h) < BIG_MOVER_THRESHOLD:
-            continue
-
-        matches = matched.get(symbol, [])
-        if matches:
-            best   = max(matches, key=lambda m: m["score"])
-            status = "lolos"
-            reason = f"Lolos {best['agent']} ({best['direction']}) score {best['score']}"
-        else:
-            status = "tidak_lolos"
-            # PLAN_v6 P5b: reasons updated for P4 reality — big movers are now
-            # tradeable up to 300% (extreme tier at half size) and extended-move
-            # penalties are health-scaled. The old ">50% out of scoring range"
-            # text described pre-P4 behavior and misled the owner.
-            if abs(change_24h) > 300:
-                reason = "24h change >300% — blow-off territory, sengaja di-skip (satu-satunya hard cap tersisa)"
-            elif abs(change_24h) >= 150:
-                reason = ("Masuk jangkauan EXTREME tier (150-300%, size ½) tapi score/health belum lolos — "
-                          "cek OI turun / funding crowded / volume memudar, atau slot bigmover penuh (2)")
-            else:
-                reason = ("Score belum lolos threshold lane manapun — momentum-health (OI/volume/funding), "
-                          "timing gate (wick/chase), slot penuh, atau cooldown SL")
-
-        # Phase 1 T1: include last price + funding so the watchlist can populate
-        # the force-open modal without an extra Binance browser call.
-        try:
-            price = float(ticker.get("lastPrice", 0) or 0)
-        except (TypeError, ValueError):
-            price = 0.0
-        try:
-            funding = float(ticker.get("lastFundingRate", 0) or 0)
-        except (TypeError, ValueError):
-            funding = 0.0
-
-        # PLAN_v3 D1.4: compute tier for market pulse classification
-        try:
-            vol_24h   = float(ticker.get("quoteVolume", 0) or 0)
-            vol_avg   = float(ticker.get("volume", 0) or 0)
-            vol_ratio = vol_24h / (vol_avg * 20) if vol_avg > 0 else 1.0  # rough 24h vs avg
-        except Exception:
-            vol_ratio = 1.0
-        tier = _classify_tier(change_24h, vol_ratio, bb_squeeze=False)  # bb_squeeze deferred (no kline here)
-
-        movers.append({
-            "symbol":       symbol,
-            "change_24h":   round(change_24h, 2),
-            "price":        price,
-            "funding_rate": funding,
-            "status":       status,
-            "reason":       reason,
-            "matches":      matches,
-            "tier":         tier,   # PLAN_v3 D1.4: "big_mover" | "rising_star" | "coiling" | "other"
-        })
-
-    movers.sort(key=lambda x: abs(x["change_24h"]), reverse=True)
-    return movers[:60]
 
 
 # ── Predictive log helpers (PLAN_v3 P4 D4.1) ─────────────────────────────────
@@ -555,33 +443,6 @@ async def run_futures_loop() -> None:
 
     while True:
         try:
-            # PLAN_v5 Group C: pull DB override for BigMover's fixed score gate.
-            # a_bm.scan_symbol() is synchronous and reads the bare global
-            # MIN_SCORE — reassigning the module attribute here (before _run_scan
-            # calls into it) means every call this cycle sees the live value.
-            try:
-                from agents.shared.config_reader import cfg
-                a_bm.MIN_SCORE = int(await cfg.get("futures", "bigmover_min_score", a_bm.MIN_SCORE))
-                # PLAN_v15 P3c: weekend size damper — DB-overridable like MIN_SCORE
-                a_bm.WEEKEND_SIZE_MULT = await cfg.get(
-                    "futures", "weekend_size_mult", a_bm.WEEKEND_SIZE_MULT)
-                # Lantai target SHORT. Cadangannya nilai BEKU, bukan nilai modul
-                # yang baru saja ditimpa siklus sebelumnya — kalau tidak, bawaan
-                # ikut hanyut dan tak ada lagi titik pulang yang benar.
-                a_bm.SHORT_TP_MAX_DROP_FRAC = await cfg.get(
-                    "futures", "bigmover_short_tp_max_drop_frac",
-                    a_bm._FROZEN_SHORT_TP_MAX_DROP_FRAC)
-                # Tangga TP (kelipatan ATR). Ditarik SEBELUM scan supaya setiap
-                # level yang disusun siklus ini memakai tala yang sama — bukan
-                # campuran nilai lama dan baru dalam satu putaran.
-                for _v, _k in (("TP1_ATR_MULT", "bigmover_tp1_atr_mult"),
-                               ("TP2_ATR_MULT", "bigmover_tp2_atr_mult"),
-                               ("TP3_ATR_MULT", "bigmover_tp3_atr_mult")):
-                    setattr(a_bm, _v, float(await cfg.get(
-                        "futures", _k, a_bm._FROZEN_TP[_v])))
-            except Exception as exc:
-                logger.warning("agent_config_pull_failed", scope="futures_scheduler", error=str(exc)[:120])
-
             # M4: lebar SL per lane. Ditarik SEBELUM scan supaya setiap level yang
             # disusun siklus ini memakai tala yang sama — bukan campuran nilai
             # lama dan baru di tengah jalan.
@@ -623,18 +484,8 @@ async def run_futures_loop() -> None:
 
             # Store results per agent — then signal scanning done (F107)
             futures_store.set_result("agentic", result["agentic"])                 # Fase 3
-            futures_store.set_big_movers(result["big_movers"])     # PLAN-SIGNAL-GAP P4
             futures_store.set_learning_status(result.get("learning_status", "warming"))  # F2
             futures_store.set_scanning(False)
-
-            # Phase 1 T4b: persist big movers to DB for ground-truth analytics
-            try:
-                from app.services.big_mover_logger import log_big_movers
-                from agents.futures.weight_updater import get_adaptive_thresholds
-                a3_thr = get_adaptive_thresholds("futures_agentic").get("auto_threshold", 72)
-                await log_big_movers(result["big_movers"], market="futures", threshold=a3_thr)
-            except Exception as exc:
-                logger.warning("big_mover_log_insert_failed", error=str(exc)[:80])
 
             _last_scan   = time.time()
             _cycle_count += 1

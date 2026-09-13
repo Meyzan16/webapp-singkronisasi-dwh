@@ -46,18 +46,12 @@ def test_kejadian_dicatat_bukan_dibuang_diam_diam():
 
 # ── 2. tangga TP SHORT tak boleh menembus nol ────────────────────────────────
 
-def test_lantai_short_bisa_ditala_lewat_config():
-    """Konstanta modul tanpa kunci config = tombol yang tak bisa diputar. Kunci
-    ini ditarik scheduler tiap siklus, sama seperti MIN_SCORE."""
+def test_scheduler_tak_lagi_menarik_tala_bigmover():
+    """Blok penarik `a_bm.*` bertahan sesudah modulnya dihapus di Fase 8 —
+    `NameError` tiap siklus, ditelan jadi `agent_config_pull_failed`. Terlihat
+    di log 13 Sep 2026 sebelum dibongkar."""
     src = pathlib.Path("../agents/futures/scheduler.py").read_text(encoding="utf-8")
-    assert "bigmover_short_tp_max_drop_frac" in src, "override tak pernah ditarik"
-    assert "a_bm.SHORT_TP_MAX_DROP_FRAC =" in src
-
-
-def test_baris_config_lantai_short_tersedia():
-    src = pathlib.Path("app/services/agent_config_defaults.py").read_text(encoding="utf-8")
-    assert '"key": "bigmover_short_tp_max_drop_frac"' in src
-    assert '"default": 0.90' in src
+    assert "a_bm." not in src
 
 
 # ── 3. failover host SPOT benar-benar dipanggil ──────────────────────────────

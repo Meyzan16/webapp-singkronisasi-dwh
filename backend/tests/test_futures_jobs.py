@@ -165,7 +165,7 @@ def test_semua_pekerjaan_lama_terdaftar():
     for wajib in ("outcome_pass", "predictive_resolve",
                   "predictive_repair", "repair_verifier", "prune_old_events",
                   "prune_predictive_log", "prune_rejection_log",
-                  "weekly_backtest", "weekly_signal_review", "monthly_calibration"):
+                  "weekly_signal_review", "monthly_calibration"):
         assert wajib in nama, wajib
 
 
@@ -182,7 +182,7 @@ def test_pekerjaan_pembelajaran_ditandai_kritis():
     """Kegagalannya wajib WARNING — pekerjaan mingguan/bulanan yang gagal diam
     tak akan ketahuan sampai berminggu-minggu."""
     kritis = {p.nama for p in J.daftar_pekerjaan() if p.kritis}
-    for wajib in ("outcome_pass", "weekly_backtest", "weekly_signal_review",
+    for wajib in ("outcome_pass", "weekly_signal_review",
                   "monthly_calibration"):
         assert wajib in kritis, wajib
 
@@ -210,7 +210,7 @@ def test_tiga_pekerjaan_belajar_ditandai_berat():
     """Regresi 8 Sep 2026. Ketiganya dipanggil dari dalam proses backend dan
     membekukan event loop-nya lima menit — denyut ws_feed pun berhenti."""
     berat = {p.nama for p in J.daftar_pekerjaan() if p.berat}
-    assert berat == {"weekly_backtest", "weekly_signal_review", "monthly_calibration"}
+    assert berat == {"weekly_signal_review", "monthly_calibration"}
 
 
 def _pekerjaan_uji(jalan: list[str]):

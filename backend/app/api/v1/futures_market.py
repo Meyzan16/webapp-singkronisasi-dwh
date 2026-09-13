@@ -240,9 +240,9 @@ async def _fetch_overview() -> dict:
         # ── F98: sematkan skor agen tunggal supaya overview tersambung ke scanner ──
         try:
             from agents.futures import store as _futures_store
-            a1_cache = _futures_store.get_result("agentic") or {}
+            ag_cache = _futures_store.get_result("agentic") or {}
             score_map: dict[str, float] = {}
-            for r in a1_cache.get("results", []):
+            for r in ag_cache.get("results", []):
                 _sym = r.get("symbol")
                 _sc  = r.get("score", 0) or 0
                 if _sym and _sc > score_map.get(_sym, 0):
@@ -250,7 +250,7 @@ async def _fetch_overview() -> dict:
         except Exception:
             score_map = {}
         for row in enriched:
-            row["agent1_score"] = score_map.get(row["symbol"])   # None if not in last scan
+            row["agentic_score"] = score_map.get(row["symbol"])   # None bila tak ada di scan terakhir
 
     # ── Sort + categorize ──────────────────────────────────────────────────────
     enriched_sorted_chg = sorted(enriched, key=lambda x: x["change_pct"], reverse=True)

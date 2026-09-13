@@ -94,9 +94,7 @@ async def reset_simulation(body: ResetBody) -> dict:
             summary["health_events"] = r.rowcount or 0
             for sql in [
                 "DELETE FROM balance_transactions",
-                "DELETE FROM weekly_backtest_result",
                 "DELETE FROM force_open_log",
-                "DELETE FROM big_mover_log",
             ]:
                 try:
                     r = await session.execute(text(sql))

@@ -62,21 +62,38 @@ def test_ambang_agen_aktif_dari_konfigurasinya_sendiri():
     assert AT._effective_threshold("futures_agentic") == int(ag_get("agentic_min_score"))
 
 
-def test_agen_tak_dikenal_jatuh_ke_jalur_adaptif():
-    """Fase 8 membuang cabang khusus lane lama. Yang tersisa harus turun anggun
-    ke jalur adaptif biasa — bukan melempar."""
-    assert isinstance(AT._effective_threshold("futures_entah_apa"), int)
+def test_hanya_ada_satu_penggaris():
+    """Metode lama dibongkar 13 Sep 2026: tak ada lagi ambang adaptif lane lama
+    (72). Agen apa pun dinilai dengan `agentic_min_score` — dan yang
+    DITAMPILKAN (`get_auto_threshold`) harus angka yang sama, bukan 72 yang
+    dulu dipaku di UI "Score ≥ 72pt"."""
+    from agents.futures.agentic import get as ag_get
+
+    ambang = int(ag_get("agentic_min_score"))
+    assert AT._effective_threshold("futures_entah_apa") == ambang
+    assert AT.get_auto_threshold() == ambang
 
 
-# ── Plafon overekstensi: dikalibrasi untuk penilai yang lain ─────────────────
+def test_override_manual_menang():
+    AT.set_auto_threshold(77)
+    try:
+        assert AT._effective_threshold("futures_agentic") == 77
+        assert AT.get_auto_threshold() == 77
+    finally:
+        AT.set_auto_threshold(None)
 
-def test_plafon_overekstensi_tak_memveto_agen_aktif():
-    """Plafon 80 dikalibrasi atas skor lane lama (diagnostik 23 Jul: >=80
-    berekspektasi -11,28%). Agen tunggal memakai skala berbeda dan menangani
-    overekstensi dengan MENGECILKAN ukuran (`size_mult` 0,5), bukan memveto —
-    mekanisme yang tak dimiliki lane lama."""
+
+# ── Gerbang lane lama sudah tak ada ──────────────────────────────────────────
+
+def test_gerbang_lane_lama_dibongkar():
+    """Kuota lane, jatah harian BigMover, plafon overekstensi, lantai lane
+    lemah, gerbang fade-day — semuanya dikalibrasi untuk penilai lain dan
+    hanya menyaring kandidat yang tak pernah ada lagi."""
+    for lama in ("LANE_QUOTAS", "MAX_BIGMOVER_POSITIONS", "BIGMOVER_DAILY_BUDGET",
+                 "OVEREXTENSION_CEILING", "WEAK_LANE_FLOOR", "BREADTH_FADE_FRAC"):
+        assert not hasattr(AT, lama), f"{lama} masih ada"
     sumber = inspect.getsource(AT.auto_open_positions)
-    assert "_AGEN_AKTIF" in sumber, "plafon masih diterapkan ke agen aktif"
+    assert "futures_agent_bigmover" not in sumber
 
 
 def test_agen_aktif_diturunkan_dari_registry():
@@ -96,13 +113,14 @@ def test_bentuk_kandidat_agentic_dikenali_auto_trader():
     assert AG.AGENT_NAME in AT._FUTURES_STYLES
 
 
-def test_lane_agentic_tak_terkunci_kuota_lane_lama():
-    """`LANE_QUOTAS` hanya memuat lane lama. Agen tunggal sengaja dibatasi
-    `MAX_AUTO_POSITIONS` saja — tapi kalau namanya kebetulan masuk kuota lama,
-    ia akan terpotong oleh angka yang bukan untuknya."""
-    from agents.futures import agentic as AG
+def test_estimasi_hold_dari_time_stop_agen():
+    """Lantai biaya memakai estimasi lama tahan untuk menghitung funding.
+    Dulu peta per-lane lama (momentum 6 jam, accumulation 48 jam) dengan
+    cadangan 12 jam untuk lane tak dikenal — agen tunggal selalu kena 12 jam
+    itu, padahal time-stop-nya 8 jam."""
+    from agents.futures import exit_config as ecfg
 
-    assert AG.LANE not in AT.LANE_QUOTAS
+    assert AT._estimasi_hold_h() == float(ecfg.get("exit_max_hold_h"))
 
 
 @pytest.mark.parametrize("field", ["agent", "setup_type", "score", "direction", "symbol"])

@@ -84,55 +84,6 @@ export function FuturesTab() {
     return () => { clearInterval(poll); clearInterval(tick); };
   }, [fetchPositions]);
 
-  // G12: Big Mover push notification WebSocket
-  useEffect(() => {
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-    let mounted = true;
-
-    function connect() {
-      if (!mounted) return;
-      const wsBase = process.env.NEXT_PUBLIC_WS_URL;
-      const proto  = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host   = typeof window !== "undefined" ? window.location.host : "localhost:8000";
-      const wsUrl  = wsBase ? `${wsBase}/ws/big-movers` : `${proto}//${host}/ws/big-movers`;
-      ws = new WebSocket(wsUrl);
-
-      ws.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data as string) as {
-            type: string; symbol?: string; change_24h?: number; price?: number;
-          };
-          if (data.type === "big_mover" && data.symbol && data.change_24h != null) {
-            const dir   = data.change_24h > 0 ? "▲" : "▼";
-            const title = `Big Mover: ${data.symbol.replace("USDT", "")} ${dir}${Math.abs(data.change_24h).toFixed(1)}%`;
-            const body  = `Price: $${data.price?.toFixed(4) ?? "—"}`;
-            if (typeof window !== "undefined" && "Notification" in window) {
-              if (Notification.permission === "granted") {
-                new Notification(title, { body, icon: "/favicon.ico" });
-              } else if (Notification.permission !== "denied") {
-                void Notification.requestPermission().then(p => {
-                  if (p === "granted") new Notification(title, { body, icon: "/favicon.ico" });
-                });
-              }
-            }
-          }
-        } catch { /* ignore parse errors */ }
-      };
-
-      ws.onclose = () => {
-        if (mounted) reconnectTimer = setTimeout(connect, 5000);
-      };
-      ws.onerror = () => ws?.close();
-    }
-
-    connect();
-    return () => {
-      mounted = false;
-      clearTimeout(reconnectTimer);
-      ws?.close();
-    };
-  }, []);
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 

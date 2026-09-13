@@ -44,7 +44,6 @@ export interface AgentConfigFutures {
   scan_interval_sec: number;
   monitor_interval_sec: number;
   universe_cap: number;
-  big_mover_threshold_pct: number;
   agents: Record<string, Record<string, number | boolean | string>>;
   auto_trader: {
     max_positions_global: number;

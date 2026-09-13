@@ -25,7 +25,7 @@ def _next_scan_in(last_ts: Optional[float]) -> Optional[int]:
 
 
 def _build_snapshot(fs) -> dict:
-    """BUG-L20: bundle ALL lanes (agent1/2/3) into one snapshot payload."""
+    """Satu snapshot berisi hasil agen tunggal + status pemindai."""
     data = fs.get_all_results()
     last_ts = max((fs.last_scan_ts(a) or 0) for a in _WS_AGENTS) or None
     return {

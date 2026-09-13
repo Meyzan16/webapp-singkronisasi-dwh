@@ -1,7 +1,7 @@
 """
-Futures Scanner API — Agent 1 (Pre-Gainer) + Agent 2 (Accumulation) + Agent 3 (Momentum).
+Futures Scanner API — agen tunggal (`futures_agentic`).
 
-GET  /futures/scan             — cached results (all agents)
+GET  /futures/scan             — hasil pindai dari cache
 POST /futures/scan             — force fresh scan
 GET  /futures/positions        — open futures paper trades
 POST /futures/trade            — open a futures paper trade
@@ -33,7 +33,7 @@ _ALL_FUTURES_STYLES = _FUTURES_AGENTS
 class OpenFuturesTradeRequest(BaseModel):
     symbol:    str
     direction: str       # "LONG" | "SHORT"
-    agent:     str       # "futures_agent1" | "futures_agent2" | "futures_agent3"
+    agent:     str       # "futures_agentic"
     entry:     float
     sl:        float
     tp1:       float
@@ -59,12 +59,12 @@ class OpenFuturesTradeRequest(BaseModel):
 
 @router.get("/futures/scan")
 async def get_futures_scan(
-    agent:     str   = Query(default="all",  description="all | agent1 | agent2 | agent3"),
+    agent:     str   = Query(default="all",  description="all | agentic"),
     direction: str   = Query(default="ALL",  description="ALL | LONG | SHORT"),
-    min_score: float = Query(default=52),   # F105: match agent MIN threshold (was 55)
+    min_score: float = Query(default=0),
     limit:     int   = Query(default=30, ge=1, le=100),
 ) -> dict:
-    """Cached scan results from both agents. Triggers fresh scan if cache empty."""
+    """Hasil pindai agen tunggal dari cache. Memicu pindai baru bila cache kosong."""
     from agents.futures import store as fs
     from agents.futures.scheduler import _run_scan
 
@@ -76,7 +76,6 @@ async def get_futures_scan(
         try:
             result = await _run_scan()
             fs.set_result("agentic", result["agentic"])   # Fase 8: satu agen
-            fs.set_big_movers(result["big_movers"])   # PLAN-SIGNAL-GAP P4
             cached = fs.get_all_results()
         except Exception as exc:
             fs.set_scanning(False)
@@ -92,10 +91,10 @@ async def get_futures_scan(
 async def force_futures_scan(
     agent:     str   = Query(default="all"),
     direction: str   = Query(default="ALL"),
-    min_score: float = Query(default=52),   # F105: match agent MIN threshold (was 55)
+    min_score: float = Query(default=0),
     limit:     int   = Query(default=30, ge=1, le=100),
 ) -> dict:
-    """Force fresh scan of 100 Futures pairs. Takes ~30–60s."""
+    """Paksa pindai ulang seluruh semesta. ~30–60 detik."""
     from agents.futures import store as fs
     from agents.futures.scheduler import _run_scan
 
@@ -104,7 +103,6 @@ async def force_futures_scan(
     try:
         result = await _run_scan()
         fs.set_result("agentic", result["agentic"])   # Fase 8: satu agen
-        fs.set_big_movers(result["big_movers"])   # PLAN-SIGNAL-GAP P4
         return _filter_results(fs.get_all_results(), agent, direction, min_score, limit)
     except Exception as exc:
         logger.error("futures_force_scan_error", error=str(exc))
@@ -113,56 +111,14 @@ async def force_futures_scan(
         fs.set_scanning(False)
 
 
-@router.get("/futures/big-movers")
-async def get_big_movers(
-    limit: int = Query(default=50, ge=1, le=200),
-) -> dict:
-    """
-    PLAN-SIGNAL-GAP P4: coins with |change_24h| >= 10% seen in the last scan cycle,
-    tagged with whether they qualified for any lane (and at what score) or not, plus
-    a heuristic reason. Informational only — never auto-opens a position.
-    """
-    from agents.futures import store as fs
-
-    movers = fs.get_big_movers()
-    return {
-        "movers":       movers[:limit],
-        "total":        len(movers),
-        "generated_at": fs.last_scan_ts("agent3"),
-    }
-
-
-@router.get("/futures/big-movers/live")
-async def get_big_movers_live(
-    limit: int = Query(default=50, ge=1, le=200),
-) -> dict:
-    """
-    Phase 2 BM4 / G21: real-time WebSocket feed snapshot.
-    Returns coins with abs(change_1m) ≥ 1% OR change_24h ≥ 5%.
-    Latency target < 2s vs 2-min scan cycle.
-    Returns [] with `feed_stale=True` if WS connection has been silent > 30s — caller
-    should fall back to /futures/big-movers (REST cache).
-    """
-    from agents.futures.ws_big_mover_feed import get_live_movers, get_state
-    movers = get_live_movers(limit=limit)
-    state = get_state()
-    return {
-        "movers":      movers,
-        "total":       len(movers),
-        "feed_stale":  state.get("is_stale", False),
-        "feed_age_sec": state.get("age_sec"),
-        "feed_state":  state,
-    }
-
-
 # ── Layer 2: Open position ─────────────────────────────────────────────────────
 
 @router.post("/futures/trade")
 async def open_futures_trade(body: OpenFuturesTradeRequest) -> dict:
     """
-    Open a futures paper trade (Agent 1, 2, or 3).
-    Rules: GLOBAL per-coin dedup (one position per symbol across all lanes — cross-margin),
-    entry within 2% of market, R:R ≥ 1:3.
+    Buka paper trade futures secara manual dari kartu sinyal agen tunggal.
+    Aturan: dedup GLOBAL per koin (satu posisi per simbol — cross-margin),
+    entry dalam 2% dari harga pasar, R:R minimum dari konfigurasi agen.
     """
     from app.database import AsyncSessionLocal, is_db_available
     from app.models.paper_trade import PaperTrade
@@ -547,11 +503,8 @@ async def get_futures_status() -> dict:
     from agents.futures.scheduler import get_state
 
     state   = get_state()
-    ts_ag   = fs.last_scan_ts("agentic")      # Fase 3 — agen tunggal
-    ts_a1   = fs.last_scan_ts("agent1")
-    ts_a2   = fs.last_scan_ts("agent2")
-    ts_a3   = fs.last_scan_ts("agent3")   # BUG-L21: agent3 was missing
-    last_ts = max(ts_ag or 0, ts_a1 or 0, ts_a2 or 0, ts_a3 or 0) or None
+    ts_ag   = fs.last_scan_ts("agentic")      # agen tunggal
+    last_ts = ts_ag or None
     from agents.futures.scheduler import INTERVAL_SEC as _SCHED_INTERVAL
     next_in = max(0, round((_SCHED_INTERVAL - (time.time() - last_ts)) / 60, 1)) if last_ts else None
 
@@ -563,12 +516,6 @@ async def get_futures_status() -> dict:
         # keduanya tampak identik dari luar.
         "agentic_last_scan": ts_ag,
         "agentic_results":   len((fs.get_result("agentic") or {}).get("results", [])),
-        "agent1_last_scan":  ts_a1,
-        "agent2_last_scan":  ts_a2,
-        "agent3_last_scan":  ts_a3,
-        "agent1_results":    len((fs.get_result("agent1") or {}).get("results", [])),
-        "agent2_results":    len((fs.get_result("agent2") or {}).get("results", [])),
-        "agent3_results":    len((fs.get_result("agent3") or {}).get("results", [])),
     }
 
 
@@ -987,22 +934,15 @@ async def get_force_open_budget(session_id: str = Query("default")) -> dict:
 
 @router.get("/futures/auto/status")
 async def get_auto_status() -> dict:
-    """Get auto-trade status and settings."""
+    """Status auto-open dan ambangnya — ambang AGEN AKTIF, bukan angka lane lama."""
     from agents.futures.auto_trader import (
-        is_auto_enabled, get_auto_threshold, MAX_AUTO_POSITIONS, _effective_threshold,
+        is_auto_enabled, get_auto_threshold, MAX_AUTO_POSITIONS,
     )
-    # PLAN_v12 P2-B4: threshold auto-open BEDA per-agent & adaptif — "≥72" tunggal
-    # menyesatkan. Kembalikan per-agent supaya UI bisa tampil badge "auto ≥N".
-    per_agent: dict[str, int] = {}
-    for _a in _ALL_FUTURES_STYLES:
-        try:
-            per_agent[_a] = int(_effective_threshold(_a))
-        except Exception:
-            per_agent[_a] = get_auto_threshold()
+    from agents.futures.agentic import get as _ag_get
     return {
         "enabled":       is_auto_enabled(),
-        "threshold":     get_auto_threshold(),   # F102: reflects manual override if set
-        "per_agent":     per_agent,              # PLAN_v12 P2-B4
+        "threshold":     get_auto_threshold(),
+        "min_score":     int(_ag_get("agentic_min_score")),   # lantai kandidat scanner
         "max_positions": MAX_AUTO_POSITIONS,
     }
 
@@ -1030,10 +970,7 @@ def _filter_results(
     min_score: float,
     limit: int,
 ) -> dict:
-    ag = cached.get("agentic", {})      # Fase 3 — agen tunggal
-    a1 = cached.get("agent1", {})
-    a2 = cached.get("agent2", {})
-    a3 = cached.get("agent3", {})
+    ag = cached.get("agentic", {})      # agen tunggal
 
     def _apply(results: list) -> list:
         out = [r for r in results if r.get("score", 0) >= min_score]
@@ -1041,15 +978,9 @@ def _filter_results(
             out = [r for r in out if r.get("direction") == direction]
         return out[:limit]
 
-    # Sejak Fase 3 `agentic` yang menghasilkan kandidat; agent1-3 tetap dikirim
-    # supaya UI lama tak pecah selama masa peralihan (isinya kosong).
-    semua = (ag, a1, a2, a3)
     return {
         "agentic":      _apply(ag.get("results", [])) if agent in ("all", "agentic") else [],
-        "agent1":       _apply(a1.get("results", [])) if agent in ("all", "agent1") else [],
-        "agent2":       _apply(a2.get("results", [])) if agent in ("all", "agent2") else [],
-        "agent3":       _apply(a3.get("results", [])) if agent in ("all", "agent3") else [],
-        "scanned":      max(x.get("scanned", 0) for x in semua),
-        "generated_at": max(x.get("generated_at", 0) for x in semua),
-        "elapsed_sec":  max(x.get("elapsed_sec", 0) for x in semua),
+        "scanned":      ag.get("scanned", 0),
+        "generated_at": ag.get("generated_at", 0),
+        "elapsed_sec":  ag.get("elapsed_sec", 0),
     }

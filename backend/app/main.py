@@ -50,8 +50,6 @@ from app.api.v1.spot_market     import router as spot_market_router
 from app.api.v1.balance import router as balance_router
 from app.api.v1.signals import router as signals_router
 from app.api.v1.futures_eligibility import router as futures_eligibility_router
-from app.api.v1.big_mover_log import router as big_mover_log_router
-from app.api.v1.backtest import router as backtest_router
 from app.api.v1.admin             import router as admin_router
 from app.api.v1.diagnostics       import router as diagnostics_router
 from app.api.v1.predictive        import router as predictive_router
@@ -62,9 +60,7 @@ from app.models.paper_trade import PaperTrade as _PaperTrade          # noqa: F4
 from app.models.paper_balance import PaperBalance as _PaperBalance    # noqa: F401
 from app.models.balance_transaction import BalanceTransaction as _BalTxn  # noqa: F401
 from app.models.signal_weight import AgentSignalWeight as _ASW         # noqa: F401
-from app.models.big_mover_log import BigMoverLog as _BML               # noqa: F401
 from app.models.force_open_log import ForceOpenLog as _FOL             # noqa: F401
-from app.models.backtest_result import WeeklyBacktestResult as _WBR   # noqa: F401
 from app.models.rejection_log import RejectionLog as _RL
 from app.models.predictive_log import PredictiveLog as _PL   # noqa: F401
 from app.models.app_settings import AppSettings as _AS       # noqa: F401
@@ -78,11 +74,9 @@ from agents.opportunity.scheduler import run_opportunity_loop, run_bigmover_fast
 from agents.opportunity.monitor import run_opportunity_monitor
 from agents.futures.scheduler import run_futures_loop
 from agents.futures.monitor import run_futures_monitor
-from agents.futures.ws_big_mover_feed import run_ws_big_mover_feed   # Phase 2 BM4 / G21
 from agents.futures.delisting_monitor import run_delisting_monitor   # G17
 from app.ws.opportunity_stream import opportunity_stream
 from app.ws.futures_stream import futures_stream
-from app.ws.big_mover_alerts import big_mover_alert_stream   # G12
 
 logger = structlog.get_logger(__name__)
 settings = get_settings()
@@ -183,8 +177,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     futures_monitor_task = asyncio.create_task(run_futures_monitor())
     # Phase 2 BM3 / G13: 60s fastpass for SPOT big-mover lane
     bigmover_fastpass_task = asyncio.create_task(run_bigmover_fastpass())
-    # Phase 2 BM4 / G21: real-time WebSocket big-mover feed
-    ws_big_mover_task = asyncio.create_task(run_ws_big_mover_feed())
     # G17: delisting risk monitor (poll every 6h)
     delisting_task = asyncio.create_task(run_delisting_monitor())
     # Notifier Telegram — pantau paper_trades, kabari open/close (zero-touch trading)
@@ -210,7 +202,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Shutdown ───────────────────────────────────────────────────────────────
     _shutdown_tasks = [
         opportunity_task, monitor_task, futures_task, futures_monitor_task,
-        bigmover_fastpass_task, ws_big_mover_task, delisting_task, notifier_task,
+        bigmover_fastpass_task, delisting_task, notifier_task,
         db_watchdog_task,
     ]
     if spot_repair_task is not None:
@@ -241,8 +233,6 @@ app.include_router(spot_market_router,      prefix=settings.api_v1_prefix)
 app.include_router(balance_router,          prefix=settings.api_v1_prefix)
 app.include_router(signals_router,          prefix=settings.api_v1_prefix)
 app.include_router(futures_eligibility_router, prefix=settings.api_v1_prefix)
-app.include_router(big_mover_log_router,    prefix=settings.api_v1_prefix)
-app.include_router(backtest_router,         prefix=settings.api_v1_prefix)
 app.include_router(admin_router,            prefix=settings.api_v1_prefix)
 app.include_router(diagnostics_router,      prefix=settings.api_v1_prefix)
 app.include_router(predictive_router,       prefix=settings.api_v1_prefix)
@@ -259,11 +249,6 @@ async def ws_opportunity(websocket: WebSocket) -> None:
 @app.websocket("/ws/futures")
 async def ws_futures(websocket: WebSocket) -> None:
     await futures_stream(websocket)
-
-
-@app.websocket("/ws/big-movers")
-async def ws_big_movers(websocket: WebSocket) -> None:
-    await big_mover_alert_stream(websocket)
 
 
 @app.get("/health")

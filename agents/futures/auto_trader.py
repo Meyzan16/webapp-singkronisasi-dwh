@@ -22,20 +22,11 @@ from agents.futures.regime import get_cached_regime
 
 logger = structlog.get_logger(__name__)
 
-AUTO_OPEN_THRESHOLD = 72   # fallback when no adaptive threshold yet
-MAX_AUTO_POSITIONS  = 6    # P2: GLOBAL cap across all lanes (one shared wallet)
+AUTO_OPEN_THRESHOLD = 65   # cadangan bila `agentic_min_score` tak terbaca
+MAX_AUTO_POSITIONS  = 6    # plafon GLOBAL posisi terbuka (satu dompet)
 FUTURES_COOLDOWN_HOURS = 3 # F55: no re-entry within 3h of an SL on the same symbol (global)
 
-# P4.3: Lane quota — 40/30/20/10 split prevents momentum from monopolizing all 6 slots.
-# Map: setup_type → max concurrent open positions in that lane (not counting bigmover).
-LANE_QUOTAS: dict[str, int] = {
-    "momentum":     2,   # 40% of 6 = 2.4 → 2 (floor to avoid over-expose)
-    "pre_gainer":   2,   # 30% of 6 = 1.8 → 2
-    "accumulation": 1,   # 20% of 6 = 1.2 → 1
-}
-
-# P2: all futures lane styles share ONE wallet → dedup & limits are GLOBAL (BUG-L1).
-# Phase 2 BM3: include futures_agent_bigmover — shares wallet but has separate slot quota.
+# Semua gaya futures berbagi SATU dompet → dedup & batas bersifat GLOBAL (BUG-L1).
 def _semua_gaya_futures() -> tuple[str, ...]:
     """Semua gaya futures — dari registry, termasuk agen aktif.
 
@@ -66,14 +57,10 @@ def _agen_aktif() -> frozenset[str]:
 
 _AGEN_AKTIF = _agen_aktif()
 
-# Phase 2 BM1: dedicated quota for Big Mover lane (separate from MAX_AUTO_POSITIONS=6).
-MAX_BIGMOVER_POSITIONS = 2
-
-# Phase 2 BM1: cross-margin wallet utilization cap — total locked margin ≤ 70% wallet
+# Cross-margin wallet utilization cap — total locked margin ≤ 70% wallet
 MAX_WALLET_MARGIN_PCT = 70.0
 
-# Phase 2 BM1: funding gate (Phase 3 G3-funding pre-applied for bigmover)
-# PLAN_v6 P4c: now TWO-ZONE instead of a single hard veto. Top gainers routinely
+# Gerbang funding, DUA ZONA (PLAN_v6 P4c). Top gainers routinely
 # carry elevated funding (crowded) — that's a reason to size down, not to skip
 # the move entirely. Soft zone trades at half size; only truly extreme funding vetoes.
 MAX_LONG_FUNDING_PCT   = 0.12    # soft threshold: beyond this → size ½
@@ -82,48 +69,25 @@ HARD_LONG_FUNDING_PCT  = 0.25    # hard threshold: beyond this → veto (unsusta
 HARD_SHORT_FUNDING_PCT = -0.25
 FUNDING_SOFT_SIZE_MULT = 0.5
 
-# Overextension guard (diagnostik 23 Jul, n=1640): skor >=80 exp -11.28% pf 0.14
-# (setup overextended reversal keras), sedangkan sweet-spot 75-80 exp +0.35% pf 1.11.
-# Veto auto-open kandidat overextended -> buang ekor kerugian terbesar.
-# 0 = nonaktif. Override DB: futures.overextension_ceiling
-OVEREXTENSION_CEILING = 80
-
-# Floor auto-open lane lemah (pre_gainer/accumulation). PLAN_v14 dulu turunkan ke
-# 65 agar lane aktif, TAPI diagnostik 23 Jul (n=1640): band skor 65-70 rugi
-# (accumulation pf0.49, pre_gainer pf0.45). Naikkan ke 70 -> pool eligible
-# +0.07%->+0.19% pf1.02->1.05. Override DB: futures.weak_lane_floor
-WEAK_LANE_FLOOR = 70
-
-# Regimes where auto-open is fully disabled
+# Rezim yang menutup auto-open sepenuhnya. Dulu (BUG-L12) hanya lane pre_move
+# yang ditahan dan momentum "menunggangi volatilitas"; sejak agen tunggal, kondisi
+# `setup_type != "momentum"` itu selalu benar — jadi perilaku yang BERJALAN
+# adalah: rezim volatile menahan semua kandidat. Dinyatakan eksplisit di sini,
+# bukan lewat perbandingan nama lane yang sudah tak ada.
 AUTO_DISABLED_REGIMES = {"volatile"}  # volatile = immediate SL risk
 
 # ── PLAN_v16 F2/F5 — cost-floor gate & lane throttle ──────────────────────────
 MIN_TP1_COST_MULT = 3.0    # F2: TP1 wajib ≥ 3× total biaya round-trip (DB: min_tp1_cost_mult)
-# F2: estimasi hold per lane (jam) → estimasi funding windows utk cost floor
-_HOLD_EST_H: dict[str, float] = {
-    "momentum": 6.0, "bigmover": 3.0,
-    "pre_gainer": 24.0, "pre_move": 24.0, "accumulation": 48.0,
-}
+# F2: estimasi lama tahan (jam) → estimasi jendela funding untuk lantai biaya.
+# Agen tunggal memakai time-stop `exit_max_hold_h`; angka ini cadangannya.
+HOLD_EST_H_DEFAULT = 8.0
 LANE_THROTTLE_WR      = 0.40   # F5: lane rolling WR di bawah ini (min 10 trade) → ½ size
 LANE_THROTTLE_MIN_N   = 10
 
-# ── PLAN_v15 P3/P8 — fade-day & profit-lock knobs ─────────────────────────────
+# ── PLAN_v15 P3/P8 — profit-lock knobs ────────────────────────────────────────
 MAX_SAME_DIRECTION      = 4     # P3d: max open positions sharing one direction (of 6 slots)
-BIGMOVER_DAILY_BUDGET   = 6     # P3b: max BM entries per WIB day
-BIGMOVER_DAILY_SL_STOP  = 2     # P3b: BM real-SL closes today → BM done for the day
 PROFIT_LOCK_MIN_SCORE   = 80    # P8: after profit lock, only A-grade candidates…
 PROFIT_LOCK_SIZE_MULT   = 0.5   #     …at half size ("play with house money")
-BREADTH_FADE_FRAC       = 0.60  # P3a: ≥60% of top gainers fading on 1h → market is pump-and-fade
-BREADTH_MIN_SAMPLE      = 5     # P3a: need ≥5 gainers in sample before the gate can fire
-
-#: Bawaan dibekukan saat impor — SEBELUM override mana pun masuk.
-#: `cfg.get(..., NILAI_BERJALAN)` memakai nilai yang SUDAH ditimpa siklus
-#: sebelumnya sebagai cadangan, sehingga bawaan hanyut mengikuti override dan
-#: titik pulang yang benar hilang. Pola itu sudah tiga kali jadi bug di proyek
-#: ini; kunci baru dibekukan sejak awal.
-_FROZEN: dict[str, float] = {
-    "BIGMOVER_DAILY_BUDGET": BIGMOVER_DAILY_BUDGET,
-}
 
 # BC2: hedge mode — when True, allow LONG + SHORT on the same symbol simultaneously.
 # Default: False (one-way mode, one position per symbol across all lanes).
@@ -169,46 +133,38 @@ def set_auto_threshold(threshold: Optional[int]) -> None:
     logger.info("auto_threshold_set", threshold=threshold)
 
 
+def _ambang_agentic() -> int:
+    """Ambang skor agen tunggal (`agentic_min_score`) — satu-satunya penggaris."""
+    try:
+        from agents.futures.agentic import get as _ag_get
+        return int(_ag_get("agentic_min_score"))
+    except Exception:      # noqa: BLE001
+        return AUTO_OPEN_THRESHOLD
+
+
 def get_auto_threshold() -> int:
-    """F102: displayed/effective base threshold — manual override or default fallback."""
-    return _manual_threshold if _manual_threshold is not None else AUTO_OPEN_THRESHOLD
+    """Ambang yang DITAMPILKAN/berlaku: override manual (F102) atau ambang agen."""
+    return _manual_threshold if _manual_threshold is not None else _ambang_agentic()
 
 
 def _effective_threshold(agent: str) -> int:
-    """Base threshold for an agent: manual override wins, else adaptive (F69).
-    Phase 2 BM1: bigmover lane uses FIXED threshold (60) to avoid the A2 death-spiral.
-    """
-    # Agen tunggal punya ambangnya sendiri (`agentic_min_score`) dan skornya
-    # lahir dari fungsi penilai yang BERBEDA — angka 72 hasil kalibrasi adaptif
-    # lane lama tak berarti apa-apa pada skala itu. Membiarkannya lewat jalur
-    # adaptif lama berarti menilai agen baru dengan penggaris agen lama.
-    if agent in _AGEN_AKTIF:
-        try:
-            from agents.futures.agentic import get as _ag_get
-            return int(_ag_get("agentic_min_score"))
-        except Exception:      # noqa: BLE001
-            return 65
+    """Ambang untuk satu kandidat. Skor agen tunggal lahir dari penilai yang
+    berbeda skalanya dari lane lama — angka 72 hasil kalibrasi adaptif lama tak
+    berarti apa-apa di sini. Override manual (F102) menang bila ada."""
     if _manual_threshold is not None:
         return _manual_threshold
-    from agents.futures.weight_updater import get_adaptive_thresholds
-    _base = get_adaptive_thresholds(agent)["auto_threshold"]
-    # Fase 8: lantai lane lemah (Pre-Gainer/Accumulation) ikut dibongkar bersama
-    # lane-nya. Yang tersisa hanya jalur adaptif biasa — dan agen tunggal tak
-    # pernah sampai ke sini karena punya ambangnya sendiri di atas.
-    return _base
+    return _ambang_agentic()
 
 
 async def auto_open_positions(candidates: list[dict]) -> int:
     """
-    P2 — UNIFIED global auto-open across ALL futures lanes (pre_move + momentum).
-
-    Takes the combined candidate pool from every lane and opens the globally best
-    setups, capped by ONE shared wallet:
-      - BUG-L1: ONE position per symbol across all lanes (cross-margin nets to one
-        position per symbol) — the highest-score candidate per symbol wins.
-      - BUG-L12: in a volatile regime, momentum setups are still allowed; only
-        pre_move setups are skipped (was a blanket block of all lanes).
-    Returns count of positions opened.
+    Buka posisi terbaik secara global dari kolam kandidat agen tunggal, dibatasi
+    SATU dompet bersama:
+      - BUG-L1: SATU posisi per simbol (cross-margin menjadikan satu simbol satu
+        posisi) — kandidat berskor tertinggi per simbol yang menang.
+      - Gerbang: risk gate, gerbang harian, rezim volatile, veto pembelajaran,
+        cooldown SL, konsentrasi arah, funding dua zona, lantai biaya, sizing.
+    Mengembalikan jumlah posisi yang dibuka.
     """
     if not _auto_enabled or not is_db_available():
         return 0
@@ -222,38 +178,15 @@ async def auto_open_positions(candidates: list[dict]) -> int:
 
     # PLAN_v5 Group C: pull DB overrides once per cycle — see scanner.py
     # run_opportunity_scan for the `global` rationale (resolved at call time).
-    global MAX_AUTO_POSITIONS, MAX_BIGMOVER_POSITIONS, FUTURES_COOLDOWN_HOURS, \
-        MAX_WALLET_MARGIN_PCT, LANE_QUOTAS, MAX_SAME_DIRECTION, BIGMOVER_DAILY_SL_STOP
+    global MAX_AUTO_POSITIONS, FUTURES_COOLDOWN_HOURS, \
+        MAX_WALLET_MARGIN_PCT, MAX_SAME_DIRECTION, MIN_TP1_COST_MULT
     try:
         from agents.shared.config_reader import cfg
         MAX_AUTO_POSITIONS     = int(await cfg.get("futures", "max_auto_positions", MAX_AUTO_POSITIONS))
-        MAX_BIGMOVER_POSITIONS = int(await cfg.get("futures", "max_bigmover_positions", MAX_BIGMOVER_POSITIONS))
         FUTURES_COOLDOWN_HOURS = await cfg.get("futures", "cooldown_hours", FUTURES_COOLDOWN_HOURS)
         MAX_WALLET_MARGIN_PCT  = await cfg.get("futures", "max_wallet_margin_pct", MAX_WALLET_MARGIN_PCT)
-        # PLAN_v15 P3b/P3d
         MAX_SAME_DIRECTION     = int(await cfg.get("futures", "max_same_direction", MAX_SAME_DIRECTION))
-        BIGMOVER_DAILY_SL_STOP = int(await cfg.get("futures", "bigmover_daily_sl_stop", BIGMOVER_DAILY_SL_STOP))
-        # Jatah entri harian bigmover. Cadangannya nilai BEKU, bukan nilai
-        # berjalan: `cfg.get(..., NILAI_SEKARANG)` membuat bawaan hanyut
-        # mengikuti override sampai titik pulang hilang.
-        global BIGMOVER_DAILY_BUDGET
-        BIGMOVER_DAILY_BUDGET  = int(await cfg.get(
-            "futures", "bigmover_daily_budget", _FROZEN["BIGMOVER_DAILY_BUDGET"]))
-        # PLAN_v16 F2
-        global MIN_TP1_COST_MULT
         MIN_TP1_COST_MULT      = await cfg.get("futures", "min_tp1_cost_mult", MIN_TP1_COST_MULT)
-        # Overextension guard + floor lane lemah (diagnostik 23 Jul)
-        global OVEREXTENSION_CEILING, WEAK_LANE_FLOOR
-        OVEREXTENSION_CEILING  = await cfg.get("futures", "overextension_ceiling", OVEREXTENSION_CEILING)
-        WEAK_LANE_FLOOR        = int(await cfg.get("futures", "weak_lane_floor", WEAK_LANE_FLOOR))
-        # LANE_QUOTAS is a dict shared by reference with importers — mutate in
-        # place so `from auto_trader import LANE_QUOTAS` bindings elsewhere stay in sync.
-        # Iterasi lane, bukan tiga baris bernama — lane yang ditambahkan ke
-        # LANE_QUOTAS langsung ikut bisa ditala, tanpa perlu diingat menambah
-        # baris di sini (kelalaian seperti itu tak memunculkan error apa pun).
-        for _lane in list(LANE_QUOTAS):
-            LANE_QUOTAS[_lane] = int(await cfg.get(
-                "futures", f"lane_quota_{_lane}", LANE_QUOTAS[_lane]))
     except Exception as exc:
         logger.warning("agent_config_pull_failed", scope="auto_trader", error=str(exc)[:120])
 
@@ -293,18 +226,6 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     # P8: profit lock — only A-grade at ½ size (checked per candidate below)
     _profit_lock_mode = bool(_dg["profit_lock"])
 
-    # P3a: market breadth — pump-and-fade day detection (computed each scan cycle)
-    _breadth = {}
-    try:
-        from agents.futures import store as _fstore
-        _breadth = _fstore.get_market_breadth() or {}
-    except Exception:
-        pass
-    _fade_day = (
-        _breadth.get("gainers", 0) >= BREADTH_MIN_SAMPLE
-        and _breadth.get("fade_frac", 0.0) >= BREADTH_FADE_FRAC
-    )
-
     # Dedup by symbol — keep the highest-score candidate (global ranking, BUG-L1).
     # Per-candidate adaptive threshold (its own lane) + ranging bar; BUG-L12 volatile gate.
     # BC2: when HEDGE_MODE=True, dedup key is (symbol, direction) to allow simultaneous
@@ -320,40 +241,13 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         if coin_regime == "ranging":
             threshold += 5
         if r.get("score", 0) < threshold:
-            # PLAN_v14 B3: audit lane dormant — log kenapa Pre-Gainer/Accumulation di-skip
-            if r.get("agent") in ("futures_agent1", "futures_agent2"):
-                logger.debug("lane_skip_below_threshold", agent=r.get("agent"),
-                             symbol=symbol, score=r.get("score", 0), threshold=threshold)
-                # PLAN_v15 R0d: persist the near-miss (score passed min but failed
-                # auto-open) to rejection_log so P6 calibration has real data on the
-                # 52-64 score band. reason distinguishes it from scoring rejects.
-                try:
-                    from agents.futures.weight_updater import log_rejection
-                    log_rejection(symbol, r.get("agent", ""), r.get("direction", ""),
-                                  r.get("score", 0), threshold,
-                                  regime=coin_regime, reason="below_auto_threshold")
-                except Exception:
-                    pass
             _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"),
                  "below_auto_threshold")   # F1
             continue
-        # Overextension guard: skor ekstrem = setup overextended yang reversal keras
-        # (diagnostik 23 Jul: >=80 exp -11.28%). Veto auto-open; 0 = nonaktif.
-        # Plafon ini dikalibrasi atas skor LANE LAMA (diagnostik 23 Jul: skor >=80
-        # berekspektasi -11,28%). Agen tunggal memakai fungsi penilai yang berbeda,
-        # jadi angka 80 di sana bukan besaran yang sama — memakainya berarti
-        # memveto justru setup dengan konfirmasi terbanyak.
-        #
-        # Overekstensi tetap ditangani, hanya dengan cara lain: `agentic` memberi
-        # `momentum_ekstrem` skor lebih RENDAH (18, bukan 30) dan memangkas
-        # `size_mult` jadi 0,5 — mengecilkan ukuran alih-alih memveto. Mekanisme
-        # itu tak dimiliki lane lama, dan itulah sebabnya mereka butuh plafon.
-        if (OVEREXTENSION_CEILING and r.get("agent") not in _AGEN_AKTIF
-                and r.get("score", 0) >= OVEREXTENSION_CEILING):
-            _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"), "overextension_veto")
-            continue
-        # BUG-L12: volatile blocks pre_move only — momentum rides the volatility
-        if coin_regime in AUTO_DISABLED_REGIMES and r.get("setup_type") != "momentum":
+        # Overekstensi TIDAK diveto di sini: `agentic` memberi `momentum_ekstrem`
+        # skor lebih rendah dan memangkas `size_mult` jadi 0,5 — mengecilkan
+        # ukuran alih-alih memveto.
+        if coin_regime in AUTO_DISABLED_REGIMES:
             _dec(symbol, r.get("agent", ""), r.get("direction", "LONG"),
                  "volatile_regime_skip")   # F1
             continue
@@ -399,15 +293,6 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             logger.debug("auto_trader_at_max", open=open_count)
             return 0
 
-        # Phase 2 BM1: separate slot count for Big Mover lane
-        bm_count_q = await session.execute(
-            select(func.count(PaperTrade.id)).where(
-                PaperTrade.style == "futures_agent_bigmover",
-                PaperTrade.status == "open",
-            )
-        )
-        bm_open_count: int = bm_count_q.scalar() or 0
-
         # PLAN_v15 P3d: open-position count per direction (alert_type stores it lowercase)
         dir_q = await session.execute(
             select(PaperTrade.alert_type, func.count(PaperTrade.id)).where(
@@ -418,27 +303,6 @@ async def auto_open_positions(candidates: list[dict]) -> int:
         dir_open_counts: dict[str, int] = {
             (row[0] or "").upper(): row[1] for row in dir_q.fetchall()
         }
-
-        # PLAN_v15 P3b: BM entries opened today (WIB) — daily budget
-        from agents.futures.risk_gate import wib_day_start_epoch
-        bm_today_q = await session.execute(
-            select(func.count(PaperTrade.id)).where(
-                PaperTrade.style == "futures_agent_bigmover",
-                PaperTrade.entry_at >= wib_day_start_epoch(),
-            )
-        )
-        bm_opened_today: int = bm_today_q.scalar() or 0
-
-        # P4.3: per-setup_type lane quota — count open positions per setup_type
-        lane_q = await session.execute(
-            select(PaperTrade.setup_type, func.count(PaperTrade.id)).where(
-                PaperTrade.style.in_(_FUTURES_STYLES),
-                PaperTrade.status == "open",
-            ).group_by(PaperTrade.setup_type)
-        )
-        lane_open_counts: dict[str, int] = {row[0]: row[1] for row in lane_q.fetchall() if row[0]}
-        # Track newly opened per lane during this cycle
-        lane_opened_this_cycle: dict[str, int] = {}
 
         # GLOBAL open symbols + SL cooldown across all lanes (BUG-L1).
         # BC2: in HEDGE_MODE, dedup on (symbol, direction) tuples so LONG+SHORT coexist.
@@ -502,26 +366,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 _dec(symbol, agent, direction, "direction_cap")   # F1
                 continue
 
-            if agent == "futures_agent_bigmover":
-                # PLAN_v15 P3b: BM daily budget + daily real-SL stop
-                if bm_opened_today >= BIGMOVER_DAILY_BUDGET:
-                    logger.info("bigmover_daily_budget_reached", opened=bm_opened_today)
-                    _dec(symbol, agent, direction, "bm_daily_budget")   # F1
-                    continue
-                if _dg.get("bm_real_sl_today", 0) >= BIGMOVER_DAILY_SL_STOP:
-                    logger.info("bigmover_daily_sl_stop", sl_today=_dg.get("bm_real_sl_today"))
-                    _dec(symbol, agent, direction, "bm_daily_sl_stop")   # F1
-                    continue
-                # PLAN_v15 P3a: fade-day breadth gate — chasing pumps LONG on a day
-                # where most top gainers are already fading 1h = buying exit liquidity.
-                if direction == "LONG" and _fade_day:
-                    logger.info("bigmover_fade_day_skip", symbol=symbol,
-                                fade_frac=_breadth.get("fade_frac"),
-                                gainers=_breadth.get("gainers"))
-                    _dec(symbol, agent, direction, "breadth_fade_skip")   # F1
-                    continue
-
-            # Phase 3 G3-funding + PLAN_v6 P4c: two-zone funding gate (all lanes).
+            # PLAN_v6 P4c: two-zone funding gate.
             # HARD zone (>0.25%) → veto: funding cost eats any realistic profit.
             # SOFT zone (0.12–0.25%) → trade at half size: crowded but tradeable.
             # Cheap scoring-cache check first; revalidate live before order (B3.1).
@@ -544,26 +389,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 if scored_funding_pct < MIN_SHORT_FUNDING_PCT:
                     funding_mult = FUNDING_SOFT_SIZE_MULT
 
-            # Phase 2 BM1: dedicated bigmover slot cap
-            # bm_open_count starts as DB pre-existing count and is incremented after
-            # each BM open in this cycle — no need to re-scan existing_syms here.
-            if agent == "futures_agent_bigmover":
-                if bm_open_count >= MAX_BIGMOVER_POSITIONS:
-                    logger.debug("bigmover_lane_full")
-                    _dec(symbol, agent, direction, "bm_lane_full")   # F1
-                    continue
-
-            # P4.3: per-lane quota — prevent momentum from taking all 6 slots
             setup = sig.get("setup_type", "")
-            if setup and setup in LANE_QUOTAS:
-                lane_db_count    = lane_open_counts.get(setup, 0)
-                lane_cycle_count = lane_opened_this_cycle.get(setup, 0)
-                if lane_db_count + lane_cycle_count >= LANE_QUOTAS[setup]:
-                    logger.debug("lane_quota_full", setup=setup,
-                                 db=lane_db_count, cycle=lane_cycle_count,
-                                 quota=LANE_QUOTAS[setup])
-                    _dec(symbol, agent, direction, "lane_quota_full")   # F1
-                    continue
 
             # P6.4: per-lane WR auto-pause
             if setup:
@@ -594,7 +420,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             _slip_pct = sig.get("entry_slippage_pct") or calculate_entry_slippage(
                 sig.get("quote_vol_24h", 0)
             )
-            _hold_h      = _HOLD_EST_H.get(setup, 12.0)
+            _hold_h      = _estimasi_hold_h()
             _funding_est = abs(scored_funding_pct) * (_hold_h / 8.0)   # % per 8h window
             _cost_floor  = FUTURES_ROUND_TRIP_FEE_PCT + 2 * _slip_pct + _funding_est
             _tp1_pct_sig = float(sig.get("tp1_pct") or 0.0)
@@ -652,8 +478,8 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 pos_size        = round(pos_size * 0.5, 2)
                 risk_dollar_val = round(risk_dollar_val * 0.5, 2)
 
-            # PLAN_v6 P4a/P4c: apply size reductions — agent-signal size_mult
-            # (bigmover G18 hot-entry / extreme tier) × funding soft-zone mult.
+            # Pengurangan ukuran: `size_mult` dari agen (momentum ekstrem) ×
+            # pengali zona lunak funding.
             _size_mult = float(sig.get("size_mult", 1.0) or 1.0) * funding_mult
             # PLAN_v15 P8: profit-lock mode trades at half size (house-money rule)
             if _profit_lock_mode:
@@ -702,7 +528,7 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                 "liq_long":     sig.get("liq_long", 0),
                 "liq_short":    sig.get("liq_short", 0),
                 "margin_type":  "cross",
-                "setup_type":   sig.get("setup_type", "pre_move"),   # P2: lane tag
+                "setup_type":   sig.get("setup_type", "agentic"),
                 "atr_pct":      sig.get("atr_pct", 0),   # PLAN_v15: G4 rugpull + P9 fail-fast read this
                 "auto_opened":  True,
                 # P1 / B4.1 + PLAN_v16 F1: slippage dipotong dari pnl di monitor saat close
@@ -759,12 +585,6 @@ async def auto_open_positions(candidates: list[dict]) -> int:
             _dec(symbol, agent, direction, "opened")   # F1
             # PLAN_v15 P3b/P3d: keep in-cycle counters honest for the next candidate
             dir_open_counts[direction] = dir_open_counts.get(direction, 0) + 1
-            if agent == "futures_agent_bigmover":
-                bm_open_count += 1
-                bm_opened_today += 1
-            # P4.3: track lane count for quota enforcement within this cycle
-            if setup and setup in LANE_QUOTAS:
-                lane_opened_this_cycle[setup] = lane_opened_this_cycle.get(setup, 0) + 1
 
             logger.info(
                 "auto_trade_opened",
@@ -782,7 +602,16 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     return opened
 
 
-# ── Phase 2 BM1 helpers ────────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _estimasi_hold_h() -> float:
+    """Lama tahan yang diharapkan (jam) — dari time-stop agen (`exit_max_hold_h`)."""
+    try:
+        from agents.futures import exit_config as _ecfg
+        return float(_ecfg.get("exit_max_hold_h"))
+    except Exception:      # noqa: BLE001
+        return HOLD_EST_H_DEFAULT
+
 
 async def _revalidate_funding(symbol: str, direction: str) -> bool:
     """

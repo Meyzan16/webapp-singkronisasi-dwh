@@ -16,7 +16,7 @@ from agents.learning import exit_rollout as er
 
 def test_tangga_tp_terdaftar_sebagai_parameter_majemuk():
     assert "entry_tp_ladder" in er.COMPOSITE_PARAMS
-    for market, n in (("futures", 3), ("spot", 3)):
+    for market, n in (("spot", 3),):
         keys = er.composite_keys("entry_tp_ladder", market)
         assert len(keys) == n, f"{market}: tangga harus 3 anak, dapat {len(keys)}"
         assert len(set(keys)) == n, "ada kunci duplikat — satu rung tak akan tertulis"
@@ -26,19 +26,16 @@ def test_kunci_tangga_cocok_dengan_yang_DITARIK_agen():
     """Kunci yang ditulis rollout HARUS kunci yang sama dengan yang ditarik
     scheduler. Beda satu huruf = usulan mendarat di kunci mati, persis kesalahan
     lane SPOT 8 Agu."""
-    import pathlib
-    fsch = pathlib.Path("../agents/futures/scheduler.py").read_text(encoding="utf-8")
     from agents.opportunity import scanner as sc
     ssrc = inspect.getsource(sc.refresh_tp_ladder)
-    for k in er.composite_keys("entry_tp_ladder", "futures"):
-        assert k in fsch, f"{k} tak pernah ditarik scheduler futures"
     for k in er.composite_keys("entry_tp_ladder", "spot"):
         assert k in ssrc, f"{k} tak pernah ditarik scanner spot"
 
 
-def test_terdaftar_di_kedua_market():
-    for m in ("futures", "spot"):
-        assert "entry_tp_ladder" in er.SUPPORTED_PARAMS_BY_MARKET[m]
+def test_terdaftar_di_spot_saja():
+    """Futures kehilangan tangga masuk majemuk bersama lane BigMover (13 Sep 2026)."""
+    assert "entry_tp_ladder" in er.SUPPORTED_PARAMS_BY_MARKET["spot"]
+    assert "entry_tp_ladder" not in er.SUPPORTED_PARAMS_BY_MARKET["futures"]
 
 
 def test_canary_menulis_SEMUA_kunci_bukan_sebagian():

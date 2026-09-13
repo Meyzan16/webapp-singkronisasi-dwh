@@ -7,17 +7,10 @@ import { DirBadge, AgentBadge } from "@/components/ui/trading-badges";
 import { type ConnState, CONN_META } from "@/components/ui/live-badge";
 import { useLaneStatus } from "@/features/shared/useLaneStatus";
 import { PauseBadge } from "@/features/shared/PauseBadge";
-import { BigMoversPanel } from "./components/BigMoversPanel";
 
-/** U1 — satu daftar lane scanner, dipetakan ke nama lane pada `lane_quotas`.
- *  Nama agen (`agent3`) dan nama lane (`momentum`) BEDA; pemetaan ini yang
- *  menyambungkannya, jadi status pakai lane bisa dibaca dari keadaan. */
-const LANE_TABS = [
-  // Fase 8: satu agen. Empat lane lama dihapus bersama modulnya; halaman ini
-  // dulu membaca `data.agent1/2/3.results` yang kini kosong — jadi bagian
-  // futures-nya diam-diam tak menampilkan apa pun.
-  { key: "agentic" as const, lane: "agentic", name: "Agentic", label: "🧠 Agentic", cls: "bg-teal-500/20 border-teal-400/40 text-teal-300" },
-];
+/** Satu agen, satu lane. Nama lane ini yang dipakai `risk_gate` untuk jeda
+ *  win-rate (`lane_pauses`) — badge jeda di header membacanya. */
+const LANE = "agentic";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -101,7 +94,7 @@ function ScoreBubble({ score }: { score: number }) {
 
 function SignalCard({ s, isNew, isOpen, openPos, onClick, autoThreshold }: {
   s: FuturesSignal; isNew: boolean; isOpen: boolean;
-  openPos?: OpenPosition; onClick: () => void; autoThreshold: number
+  openPos?: OpenPosition; onClick: () => void; autoThreshold: number | null
 }) {
   const isLong = s.direction === "LONG";
   return (
@@ -130,7 +123,7 @@ function SignalCard({ s, isNew, isOpen, openPos, onClick, autoThreshold }: {
                   OPEN {openPos.upnl_pct >= 0 ? "+" : ""}{openPos.upnl_pct.toFixed(1)}%
                 </span>
               )}
-              {s.score >= autoThreshold && (
+              {autoThreshold != null && s.score >= autoThreshold && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-teal-100 text-teal-700 border border-teal-200">
                   🤖 AUTO
                 </span>
@@ -198,7 +191,7 @@ function SignalCard({ s, isNew, isOpen, openPos, onClick, autoThreshold }: {
 
 // ── Trade Modal ────────────────────────────────────────────────────────────────
 
-function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
+function TradeModal({ s, onClose, riskBasePct }: { s: FuturesSignal; onClose: () => void; riskBasePct: number }) {
   const [opening, setOpening] = useState(false);
   const [opened,  setOpened]  = useState(false);
   const [error,   setError]   = useState("");
@@ -246,11 +239,12 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
     finally { setOpening(false); }
   };
 
-  // P8: build the price ladder so the HIGHEST price is always at the top.
-  // LONG: TP3>TP2>TP1>Entry>SL · SHORT: SL>Entry>TP1>TP2>TP3 (was inverted for SHORT).
+  // Tangga harga: harga TERTINGGI selalu di atas.
+  // LONG: TP2>TP1>Entry>SL · SHORT: SL>Entry>TP1>TP2.
   type Lvl = { label: string; val: number; pct: number | null; loss?: boolean; cl: string };
+  // Agen tunggal: dua tangga TP (50% di TP1, 25% di TP2), sisa 25% = pelari
+  // yang dikelola trailing — tak ada TP3 tetap.
   const tpRows: Lvl[] = [
-    { label: "TP3",   val: s.tp3, pct: s.tp3_pct, cl: "text-green-400" },
     { label: "TP2 ★", val: s.tp2, pct: s.tp2_pct, cl: "text-green-600 bg-green-50 font-bold" },
     { label: "TP1",   val: s.tp1, pct: s.tp1_pct, cl: "text-green-500" },
   ];
@@ -258,7 +252,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
   const slRow:    Lvl = { label: "SL",    val: s.sl,    pct: s.risk_pct, loss: true, cl: "text-red-500" };
   const levels: Lvl[] = isLong
     ? [...tpRows, entryRow, slRow]                       // high → low
-    : [slRow, entryRow, ...[...tpRows].reverse()];       // SHORT: SL(top) → TP3(bottom)
+    : [slRow, entryRow, ...[...tpRows].reverse()];       // SHORT: SL(top) → TP2(bottom)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
@@ -355,7 +349,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
           {/* Position sizing simulation */}
           {!opened && (() => {
             const BALANCE  = balance;                                        // F38: real balance from API
-            const riskDollar  = BALANCE * 0.01;                              // 1% of balance
+            const riskDollar  = BALANCE * (riskBasePct / 100);               // risiko dasar dari sizing_config
             const notional    = s.risk_pct > 0 ? riskDollar / (s.risk_pct / 100) : 0;
             const margin      = s.leverage > 0 ? notional / s.leverage : notional;
             const winDollar   = riskDollar * s.rr_ratio;
@@ -367,7 +361,7 @@ function TradeModal({ s, onClose }: { s: FuturesSignal; onClose: () => void }) {
                 <div className="grid grid-cols-2 gap-2">
                   {[
                     { label: "Modal",      value: `$${BALANCE.toLocaleString()} USDT`, cls: "text-neutral-700" },
-                    { label: "Risk (1%)",  value: `-$${riskDollar.toFixed(0)}`,   cls: "text-red-600"     },
+                    { label: `Risk (${riskBasePct}%)`, value: `-$${riskDollar.toFixed(1)}`, cls: "text-red-600" },
                     { label: "Notional",   value: `$${notional.toFixed(0)}`,      cls: "text-neutral-700" },
                     { label: "Margin",     value: `$${margin.toFixed(0)}`,        cls: "text-blue-600"    },
                     { label: "Win Est.",   value: `+$${winDollar.toFixed(1)}`,    cls: "text-green-600"   },
@@ -423,16 +417,20 @@ export default function ScannerFuturesPage() {
   const [isLive, setIsLive]           = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [scanned, setScanned]         = useState(0);
-  const [activeAgent, setActiveAgent] = useState<"all" | "agentic">("all");
-  const { isDisabled } = useLaneStatus();
+  // Sizing BERLAKU dari sizing_config lewat /agent/config — simulasi di modal
+  // memakai angka yang sama dengan mesin, bukan "1%" yang dipaku.
+  const { futures: futCfg } = useLaneStatus();
+  const riskBasePct = ((futCfg?.sizing ?? {}) as Record<string, number>).size_risk_base_pct ?? 1;
   const [dirFilter, setDirFilter]     = useState<"ALL" | "LONG" | "SHORT">("ALL");
-  const [minScore, setMinScore]       = useState(52);
+  const [minScore, setMinScore]       = useState(0);
   const [search, setSearch]           = useState("");
   const [selected, setSelected]       = useState<FuturesSignal | null>(null);
   const [newSymbols, setNewSymbols]   = useState<Set<string>>(new Set());
   // Auto-trade
   const [autoEnabled, setAutoEnabled]       = useState(true);
-  const [autoThreshold, setAutoThreshold]   = useState(72);   // UI-4: effective base threshold from API
+  // Ambang agen aktif dari API (`agentic_min_score`) — bukan 72 lane lama.
+  const [autoThreshold, setAutoThreshold]   = useState<number | null>(null);
+  const [maxPositions, setMaxPositions]     = useState<number | null>(null);
   const [autoToggling, setAutoToggling]     = useState(false);
   // Open positions monitor
   const [openPositions, setOpenPositions]   = useState<OpenPosition[]>([]);
@@ -465,9 +463,10 @@ export default function ScannerFuturesPage() {
           apiFetch("/api/v1/futures/monitor/risk"),
         ]);
         if (autoRes.ok) {
-          const a = await autoRes.json() as { enabled: boolean; threshold?: number };
+          const a = await autoRes.json() as { enabled: boolean; threshold?: number; max_positions?: number };
           setAutoEnabled(a.enabled);
           if (typeof a.threshold === "number") setAutoThreshold(a.threshold);
+          if (typeof a.max_positions === "number") setMaxPositions(a.max_positions);
         }
         if (riskRes.ok) {
           terapkanRisk(await riskRes.json() as RiskSnapshot);
@@ -561,44 +560,23 @@ export default function ScannerFuturesPage() {
     } catch { /* silent */ } finally { setScanning(false); }
   }, [applySnapshot]);
 
-  // U1 — lane yang quota-nya 0 tak akan pernah membuka posisi. Sinyalnya tetap
-  // dipindai backend, jadi kalau dibiarkan tampil layar ini menawarkan peluang yang
-  // sudah pasti dilewati auto-trader. Tab-nya hilang, sinyalnya keluar dari daftar
-  // dan dari hitungan LONG/SHORT. Riwayat lane itu TIDAK tersentuh (ada di History).
-  const laneMatiKey = LANE_TABS.filter(t => isDisabled(t.lane)).map(t => t.key).join(",");
-  const laneTabs    = LANE_TABS.filter(t => !isDisabled(t.lane));
-
-  // Filter yang menunjuk lane mati akan menampilkan "kosong" tanpa sebab yang
-  // terlihat — kembalikan ke "all" begitu lane-nya dimatikan.
-  useEffect(() => {
-    if (activeAgent !== "all" && laneMatiKey.split(",").includes(activeAgent)) setActiveAgent("all");
-  }, [laneMatiKey, activeAgent]);
-
-  const sinyalLaneAktif = useMemo(() => {
-    const mati = new Set(laneMatiKey ? laneMatiKey.split(",") : []);
-    return mati.has("agentic") ? [] : agentic;
-  }, [agentic, laneMatiKey]);
-
   const filtered = useMemo(() => {
-    const all: FuturesSignal[] = sinyalLaneAktif;
     const q = search.trim().toLowerCase();
-    return all.filter(s =>
+    return agentic.filter(s =>
       s.score >= minScore &&
       (dirFilter === "ALL" || s.direction === dirFilter) &&
       (!q || s.symbol.toLowerCase().includes(q))
     );
-  }, [sinyalLaneAktif, minScore, dirFilter, search]);
+  }, [agentic, minScore, dirFilter, search]);
 
   const cm = CONN_META[connState];
   const scanProg = nextScanDisplay != null
     ? Math.round(((INTERVAL_SEC - nextScanDisplay) / INTERVAL_SEC) * 100) : 0;
   const fmtCD = (s: number | null) => s == null ? "--:--"
     : `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`;
-  // F40: dedupe by symbol across agents — one coin counted once per direction
-  // U1: hitungan ikut lane aktif saja — koin yang hanya muncul di lane mati bukan
-  // peluang, karena auto-trader pasti melewatinya.
-  const totalLong  = new Set(sinyalLaneAktif.filter(s => s.direction === "LONG").map(s => s.symbol)).size;
-  const totalShort = new Set(sinyalLaneAktif.filter(s => s.direction === "SHORT").map(s => s.symbol)).size;
+  const totalLong  = new Set(agentic.filter(s => s.direction === "LONG").map(s => s.symbol)).size;
+  const totalShort = new Set(agentic.filter(s => s.direction === "SHORT").map(s => s.symbol)).size;
+  const lanePause  = lanePauses[LANE];
 
   // Compute sets of open symbols for badge
   const openSymbolMap = useMemo(() => {
@@ -622,21 +600,15 @@ export default function ScannerFuturesPage() {
                 <span className="text-3xl">⚡</span>
                 <div>
                   <h1 className="text-2xl font-bold">Futures Scanner</h1>
-                  {/* Disusun dari lane yang benar-benar aktif — menyebut lane mati di sini
-                      membuat kalimatnya berbohong tiap kali quota ditala. */}
-                  <p className="text-xs text-neutral-400">{laneTabs.map(t => t.name).join(" · ")} · New Listing · satu wallet cross-margin</p>
+                  <p className="text-xs text-neutral-400">Agen tunggal · momentum + konfirmasi 1h + volume · New Listing · satu wallet cross-margin</p>
                 </div>
               </div>
-              <div className="flex gap-2 ml-12 flex-wrap">
-                {laneTabs.map(a => (
-                  <button key={a.key}
-                    onClick={() => setActiveAgent(prev => prev === a.key ? "all" : a.key)}
-                    className={`flex items-center gap-1.5 text-[10px] font-bold px-3 py-1 rounded-full border transition-all ${activeAgent === a.key ? a.cls : "bg-white/5 border-white/10 text-neutral-400 hover:border-white/20"}`}>
-                    {a.label}
-                    <PauseBadge until={lanePauses[a.lane]?.paused ? lanePauses[a.lane]?.pause_until : undefined} now={riskNow} />
-                  </button>
-                ))}
-              </div>
+              {lanePause?.paused && (
+                <div className="flex items-center gap-2 ml-12 text-[10px] font-bold text-amber-300">
+                  Auto-open dijeda oleh gerbang win-rate
+                  <PauseBadge until={lanePause.pause_until} now={riskNow} />
+                </div>
+              )}
             </div>
             <div className="flex flex-col items-end gap-3">
               <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -724,7 +696,7 @@ export default function ScannerFuturesPage() {
             )}
           </div>
           <p className="text-[11px] text-neutral-500 mt-0.5">
-            Score ≥ {autoThreshold}pt → otomatis buka paper trade · Max 6 posisi (global, 1 wallet) · dedup per koin
+            Score ≥ {autoThreshold ?? "…"}pt → otomatis buka paper trade · Max {maxPositions ?? "…"} posisi (1 wallet) · dedup per koin
           </p>
         </div>
         <button
@@ -752,9 +724,8 @@ export default function ScannerFuturesPage() {
           <span className="text-neutral-400 text-[10px] font-semibold">MIN</span>
           <select value={minScore} onChange={e => setMinScore(Number(e.target.value))}
             className="text-xs text-neutral-700 bg-transparent focus:outline-none">
-            <option value={52}>52pt</option>
-            <option value={60}>60pt ⚡</option>
-            <option value={72}>72pt 🔥 Auto</option>
+            <option value={0}>Semua</option>
+            {autoThreshold != null && <option value={autoThreshold}>{autoThreshold}pt 🤖 Auto</option>}
             <option value={80}>80pt 💎</option>
           </select>
         </div>
@@ -777,16 +748,13 @@ export default function ScannerFuturesPage() {
           <div className="w-14 h-14 rounded-full bg-teal-100 flex items-center justify-center mx-auto">
             <span className="text-3xl animate-bounce">⚡</span>
           </div>
-          <p className="font-semibold text-neutral-700">Menghubungkan ke Pre-Gainer Scanner...</p>
-          <p className="text-xs text-neutral-400">{laneTabs.map(t => t.name).join(" + ")} · 150 USDT-M pairs + new listings</p>
+          <p className="font-semibold text-neutral-700">Menghubungkan ke Futures Scanner...</p>
+          <p className="text-xs text-neutral-400">Agen tunggal · USDT-M perpetual + new listings</p>
         </div>
       )}
 
       {/* Market Intel Banner */}
       <MarketIntelBanner mode="futures" />
-
-      {/* PLAN-SIGNAL-GAP P4: Big Movers Monitor — informational, no auto-open */}
-      <BigMoversPanel />
 
       {/* Cards */}
       {filtered.length > 0 && (
@@ -810,15 +778,15 @@ export default function ScannerFuturesPage() {
       )}
 
       {/* Empty */}
-      {!loading && filtered.length === 0 && sinyalLaneAktif.length > 0 && (
+      {!loading && filtered.length === 0 && agentic.length > 0 && (
         <div className="text-center py-12 text-neutral-400">
           <p className="text-3xl mb-3">🔍</p>
           <p className="font-semibold">Tidak ada sinyal untuk filter ini</p>
-          <button onClick={() => { setDirFilter("ALL"); setMinScore(52); setSearch(""); setActiveAgent("all"); }}
+          <button onClick={() => { setDirFilter("ALL"); setMinScore(0); setSearch(""); }}
             className="mt-3 text-sm text-teal-600 underline">Reset filter</button>
         </div>
       )}
-      {!loading && !scanning && sinyalLaneAktif.length === 0 && (
+      {!loading && !scanning && agentic.length === 0 && (
         <div className="space-y-4">
           <div className="text-center py-8 text-neutral-400">
             <p className="text-3xl mb-3">📡</p>
@@ -828,7 +796,7 @@ export default function ScannerFuturesPage() {
         </div>
       )}
       {/* Modal */}
-      {selected && <TradeModal s={selected} onClose={() => setSelected(null)} />}
+      {selected && <TradeModal s={selected} onClose={() => setSelected(null)} riskBasePct={riskBasePct} />}
     </div>
   );
 }

@@ -19,7 +19,7 @@ export function CoinRow({ c, rank, showNew, showFR }: { c: Coin; rank: number; s
   return (
     <div
       onClick={() => router.push(`/scanner?symbol=${c.base}`)}
-      title={`Scan ${c.base} di Pre-Gainer Scanner`}
+      title={`Lihat ${c.base} di Futures Scanner`}
       className="flex items-center gap-2 px-3 py-2 hover:bg-neutral-50 border-b border-neutral-100 last:border-0 cursor-pointer">
       <span className="text-[10px] text-neutral-400 w-5 shrink-0 tabular-nums">{rank}</span>
       <div className="flex-1 min-w-0">
@@ -30,9 +30,9 @@ export function CoinRow({ c, rank, showNew, showFR }: { c: Coin; rank: number; s
             <span className="text-[8px] font-black bg-teal-500 text-white px-1 rounded">NEW</span>
           )}
           {showFR && <FundingBadge fr={c.funding_rate} />}
-          {c.agent1_score != null && c.agent1_score >= 52 && (
-            <span className="text-[8px] font-black bg-blue-100 text-blue-700 px-1 rounded" title="Skor Agent 1 Pre-Gainer">
-              🎯 {c.agent1_score.toFixed(0)}
+          {c.agentic_score != null && (
+            <span className="text-[8px] font-black bg-teal-100 text-teal-700 px-1 rounded" title="Skor agen tunggal (Futures Scanner)">
+              🧠 {c.agentic_score.toFixed(0)}
             </span>
           )}
         </div>

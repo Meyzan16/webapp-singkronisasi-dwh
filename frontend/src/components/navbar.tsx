@@ -8,7 +8,7 @@ const pathnameMap = {
   },
   "scanner": {
     title: "⚡ Futures Scanner",
-    description: "Agent 1 (AI Knowledge) + Agent 2 (T0-T4) · 100 USDT-M Perpetual pairs · LONG & SHORT",
+    description: "Agen tunggal — momentum · konfirmasi 1h · volume · USDT-M Perpetual · LONG & SHORT",
   },
   "opportunity": {
     title: "🎯 Spot Opportunity",

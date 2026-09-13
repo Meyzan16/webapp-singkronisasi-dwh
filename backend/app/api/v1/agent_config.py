@@ -187,7 +187,6 @@ async def _futures_config() -> dict:
         "scan_interval_sec": fsched.INTERVAL_SEC,
         "monitor_interval_sec": fmon.INTERVAL_SEC,
         "universe_cap": fsched.UNIVERSE_CAP,
-        "big_mover_threshold_pct": fsched.BIG_MOVER_THRESHOLD,
         # Fase 8: satu agen. Empat lane lama dihapus bersama modulnya setelah
         # trade era mereka tutup semuanya; riwayatnya tetap terbaca lewat
         # `FUTURES_AGENTS` yang masih memuat namanya.
@@ -242,10 +241,8 @@ async def _futures_config() -> dict:
             "profit_giveback_floor_pct": rg.PROFIT_GIVEBACK_FLOOR_PCT,
             "lane_consec_sl_pause":      int(lane_consec_sl),
             "consec_sl_window_h":        rg.CONSEC_SL_WINDOW_H,
-            "bigmover_daily_budget":     at.BIGMOVER_DAILY_BUDGET,
             "max_same_direction":        int(max_same_direction),
             "failfast_atr_mult":         failfast_atr_mult,
-            "breadth_fade_frac":         at.BREADTH_FADE_FRAC,
             "daily_gates":               rg.get_daily_gates(),
         },
     }

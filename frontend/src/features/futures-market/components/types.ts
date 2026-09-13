@@ -19,7 +19,7 @@ export interface Coin {
   next_funding_time:  number;
   open_interest:      number | null;
   open_interest_usdt: number | null;
-  agent1_score?:      number | null;
+  agentic_score?:     number | null;   // skor agen tunggal dari scan terakhir
 }
 
 export interface MarketStats {

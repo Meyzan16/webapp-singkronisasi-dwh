@@ -14,17 +14,21 @@ import pytest
 
 # ── Lapis 1: bisa ditala, bawaan = perilaku lama ─────────────────────────────
 
-def test_jatah_harian_bisa_ditala_dua_market():
-    fut = pathlib.Path("../agents/futures/auto_trader.py").read_text(encoding="utf-8")
+def test_jatah_harian_bisa_ditala_spot():
+    """Sisi FUTURES: jatah harian BigMover dibongkar 13 Sep 2026 bersama lane-nya."""
     spot = pathlib.Path("../agents/opportunity/scheduler.py").read_text(encoding="utf-8")
-    assert '"bigmover_daily_budget"' in fut
     assert '"max_auto_opens_per_day"' in spot
 
 
-def test_tangga_tp_bisa_ditala_dua_market():
-    fsch = pathlib.Path("../agents/futures/scheduler.py").read_text(encoding="utf-8")
-    for k in ("bigmover_tp1_atr_mult", "bigmover_tp2_atr_mult", "bigmover_tp3_atr_mult"):
-        assert k in fsch, f"{k} tak pernah ditarik"
+def test_tangga_tp_futures_tak_lagi_menulis_kunci_mati():
+    """Kunci `bigmover_tp*_atr_mult` tak dibaca siapa pun sejak lane-nya dibongkar;
+    rollout yang menulis ke sana akan "berhasil" tanpa mengubah apa pun."""
+    from agents.learning import exit_rollout as er
+    assert er.composite_keys("entry_tp_ladder", "futures") == ()
+    assert "entry_tp_ladder" not in er.SUPPORTED_PARAMS_BY_MARKET["futures"]
+
+
+def test_tangga_tp_bisa_ditala_spot():
     from agents.opportunity import scanner as sc
     src = inspect.getsource(sc.refresh_tp_ladder)
     for k in ("bigmover_tp1_pct", "bigmover_tp2_pct", "bigmover_tp3_pct"):
@@ -39,7 +43,6 @@ def test_tangga_tp_spot_benar_benar_di_refresh_loop():
 
 
 @pytest.mark.parametrize("modul,var", [
-    ("../agents/futures/scheduler.py", "a_bm._FROZEN_TP"),
     ("../agents/opportunity/scanner.py", "_FROZEN_TP"),
 ])
 def test_cadangan_memakai_nilai_beku(modul, var):

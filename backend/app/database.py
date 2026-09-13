@@ -157,9 +157,6 @@ async def _migrate_columns(connection) -> None:
         # SP1: signal performance enrichment columns
         "ALTER TABLE agent_signal_weights ADD COLUMN IF NOT EXISTS avg_pnl_pct FLOAT DEFAULT 0.0",
         "ALTER TABLE agent_signal_weights ADD COLUMN IF NOT EXISTS sample_count_raw INTEGER DEFAULT 0",
-        # Phase 1 T4: big_mover_log forward-PnL horizons + dedup index
-        "CREATE INDEX IF NOT EXISTS ix_big_mover_log_ts_symbol ON big_mover_log (ts, symbol)",
-        "CREATE INDEX IF NOT EXISTS ix_big_mover_log_backfill ON big_mover_log (last_backfill_at)",
         # Phase 1 B1.2: force-open rate limit
         "CREATE INDEX IF NOT EXISTS ix_force_open_log_ts ON force_open_log (ts)",
         # PLAN_v2 P0.5 — per-trade heartbeat + denormalized setup_type

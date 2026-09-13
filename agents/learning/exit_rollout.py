@@ -89,10 +89,13 @@ def param_config_key(param: str, lane: str, market: str = "futures") -> tuple[st
 # Ini juga parameter sisi MASUK pertama yang melewati tahapan ini. Mekanismenya
 # sengaja dipakai ulang, bukan disalin: sisi SPOT dan katalog Formulas dua-duanya
 # pernah lahir sebagai salinan lalu menyimpang diam-diam.
+#
+# FUTURES tak lagi punya tangga masuk majemuk: kuncinya (`bigmover_tp*_atr_mult`)
+# milik lane BigMover yang dibongkar 13 Sep 2026. Agen tunggal menyusun tangga
+# masuknya dari `exit_tp1/2_atr_mult` (satu sumber untuk masuk DAN keluar), dan
+# pembelajarannya lewat `_kunci_tp` → `exit_tp1_atr_mult_learned`.
 COMPOSITE_PARAMS: dict[str, dict[str, tuple[str, ...]]] = {
     "entry_tp_ladder": {
-        "futures": ("bigmover_tp1_atr_mult", "bigmover_tp2_atr_mult",
-                    "bigmover_tp3_atr_mult"),
         "spot":     ("bigmover_tp1_pct", "bigmover_tp2_pct", "bigmover_tp3_pct"),
     },
 }
@@ -201,7 +204,7 @@ async def _ditolak_dgn_bukti(session, market: str, lane: str, param: str,
 SUPPORTED_PARAMS_BY_MARKET: dict[str, tuple[str, ...]] = {
     "futures": ("tp_atr_mult", "failfast_min_sl_gap",
                 "trail_lock_after_tp1", "trail_advance_tp1_tp2",
-                "entry_tp_ladder", "sl_max_pct"),
+                "sl_max_pct"),
     # SPOT kini punya kunci config sendiri untuk kedua parameter trailing, jadi
     # usulannya benar-benar sampai ke monitor. Fail-fast tetap khusus futures —
     # monitor SPOT memakai pemicu lain (rotasi, trend_reversal).
@@ -686,6 +689,8 @@ async def _usulkan_tangga_masuk(days: int, market: str,
     Ketiga anak tangga bergerak utuh — lihat `COMPOSITE_PARAMS`. Tetap masuk
     `shadow`: tak ada yang berlaku sampai dinaikkan secara eksplisit.
     """
+    if "entry_tp_ladder" not in SUPPORTED_PARAMS_BY_MARKET.get(market, ()):
+        return
     from agents.learning.exit_learning import recommend_entry_tp_ladder
     for lane in ("bigmover",):
         lad = await recommend_entry_tp_ladder(days=days, market=market, lane=lane)

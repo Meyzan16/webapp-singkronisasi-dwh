@@ -324,14 +324,10 @@ def daftar_pekerjaan() -> list[Pekerjaan]:
             catatan="Label hasil 30m/1h/4h/24h + sambungkan trade tertutup ke ledger",
             jalankan=_outcome_pass,
         ),
-        # `big_mover_backfill` DICABUT 13 Sep 2026. Terukur: 149.467 baris
-        # menunggu (tertua 29 Juni), 150 baris tiap 20 menit, tiap putaran
-        # menahan loop 9-39 detik — dan hasilnya (`pnl_*h_pct` di
-        # `big_mover_log`) hanya dibaca `/big-mover-log/*`, yang tak dipanggil
-        # satu halaman pun. Ledger belajar memakai `futures_decision_events`
-        # (diisi `outcome_pass`), bukan tabel ini. Kalau halaman big-mover
-        # dihidupkan lagi, pasang kembali dengan `berat=True` supaya jalan di
-        # proses pembelajaran. Fungsinya (`_big_mover_backfill`) dipertahankan.
+        # `big_mover_backfill` dan `weekly_backtest` DIHAPUS 13 Sep 2026 bersama
+        # tabel `big_mover_log` yang mereka isi dan baca — bagian dari metode
+        # lane BigMover. Ledger belajar agen tunggal memakai
+        # `futures_decision_events` (diisi `outcome_pass`).
         Pekerjaan(
             nama="predictive_resolve",
             jadwal=Jadwal(every_sec=24 * MENIT),          # dulu % 12 == 0
@@ -367,14 +363,6 @@ def daftar_pekerjaan() -> list[Pekerjaan]:
             jadwal=Jadwal(every_sec=24 * JAM),            # dulu % 100 == 0
             catatan="Pangkas rejection_log > 7 hari",
             jalankan=_prune_rejection_log,
-        ),
-        Pekerjaan(
-            nama="weekly_backtest",
-            berat=True,
-            jadwal=Jadwal(weekly_on=6, weekly_hour=0),    # Minggu 00:00 UTC
-            kritis=True,
-            catatan="Replay big_mover_log mingguan",
-            jalankan=_weekly_backtest,
         ),
         Pekerjaan(
             nama="weekly_signal_review",
@@ -431,11 +419,6 @@ async def _prune_old_events() -> None:
     await prune_old_events()
 
 
-async def _big_mover_backfill() -> None:
-    from app.services.big_mover_logger import backfill_pending
-    await backfill_pending(max_rows=150)
-
-
 async def _predictive_resolve() -> None:
     from app.database import is_db_available
     if not is_db_available():
@@ -489,11 +472,6 @@ async def _prune_rejection_log() -> None:
         await session.execute(
             delete(RejectionLog).where(RejectionLog.rejected_at < _t.time() - 7 * 86400))
         await session.commit()
-
-
-async def _weekly_backtest() -> None:
-    from agents.learning.weekly_backtest import run_weekly_backtest
-    await run_weekly_backtest()
 
 
 async def _weekly_signal_review() -> None:
