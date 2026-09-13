@@ -47,11 +47,20 @@ class FakeTrade:
 class FakeSession:
     """Cukup untuk `_log_exit_event` — mencatat apa yang ditambahkan."""
 
-    def __init__(self):
+    def __init__(self, segar: dict | None = None):
         self.added = []
+        self.refreshed = []
+        # id -> callable(trade): keadaan "terkini" yang dimuat ulang `refresh`.
+        self._segar = segar or {}
 
     def add(self, obj):
         self.added.append(obj)
+
+    async def refresh(self, obj):
+        self.refreshed.append(obj.id)
+        muat = self._segar.get(obj.id)
+        if muat:
+            muat(obj)
 
 
 @pytest.fixture(autouse=True)
@@ -271,3 +280,77 @@ def test_gaya_yang_diawasi_mencakup_yang_diperdagangkan():
 
     assert set(AT._FUTURES_STYLES) <= set(M._FUTURES_STYLES), (
         "ada gaya yang bisa dibuka tapi tidak diawasi")
+
+
+# ── Jalur cepat 30 detik ─────────────────────────────────────────────────────
+#
+# Malam 12-13 Sep 2026: tujuh dari 23 penutupan menembus SL >1% (sampai 5,7%)
+# karena posisi agen tunggal hanya dilihat tiap 120 detik — ia tak pernah masuk
+# `_fast_loop_trade_ids`, yang diisi dari dalam loop lane lama.
+
+def test_jalur_cepat_memuat_agen_aktif_tanpa_penandaan():
+    """Penandaan "berisiko" tak cukup: ARKUSDT jatuh dari +10% ke SL dalam
+    satu jeda. Seluruh posisi terbuka agen aktif harus ikut, selalu."""
+    import inspect
+    sumber = inspect.getsource(M._ambil_trade_jalur_cepat)
+    assert "PaperTrade.style.in_(_AGENTIC_STYLES)" in sumber
+
+
+def test_jalur_cepat_memakai_aturan_agentic_bukan_lane_lama():
+    """`_fast_close` menilai dengan aturan lane lama (status dari tanda PnL,
+    fraksi TP1 0,33). Posisi agen tunggal wajib lewat `_monitor_agentic`."""
+    import inspect
+    sumber = inspect.getsource(M._run_fast_loop)
+    assert "_monitor_agentic(session, agentic_fast, prices)" in sumber
+    # lane lama tetap lewat jalur lamanya
+    assert "for trade in legacy_fast:" in sumber
+
+
+@pytest.mark.asyncio
+async def test_muat_ulang_sebelum_memutuskan():
+    """Dua loop, dua sesi, satu baris. Tanpa muat ulang, loop utama bisa
+    menutup lagi posisi yang 30 detik lalu sudah ditutup jalur cepat."""
+    t = FakeTrade()
+    sess = FakeSession()
+    await M._monitor_agentic(sess, [t], {"XUSDT": 90.0})
+    assert sess.refreshed == [t.id]
+
+
+@pytest.mark.asyncio
+async def test_posisi_yang_sudah_tutup_di_sesi_lain_dilewati():
+    t = FakeTrade()
+
+    def _sudah_tutup(tr):
+        tr.status = "sl"
+        tr.pnl_dollar = -15.0
+
+    sess = FakeSession(segar={t.id: _sudah_tutup})
+    closed, updated = await M._monitor_agentic(sess, [t], {"XUSDT": 90.0})
+
+    assert (closed, updated) == (0, 0)
+    assert sess.added == []              # tak ada ledger kedua
+    assert t.pnl_dollar == -15.0         # angka penutupan pertama utuh
+
+
+# ── Kebisingan `agentic_sl_moved` ────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_trailing_tak_memindahkan_sl_ke_tempat_yang_sama():
+    """SL tersimpan dibulatkan 8 desimal; target dihitung ulang tanpa
+    pembulatan. Selisih 1e-8 dulu terhitung "lebih baik" tiap siklus —
+    POWRUSDT: enam entri log dengan SL identik. Di jalur 30 detik itu jadi
+    empat kali lebih berisik."""
+    meta = {"atr_pct": 4.0, "risk_pct": 5.0, "cost_floor_pct": 0.20,
+            "setup_type": "agentic", "tp1_partial_done": True,
+            "peak_pnl_pct": 8.0}
+    t = FakeTrade(meta=meta, trail_active=True)
+    sess = FakeSession()
+
+    _, u1 = await M._monitor_agentic(sess, [t], {"XUSDT": 107.0})
+    assert u1 == 1 and t.trail_sl == pytest.approx(106.0)
+    sl_pertama = t.trail_sl
+
+    # Harga bergerak tapi puncak tidak: target sama persis, hanya beda pembulatan
+    _, u2 = await M._monitor_agentic(sess, [t], {"XUSDT": 106.5})
+    assert u2 == 0, "pemindahan SL dicatat padahal SL tak berubah"
+    assert t.trail_sl == sl_pertama

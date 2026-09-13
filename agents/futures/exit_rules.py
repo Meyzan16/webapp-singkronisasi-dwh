@@ -188,6 +188,23 @@ def breakeven_armed(s: ExitState, p: ExitParams) -> bool:
             and untung >= p.be_arm_atr * s.atr_pct)
 
 
+# SL yang tersimpan dibulatkan 8 desimal; target trailing dihitung ulang tanpa
+# pembulatan tiap siklus, jadi "lebih baik" oleh selisih 1e-8 muncul terus dan
+# monitor mencatat `agentic_sl_moved` untuk pemindahan yang tak terjadi
+# (POWRUSDT: enam entri log dengan SL identik). Perbaikan harus lebih besar
+# dari satu bagian per sejuta harga untuk dihitung sebagai pemindahan.
+_TOLERANSI_SL = 1e-6
+
+
+def _membaik(target: float, sl: float, direction: str) -> bool:
+    """Apakah `target` melindungi lebih baik daripada `sl` secara bermakna."""
+    if sl <= 0:
+        return True
+    if direction == "LONG":
+        return target > sl * (1 + _TOLERANSI_SL)
+    return target < sl * (1 - _TOLERANSI_SL)
+
+
 def evaluate(s: ExitState, p: ExitParams) -> ExitDecision:
     """Satu keputusan keluar. URUTANNYA ADALAH BAGIAN DARI ATURAN.
 
@@ -235,8 +252,7 @@ def evaluate(s: ExitState, p: ExitParams) -> ExitDecision:
         kunci_pct = s.peak_pnl_pct * p.trail_lock_frac
         target = (s.entry * (1 + kunci_pct / 100) if s.direction == "LONG"
                   else s.entry * (1 - kunci_pct / 100))
-        lebih_baik = target > s.sl if s.direction == "LONG" else target < s.sl
-        if lebih_baik:
+        if _membaik(target, s.sl, s.direction):
             return ExitDecision(action="move_sl", reason="trail", new_sl=target,
                                 note=f"kunci {p.trail_lock_frac:.0%} dari puncak "
                                      f"{s.peak_pnl_pct:.2f}%")
@@ -244,8 +260,7 @@ def evaluate(s: ExitState, p: ExitParams) -> ExitDecision:
     # ── 4. Breakeven — SEBELUM TP1, dan hanya bila untungnya sudah bermakna ──
     if not s.tp1_done and not s.trail_active and breakeven_armed(s, p):
         be = protective_price(s, p)
-        lebih_baik = be > s.sl if s.direction == "LONG" else be < s.sl
-        if lebih_baik:
+        if _membaik(be, s.sl, s.direction):
             return ExitDecision(action="move_sl", reason="breakeven", new_sl=be,
                                 note=f"untung {_pnl_pct(s):.2f}% sudah > "
                                      f"{p.be_arm_cost_mult:.0f}x biaya ({s.cost_pct:.2f}%) "

@@ -230,6 +230,13 @@ async def _monitor_agentic(session, trades: list, prices: dict) -> tuple[int, in
         price = prices.get(trade.symbol)
         if price is None:
             continue
+        # Dua loop (utama 120 dtk, cepat 30 dtk) mengelola baris yang sama dari
+        # sesi berbeda. Muat ulang dulu supaya keputusan dibuat atas keadaan
+        # terkini — bukan menutup dua kali posisi yang baru saja ditutup loop
+        # lain, dengan angka yang berbeda.
+        await session.refresh(trade)
+        if trade.status != "open":
+            continue
         try:
             meta = json.loads(trade.signals_json or "{}")
         except (TypeError, ValueError):
@@ -2233,29 +2240,47 @@ async def reconcile_offline_positions() -> int:
 
 # ── P5.4: Fast loop for high-risk positions ──────────────────────────────────
 
+async def _ambil_trade_jalur_cepat(session, trade_ids: list[int]) -> list:
+    """Posisi yang diperiksa jalur cepat: yang ditandai berisiko (lane lama)
+    DITAMBAH seluruh posisi terbuka agen aktif. Dipisah supaya bisa diuji tanpa
+    memutar loopnya."""
+    from sqlalchemy import or_
+
+    syarat = [PaperTrade.style.in_(_AGENTIC_STYLES)]
+    if trade_ids:
+        syarat.append(PaperTrade.id.in_(trade_ids))
+    result = await session.execute(
+        select(PaperTrade).where(PaperTrade.status == "open", or_(*syarat))
+    )
+    return list(result.scalars().all())
+
+
 async def _run_fast_loop() -> None:
     """
     P5.4: Every 30s, re-check only positions flagged as high-risk (lev≥10, liq_dist<10%,
     margin_loss>30%). Only runs SL/max-loss/liq-guard checks — skips regime, TP extension,
     rotation to keep overhead low. Called concurrently from run_futures_monitor.
+
+    Posisi AGEN AKTIF selalu ikut — bukan hanya yang ditandai berisiko.
+    Terukur malam 12-13 Sep 2026 (23 penutupan): tujuh di antaranya menembus SL
+    lebih dari 1% sebelum monitor 120 detik sempat melihatnya — 3,1%, 3,9%,
+    1,9%, 5,7%, 4,8%, 1,7%. Penandaan "berisiko" tak akan menolong: ARKUSDT
+    jatuh dari +10% ke SL dalam SATU jeda, jadi dua menit sebelumnya ia tak
+    terlihat dekat SL sama sekali. Dampaknya asimetris — pada `sl_plus` hanya
+    mengurangi untung, pada `sl_hit` rugi melampaui risiko yang direncanakan
+    (GRIFFAINUSDT −$7,81 dari rencana ~−$5,4), mematahkan jaminan
+    "rugi di SL = 1% modal". Aturan keluarnya tetap `_monitor_agentic` —
+    `_fast_close` di bawah adalah aturan lane lama dan tak boleh dipakai.
     """
     await asyncio.sleep(STARTUP_DELAY + 30)   # stagger to avoid startup race
     while True:
         await asyncio.sleep(FAST_INTERVAL_SEC)
-        if not _fast_loop_trade_ids:
-            continue
         try:
             trade_ids = list(_fast_loop_trade_ids)
             if not is_db_available():
                 continue
             async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    select(PaperTrade).where(
-                        PaperTrade.id.in_(trade_ids),
-                        PaperTrade.status == "open",
-                    )
-                )
-                fast_trades = list(result.scalars().all())
+                fast_trades = await _ambil_trade_jalur_cepat(session, trade_ids)
                 if not fast_trades:
                     _fast_loop_trade_ids.clear()
                     continue
@@ -2263,8 +2288,17 @@ async def _run_fast_loop() -> None:
                 syms   = list({t.symbol for t in fast_trades})
                 prices = await _fetch_futures_prices(syms)
 
-                changed = False
-                for trade in fast_trades:
+                agentic_fast = [t for t in fast_trades if t.style in _AGENTIC_STYLES]
+                legacy_fast  = [t for t in fast_trades if t.style not in _AGENTIC_STYLES]
+
+                # Jalur agentic menulis `peak_pnl_pct` bahkan saat `hold`, jadi
+                # commit diperlukan begitu ADA posisi agentic yang diproses.
+                _ag_closed, _ = await _monitor_agentic(session, agentic_fast, prices)
+                changed = bool(agentic_fast)
+                if _ag_closed:
+                    logger.info("fast_loop_agentic_closed", closed=_ag_closed)
+
+                for trade in legacy_fast:
                     price = prices.get(trade.symbol)
                     if price is None:
                         continue

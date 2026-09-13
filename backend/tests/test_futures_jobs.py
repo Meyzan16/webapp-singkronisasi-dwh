@@ -162,11 +162,20 @@ def test_semua_pekerjaan_lama_terdaftar():
     """Kalau satu tertinggal, ia mati SENYAP — tak ada error, hanya pelajaran
     yang berhenti datang."""
     nama = {p.nama for p in J.daftar_pekerjaan()}
-    for wajib in ("outcome_pass", "big_mover_backfill", "predictive_resolve",
+    for wajib in ("outcome_pass", "predictive_resolve",
                   "predictive_repair", "repair_verifier", "prune_old_events",
                   "prune_predictive_log", "prune_rejection_log",
                   "weekly_backtest", "weekly_signal_review", "monthly_calibration"):
         assert wajib in nama, wajib
+
+
+def test_big_mover_backfill_tak_lagi_dijadwalkan():
+    """Dicabut 13 Sep 2026: 149 rb baris menunggu, 150 per 20 menit, tiap
+    putaran menahan loop 9-39 detik, untuk kolom yang tak dibaca satu halaman
+    pun. Kalau ada yang memasangnya lagi, wajib `berat=True`."""
+    for p in J.daftar_pekerjaan():
+        if p.nama == "big_mover_backfill":
+            assert p.berat, "backfill kembali ke loop backend — pindahkan ke berat"
 
 
 def test_pekerjaan_pembelajaran_ditandai_kritis():

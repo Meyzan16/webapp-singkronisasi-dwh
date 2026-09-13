@@ -324,12 +324,14 @@ def daftar_pekerjaan() -> list[Pekerjaan]:
             catatan="Label hasil 30m/1h/4h/24h + sambungkan trade tertutup ke ledger",
             jalankan=_outcome_pass,
         ),
-        Pekerjaan(
-            nama="big_mover_backfill",
-            jadwal=Jadwal(every_sec=20 * MENIT),          # dulu % 10 == 0
-            catatan="Isi forward-PnL big_mover_log (150 baris/putaran)",
-            jalankan=_big_mover_backfill,
-        ),
+        # `big_mover_backfill` DICABUT 13 Sep 2026. Terukur: 149.467 baris
+        # menunggu (tertua 29 Juni), 150 baris tiap 20 menit, tiap putaran
+        # menahan loop 9-39 detik — dan hasilnya (`pnl_*h_pct` di
+        # `big_mover_log`) hanya dibaca `/big-mover-log/*`, yang tak dipanggil
+        # satu halaman pun. Ledger belajar memakai `futures_decision_events`
+        # (diisi `outcome_pass`), bukan tabel ini. Kalau halaman big-mover
+        # dihidupkan lagi, pasang kembali dengan `berat=True` supaya jalan di
+        # proses pembelajaran. Fungsinya (`_big_mover_backfill`) dipertahankan.
         Pekerjaan(
             nama="predictive_resolve",
             jadwal=Jadwal(every_sec=24 * MENIT),          # dulu % 12 == 0
