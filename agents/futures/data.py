@@ -226,20 +226,25 @@ async def fetch_top100_futures() -> list[dict]:
         if not symbols:
             return []
 
-        # Step 2: fetch 24h ticker — v1 with symbols param (v2 returns 404 on binance.bh)
-        # weight = 2×N for N≤20, proportional for more (much lighter than no-param weight=40)
-        import json as _json
-        syms_param = _json.dumps(symbols[:200], separators=(",", ":"))  # compact: Binance rejects spaces
-        ticker_r = await c.get(
-            fapi("/fapi/v1/ticker/24hr"),
-            params={"symbols": syms_param},
-        )
+        # Step 2: ticker 24h SELURUH pasar (weight=40), lalu disaring ke himpunan
+        # USDT-perp di sisi klien.
+        #
+        # Dulu memakai parameter `symbols` yang dipotong 200 nama pertama —
+        # dan BUG-L25: binance.bh MENGABAIKAN parameter itu dan mengembalikan
+        # seluruh pasar. `fetch_new_listings` menyaring ulang, fungsi ini
+        # tidak: pasangan USDC ikut masuk semesta, dan 13 Sep 2026 agen
+        # membuka FILUSDC + FILUSDT bersamaan (aset sama, eksposur ganda —
+        # dedup per simbol tak melihatnya) plus NEARUSDC. Di host Binance
+        # asli, potongan 200 nama justru menyembunyikan ~60% pair USDT.
+        ticker_r = await c.get(fapi("/fapi/v1/ticker/24hr"))
         if ticker_r.status_code != 200:
             return []
 
         tickers = ticker_r.json()
         if not isinstance(tickers, list):
             return []
+        _usdt_perp = set(symbols)
+        tickers = [t for t in tickers if t.get("symbol") in _usdt_perp]
 
         # Filter 1: stablecoin perpetuals
         _STABLE = {
