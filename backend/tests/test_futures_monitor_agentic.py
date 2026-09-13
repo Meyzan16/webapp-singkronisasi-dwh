@@ -399,3 +399,23 @@ async def test_tanpa_sumbu_tetap_bekerja_dari_harga():
 def test_loop_utama_mengambil_sumbu():
     import inspect
     assert "_fetch_wicks(" in inspect.getsource(M.check_futures_positions)
+
+
+@pytest.mark.asyncio
+async def test_pemindahan_sl_dicatat_waktunya_untuk_pagar_sumbu():
+    """IOTXUSDT 13 Sep 2026: SL naik ke breakeven 13:39:16, loop utama 13:39:30
+    membaca low lilin SEBELUM SL naik → "breach 2,03%" palsu, posisi dipotong
+    14 detik kemudian. Setiap pemindahan SL harus meninggalkan `sl_moved_at`
+    supaya sumbu lama tak menilai SL baru."""
+    t = FakeTrade()
+    await M._monitor_agentic(FakeSession(), [t], {"XUSDT": 103.0})   # breakeven
+    assert t.trail_sl is not None
+    assert json.loads(t.signals_json).get("sl_moved_at", 0) > 0
+
+
+def test_pengambil_sumbu_menyaring_lilin_lama():
+    import inspect
+    src = inspect.getsource(M._fetch_wicks)
+    assert "float(k[0]) / 1000 >= batas" in src
+    src2 = inspect.getsource(M.check_futures_positions)
+    assert "sl_moved_at" in src2 and "last_tick_at" in src2

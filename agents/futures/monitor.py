@@ -265,6 +265,7 @@ async def _monitor_agentic(session, trades: list, prices: dict,
         if keputusan.action == "move_sl" and keputusan.new_sl:
             trade.trail_sl = round(keputusan.new_sl, 8)
             trade.trail_active = True
+            meta["sl_moved_at"] = time.time()   # sumbu SEBELUM ini tak boleh menilai SL baru
             _append_trade_event(meta, keputusan.reason, {
                 "new_sl": trade.trail_sl, "note": keputusan.note})
             trade.signals_json = json.dumps(meta, ensure_ascii=False)
@@ -295,6 +296,7 @@ async def _monitor_agentic(session, trades: list, prices: dict,
             if keputusan.new_sl:
                 trade.trail_sl = round(keputusan.new_sl, 8)
                 trade.trail_active = True
+                meta["sl_moved_at"] = time.time()
             _append_trade_event(meta, keputusan.reason, {
                 "frac": frac, "banked_dollar": dibank, "note": keputusan.note})
             trade.signals_json = json.dumps(meta, ensure_ascii=False)
@@ -409,23 +411,31 @@ async def _fetch_futures_prices(symbols: list[str]) -> dict[str, float]:
     return prices
 
 
-async def _fetch_wicks(symbols: list[str], candles: int = 3) -> dict[str, tuple[float, float]]:
-    """Ekstrem (low, high) dari `candles` lilin 1m terakhir per simbol — jendela
-    yang menutupi satu siklus loop utama (120 dtk) plus satu lilin cadangan.
-    Fail-open: simbol yang gagal tak masuk hasil → SL dinilai dari harga saja."""
+async def _fetch_wicks(since: dict[str, float], candles: int = 3) -> dict[str, tuple[float, float]]:
+    """Ekstrem (low, high) lilin 1m per simbol — HANYA lilin yang dibuka pada
+    atau sesudah `since[symbol]`.
+
+    Batas waktu itu bukan hiasan. IOTXUSDT 13 Sep 2026: SL dinaikkan ke
+    breakeven 13:39:16, loop utama 13:39:30 membaca low tiga lilin terakhir —
+    termasuk menit-menit SEBELUM SL naik — dan menutup posisi dengan
+    "breach 2,03%" yang tak pernah terjadi terhadap SL baru. Sumbu yang sah
+    hanya yang terbentuk sejak tick terakhir DAN sejak SL terakhir dipindah.
+    Lilin yang dibuka sebelum batas dibuang seluruhnya (ekstrem sebagiannya
+    tak bisa dipilah). Fail-open: simbol tanpa lilin sah → dinilai dari harga.
+    """
     out: dict[str, tuple[float, float]] = {}
-    if not symbols:
+    if not since:
         return out
     sem = asyncio.Semaphore(6)
 
-    async def _satu(client: httpx.AsyncClient, sym: str) -> None:
+    async def _satu(client: httpx.AsyncClient, sym: str, batas: float) -> None:
         async with sem:
             try:
                 r = await client.get(fapi("/fapi/v1/klines"),
                                      params={"symbol": sym, "interval": "1m", "limit": candles})
                 if r.status_code != 200:
                     return
-                ks = r.json()
+                ks = [k for k in r.json() if float(k[0]) / 1000 >= batas]
                 if not ks:
                     return
                 out[sym] = (min(float(k[3]) for k in ks), max(float(k[2]) for k in ks))
@@ -434,7 +444,7 @@ async def _fetch_wicks(symbols: list[str], candles: int = 3) -> dict[str, tuple[
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            await asyncio.gather(*[_satu(client, s) for s in symbols])
+            await asyncio.gather(*[_satu(client, sym, b) for sym, b in since.items()])
     except Exception:
         pass
     return out
@@ -562,10 +572,18 @@ async def check_futures_positions() -> tuple[int, int]:
                            msg="price fetch took >30s — skipping cycle")
             return 0, 0
 
-        # Sumbu lilin 1m sejak siklus lalu: SL/TP dinilai dari ekstrem, bukan
-        # harga sesaat. Hanya loop utama yang mengambilnya (1 request/posisi/2 mnt);
-        # jalur cepat 30 dtk memakai harga saja.
-        wicks = await _fetch_wicks(list({t.symbol for t in trades}))
+        # Sumbu lilin 1m sejak tick terakhir / SL terakhir dipindah: SL/TP
+        # dinilai dari ekstrem, bukan harga sesaat. Hanya loop utama yang
+        # mengambilnya (1 request/posisi/2 mnt); jalur cepat memakai harga saja.
+        since: dict[str, float] = {}
+        for t in trades:
+            try:
+                _m = json.loads(t.signals_json or "{}")
+            except (TypeError, ValueError):
+                _m = {}
+            batas = max(float(t.last_tick_at or 0.0), float(_m.get("sl_moved_at") or 0.0))
+            since[t.symbol] = max(since.get(t.symbol, 0.0), batas)
+        wicks = await _fetch_wicks(since)
         closed, updated = await _monitor_agentic(session, trades, prices, wicks)
         # Commit selalu: keputusan `hold` pun menulis `peak_pnl_pct` (bahan
         # trailing DAN kolom mfe_atr di ledger) serta denyut per posisi.
