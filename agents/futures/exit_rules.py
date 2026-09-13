@@ -191,9 +191,11 @@ def breakeven_armed(s: ExitState, p: ExitParams) -> bool:
 # SL yang tersimpan dibulatkan 8 desimal; target trailing dihitung ulang tanpa
 # pembulatan tiap siklus, jadi "lebih baik" oleh selisih 1e-8 muncul terus dan
 # monitor mencatat `agentic_sl_moved` untuk pemindahan yang tak terjadi
-# (POWRUSDT: enam entri log dengan SL identik). Perbaikan harus lebih besar
-# dari satu bagian per sejuta harga untuk dihitung sebagai pemindahan.
-_TOLERANSI_SL = 1e-6
+# (POWRUSDT: enam entri log dengan SL identik). 1 ppm terbukti masih terlalu
+# ketat — FILUSDT 13 Sep: 1,0045 → 1,00450331 (3 ppm) tetap tercatat. Perbaikan
+# harus lebih besar dari 0,01% harga untuk dihitung sebagai pemindahan; itu
+# masih jauh lebih halus dari tick harga mana pun.
+_TOLERANSI_SL = 1e-4
 
 
 def _membaik(target: float, sl: float, direction: str) -> bool:
