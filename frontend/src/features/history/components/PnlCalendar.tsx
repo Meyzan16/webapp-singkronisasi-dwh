@@ -11,6 +11,26 @@ export function localDayKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+// Badge tutup: `status` DB hanya tp/sl — trailing SL yang tersentuh DI ATAS entry
+// (close_reason `sl_plus`) tetap berstatus "sl" walau untung, jadi label harus
+// dibaca dari close_reason dulu, baru jatuh ke status.
+function closeBadge(p: OppPosition): { label: string; cls: string; title: string } {
+  const r = p.close_reason ?? "";
+  if (r === "sl_plus")
+    return { label: "SL+", cls: "bg-teal-100 text-teal-700", title: "Trail SL di atas entry saat tersentuh — ditutup untung" };
+  if (r === "breakeven_stop" || r === "tp1_breakeven")
+    return { label: "BE", cls: "bg-neutral-200 text-neutral-600", title: "Stop di breakeven — bukan rugi nyata" };
+  if (r.startsWith("tp") || p.status === "tp")
+    return { label: "TP", cls: "bg-green-100 text-green-700", title: r || "Take profit" };
+  if (r.startsWith("sl") || r.endsWith("_sl") || p.status === "sl") {
+    // offline_reconcile_sl dsb.: stop apa pun yang terisi di atas entry tetap untung
+    if ((p.pnl_dollar ?? p.pnl_pct ?? 0) > 0)
+      return { label: "SL+", cls: "bg-teal-100 text-teal-700", title: `${r || "sl"} — stop terisi di zona untung` };
+    return { label: "SL", cls: "bg-red-100 text-red-600", title: r || "Stop loss" };
+  }
+  return { label: p.status.toUpperCase(), cls: "bg-neutral-100 text-neutral-500", title: r || p.status };
+}
+
 interface PnlCalendarProps {
   calendarMap:  Map<string, number>;   // localDayKey → P&L $ hari itu
   closedTrades: OppPosition[];         // untuk detail per-hari saat sel diklik
@@ -218,13 +238,14 @@ export function PnlCalendar({ calendarMap, closedTrades, balance }: PnlCalendarP
               {dayTrades.map(p => (
                 <div key={p.id} className="flex items-center gap-2 text-xs py-1 border-b border-neutral-50 last:border-0">
                   <span className="font-bold w-20">{p.symbol.replace("USDT", "")}</span>
-                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                    p.status === "tp"     ? "bg-green-100 text-green-700" :
-                    p.status === "sl"     ? "bg-red-100 text-red-600" :
-                                            "bg-neutral-100 text-neutral-500"
-                  }`}>
-                    {p.status.toUpperCase()}
-                  </span>
+                  {(() => {
+                    const b = closeBadge(p);
+                    return (
+                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${b.cls}`} title={b.title}>
+                        {b.label}
+                      </span>
+                    );
+                  })()}
                   <span className="text-[10px] text-neutral-400">
                     {p.closed_at
                       ? new Date(p.closed_at * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
