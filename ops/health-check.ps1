@@ -126,3 +126,19 @@ function EngineTransition($url, $name, $file) {
 }
 EngineTransition 'http://localhost:8000/api/v1/signals/adaptive-engine'         'SPOT'    (Join-Path $Repo 'ops\logs\.engine-spot')
 EngineTransition 'http://localhost:8000/api/v1/signals/adaptive-engine/futures' 'FUTURES' (Join-Path $Repo 'ops\logs\.engine-fut')
+
+# Frontend :3000 — hidupkan ulang bila mati. Ringan: satu GET, tanpa pencacah
+# berturut-turut (dev server Next tak punya fase "lambat tapi hidup" seperti BE).
+$FePidFile = Join-Path $Repo 'ops\frontend.pid'
+if (Test-Path $FePidFile) {
+    $feOk = $false
+    try { $rr = Invoke-WebRequest 'http://localhost:3000/' -TimeoutSec 60 -UseBasicParsing; $feOk = ($rr.StatusCode -lt 500) } catch {}
+    if (-not $feOk) {
+        Log $HealthLog "frontend :3000 tidak menjawab -> start-night (Start-FrontendIfDown)"
+        $fpid = Get-Content $FePidFile -ErrorAction SilentlyContinue
+        if ($fpid) { try { Start-Process taskkill -ArgumentList '/PID', $fpid, '/T', '/F' -WindowStyle Hidden -Wait } catch {} }
+        Remove-Item $FePidFile -Force -ErrorAction SilentlyContinue
+        try { & (Join-Path $Repo 'ops\start-night.ps1') | Out-Null; Log $HealthLog "frontend auto-restart selesai" }
+        catch { Log $HealthLog "frontend auto-restart GAGAL: $($_.Exception.Message)" }
+    }
+}

@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 $Repo    = 'D:\kerja\Apps\workspace\agents-trading'
 $PidFile = Join-Path $Repo 'ops\backend.pid'
 $LearnPidFile = Join-Path $Repo 'ops\learning.pid'
+$FePidFile = Join-Path (Join-Path $Repo 'ops') 'frontend.pid'
 $RunLog  = Join-Path $Repo 'ops\logs\night-runner.log'
 
 function Log($m) { "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))  $m" | Tee-Object -FilePath $RunLog -Append }
@@ -24,6 +25,18 @@ if (Test-Path $LearnPidFile) {
         Log "learning PID $lpid sudah tidak aktif"
     }
     Remove-Item $LearnPidFile -ErrorAction SilentlyContinue
+}
+
+# Frontend (cmd -> node): bunuh pohon prosesnya, bukan hanya cmd induknya.
+if (Test-Path $FePidFile) {
+    $fpid = Get-Content $FePidFile -ErrorAction SilentlyContinue
+    if ($fpid -and (Get-Process -Id $fpid -ErrorAction SilentlyContinue)) {
+        try { Start-Process taskkill -ArgumentList '/PID', $fpid, '/T', '/F' -WindowStyle Hidden -Wait } catch {}
+        Log "frontend STOP (PID $fpid)"
+    } else {
+        Log "frontend PID $fpid sudah tidak aktif"
+    }
+    Remove-Item $FePidFile -Force -ErrorAction SilentlyContinue
 }
 
 if (-not (Test-Path $PidFile)) { Log "tidak ada backend.pid - mungkin sudah mati"; return }

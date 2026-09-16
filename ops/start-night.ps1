@@ -17,6 +17,9 @@ $LearnPidFile = Join-Path $Repo 'ops\learning.pid'
 $LearnOutLog  = Join-Path $LogDir "learning-$stamp.out.log"
 $LearnErrLog  = Join-Path $LogDir "learning-$stamp.err.log"
 $ErrLog  = Join-Path $LogDir "backend-$stamp.err.log"
+$FePidFile = Join-Path (Join-Path $Repo 'ops') 'frontend.pid'
+$FeOutLog  = Join-Path $LogDir "frontend-$stamp.out.log"
+$FeErrLog  = Join-Path $LogDir "frontend-$stamp.err.log"
 $RunLog  = Join-Path $LogDir 'night-runner.log'
 
 function Log($m) { "$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))  $m" | Tee-Object -FilePath $RunLog -Append }
@@ -43,6 +46,26 @@ function Start-LearningIfDown {
             -WindowStyle Hidden -PassThru
     $lp.Id | Out-File -FilePath $LearnPidFile -Encoding ascii
     Log ("learning START (PID {0}) log {1}" -f $lp.Id, $LearnOutLog)
+}
+
+# Nyalakan dev server Next (FE :3000) bila belum hidup — pola sama dengan learning.
+# Sebelumnya FE hanya dinyalakan tangan/Browser pane dan mati bersama sesi itu
+# (15-16 Sep 2026: FE mati tiap kali pane ditutup, BE tetap hidup).
+function Start-FrontendIfDown {
+    if (Test-Path $FePidFile) {
+        $old = Get-Content $FePidFile -ErrorAction SilentlyContinue
+        if ($old -and (Get-Process -Id $old -ErrorAction SilentlyContinue)) {
+            Log "frontend sudah jalan (PID $old)"
+            return
+        }
+    }
+    # cmd /c npm run dev: PID yang dicatat = cmd induk; taskkill /T di stop-night
+    # membunuh node anaknya sekalian.
+    $fp = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','npm run dev' -WorkingDirectory (Join-Path $Repo 'frontend') `
+            -RedirectStandardOutput $FeOutLog -RedirectStandardError $FeErrLog `
+            -WindowStyle Hidden -PassThru
+    $fp.Id | Out-File -FilePath $FePidFile -Encoding ascii
+    Log ("frontend START (PID {0}) log {1}" -f $fp.Id, $FeOutLog)
 }
 
 # Tanpa penjaga di bawah ini, kegagalan APA PUN sesudah baris ini menghilang
@@ -116,6 +139,7 @@ if (Test-Path $PidFile) {
     if ($old -and (Get-Process -Id $old -ErrorAction SilentlyContinue)) {
         Log "backend sudah jalan (PID $old) - lewati start, kirim laporan status"
         Start-LearningIfDown
+        Start-FrontendIfDown
         try { & (Join-Path $Repo 'ops\report-telegram.ps1') 'Startup (backend sudah jalan)' | Out-Null; Log "laporan dikirim" }
         catch { Log "laporan gagal: $($_.Exception.Message)" }
         # Penanda tuntas WAJIB ada juga di jalur keluar-awal ini. Tanpa itu,
@@ -149,6 +173,9 @@ Log ("backend START (PID {0}) log {1}" -f $p.Id, $OutLog)
 
 # 3b) Start proses pembelajaran terpisah, detached
 Start-LearningIfDown
+
+# 3c) Start frontend (Next dev :3000), detached
+Start-FrontendIfDown
 
 # 4) Tunggu backend sehat, lalu kirim laporan menyeluruh ke Telegram
 Start-Sleep -Seconds 25
