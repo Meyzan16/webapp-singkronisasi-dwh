@@ -32,7 +32,8 @@ from app.models.paper_trade import PaperTrade
 from app.models.signal_weight import AgentSignalWeight
 from app.models.signal_weight_history import SignalWeightHistory
 # learning_policy murni (hanya re+typing) — tak ada risiko circular import.
-from agents.shared.trade_outcome import is_win as _is_win, is_scratch as _is_scratch
+from agents.shared.trade_outcome import (is_win as _is_win, is_scratch as _is_scratch,
+                                          is_net_win as _is_net_win)
 from agents.futures.learning_policy import (
     canonical_signal_key as _canonical_signal_key,
     signal_key as _namespaced_signal_key,
@@ -507,17 +508,14 @@ async def update_weights() -> int:
             if not signals:
                 continue
 
-            # Fase 1b (bug B1): trade impas DIBUANG dari pelatihan. Sampai 5 Sep
-            # 2026, 38 dari 55 "kemenangan" futures membukukan di bawah $0,50 —
-            # dan tiap satunya menaikkan bobot sinyal seolah setara kemenangan
-            # $14. Menghitungnya sebagai kekalahan juga salah: sinyalnya netral,
-            # bukan buruk.
-            if _is_scratch(trade):
-                continue
-
+            # Bab 3 (18 Sep 2026): label pelatihan = untung BERSIH > 0
+            # (`is_net_win`), dan trade impas tidak lagi dibuang — pnl_dollar
+            # sudah net biaya, jadi tandanya bermakna. Lapisan K6 (≥$3 & 2×
+            # biaya) di atas angka net membuat 7 sinyal inti diban dan agen
+            # berhenti total 17-18 Sep. Riwayat Fase 1b/B1 ada di trade_outcome.
             agent   = trade.style
             regime  = trade.regime or "all"
-            is_win  = _is_win(trade)
+            is_win  = _is_net_win(trade)
             decay   = _decay_factor(trade.closed_at, now)
             pnl_pct = trade.pnl_pct or 0.0
 

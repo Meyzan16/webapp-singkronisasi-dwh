@@ -139,6 +139,25 @@ def is_win(trade) -> bool:
     return realized_usd(trade) >= win_threshold_usd(trade)
 
 
+def is_net_win(trade) -> bool:
+    """Label untuk MELATIH BOBOT SINYAL futures: untung bersih > 0.
+
+    ── Bab 3 (18 Sep 2026): agen memban dirinya sendiri ─────────────────────
+    `pnl_dollar` futures sudah BERSIH (fee + slippage + funding dipotong monitor),
+    jadi ambang K6 ("≥ $3 dan 2× biaya") adalah lapisan biaya KEDUA di atas
+    angka yang sudah net. Akibat terukur 30 hari: label K6 memberi 22 menang /
+    34 kalah (WR 39% → bobot 0,7 → ban), padahal net-nya 74 untung / 47 rugi
+    (61%). Tujuh sinyal inti `agentic` (funding_netral, arah_konfirmasi, …)
+    diban berturut 13-16 Sep, dan 17-18 Sep 350 kandidat 100% diveto
+    `learning_ban` — nol trade. Pembobotan kini memakai tanda untung bersih;
+    K6 tetap dipakai risk_gate dan laporan WR (di sana "impas ≠ menang" memang
+    benar). SPOT tak berubah.
+    """
+    if not is_futures(trade):
+        return is_win(trade)
+    return realized_usd(trade) > 0
+
+
 def is_loss(trade) -> bool:
     """Kalah = rugi yang bermakna. Cermin `is_win`, bukan sekadar `not is_win`:
     di antara keduanya ada wilayah impas yang bukan dua-duanya."""

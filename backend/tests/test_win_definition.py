@@ -66,7 +66,11 @@ def test_weight_updater_memakai_definisi_bersama():
     ini. Terbalik di sini berarti mesin belajar mengejar arah yang salah."""
     from agents.futures import weight_updater
     src = inspect.getsource(weight_updater)
-    assert "trade_outcome import is_win" in src
+    assert "from agents.shared.trade_outcome import" in src
+    # Bab 3 (18 Sep 2026): pelatihan bobot memakai label untung BERSIH, bukan
+    # ambang K6 — lihat docstring `is_net_win`.
+    assert "is_net_win" in src
+    assert "is_win  = _is_net_win(trade)" in src
     assert 'status == "tp" and (t.pnl_pct or 0.0) > 0' not in src
     assert 'status == "tp" and (trade.pnl_pct or 0.0) > 0' not in src
 

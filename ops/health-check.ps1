@@ -43,6 +43,27 @@ try {
         if ($bs.spot_banned_until -or $bs.futures_banned_until) { $down += 'binance-BANNED' }
     } catch { }
 
+    # SCANNER MACET (bukan mati). 18 Sep 2026: futures_scanner "running: True"
+    # tapi ConnectError 8 jam berturut dan last_scan_ts tak maju — health-check
+    # tetap menulis "sehat". Proses beku sesudah mesin bangun dari tidur tampak
+    # persis sama (PID hidup, tak satu pun siklus jalan). Kebenarannya adalah
+    # last_scan_ts: kalau lebih tua dari 3x interval (min 20 menit), scanner
+    # dianggap macet dan dilempar ke jalur restart di bawah — pakai pencacah
+    # berturut yang sama supaya satu siklus lambat tak memicu restart.
+    # BUKAN `Get-Date -UFormat %s`: di PowerShell 5.1 itu epoch dari jam LOKAL
+    # (+7 jam di WIB), sehingga scanner yang baru saja jalan terbaca "421 mnt lalu".
+    $nowEpoch = [double][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $stale = @()
+    foreach ($a in 'spot_scanner','futures_scanner') {
+        $sc = $r.$a
+        if (-not $sc) { continue }
+        $limit = [Math]::Max(1200, 3 * 60 * [double]($sc.interval_minutes))
+        if ($sc.last_scan_ts -and (($nowEpoch - [double]$sc.last_scan_ts) -gt $limit)) {
+            $stale += "$a(last_scan $([int](($nowEpoch - [double]$sc.last_scan_ts)/60)) mnt lalu)"
+        }
+    }
+    if ($stale.Count -gt 0) { throw "SCANNER MACET: $($stale -join ', ')" }
+
     if ($down.Count -eq 0) {
         Log $HealthLog "OK  db+4agent sehat"
         if ($prev -ne 'ok') { Notify "PULIH: agents-trading normal lagi (db + 4 agent sehat)."; SetState 'ok' }
@@ -126,6 +147,23 @@ function EngineTransition($url, $name, $file) {
 }
 EngineTransition 'http://localhost:8000/api/v1/signals/adaptive-engine'         'SPOT'    (Join-Path $Repo 'ops\logs\.engine-spot')
 EngineTransition 'http://localhost:8000/api/v1/signals/adaptive-engine/futures' 'FUTURES' (Join-Path $Repo 'ops\logs\.engine-fut')
+
+# Learning :8002 — proses terpisah, tak pernah dicek sebelumnya. Kalau endpoint
+# mati/timeout: bunuh PID lama (bisa beku, bukan mati — start-night hanya
+# memeriksa "PID hidup") lalu start-night menyalakannya lagi.
+$LearnPidFile = Join-Path $Repo 'ops\learning.pid'
+if (Test-Path $LearnPidFile) {
+    $lnOk = $false
+    try { $lh = Invoke-RestMethod 'http://localhost:8002/health' -TimeoutSec 30; $lnOk = ($null -ne $lh) } catch {}
+    if (-not $lnOk) {
+        Log $HealthLog "learning :8002 tidak menjawab -> bunuh PID lama, start-night"
+        $lpid = Get-Content $LearnPidFile -ErrorAction SilentlyContinue
+        if ($lpid) { try { Start-Process taskkill -ArgumentList '/PID', $lpid, '/T', '/F' -WindowStyle Hidden -Wait } catch {} }
+        Remove-Item $LearnPidFile -Force -ErrorAction SilentlyContinue
+        try { & (Join-Path $Repo 'ops\start-night.ps1') | Out-Null; Log $HealthLog "learning auto-restart selesai" }
+        catch { Log $HealthLog "learning auto-restart GAGAL: $($_.Exception.Message)" }
+    }
+}
 
 # Frontend :3000 — hidupkan ulang bila mati. Ringan: satu GET, tanpa pencacah
 # berturut-turut (dev server Next tak punya fase "lambat tapi hidup" seperti BE).

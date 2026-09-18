@@ -51,7 +51,11 @@ _prev_banned: set | None = None
 # (identik gate F3/§4: 60 mature samples). Selama warming, HANYA hard-ban yang
 # boleh mem-veto; veto lunak (adaptive_score turun) menunggu active.
 MATURE_ACTIVE_THRESHOLD = 60
-BAN_MIN_SAMPLES = 10          # mirror SPOT: ban butuh ≥10 sampel
+# 18 Sep 2026: 10 → 30. Dengan 10, sinyal inti yang muncul di hampir tiap
+# kandidat (funding_netral, arah_konfirmasi) diban dari 11-12 sampel dan seluruh
+# agen berhenti; ban adalah veto total, jadi butuh bukti setara gate learning
+# "active" (≥30 hasil tegas), bukan sekadar 10. SPOT tetap 10.
+BAN_MIN_SAMPLES = 30
 BAN_WEIGHT_BELOW = 0.80
 
 
