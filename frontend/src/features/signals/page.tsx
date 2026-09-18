@@ -388,6 +388,8 @@ const REASON_LABELS: Record<string, string> = {
   bm_lane_full:           "Slot BigMover penuh",
   lane_quota_full:        "Kuota lane penuh",
   lane_paused:            "Lane sedang dijeda",
+  direction_disabled:     "Arah dimatikan manual (Config: long/short_enabled)",
+  direction_paused:       "Arah dijeda otomatis (WR arah rendah)",
   funding_flip:           "Arah biaya funding berbalik",
   cost_floor_skip:        "Potensi profit tak menutup biaya",
   sizing_blocked:         "Ukuran posisi tak memenuhi syarat",

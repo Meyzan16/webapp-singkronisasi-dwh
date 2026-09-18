@@ -180,8 +180,13 @@ async def auto_open_positions(candidates: list[dict]) -> int:
     # run_opportunity_scan for the `global` rationale (resolved at call time).
     global MAX_AUTO_POSITIONS, FUTURES_COOLDOWN_HOURS, \
         MAX_WALLET_MARGIN_PCT, MAX_SAME_DIRECTION, MIN_TP1_COST_MULT
+    # Saklar arah manual (futures.long_enabled / short_enabled). Dibaca per
+    # siklus supaya bisa dibalik dari UI Config tanpa restart.
+    direction_enabled = {"LONG": True, "SHORT": True}
     try:
         from agents.shared.config_reader import cfg
+        direction_enabled["LONG"]  = bool(int(await cfg.get("futures", "long_enabled", 1)))
+        direction_enabled["SHORT"] = bool(int(await cfg.get("futures", "short_enabled", 1)))
         MAX_AUTO_POSITIONS     = int(await cfg.get("futures", "max_auto_positions", MAX_AUTO_POSITIONS))
         FUTURES_COOLDOWN_HOURS = await cfg.get("futures", "cooldown_hours", FUTURES_COOLDOWN_HOURS)
         MAX_WALLET_MARGIN_PCT  = await cfg.get("futures", "max_wallet_margin_pct", MAX_WALLET_MARGIN_PCT)
@@ -390,6 +395,21 @@ async def auto_open_positions(candidates: list[dict]) -> int:
                     funding_mult = FUNDING_SOFT_SIZE_MULT
 
             setup = sig.get("setup_type", "")
+
+            # Saklar arah manual + jeda arah otomatis (Fase 5). `is_direction_paused`
+            # sudah ada sejak Fase 5 tapi tak pernah dipanggil di sini — jeda
+            # arah hanya dihitung, tidak pernah menggerbang (ditemukan 18 Sep 2026).
+            if not direction_enabled.get(direction, True):
+                logger.info("auto_trade_direction_disabled", symbol=symbol, direction=direction)
+                _dec(symbol, agent, direction, "direction_disabled")
+                continue
+            from agents.futures.risk_gate import is_direction_paused
+            _dir_paused, _dir_reason = is_direction_paused(direction)
+            if _dir_paused:
+                logger.info("auto_trade_direction_paused", symbol=symbol,
+                            direction=direction, reason=_dir_reason)
+                _dec(symbol, agent, direction, "direction_paused")
+                continue
 
             # P6.4: per-lane WR auto-pause
             if setup:

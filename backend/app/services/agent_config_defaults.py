@@ -99,6 +99,13 @@ DEFAULTS: list[dict] = [
      "description": "P2: jumlah loss nyata beruntun per lane (window 6h) sebelum lane pause 12 jam"},
     {"group": "futures", "key": "max_same_direction", "default": 4, "category": "quota",
      "description": "P3d: max posisi futures terbuka dengan arah sama (LONG/SHORT)"},
+    # Saklar arah manual (18 Sep 2026). 14 hari: SHORT n=16 PF 0,39 (−$37) vs
+    # LONG PF 1,28 (+$34). 0 = arah itu tak boleh dibuka (posisi terbuka tetap
+    # dikelola monitor). Jeda otomatis per arah (Fase 5) berjalan terpisah.
+    {"group": "futures", "key": "long_enabled", "default": 1, "category": "risk",
+     "description": "Saklar arah LONG: 1 = boleh buka posisi baru, 0 = dijeda manual"},
+    {"group": "futures", "key": "short_enabled", "default": 1, "category": "risk",
+     "description": "Saklar arah SHORT: 1 = boleh buka posisi baru, 0 = dijeda manual (SHORT PF 0,39 14 hari s/d 18 Sep 2026)"},
     # ── FUTURES — PLAN-FUTURES-AGENTIC (Fase 0 & 1a, 5 Sep 2026) ────────────
     # Saklar induk rewrite. 0 = perilaku lama (4 lane, agent1/2/3/bigmover).
     # Seluruh kode agentic bercabang dari sini, jadi menyalakannya adalah SATU
