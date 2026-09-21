@@ -11,6 +11,7 @@ import { SpotBalancePanel, FuturesBalancePanel } from "./components/BalancePanel
 import { SystemHealthPanel } from "./components/SystemHealthPanel";
 import { RecentTradesPanel, type RecentTrade } from "./components/RecentTradesPanel";
 import { SpotPortfolioPanel, type SpotAsset } from "./components/SpotPortfolioPanel";
+import { RebalanceCalculator } from "./components/RebalanceCalculator";
 import type { Health, BinanceStatus } from "@/types/health";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -344,6 +345,7 @@ export default function DashboardPage() {
       <RecentTradesPanel trades={recentTrades} />
 
       <SpotPortfolioPanel assets={spotAssets} loading={spotLoading} error={spotError} />
+      <RebalanceCalculator assets={spotAssets} loading={spotLoading} error={spotError} />
     </div>
   );
 }
