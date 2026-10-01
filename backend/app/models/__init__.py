@@ -16,6 +16,7 @@ from app.models.futures_exit_event import FuturesExitEvent
 from app.models.futures_exit_rollout import FuturesExitRollout
 from app.models.futures_model_version import FuturesModelVersion
 from app.models.futures_repair_action import FuturesRepairAction
+from app.models.futures_shadow_signal import FuturesShadowSignal
 from app.models.spot_repair_action import SpotRepairAction
 
 __all__ = [
@@ -25,6 +26,6 @@ __all__ = [
     "AppSettings", "BalanceTransaction", "ForceOpenLog",
     "AgentConfig", "SpotDecisionEvent", "SpotModelVersion",
     "FuturesDecisionEvent", "FuturesExitEvent", "FuturesExitRollout",
-    "FuturesModelVersion", "FuturesRepairAction",
+    "FuturesModelVersion", "FuturesRepairAction", "FuturesShadowSignal",
     "SpotRepairAction",
 ]

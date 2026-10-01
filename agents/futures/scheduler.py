@@ -212,6 +212,14 @@ async def _run_scan() -> dict:
     fetch_sec = round(time.time() - _t_fetch, 1)
     universe_sec = round(_t_fetch - start, 1)
 
+    # PLAN-OKT-2026 P1: hipotesis entry alternatif dicatat SHADOW dari data yang
+    # sama — nol efek keputusan, tabel sendiri. Kegagalannya tak boleh menahan scan.
+    try:
+        from agents.futures.shadow_signals import record_shadow_signals
+        await record_shadow_signals(tickers, all_tf_maps, time.time())
+    except Exception as exc:      # noqa: BLE001
+        logger.warning("futures_shadow_record_failed", error=str(exc)[:120])
+
     # Step 3: score all agents
     ag_results: list[dict] = []   # Fase 3 — agen tunggal (kosong selama saklar mati)
 

@@ -409,6 +409,13 @@ async def _outcome_pass() -> None:
     )
     n_label = await update_decision_outcomes()
     n_link = await backfill_closed_futures_trades()
+    # PLAN-OKT-2026 P1: label sinyal riset shadow — tabel sendiri, tak memicu
+    # latihan (`_ada_outcome_baru` sengaja tak disentuh).
+    try:
+        from agents.futures.shadow_signals import update_shadow_outcomes
+        await update_shadow_outcomes()
+    except Exception as exc:      # noqa: BLE001 — riset tak boleh menjatuhkan job
+        logger.warning("futures_shadow_outcome_failed", error=str(exc)[:120])
     if n_label or n_link:
         _ada_outcome_baru = True
         logger.info("futures_outcome_pass", price_labels=n_label, trade_links=n_link)

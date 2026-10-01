@@ -45,10 +45,29 @@ mengejar pump. Tak ada parameter yang bisa disetel untuk membalik itu;
 butuh hipotesis sinyal baru. Sampai ada edge terbukti di ledger: **jangan
 menaikkan ukuran, jangan mengaktifkan kontribusi skor adaptive (P4).**
 
-Langkah berikut (riset, tanpa efek keputusan):
-1. Rekam kandidat dari hipotesis lain secara *shadow* di ledger (mis. pullback
-   ke EMA setelah breakout, bukan entry di pucuk) — dinilai setelah ≥300 matang.
-2. Ulangi analisis ini tiap 2 minggu dengan skrip yang sama.
+### P1a — Riset sinyal shadow ✅ HIDUP sejak 1 Okt 2026 22:44 WIB
+
+`agents/futures/shadow_signals.py` → tabel sendiri `futures_shadow_signals`
+(BUKAN `futures_decision_events`, yang dibaca pelatihan model/walkforward/UI).
+Dipanggil scanner sesudah fetch, memakai data yang sama; nol efek keputusan.
+
+| Hipotesis | Arah | Aturan (ditetapkan sebelum ada hasil) |
+|---|---|---|
+| `control` | LONG | 1 simbol acak per scan — garis dasar drift |
+| `pullback_ema` | LONG | 4j > EMA50, EMA20 1j > EMA50 1j, harga ≤ 0,5 ATR dari EMA20 1j, RSI 1j 40–55, lilin 1j hijau |
+| `squeeze_breakout` | L/S | lebar Bollinger 1j ≤ persentil 20 (100 bar) dalam 5 bar terakhir, close tembus pita 2σ, volume ≥ 1,5× |
+| `dip_in_uptrend` | LONG | 4j > EMA50, RSI 1j < 32, close 1j > close sebelumnya |
+
+Penilaian: pnl 1j/4j/24j + simulasi bracket SL 1,5 ATR / TP 3 ATR (2R), 24 jam,
+SL&TP satu lilin = SL; `bracket_r` net biaya 0,3%. Dedup per hipotesis+simbol+arah 4 jam.
+
+**Aturan lulus** (di `ops/shadow_report.py`, jangan diubah setelah melihat angka):
+≥300 berlabel · rata > +0,10 R di paruh awal DAN akhir · ≥0,15 R di atas kontrol ·
+satu minggu ≤40% total R.
+
+Laporan: `backend/.venv/Scripts/python.exe ops/shadow_report.py` (dari root).
+Perkiraan: ±300 per hipotesis dalam 1–3 minggu **asal sistem hidup** (lihat P0.4).
+Ulangi juga analisis edge kandidat agen tunggal tiap 2 minggu.
 
 ## P2 — Exit futures
 
