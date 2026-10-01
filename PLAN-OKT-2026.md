@@ -156,3 +156,21 @@ Konfirmasi independen: `ForwardValidate` 69 jam berturut "MEMBURUK"
 | `IPWatch` nonaktif sejak 23 Jul | dibiarkan (sengaja nonaktif) |
 | **P0.4 uptime: task Stop 07:00 + sleep** | ⛔ owner — satu-satunya blocker yang tersisa |
 | P4 adaptive engine | ditahan sampai ada edge |
+
+### Hasil uji data gratis Binance (1 Okt 2026, 23:45)
+
+1.321 kandidat agen tunggal (dedup), latih s/d 22 Sep 20:15, uji sesudahnya.
+Fitur dari histori 1 jam (periode yang sudah selesai sebelum scan — tanpa lookahead):
+rasio taker buy/sell (1j & rata 4j), rasio long/short trader besar (+ perubahan 4j),
+rasio long/short semua akun (+ perubahan 4j), trader besar vs kerumunan, basis.
+
+**Hasil: tidak ada irisan yang positif (> +0,25% net 4j) di latih DAN uji.**
+Sinyal terkuat hanya memperkecil rugi, bukan membalik:
+- LONG dengan `basis_rate` tersil teratas paling buruk (−1,00% / −2,01%) — premi
+  futures tinggi = pasar sudah terlalu panas, konsisten dengan temuan "mengejar pump".
+- LONG dengan taker buy/sell tinggi sedikit lebih baik (+0,17% / −0,78%) — tetap negatif di uji.
+
+Kesimpulan: rasio taker/long-short/basis **tidak** menyelamatkan strategi mengejar
+pump. Bersama hasil DexScreener/CMC di atas: masalahnya hipotesis entry, bukan
+kekurangan data. Jalan yang tersisa = riset shadow P1a (hipotesis entry berbeda).
+Skrip ulang: `ops/research/` (README).
