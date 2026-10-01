@@ -37,6 +37,13 @@ URGENT_ROTATION_DAYS = 1.0     # rotasi mendesak boleh sejak 1 hari
 URGENT_SCORE_GAP = 25.0        # unggul ≥25 = biaya peluang jelas
 URGENT_SCORE_MIN = 90.0        # skor minimum kandidat untuk rotasi mendesak
 ROTATION_MIN_PNL_PCT = -0.5    # lantai P&L: rotasi tak boleh membukukan rugi
+# Saklar rotasi mendesak per lane (1 = boleh, 0 = mati). 1 Okt 2026: kontrafaktual
+# 32 rotasi accumulation 60 hari — dirotasi +$14,79 vs ditahan dgn SL/TP asli
+# s/d 7 hari −$0,17 (2 TP, 10 SL, 20 menggantung). Default = perilaku lama.
+URGENT_ROTATION_ACCUMULATION = 1.0
+URGENT_ROTATION_BREAKOUT = 1.0
+URGENT_ROTATION_BIGMOVER = 1.0
+URGENT_ROTATION_EARLY_RADAR = 1.0
 
 # ── Umur maksimum per mode entri ──────────────────────────────────────────────
 MAX_AGE_DAYS_FRESH_SETUP = 10.0
@@ -116,6 +123,10 @@ _KEYS: dict[str, str] = {
     "URGENT_SCORE_GAP":             "monitor_urgent_score_gap",
     "URGENT_SCORE_MIN":             "monitor_urgent_score_min",
     "ROTATION_MIN_PNL_PCT":         "monitor_rotation_min_pnl_pct",
+    "URGENT_ROTATION_ACCUMULATION": "monitor_urgent_rotation_accumulation",
+    "URGENT_ROTATION_BREAKOUT":     "monitor_urgent_rotation_breakout",
+    "URGENT_ROTATION_BIGMOVER":     "monitor_urgent_rotation_bigmover",
+    "URGENT_ROTATION_EARLY_RADAR":  "monitor_urgent_rotation_early_radar",
     "MAX_AGE_DAYS_FRESH_SETUP":     "monitor_max_age_fresh_setup",
     "MAX_AGE_DAYS_MOMENTUM_CHASE":  "monitor_max_age_momentum_chase",
     "MAX_AGE_DAYS_BIGMOVER":        "monitor_max_age_bigmover",
@@ -231,3 +242,15 @@ def snapshot() -> dict:
     snap = {key: globs[var] for var, key in _KEYS.items()}
     snap["tp_atr_mult_by_lane"] = dict(TP_ATR_BY_LANE)
     return snap
+
+
+def urgent_rotation_enabled(lane: str) -> bool:
+    """Apakah rotasi mendesak boleh untuk lane SPOT ini. Lane tak dikenal = boleh
+    (perilaku lama), supaya lane baru tak diam-diam kehilangan pemicunya."""
+    val = {
+        "accumulation": URGENT_ROTATION_ACCUMULATION,
+        "breakout":     URGENT_ROTATION_BREAKOUT,
+        "bigmover":     URGENT_ROTATION_BIGMOVER,
+        "early_radar":  URGENT_ROTATION_EARLY_RADAR,
+    }.get((lane or "").lower())
+    return True if val is None else float(val) >= 0.5

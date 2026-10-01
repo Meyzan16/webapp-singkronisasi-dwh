@@ -1017,7 +1017,8 @@ async def _process_trade(
         if hold_days >= scfg.STAGNANT_CHECK_DAYS and drift_pct <= scfg.STAGNANT_DRIFT_PCT:
             if _has_better_candidate(capped_score, trade.symbol):
                 _rotate = True
-        elif hold_days >= scfg.URGENT_ROTATION_DAYS:
+        elif (hold_days >= scfg.URGENT_ROTATION_DAYS
+              and scfg.urgent_rotation_enabled(lane_of(meta, trade.alert_type))):
             if _has_better_candidate(capped_score, trade.symbol,
                                      min_gap=scfg.URGENT_SCORE_GAP, min_score=scfg.URGENT_SCORE_MIN):
                 _rotate     = True

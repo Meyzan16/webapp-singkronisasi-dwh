@@ -82,7 +82,12 @@ Lane `accumulation` (PF 1,92 sebelum 18 Sep): 15 dari 25 penutupan kini
 `urgent_rotation`, total +$1,84 (rata +$0,12, ditahan ~29 jam) — posisi dipotong
 sebelum matang. Sebelum 18 Sep rotasi rata +$1,9/trade. `bigmover`: 8 SL −$22,60.
 
-⛔ **Keputusan owner**: matikan/perketat `urgent_rotation` untuk `accumulation`?
+✅ **Diputuskan 1 Okt 2026: rotasi TETAP AKTIF.** Kontrafaktual 32 rotasi
+accumulation (60 hari, SL/TP asli, tahan s/d 7 hari): dirotasi **+$14,79** vs
+ditahan **−$0,17** (2 TP, 10 SL, 20 menggantung). Temuan "+$0,12/trade" di atas
+bukan kerugian — alternatifnya lebih buruk. Saklar per-lane
+`spot.monitor_urgent_rotation_{accumulation,breakout,bigmover,early_radar}`
+(default 1) tersedia bila bukti berubah.
 
 ## P4 — Adaptive engine (PLAN_ADAPTIVE_ENGINE_BOOST Fase B/D/E)
 
