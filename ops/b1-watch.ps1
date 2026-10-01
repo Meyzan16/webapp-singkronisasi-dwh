@@ -22,6 +22,15 @@ if (-not (Test-Path $PidFile)) { return }
 $curPid = (Get-Content $PidFile -ErrorAction SilentlyContinue)
 if (-not $curPid -or -not (Get-Process -Id $curPid -ErrorAction SilentlyContinue)) { return }
 
+# Flag B1 dimatikan 8 Agu 2026; sejak itu skrip ini tetap mengirim "vonis" harian
+# tentang fitur yang tidak hidup (ditemukan 1 Okt 2026). Diam selama flag mati.
+$cfgAll = Get-Api '/api/v1/agent/config/all'
+$flag = $null
+if ($cfgAll) {
+    $flag = @($cfgAll) | Where-Object { $_.key -eq 'expectancy_aware_weights' } | Select-Object -First 1
+}
+if ($flag -and [double]$flag.value -lt 0.5) { Log "flag expectancy_aware_weights mati - lewati"; return }
+
 # --- Ambil metrik ---
 $fut = Get-Api '/api/v1/signals/adaptive-engine/futures'
 if (-not $fut) { Log 'endpoint futures tak merespon - skip'; return }

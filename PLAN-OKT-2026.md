@@ -99,3 +99,60 @@ memperkuat noise. Dibuka kembali bila P1 menemukan edge.
 - PLAN-UI-SUSULAN: U1–U5 selesai.
 - SCHEDULE_FUTURES: gate Live & Hari-30 gagal (dicatat 24 Agu); belum layak live.
 - PLAN_ADAPTIVE_ENGINE_BOOST: Fase A (validasi forward) gagal 24 Agu → B/C/D/E menunggu edge.
+
+## Diagnosis menyeluruh "kenapa futures belum untung" (1 Okt 2026, 23:00)
+
+Seluruh riwayat: **234 trade sejak 10 Jul, −$198,28.** Tiap generasi agen rugi
+(agent3 −$54 Jul, bigmover −$74 Agu, agentic −$53 Sep).
+
+Agen `agentic` (122 trade) dalam satuan R:
+
+| Penutupan | n | rata R | total R |
+|---|---|---|---|
+| `sl_plus` (trailing) | 55 | +0,67 | +36,9 |
+| `sl_hit` | 35 | −1,12 | −39,2 |
+| `offline_reconcile_sl` | 27 | −0,39 | −10,7 |
+| TP tersentuh | 1 | +2,02 | +2,0 |
+
+Menang 58%, tapi rata menang $3,66 vs kalah $6,00 → butuh WR ≥62% untuk impas.
+
+**Kontrafaktual exit** (lilin 5m, risiko dolar sama, dipisah paruh awal/akhir):
+- Tahan ke TP tetap: −11,3R (aktual −10,3R) → trailing bukan masalah.
+- 20 kombinasi lebar SL (1–3×) × target (1–3R): **tak satu pun positif di kedua paruh.**
+- MFE besar (58/122 sempat ≥2R) hanya volatilitas dua arah — bukan untung yang terbuang.
+
+**Kesimpulan:** sebabnya ENTRY tanpa edge (lihat P1), ditambah ±27% trade
+ditutup offline karena mesin mati. Bukan exit, bukan sizing, bukan threshold.
+Konfirmasi independen: `ForwardValidate` 69 jam berturut "MEMBURUK"
+(exp −0,73%, PF 0,74, n=1.895).
+
+### Perlu API tambahan (DexScreener / CoinMarketCap)?
+
+**Tidak, untuk sekarang.**
+- Scanner sudah memakai data Binance futures yang paling relevan untuk perp:
+  klines, funding, OI (+ histori), rasio long/short global, likuidasi, 24h ticker.
+- **DexScreener** = pasangan DEX on-chain (likuiditas pool, pair baru, meme).
+  Koin yang ditradingkan di sini adalah perp Binance; sinyal DEX baru relevan
+  untuk strategi "hype DEX → listing CEX", yang bukan strategi agen ini.
+- **CoinMarketCap** (gratis ±10rb kredit/bulan) = kapitalisasi, peringkat,
+  kategori, dominasi. Hampir semuanya turunan harga×suplai; tak ada bukti di
+  ledger bahwa ukuran pasar membedakan kandidat menang/kalah (volume 24j —
+  proksi terdekat — tak positif di tersil mana pun).
+- Yang LAYAK diuji lebih dulu, gratis dari Binance: `takerlongshortRatio`,
+  `topLongShortPositionRatio`, basis. Cara mengujinya: catat sebagai fitur di
+  ledger/shadow, nilai dengan analisis tersil kronologis yang sama — **sebelum**
+  membayar atau mengintegrasikan API luar.
+
+## Tugas tersangkut — status 1 Okt 2026
+
+| Item | Status |
+|---|---|
+| Stack docker ganda | ✅ selesai (72304d9) |
+| Durasi scan / timing | ✅ selesai (72304d9) |
+| Riset sinyal shadow | ✅ hidup, menunggu ≥300/hipotesis (a6efe3e) |
+| Saklar urgent_rotation per lane | ✅ selesai, tetap aktif (781cabe) |
+| `B1Watch` melapor vonis harian atas flag yang mati sejak 8 Agu | ✅ skrip kini diam selama flag mati |
+| B7 notional $1.000 hardcode | ✅ bukan masalah: cadangan mati, 0/234 trade memakainya |
+| `IPWatch` nonaktif sejak 23 Jul | dibiarkan (sengaja nonaktif) |
+| **P0.4 uptime: task Stop 07:00 + sleep** | ⛔ owner — satu-satunya blocker yang tersisa |
+| P4 adaptive engine | ditahan sampai ada edge |
