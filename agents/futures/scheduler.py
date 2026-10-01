@@ -192,21 +192,25 @@ async def _run_scan() -> dict:
     BATCH_SLEEP = 0.2  # 200ms between batches (was 500ms) — still rate-limit safe
     all_tf_maps: dict[str, dict] = {}
 
-    async with httpx.AsyncClient(timeout=20) as client:
-        for i in range(0, len(tickers), BATCH):
-            batch = tickers[i: i + BATCH]
-            tasks = {
-                t["symbol"]: asyncio.create_task(
-                    fetch_symbol_data(t["symbol"], TIMEFRAMES, client=client)
-                )
-                for t in batch
-            }
-            for symbol, task in tasks.items():
-                try:
-                    all_tf_maps[symbol] = await task
-                except Exception:
-                    all_tf_maps[symbol] = {}
+    # Jendela geser (semaphore), bukan batch berpagar: dulu tiap batch 20 simbol
+    # menunggu simbol PALING lambat sebelum batch berikutnya mulai — 1 Okt 2026
+    # scan rata 132 dtk (maks 289) melebihi interval 120 dtk. Konkurensi puncak
+    # tetap 20 dan jeda per slot dipertahankan, jadi anggaran rate-limit sama.
+    sem = asyncio.Semaphore(BATCH)
+
+    async def _one(symbol: str, client: httpx.AsyncClient) -> None:
+        async with sem:
+            try:
+                all_tf_maps[symbol] = await fetch_symbol_data(symbol, TIMEFRAMES, client=client)
+            except Exception:
+                all_tf_maps[symbol] = {}
             await asyncio.sleep(BATCH_SLEEP)
+
+    _t_fetch = time.time()
+    async with httpx.AsyncClient(timeout=20) as client:
+        await asyncio.gather(*(_one(t["symbol"], client) for t in tickers))
+    fetch_sec = round(time.time() - _t_fetch, 1)
+    universe_sec = round(_t_fetch - start, 1)
 
     # Step 3: score all agents
     ag_results: list[dict] = []   # Fase 3 — agen tunggal (kosong selama saklar mati)
@@ -311,6 +315,8 @@ async def _run_scan() -> dict:
         agentic=len(ag_results),
         scanned=len(tickers),
         elapsed_sec=elapsed,
+        universe_sec=universe_sec,
+        fetch_sec=fetch_sec,
     )
     return result
 

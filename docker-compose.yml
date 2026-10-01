@@ -33,6 +33,10 @@ services:
   # ── Backend — FastAPI API server (agents run in separate container) ───────────
 
   backend:
+    # Lokal, stack aplikasi dijalankan ops/start-night.ps1 (uvicorn + Next).
+    # Profil "app" mencegah `docker compose up` / Docker Desktop menyalakan
+    # stack KEDUA ke DB yang sama (1 Okt 2026: container kode 5 Jul ikut hidup).
+    profiles: ["app"]
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -61,6 +65,10 @@ services:
   # ── Agents — Standalone autonomous trading agents ────────────────────────────
 
   agents:
+    # Lokal, stack aplikasi dijalankan ops/start-night.ps1 (uvicorn + Next).
+    # Profil "app" mencegah `docker compose up` / Docker Desktop menyalakan
+    # stack KEDUA ke DB yang sama (1 Okt 2026: container kode 5 Jul ikut hidup).
+    profiles: ["app"]
     build:
       context: .
       dockerfile: agents/Dockerfile
@@ -92,6 +100,10 @@ services:
   # Container ini boleh membeku sesukanya — tak ada yang menunggu jawabannya.
 
   learning:
+    # Lokal, stack aplikasi dijalankan ops/start-night.ps1 (uvicorn + Next).
+    # Profil "app" mencegah `docker compose up` / Docker Desktop menyalakan
+    # stack KEDUA ke DB yang sama (1 Okt 2026: container kode 5 Jul ikut hidup).
+    profiles: ["app"]
     build:
       context: .
       dockerfile: agents/Dockerfile
@@ -111,6 +123,10 @@ services:
   # ── Frontend — Next.js (standalone output) ───────────────────────────────────
 
   frontend:
+    # Lokal, stack aplikasi dijalankan ops/start-night.ps1 (uvicorn + Next).
+    # Profil "app" mencegah `docker compose up` / Docker Desktop menyalakan
+    # stack KEDUA ke DB yang sama (1 Okt 2026: container kode 5 Jul ikut hidup).
+    profiles: ["app"]
     build:
       context: ./frontend
       dockerfile: Dockerfile

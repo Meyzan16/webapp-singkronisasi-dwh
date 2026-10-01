@@ -112,6 +112,16 @@ try {
     Push-Location $Repo
     docker compose up postgres redis -d | Out-Null
     Log "docker: postgres + redis up"
+    # Stack aplikasi di container TIDAK boleh hidup berdampingan dengan stack
+    # lokal: 1 Okt 2026 Docker Desktop menyalakan backend/agents/frontend
+    # (kode 5 Jul, restart unless-stopped) — dua scanner + dua auto-trader ke
+    # DB yang sama, dan :8000 dipegang dua proses.
+    $appC = docker ps --format '{{.Names}}' | Where-Object { $_ -match '^agents-trading-(backend|agents|learning|frontend)-' }
+    if ($appC) {
+        docker update --restart=no $appC | Out-Null
+        docker stop $appC | Out-Null
+        Log ("docker: container aplikasi dihentikan (stack ganda): " + ($appC -join ', '))
+    }
 } catch {
     Log "PERINGATAN docker gagal: $($_.Exception.Message)"
 } finally { Pop-Location }
