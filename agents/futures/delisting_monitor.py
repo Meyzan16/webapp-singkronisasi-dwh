@@ -92,7 +92,7 @@ async def _fetch_delist_schedule() -> list[dict]:
                         logger.info("delist_risk_detected", symbol=sym,
                                     delivery_in_h=round((delivery - now_ms) / 3600000, 1))
     except Exception as exc:
-        logger.warning("delist_fetch_error", error=str(exc)[:120])
+        logger.warning("delist_fetch_error", error=(str(exc) or repr(exc))[:120], exc_type=type(exc).__name__)
 
     return symbols_at_risk
 

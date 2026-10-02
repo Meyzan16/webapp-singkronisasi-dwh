@@ -244,7 +244,7 @@ async def _fetch_prices(symbols: list[str]) -> dict[str, float]:
 
             await asyncio.gather(*[_one(s) for s in symbols])
     except Exception as exc:
-        logger.warning("monitor_price_fetch_error", error=str(exc)[:80])
+        logger.warning("monitor_price_fetch_error", error=(str(exc) or repr(exc))[:80], exc_type=type(exc).__name__)
     return prices
 
 

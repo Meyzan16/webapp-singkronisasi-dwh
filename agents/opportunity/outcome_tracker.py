@@ -135,7 +135,8 @@ async def update_decision_outcomes() -> int:
                 try:
                     return await _fetch_klines(client, event, now)
                 except Exception as exc:
-                    logger.warning("spot_outcome_fetch_failed", symbol=event.symbol, error=str(exc)[:100])
+                    logger.warning("spot_outcome_fetch_failed", symbol=event.symbol,
+                                   error=(str(exc) or repr(exc))[:100], exc_type=type(exc).__name__)
                     return []
 
         # Scans run every few minutes; many events for the same symbol share the

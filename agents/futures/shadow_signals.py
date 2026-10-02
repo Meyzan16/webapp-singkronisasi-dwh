@@ -225,7 +225,7 @@ async def update_shadow_outcomes(max_symbols: int = 60) -> int:
     """Isi pnl 1j/4j/24j + hasil bracket untuk baris pending yang sudah bisa dinilai."""
     if not is_db_available():
         return 0
-    from agents.futures.outcome_tracker import _fetch_klines_15m, compute_forward_labels
+    from agents.futures.outcome_tracker import compute_forward_labels, fetch_klines_many
     now = time.time()
     updated = 0
     async with AsyncSessionLocal() as session:
@@ -239,9 +239,12 @@ async def update_shadow_outcomes(max_symbols: int = 60) -> int:
         for r in rows:
             by_symbol.setdefault(r.symbol, []).append(r)
         async with httpx.AsyncClient(timeout=15) as client:
-            for symbol in list(by_symbol)[:max_symbols]:
+            chosen = list(by_symbol)[:max_symbols]
+            all_klines = await fetch_klines_many(
+                client, {sym: min(r.scan_ts for r in by_symbol[sym]) for sym in chosen})
+            for symbol in chosen:
                 sym_rows = by_symbol[symbol]
-                klines = await _fetch_klines_15m(client, symbol, min(r.scan_ts for r in sym_rows))
+                klines = all_klines.get(symbol) or []
                 if not klines:
                     for r in sym_rows:
                         if r.scan_ts < now - 26 * 3600:

@@ -12,6 +12,7 @@ Mirror pola agents/opportunity/outcome_tracker.py (SPOT — tidak disentuh).
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import httpx
@@ -98,6 +99,22 @@ async def _fetch_klines_15m(client: httpx.AsyncClient, symbol: str, start_ts: fl
     return []
 
 
+async def fetch_klines_many(client: httpx.AsyncClient, starts: dict[str, float],
+                            concurrency: int = 8) -> dict[str, list]:
+    """Ambil klines 15m banyak simbol sekaligus, paralel terbatas.
+
+    Dulu diambil satu per satu di dalam siklus scanner: `outcome_pass` terukur
+    45–67 dtk (26 Sep – 2 Okt 2026) dan selama itu scan berikutnya tertunda.
+    """
+    sem = asyncio.Semaphore(concurrency)
+
+    async def one(sym: str, ts: float) -> tuple[str, list]:
+        async with sem:
+            return sym, await _fetch_klines_15m(client, sym, ts)
+
+    return dict(await asyncio.gather(*(one(s, t) for s, t in starts.items())))
+
+
 async def update_decision_outcomes(max_symbols: int = 40) -> int:
     """Isi label forward untuk baris pending yang horizon-nya jatuh tempo.
     Satu fetch klines per simbol per pass. Fail-open per simbol."""
@@ -123,10 +140,12 @@ async def update_decision_outcomes(max_symbols: int = 40) -> int:
             by_symbol.setdefault(r.symbol, []).append(r)
 
         async with httpx.AsyncClient(timeout=15) as client:
-            for symbol in list(by_symbol.keys())[:max_symbols]:
+            chosen = list(by_symbol.keys())[:max_symbols]
+            all_klines = await fetch_klines_many(
+                client, {sym: min(r.scan_ts for r in by_symbol[sym]) for sym in chosen})
+            for symbol in chosen:
                 sym_rows = by_symbol[symbol]
-                start_ts = min(r.scan_ts for r in sym_rows)
-                klines = await _fetch_klines_15m(client, symbol, start_ts)
+                klines = all_klines.get(symbol) or []
                 if not klines:
                     # Simbol delisted/feed mati: baris tua tanpa data tak boleh
                     # menyumbat window pending selamanya → tandai failed.

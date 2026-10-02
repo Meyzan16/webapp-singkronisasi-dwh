@@ -1039,8 +1039,10 @@ async def run_bigmover_fastpass() -> None:
             logger.info("bigmover_fastpass_stopped")
             raise
         except Exception as exc:
-            _fastpass_last_error = str(exc)[:120]
+            # str(exc) KOSONG utk ConnectError httpx — 372 warning "error: ''" (26 Sep–2 Okt).
+            _fastpass_last_error = (str(exc) or repr(exc))[:120]
             _fastpass_running = False
-            logger.warning("bigmover_fastpass_error", error=_fastpass_last_error)
+            logger.warning("bigmover_fastpass_error", error=_fastpass_last_error,
+                           exc_type=type(exc).__name__)
 
         await asyncio.sleep(BIGMOVER_FASTPASS_SEC)

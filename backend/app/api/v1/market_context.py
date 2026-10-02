@@ -240,7 +240,7 @@ async def get_market_context() -> dict:
         _cache_ts = time.time()
         return ctx
     except Exception as exc:
-        logger.warning("market_context_error", error=str(exc)[:80])
+        logger.warning("market_context_error", error=(str(exc) or repr(exc))[:80], exc_type=type(exc).__name__)
         return {
             "sentiment":            "unknown",
             "btc_price":            0,
