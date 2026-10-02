@@ -2,7 +2,7 @@
 
 Disusun 1 Okt 2026 dari: riwayat sesi, `paper_trades`, `futures_decision_events`
 (3.800 kandidat matang sejak 9 Sep), `ops/logs/health.log`, dan rencana lama
-(PLAN-FUTURES-AGENTIC, dan yang kini diarsip di docs/archive/: PLAN_ADAPTIVE_ENGINE_BOOST, SCHEDULE_FUTURES, PLAN-UI-SUSULAN).
+(kini semua diarsip di docs/archive/: PLAN-FUTURES-AGENTIC, PLAN_ADAPTIVE_ENGINE_BOOST, SCHEDULE_FUTURES, PLAN-UI-SUSULAN).
 
 ## Kenyataan per 1 Okt 2026
 
@@ -187,4 +187,12 @@ Skrip ulang: `ops/research/` (README).
   per hari (state `ops/logs/.shadow-report-date`), laporan lain 1 baris. Baris futures `a1/a2/a3` (lane lama)
   diganti jumlah kandidat agen tunggal. Saklar `-DryRun` untuk uji tanpa mengirim.
 - **O4** SCHEDULE_FUTURES, PLAN_ADAPTIVE_ENGINE_BOOST, PLAN-UI-SUSULAN → `docs/archive/` dengan penanda arsip.
-  PLAN-FUTURES-AGENTIC.md tidak disentuh (tak bisa dibaca di sesi ini).
+  PLAN-FUTURES-AGENTIC.md menyusul (izin owner): Fase 0–8 selesai; gerbang Fase 7 4/8 → ukuran tetap 1 %
+  (docs/futures-gate-2026-10-02.md). ops/futures-gate.py diperbaiki agar bisa dijalankan dari repo root.
+
+## Pengingat terjadwal (dibuat 2 Okt 2026, aplikasi Claude harus terbuka)
+
+- **9 Okt 20:13** — `agents-trading-checkpoint-shadow-9okt`: riset shadow → `ops/logs/checkpoint-2026-10-09.md`.
+- **15 Okt 20:17** — `agents-trading-checkpoint-edge-15okt`: riset shadow + analisis ulang edge (P1d) +
+  kinerja nyata → `ops/logs/checkpoint-2026-10-15.md`.
+Keduanya hanya membaca & menulis laporan: tak mengubah kode/config, tak mengirim pesan, tak commit.

@@ -1,7 +1,14 @@
+> **ARSIP (2 Okt 2026).** Fase 0–8 SELESAI dikerjakan 5–13 Sep 2026 (`c955b0b` Fase 0+1a, `5449af5` 1b,
+> `2c96dad` 2, `f5c8d01` 3, `7346fd2` 4, `e5ce726` 5, `ec2d30d` 6, `decc13d` 7, `f621928` 8). Agen tunggal
+> `futures_agentic` live sejak itu. **Gerbang Fase 7 per 2 Okt: 4/8 lulus — ukuran tetap risk 1 %**
+> (gagal: ekspektasi −$0,50/trade, TP tersentuh 27,8 %, impas 34,1 %, breach maks 6,69 %) —
+> [docs/futures-gate-2026-10-02.md](../futures-gate-2026-10-02.md). Diagnosis lanjutan (entry tanpa edge)
+> dan rencana aktif: [PLAN-OKT-2026.md](../../PLAN-OKT-2026.md).
+
 # PLAN-FUTURES-AGENTIC — satu agen futures, sedikit posisi, tiap posisi terukur
 
 Disusun 5 Sep 2026 dari audit kode + DB nyata. Direvisi hari yang sama setelah audit bug
-jalur uang dan penegasan owner. Status: **RENCANA, belum dikerjakan.**
+jalur uang dan penegasan owner. Status asli 5 Sep: RENCANA — lihat penanda arsip di atas.
 
 Tujuan owner, dikutip apa adanya:
 

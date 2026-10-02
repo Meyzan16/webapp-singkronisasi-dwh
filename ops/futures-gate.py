@@ -23,13 +23,20 @@ import argparse
 import asyncio
 import datetime
 import json
+import os
 import statistics
+import sys
 
-from sqlalchemy import select, text
+# Docstring menyuruh menjalankan dari repo root — tanpa ini impor `agents`/`app`
+# gagal (ModuleNotFoundError, ditemukan 2 Okt 2026).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from agents.shared import trade_outcome as outcome
-from app.database import AsyncSessionLocal, probe_db, set_db_available
-from app.models.paper_trade import PaperTrade
+from sqlalchemy import select, text  # noqa: E402
+
+from agents.shared import trade_outcome as outcome  # noqa: E402
+from app.database import AsyncSessionLocal, probe_db, set_db_available  # noqa: E402
+from app.models.paper_trade import PaperTrade  # noqa: E402
 from app.services.agent_registry import ACTIVE_FUTURES_AGENTS
 
 MIN_SAMPEL = 40
