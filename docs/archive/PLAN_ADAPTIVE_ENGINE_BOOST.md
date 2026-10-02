@@ -1,3 +1,5 @@
+> **ARSIP (2 Okt 2026).** Fase 0/1/3 selesai; Fase A (validasi forward) GAGAL 24 Agu; Fase B/C/D/E ditahan sampai ada entry ber-edge (lihat PLAN-OKT-2026 P4). Rencana aktif: [PLAN-OKT-2026.md](../../PLAN-OKT-2026.md).
+
 # PLAN — Adaptive Engine BOOST (SPOT + FUTURES)
 
 **Tujuan:** membuat adaptive engine benar-benar **meningkatkan scanner SPOT & FUTURES**

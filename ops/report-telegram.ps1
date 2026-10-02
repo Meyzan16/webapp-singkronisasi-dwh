@@ -4,7 +4,8 @@
 #   & .\report-telegram.ps1            -> judul default "Laporan Sistem"
 #   & .\report-telegram.ps1 "Startup"  -> judul kustom
 
-param([string]$Title = 'Laporan Sistem')
+# -DryRun: susun & tampilkan pesan tanpa mengirim ke Telegram (untuk uji).
+param([string]$Title = 'Laporan Sistem', [switch]$DryRun)
 
 $ErrorActionPreference = 'Continue'
 $Repo   = 'D:\kerja\Apps\workspace\agents-trading'
@@ -62,7 +63,8 @@ $opp = Get-Api '/api/v1/opportunity/status'
 $fut = Get-Api '/api/v1/futures/status'
 $L.Add("$(E 0x1F50D) SCANNER")
 if ($opp) { $L.Add("  Spot: siklus $($opp.cycle_count), scan berikut ~$(N $opp.next_scan_in_min 1)m") }
-if ($fut) { $L.Add("  Futures: siklus $($fut.cycle_count), hasil a1/a2/a3 = $($fut.agent1_results)/$($fut.agent2_results)/$($fut.agent3_results)") }
+# Lane agent1/2/3 dibongkar (fbaa99d) - futures kini satu agen (agentic).
+if ($fut) { $L.Add("  Futures: siklus $($fut.cycle_count), kandidat agen $($fut.agentic_results), scan berikut ~$(N $fut.next_scan_in_min 1)m") }
 $L.Add('')
 
 # 4) AUTO-TRADER (futures)
@@ -178,7 +180,31 @@ if ($us) {
     }
 }
 
+# 11) RISET SHADOW (hipotesis entry alternatif, tanpa membuka posisi)
+#     Rincian per hipotesis SEKALI per hari; laporan lain hari itu cukup 1 baris.
+$sh = Get-Api '/api/v1/futures/shadow-report'
+if ($sh) {
+    $L.Add('')
+    $L.Add("$(E 0x1F9EA) RISET SHADOW")
+    $tests  = @($sh.groups | Where-Object { -not $_.is_control })
+    $lulus  = @($tests | Where-Object { $_.passed })
+    $ctrlR  = N $sh.control_r_per_trade 2
+    $lulusTxt = if ($lulus.Count) { "$(E 0x2705) LULUS: $(($lulus | ForEach-Object { $_.hypothesis + ' ' + $_.direction }) -join ', ')" } else { 'belum ada yang lulus' }
+    $L.Add("  Dinilai $($sh.labelled) / menunggu $($sh.pending) - pembanding ${ctrlR}R - $lulusTxt")
+    $StateFile = Join-Path $Repo 'ops\logs\.shadow-report-date'
+    $today = (Get-Date).ToString('yyyy-MM-dd')
+    $last  = if (Test-Path $StateFile) { (Get-Content $StateFile -Raw).Trim() } else { '' }
+    if ($last -ne $today) {
+        foreach ($g in ($tests | Sort-Object { -[double]($_.all.r_per_trade) })) {
+            $r = if ($null -ne $g.all.r_per_trade) { '{0:+0.00;-0.00}R' -f [double]$g.all.r_per_trade } else { '-' }
+            $ok = @($g.checks | Where-Object { $_.ok }).Count
+            $L.Add("  $(Dot $g.passed) $($g.hypothesis) $($g.direction): $r n$($g.all.n)/$(N $sh.rules.min_n 0)  syarat $ok/$(@($g.checks).Count)")
+        }
+        if (-not $DryRun) { $today | Out-File -FilePath $StateFile -Encoding ascii -NoNewline }
+    }
+}
+
 # --- Kirim ---
 $msg = ($L -join "`n")
-& $Notify $msg
+if (-not $DryRun) { & $Notify $msg }
 Write-Output $msg

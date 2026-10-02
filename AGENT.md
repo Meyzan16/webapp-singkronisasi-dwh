@@ -59,7 +59,7 @@ agents-trading/
 ├── PLAN-LIVE-TRADING.md
 ├── PLAN_ADAPTIVE_LEARNING_FUTURES_10X.md
 ├── PLAN_ADAPTIVE_SIGNAL_WEIGHTING_SPOT_10X.md
-├── SCHEDULE_FUTURES.md
+├── PLAN-OKT-2026.md          ← rencana aktif (fase, temuan, status)
 └── README.md
 ```
 
@@ -287,7 +287,7 @@ curl http://localhost:8001/health      # kalau standalone
 - `PLAN-LIVE-TRADING.md` — roadmap ke live trading.
 - `PLAN_ADAPTIVE_LEARNING_FUTURES_10X.md` — plan ML futures.
 - `PLAN_ADAPTIVE_SIGNAL_WEIGHTING_SPOT_10X.md` — plan adaptive weight spot.
-- `SCHEDULE_FUTURES.md` — jadwal & interval loop futures.
+- `PLAN-OKT-2026.md` — rencana aktif: fase, temuan audit, riset shadow. Rencana lama di `docs/archive/`.
 
 ---
 

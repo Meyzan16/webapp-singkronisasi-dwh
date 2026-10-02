@@ -1,3 +1,5 @@
+> **ARSIP (2 Okt 2026).** U1–U5 selesai 25 Agu (172ce26). Rencana aktif: [PLAN-OKT-2026.md](../../PLAN-OKT-2026.md).
+
 # PLAN — Susulan UI atas perubahan 24–25 Agu
 
 > **Status: U1–U5 SELESAI 25 Agu (`172ce26`).**

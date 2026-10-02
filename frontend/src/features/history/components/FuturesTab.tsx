@@ -5,6 +5,7 @@ import { FuturesAnalytics } from "./FuturesAnalytics";
 import { LoadingPage } from "@/components/ui/feedback";
 import { MonitorTab } from "./futures/MonitorTab";
 import { OverviewTab } from "./futures/OverviewTab";
+import { ShadowResearchTab } from "./futures/ShadowResearchTab";
 import { localDayKey } from "./PnlCalendar";
 import { type FuturesPosition, type LearningStats, type RiskDashboard, isRealWin, tradePnlDollar } from "./futures/types";
 
@@ -12,7 +13,7 @@ const FALLBACK_BALANCE = 1000;
 const RISK_PCT         = 0.01;
 const REFRESH_MS       = 15_000;
 
-type SubTab = "overview" | "monitor" | "analytics";
+type SubTab = "overview" | "monitor" | "analytics" | "research";
 
 function buildEquity(closed: FuturesPosition[], startingBalance: number, riskDollar: number) {
   const sorted = [...closed].sort((a, b) => (a.closed_at ?? 0) - (b.closed_at ?? 0));
@@ -172,6 +173,7 @@ export function FuturesTab() {
         { key: "overview",  label: "📋 Overview"  },
         { key: "monitor",   label: "🔍 Monitor"   },
         { key: "analytics", label: "📊 Analytics" },
+        { key: "research",  label: "🧪 Riset"     },
       ] as { key: SubTab; label: string }[]).map(t => (
         <button key={t.key} onClick={() => setSubTab(t.key)}
           className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${subTab === t.key ? "bg-white text-neutral-900 shadow-sm" : "text-neutral-500 hover:text-neutral-700"}`}>
@@ -180,6 +182,11 @@ export function FuturesTab() {
       ))}
     </div>
   );
+
+  // Riset shadow tak bergantung pada daftar posisi — tampil tanpa menunggu.
+  if (subTab === "research") {
+    return <div className="space-y-4">{subTabBar}<ShadowResearchTab /></div>;
+  }
 
   if (loading && positions.length === 0) {
     return (

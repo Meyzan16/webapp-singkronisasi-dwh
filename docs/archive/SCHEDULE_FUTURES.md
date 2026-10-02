@@ -1,3 +1,5 @@
+> **ARSIP (2 Okt 2026).** Semua tanggal jadwal sudah lewat; gate Live (~25 Jul) & Hari-30 (~10 Agu) GAGAL (dicatat 24 Agu). Rencana aktif: [PLAN-OKT-2026.md](../../PLAN-OKT-2026.md).
+
 # SCHEDULE_FUTURES — Jadwal Eksekusi Menuju Live Trading
 
 Update 2026-07-11 — pengganti PLAN_FUTURES.md (di-rename: semua fase yang bisa

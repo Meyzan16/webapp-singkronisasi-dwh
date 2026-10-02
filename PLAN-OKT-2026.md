@@ -2,7 +2,7 @@
 
 Disusun 1 Okt 2026 dari: riwayat sesi, `paper_trades`, `futures_decision_events`
 (3.800 kandidat matang sejak 9 Sep), `ops/logs/health.log`, dan rencana lama
-(PLAN-FUTURES-AGENTIC, PLAN_ADAPTIVE_ENGINE_BOOST, SCHEDULE_FUTURES, PLAN-UI-SUSULAN).
+(PLAN-FUTURES-AGENTIC, dan yang kini diarsip di docs/archive/: PLAN_ADAPTIVE_ENGINE_BOOST, SCHEDULE_FUTURES, PLAN-UI-SUSULAN).
 
 ## Kenyataan per 1 Okt 2026
 
@@ -176,3 +176,15 @@ Kesimpulan: rasio taker/long-short/basis **tidak** menyelamatkan strategi mengej
 pump. Bersama hasil DexScreener/CMC di atas: masalahnya hipotesis entry, bukan
 kekurangan data. Jalan yang tersisa = riset shadow P1a (hipotesis entry berbeda).
 Skrip ulang: `ops/research/` (README).
+
+## O2 / O3 / O4 — selesai 2 Okt 2026
+
+- **O2** FE: History → Futures → sub-tab **🧪 Riset** (endpoint `GET /api/v1/futures/shadow-report`,
+  cache 2 mnt). Logika ringkasan dipindah ke `agents/futures/shadow_report.py` — satu sumber untuk FE,
+  Telegram, dan `ops/shadow_report.py`. Urutan sinyal kini deterministik (`scan_ts, id`): sinyal satu scan
+  punya `scan_ts` identik dan dulu batas paruh awal/akhir bisa bergeser antar-run.
+- **O3** Telegram: `ops/report-telegram.ps1` memuat bagian RISET SHADOW — rincian per hipotesis sekali
+  per hari (state `ops/logs/.shadow-report-date`), laporan lain 1 baris. Baris futures `a1/a2/a3` (lane lama)
+  diganti jumlah kandidat agen tunggal. Saklar `-DryRun` untuk uji tanpa mengirim.
+- **O4** SCHEDULE_FUTURES, PLAN_ADAPTIVE_ENGINE_BOOST, PLAN-UI-SUSULAN → `docs/archive/` dengan penanda arsip.
+  PLAN-FUTURES-AGENTIC.md tidak disentuh (tak bisa dibaca di sesi ini).
