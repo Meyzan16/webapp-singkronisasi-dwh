@@ -7,6 +7,12 @@ Sebuah hipotesis LULUS bila semuanya terpenuhi:
   2. rata-rata bracket_r > +0,10 R di PARUH AWAL dan PARUH AKHIR (kronologis)
   3. mengalahkan kontrol ≥ 0,15 R di keseluruhan periode
   4. tak lebih dari 40% dari total R datang dari satu minggu kalender
+  5. (KHUSUS rel_strength, ditambahkan 2 Okt 2026 23:20 WIB — SEBELUM satu pun
+     sinyalnya berlabel) sinyal berlabel berasal dari ≥ 10 KEJADIAN terpisah.
+     Hipotesis ini terpicu serentak pada puluhan koin setiap kali BTC turun —
+     81 sinyal pertamanya datang dari satu penurunan. Tanpa syarat ini, 300
+     sinyal bisa hanya mewakili 3–4 kejadian pasar. Satu kejadian = rangkaian
+     sinyal yang masing-masing berjarak ≤ 4 jam dari sinyal sebelumnya.
 """
 
 from __future__ import annotations
@@ -23,6 +29,19 @@ MIN_N = 300
 MIN_R_HALF = 0.10
 MIN_EDGE_VS_CONTROL = 0.15
 MAX_WEEK_SHARE = 0.40
+#: Hipotesis yang terpicu serentak oleh satu kejadian pasar → wajib ≥ N kejadian terpisah.
+MIN_EVENTS: dict[str, int] = {"rel_strength": 10}
+EVENT_GAP_SEC = 4 * 3600
+
+
+def count_events(timestamps: list[float], gap_sec: float = EVENT_GAP_SEC) -> int:
+    """Jumlah kejadian terpisah: sinyal berjarak > gap_sec dari sebelumnya memulai kejadian baru."""
+    n, last = 0, None
+    for t in sorted(timestamps):
+        if last is None or t - last > gap_sec:
+            n += 1
+        last = t
+    return n
 
 #: Penjelasan bahasa manusia per hipotesis — dipakai FE & Telegram.
 DESCRIPTIONS: dict[str, str] = {
@@ -108,6 +127,10 @@ async def build_shadow_report() -> dict:
                 {"rule": f"satu minggu ≤{int(MAX_WEEK_SHARE * 100)}% total R", "ok": week_share <= MAX_WEEK_SHARE,
                  "value": f"{week_share * 100:.0f}%" if total > 0 else "-"},
             ]
+            if hyp in MIN_EVENTS:
+                ev = count_events([x.scan_ts for x in rs])
+                checks.append({"rule": f"≥{MIN_EVENTS[hyp]} kejadian pasar terpisah", "ok": ev >= MIN_EVENTS[hyp],
+                               "value": f"{ev}"})
             entry["checks"] = checks
             entry["passed"] = all(c["ok"] for c in checks)
             entry["edge_vs_control"] = round(mean_all - ctrl_mean, 4) if rs else None
@@ -119,6 +142,7 @@ async def build_shadow_report() -> dict:
         "pending": sum(pending.values()),
         "control_r_per_trade": round(ctrl_mean, 4),
         "rules": {"min_n": MIN_N, "min_r_half": MIN_R_HALF,
-                  "min_edge_vs_control": MIN_EDGE_VS_CONTROL, "max_week_share": MAX_WEEK_SHARE},
+                  "min_edge_vs_control": MIN_EDGE_VS_CONTROL, "max_week_share": MAX_WEEK_SHARE,
+                  "min_events_rel_strength": MIN_EVENTS["rel_strength"]},
         "groups": groups,
     }

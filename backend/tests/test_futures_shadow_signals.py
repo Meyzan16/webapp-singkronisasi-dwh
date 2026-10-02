@@ -99,3 +99,12 @@ def test_rel_strength_butuh_btc_melemah_dan_koin_lebih_kuat():
     assert "rel_strength" not in [x["hypothesis"] for x in detect("X", tf, 3.0, btc_chg_4h=-0.5)]   # BTC tak melemah
     assert "rel_strength" not in [x["hypothesis"] for x in detect("X", tf, 3.0, btc_chg_4h=None)]   # tanpa konteks
     assert "rel_strength" not in [x["hypothesis"] for x in detect("BTCUSDT", tf, 3.0, btc_chg_4h=-2.5)]
+
+
+def test_count_events_memisahkan_kejadian_berjarak_lebih_dari_4_jam():
+    from agents.futures.shadow_report import count_events
+    h = 3600
+    assert count_events([]) == 0
+    assert count_events([0, 60, 120]) == 1                    # satu ledakan sinyal = satu kejadian
+    assert count_events([0, 3 * h, 6 * h]) == 1               # tiap jarak ≤ 4 jam → tetap tersambung
+    assert count_events([0, 5 * h, 5 * h + 60, 20 * h]) == 3

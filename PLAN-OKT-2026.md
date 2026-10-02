@@ -196,3 +196,9 @@ Skrip ulang: `ops/research/` (README).
 - **15 Okt 20:17** — `agents-trading-checkpoint-edge-15okt`: riset shadow + analisis ulang edge (P1d) +
   kinerja nyata → `ops/logs/checkpoint-2026-10-15.md`.
 Keduanya hanya membaca & menulis laporan: tak mengubah kode/config, tak mengirim pesan, tak commit.
+
+### Syarat tambahan rel_strength (2 Okt 2026 23:20 WIB, sebelum ada label)
+
+81 sinyal pertama `rel_strength` lahir dari SATU penurunan BTC. Syarat lulus khusus hipotesis ini:
+sinyal berlabel harus berasal dari **≥10 kejadian pasar terpisah** (kejadian baru = jeda > 4 jam dari sinyal
+sebelumnya). Dikunci saat 0 sinyalnya berlabel; ada di `agents/futures/shadow_report.py` (`MIN_EVENTS`).

@@ -14,7 +14,7 @@ interface Group {
 }
 interface Report {
   started_at: number | null; labelled: number; pending: number; control_r_per_trade: number;
-  rules: { min_n: number; min_r_half: number; min_edge_vs_control: number; max_week_share: number };
+  rules: { min_n: number; min_r_half: number; min_edge_vs_control: number; max_week_share: number; min_events_rel_strength?: number };
   groups: Group[]; generated_at: number;
 }
 
@@ -84,7 +84,8 @@ export function ShadowResearchTab() {
         </div>
         <p className="text-[11px] text-neutral-400">
           Syarat lulus (dikunci sebelum ada hasil): ≥{data.rules.min_n} sinyal · paruh awal &amp; akhir masing-masing &gt; +{data.rules.min_r_half}R ·
-          ≥{data.rules.min_edge_vs_control}R di atas pembanding · satu minggu ≤{Math.round(data.rules.max_week_share * 100)}% total R.
+          ≥{data.rules.min_edge_vs_control}R di atas pembanding · satu minggu ≤{Math.round(data.rules.max_week_share * 100)}% total R
+          {data.rules.min_events_rel_strength ? ` · rel_strength juga harus berasal dari ≥${data.rules.min_events_rel_strength} kejadian pasar terpisah (satu penurunan BTC memicu puluhan sinyal sekaligus)` : ""}.
           Di bawah ±100 sinyal angka masih sangat dipengaruhi kebetulan.
         </p>
       </div>
