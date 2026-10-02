@@ -110,7 +110,10 @@ export default function DashboardPage() {
         apiFetch("/api/v1/futures/positions?status=all"),
         apiFetch("/api/v1/futures/learning/stats"),
         apiFetch("/api/v1/futures/status"),
-        apiFetch("/api/v1/market/spot-positions"),
+        // 45 dtk, bukan bawaan 20: scan pertama setelah backend restart memenuhi jaringan
+        // (fetch 298 dtk terukur 2 Okt 2026) dan endpoint ini lalu butuh 23–37 dtk —
+        // Spot Portfolio & Kalkulator Rebalancing tak pernah termuat. Normalnya ±1–4 dtk.
+        apiFetch("/api/v1/market/spot-positions", { timeoutMs: 45_000 }),
         apiFetch("/health"),
         apiFetch("/api/v1/market/binance-status"),
         apiFetch("/api/v1/balance/spot"),
