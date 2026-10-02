@@ -47,6 +47,7 @@ from app.api.v1.market_context import router as market_context_router
 from app.api.v1.binance_status import router as binance_status_router
 from app.api.v1.futures_market  import router as futures_market_router
 from app.api.v1.spot_market     import router as spot_market_router
+from app.api.v1.spot_filters    import router as spot_filters_router
 from app.api.v1.balance import router as balance_router
 from app.api.v1.signals import router as signals_router
 from app.api.v1.futures_eligibility import router as futures_eligibility_router
@@ -230,6 +231,7 @@ app.include_router(market_context_router,   prefix=settings.api_v1_prefix)
 app.include_router(binance_status_router,   prefix=settings.api_v1_prefix)
 app.include_router(futures_market_router,   prefix=settings.api_v1_prefix)
 app.include_router(spot_market_router,      prefix=settings.api_v1_prefix)
+app.include_router(spot_filters_router,     prefix=settings.api_v1_prefix)
 app.include_router(balance_router,          prefix=settings.api_v1_prefix)
 app.include_router(signals_router,          prefix=settings.api_v1_prefix)
 app.include_router(futures_eligibility_router, prefix=settings.api_v1_prefix)
