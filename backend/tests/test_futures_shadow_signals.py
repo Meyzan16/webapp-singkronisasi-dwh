@@ -68,3 +68,34 @@ def test_bracket_searah_arah_sinyal():
     assert [x["hypothesis"] for x in sinyal] == ["pullback_ema"]
     for s in sinyal:
         assert (s["sl_price"] < s["price_at_scan"] < s["tp_price"]) == (s["direction"] == "LONG")
+
+
+def _flag_map(breakout_vol: float = 3000.0, last_close_mult: float = 1.012) -> dict:
+    """Pump lalu konsolidasi 6 jam rapat di atas EMA20, lilin terakhir menembus puncaknya."""
+    up = [100 * (1.003 ** i) for i in range(180)] + [100 * 1.003 ** 180 * (1.01 ** i) for i in range(1, 9)]
+    top = up[-1]
+    flat = [top * (1 + 0.001 * (i % 2)) for i in range(6)]
+    closes = up + flat + [top * last_close_mult]
+    h1 = _fd("1h", closes)
+    h1.volumes[-1] = breakout_vol
+    return {"1h": h1, "4h": _fd("4h", [100 * (1.01 ** i) for i in range(100)]), "15m": _fd("15m", [closes[-1]] * 60)}
+
+
+def test_bull_flag_terpicu_setelah_pump_dan_konsolidasi():
+    hyps = [x["hypothesis"] for x in detect("X", _flag_map(), 15.0)]
+    assert "bull_flag" in hyps
+
+
+def test_bull_flag_butuh_pump_dan_volume():
+    assert "bull_flag" not in [x["hypothesis"] for x in detect("X", _flag_map(), 5.0)]           # belum pump 10%
+    assert "bull_flag" not in [x["hypothesis"] for x in detect("X", _flag_map(1000.0), 15.0)]    # volume biasa
+
+
+def test_rel_strength_butuh_btc_melemah_dan_koin_lebih_kuat():
+    tf = {"1h": _fd("1h", [100 * (1.001 ** i) for i in range(200)]),
+          "4h": _fd("4h", [100 * (1.01 ** i) for i in range(100)]),
+          "15m": _fd("15m", [100.0] * 60)}
+    assert "rel_strength" in [x["hypothesis"] for x in detect("X", tf, 3.0, btc_chg_4h=-2.5)]
+    assert "rel_strength" not in [x["hypothesis"] for x in detect("X", tf, 3.0, btc_chg_4h=-0.5)]   # BTC tak melemah
+    assert "rel_strength" not in [x["hypothesis"] for x in detect("X", tf, 3.0, btc_chg_4h=None)]   # tanpa konteks
+    assert "rel_strength" not in [x["hypothesis"] for x in detect("BTCUSDT", tf, 3.0, btc_chg_4h=-2.5)]

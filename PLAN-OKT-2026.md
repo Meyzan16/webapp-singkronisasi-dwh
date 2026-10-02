@@ -57,6 +57,8 @@ Dipanggil scanner sesudah fetch, memakai data yang sama; nol efek keputusan.
 | `pullback_ema` | LONG | 4j > EMA50, EMA20 1j > EMA50 1j, harga ≤ 0,5 ATR dari EMA20 1j, RSI 1j 40–55, lilin 1j hijau |
 | `squeeze_breakout` | L/S | lebar Bollinger 1j ≤ persentil 20 (100 bar) dalam 5 bar terakhir, close tembus pita 2σ, volume ≥ 1,5× |
 | `dip_in_uptrend` | LONG | 4j > EMA50, RSI 1j < 32, close 1j > close sebelumnya |
+| `bull_flag` (2 Okt) | LONG | naik ≥10% 24j, 6 lilin 1j sebelumnya rentangnya ≤3 ATR dan seluruhnya di atas EMA20 1j, close 1j tembus puncak konsolidasi, volume ≥1,5× |
+| `rel_strength` (2 Okt) | LONG | BTC turun ≥1,5% dalam 4j, koin ≥2 poin lebih kuat dari BTC dalam 4j, close 4j > EMA50 4j (BTCUSDT sendiri dikecualikan) |
 
 Penilaian: pnl 1j/4j/24j + simulasi bracket SL 1,5 ATR / TP 3 ATR (2R), 24 jam,
 SL&TP satu lilin = SL; `bracket_r` net biaya 0,3%. Dedup per hipotesis+simbol+arah 4 jam.

@@ -13,6 +13,11 @@ penilaian tidak menjadi pencarian parameter atas data yang sama:
   H1 pullback_ema      LONG, tren naik, harga kembali ke EMA20 1j, RSI 40–55, lilin hijau
   H2 squeeze_breakout  LONG/SHORT, Bollinger 1j menyempit (≤ persentil 20) lalu tembus pita + volume
   H3 dip_in_uptrend    LONG, tren 4j naik, RSI 1j < 32, close 1j naik dari sebelumnya
+  H4 bull_flag         LONG, sudah naik ≥10% 24j, konsolidasi 6j rapat (≤3 ATR) di atas EMA20 1j,
+                       lalu close 1j tembus puncak konsolidasi + volume ≥1,5× (masuk SESUDAH pump istirahat)
+  H5 rel_strength      LONG, BTC turun ≥1,5% dalam 4j tapi koin ini ≥2 poin lebih kuat dari BTC
+                       dan tetap di atas EMA50 4j (bertahan saat pasar melemah)
+  (H4/H5 ditambahkan 2 Okt 2026, aturan ditetapkan sebelum ada hasil — sama seperti H0–H3.)
 
 Bracket seragam: SL 1,5×ATR(1j), TP 3×ATR(1j) = 2R, horizon 24 jam. SL dan TP
 di lilin 15m yang sama dihitung SL (konservatif). Hasil `bracket_r` sudah net
@@ -62,8 +67,19 @@ def _bandwidths(closes: list[float], period: int = 20) -> list[float]:
     return out
 
 
-def detect(symbol: str, tf_map: dict, change_24h: float) -> list[dict]:
-    """Hipotesis yang terpicu untuk satu simbol. Murni, tanpa I/O."""
+def change_pct(closes: list[float], bars: int) -> float | None:
+    """Perubahan % close terakhir terhadap `bars` bar sebelumnya."""
+    if len(closes) <= bars or closes[-1 - bars] <= 0:
+        return None
+    return (closes[-1] / closes[-1 - bars] - 1) * 100
+
+
+def detect(symbol: str, tf_map: dict, change_24h: float,
+           btc_chg_4h: float | None = None) -> list[dict]:
+    """Hipotesis yang terpicu untuk satu simbol. Murni, tanpa I/O.
+
+    `btc_chg_4h` = perubahan BTC 4 jam (konteks pasar untuk H5); None = H5 dilewati.
+    """
     h1, h4, m15 = tf_map.get("1h"), tf_map.get("4h"), tf_map.get("15m")
     if not h1 or not h4 or not m15 or len(h1.closes) < 120 or len(h4.closes) < 55:
         return []
@@ -114,6 +130,22 @@ def detect(symbol: str, tf_map: dict, change_24h: float) -> list[dict]:
     if h4.closes[-1] > ema50_4h and rsi1h < 32 and c1[-1] > c1[-2]:
         hits.append(("dip_in_uptrend", "LONG"))
 
+    # H4 — bull flag: pump ≥10%, 6 lilin 1j sebelumnya rapat di atas EMA20, lalu tembus puncaknya
+    flag_hi, flag_lo = max(h1.highs[-7:-1]), min(h1.lows[-7:-1])
+    if (change_24h >= 10 and flag_hi - flag_lo <= 3 * atr1h
+            and flag_lo > ema20_1h and c1[-1] > flag_hi and vol_ratio >= 1.5):
+        feats["flag_range_atr"] = round((flag_hi - flag_lo) / atr1h, 2)
+        hits.append(("bull_flag", "LONG"))
+
+    # H5 — kekuatan relatif: BTC melemah, koin ini bertahan di atas tren 4j
+    chg4h = change_pct(c1, 4)
+    if btc_chg_4h is not None and chg4h is not None:
+        feats["chg_4h"] = round(chg4h, 2)
+        feats["btc_chg_4h"] = round(btc_chg_4h, 2)
+        if (symbol != "BTCUSDT" and btc_chg_4h <= -1.5 and chg4h - btc_chg_4h >= 2
+                and h4.closes[-1] > ema50_4h):
+            hits.append(("rel_strength", "LONG"))
+
     return [_signal(h, d, symbol, price, atr1h, feats) for h, d in hits]
 
 
@@ -134,13 +166,15 @@ async def record_shadow_signals(tickers: list[dict], tf_maps: dict, scan_ts: flo
         return 0
     signals: list[dict] = []
     eligible = []
+    _btc_h1 = (tf_maps.get("BTCUSDT") or {}).get("1h")
+    btc_chg_4h = change_pct(_btc_h1.closes, 4) if _btc_h1 else None
     for t in tickers:
         sym = t.get("symbol", "")
         tf_map = tf_maps.get(sym) or {}
         if not tf_map:
             continue
         try:
-            found = detect(sym, tf_map, float(t.get("priceChangePercent", 0) or 0))
+            found = detect(sym, tf_map, float(t.get("priceChangePercent", 0) or 0), btc_chg_4h)
         except (ValueError, ZeroDivisionError, statistics.StatisticsError):
             continue
         signals.extend(found)
