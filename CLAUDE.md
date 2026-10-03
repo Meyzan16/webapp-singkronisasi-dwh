@@ -47,6 +47,18 @@ tracker. Semua itu ringan DAN API membaca status hidupnya dari memori proses
 yang sama (scanner store, risk gate, cache bobot) — memindahkannya akan membuat
 API kehilangan status tersebut.
 
+## Login dashboard (sejak 3 Okt 2026)
+
+- Satu pemilik. Atur/ganti password: `backend/.venv/Scripts/python.exe ops/set-password.py`
+  (password diketik tersembunyi; yang disimpan hanya hash PBKDF2 + `AUTH_SECRET` di
+  `backend/.env` dan `frontend/.env.local`). `--rotate-secret` mengeluarkan semua sesi.
+- Backend mendengar di **127.0.0.1** saja; dari jaringan satu-satunya pintu adalah Next,
+  yang memeriksa cookie sesi `at_session` di `frontend/src/proxy.ts` untuk semua halaman,
+  `/api/*`, `/health`, `/ws/*`. WebSocket backend juga memeriksa cookie (lapis kedua).
+- Skrip `ops/` dan agen memanggil backend lokal tanpa login (tak lewat Next).
+- Endpoint Binance BERTANDA TANGAN memakai `spot_private()` — selalu host utama, tak ikut
+  failover ke `data-api.binance.vision` (host itu hanya data publik, 404 untuk akun).
+
 ## Tech stack
 
 | Layer | Stack |

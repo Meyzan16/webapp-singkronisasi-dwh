@@ -36,6 +36,11 @@ def _build_snapshot(fs) -> dict:
 
 
 async def futures_stream(websocket: WebSocket) -> None:
+    # Lapis kedua di belakang proxy Next: tanpa sesi sah, tolak sebelum data apa pun dikirim.
+    from app.services.auth import session_email_from_cookies
+    if not session_email_from_cookies(websocket.cookies):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     logger.info("futures_ws_connected")
 

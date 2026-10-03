@@ -2,10 +2,11 @@
 
 import { SettingsIcon, LogOut, Zap, Grid2X2, BookOpen, History, TrendingUp, BarChart2, Activity, Globe, Store, Brain } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { useContext } from "react";
+import { useContext, useEffect } from "react";
 import Link from "next/link";
 import DottedSeparator from "./ui/dotted-separator";
 import { GlobalContext } from "@/app/context";
+import { apiFetch } from "@/lib/api";
 
 const routes = [
   { label: "Dashboard",        href: "/dashboards",   icon: Grid2X2,     group: ""        },
@@ -25,10 +26,22 @@ export const Navigation = () => {
   const router   = useRouter();
   const { currentUser, setCurrentUser } = useContext(GlobalContext)!;
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    await apiFetch("/api/v1/auth/logout", { method: "POST" }).catch(() => {});
     setCurrentUser(null);
     router.push("/sign-in");
   };
+
+  // Isi nama/email dari sesi aktif (cookie httpOnly tak terbaca JS — tanya backend).
+  useEffect(() => {
+    if (currentUser) return;
+    let alive = true;
+    apiFetch("/api/v1/auth/me")
+      .then(r => (r.ok ? r.json() : null))
+      .then(u => { if (alive && u) setCurrentUser(u); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [currentUser, setCurrentUser]);
 
   const userInitials = currentUser?.name
     ? currentUser.name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)

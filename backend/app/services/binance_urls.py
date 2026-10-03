@@ -115,6 +115,16 @@ def spot(path: str) -> str:
     return f"{get_spot_url()}{path}"
 
 
+def spot_private(path: str) -> str:
+    """URL Spot untuk endpoint BERTANDA TANGAN (account, myTrades, order).
+
+    Selalu host utama, TIDAK ikut failover: cadangan `data-api.binance.vision`
+    hanya melayani data pasar publik dan menjawab 404 untuk endpoint akun —
+    3 Okt 2026 failover aktif membuat Spot Portfolio rusak total.
+    """
+    return f"{get_settings().binance_spot_url}{path}"
+
+
 def fapi(path: str) -> str:
     """Build full Futures URL: fapi('/fapi/v1/klines?...')."""
     return f"{get_fapi_url()}{path}"

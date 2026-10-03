@@ -44,6 +44,7 @@ from app.api.v1.opportunity import router as opportunity_router
 from app.api.v1.futures_scanner import router as futures_router
 from app.api.v1.futures_learning import router as futures_learning_router
 from app.api.v1.futures_shadow   import router as futures_shadow_router
+from app.api.v1.auth             import router as auth_router
 from app.api.v1.market_context import router as market_context_router
 from app.api.v1.binance_status import router as binance_status_router
 from app.api.v1.futures_market  import router as futures_market_router
@@ -229,6 +230,7 @@ app.include_router(opportunity_router,      prefix=settings.api_v1_prefix)
 app.include_router(futures_router,          prefix=settings.api_v1_prefix)
 app.include_router(futures_learning_router, prefix=settings.api_v1_prefix)
 app.include_router(futures_shadow_router,   prefix=settings.api_v1_prefix)
+app.include_router(auth_router,             prefix=settings.api_v1_prefix)
 app.include_router(market_context_router,   prefix=settings.api_v1_prefix)
 app.include_router(binance_status_router,   prefix=settings.api_v1_prefix)
 app.include_router(futures_market_router,   prefix=settings.api_v1_prefix)

@@ -20,6 +20,11 @@ def _next_scan_in(last_ts: Optional[float]) -> Optional[int]:
 
 async def opportunity_stream(websocket: WebSocket) -> None:
     """Push opportunity scan results to clients in real-time."""
+    # Lapis kedua di belakang proxy Next: tanpa sesi sah, tolak sebelum data apa pun dikirim.
+    from app.services.auth import session_email_from_cookies
+    if not session_email_from_cookies(websocket.cookies):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     logger.info("opportunity_ws_connected")
 

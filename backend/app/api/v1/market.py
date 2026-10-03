@@ -17,7 +17,7 @@ from app.services.binance_auth import get_binance_credentials, _get_time_offset
 router = APIRouter(tags=["market"])
 logger = structlog.get_logger(__name__)
 
-from app.services.binance_urls import get_spot_url, get_fapi_url, fapi, spot
+from app.services.binance_urls import get_spot_url, get_fapi_url, fapi, spot, spot_private
 
 # ── In-memory cache ──────────────────────────────────────────────────────────
 # Avg buy price berdasarkan FIFO myTrades — hanya berubah bila ada trade baru.
@@ -128,7 +128,7 @@ async def _fetch_avg_buy_price(
     try:
         # Limit 1000 (Binance max) to cover more trade history (S12)
         qs = _signed_url("/api/v3/myTrades", api_secret, {"symbol": symbol, "limit": 1000}, ts=ts)
-        resp = await client.get(spot(f"/api/v3/myTrades?{qs}"), headers=_auth_headers(api_key))
+        resp = await client.get(spot_private(f"/api/v3/myTrades?{qs}"), headers=_auth_headers(api_key))
         if resp.status_code != 200:
             return None
         trade_list = resp.json()
@@ -218,7 +218,7 @@ async def debug_spot_connection() -> dict:
         # Test 3: Account info (requires API key + Spot permission)
         try:
             qs = _signed_url("/api/v3/account", s.binance_api_secret)
-            r  = await client.get(spot(f"/api/v3/account?{qs}"), headers=_auth_headers(s.binance_api_key))
+            r  = await client.get(spot_private(f"/api/v3/account?{qs}"), headers=_auth_headers(s.binance_api_key))
             if r.status_code == 200:
                 data = r.json()
                 balances = [b for b in data.get("balances", []) if float(b["free"]) + float(b["locked"]) > 0]
@@ -266,7 +266,7 @@ async def get_spot_positions() -> SpotPositionsResponse:
 
     async with httpx.AsyncClient(timeout=20) as client:
         try:
-            account = await _get(client, spot(f"/api/v3/account?{qs}"), _auth_headers(api_key))
+            account = await _get(client, spot_private(f"/api/v3/account?{qs}"), _auth_headers(api_key))
         except HTTPException as e:
             detail = str(e.detail)
             if "401" in detail or "-2014" in detail or "-2015" in detail:

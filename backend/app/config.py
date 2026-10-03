@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     # PLAN_v2 P0.2 — destructive DB reset endpoint gated by this flag
     allow_db_reset: bool = Field(default=False, validation_alias="ALLOW_DB_RESET")
 
+    # Autentikasi dashboard (satu pemilik). Diisi oleh ops/set-password.py —
+    # password TIDAK pernah disimpan, hanya hash PBKDF2-nya. Kosong = login ditolak.
+    auth_email: str = Field(default="", validation_alias="AUTH_EMAIL")
+    auth_password_hash: str = Field(default="", validation_alias="AUTH_PASSWORD_HASH")
+    auth_secret: str = Field(default="", validation_alias="AUTH_SECRET")
+    auth_session_days: int = Field(default=7, validation_alias="AUTH_SESSION_DAYS")
+
 
 @lru_cache
 def get_settings() -> Settings:

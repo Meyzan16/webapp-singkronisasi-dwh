@@ -15,7 +15,9 @@ import { type ConnState, CONN_META } from "@/components/ui/live-badge";
 function wsUrl(): string {
   if (typeof window === "undefined") return "ws://localhost:8000/ws/opportunity";
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.hostname}:8000/ws/opportunity`;
+  // Lewat host FE (rewrite Next + penjaga sesi), bukan langsung ke :8000 — backend
+  // kini hanya mendengar di 127.0.0.1 sehingga port itu tak terjangkau dari jaringan.
+  return `${proto}//${window.location.host}/ws/opportunity`;
 }
 
 const RECONNECT_MS   = 3000;

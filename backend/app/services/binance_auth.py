@@ -17,7 +17,7 @@ import urllib.parse
 
 import httpx
 
-from app.services.binance_urls import spot
+from app.services.binance_urls import spot, spot_private
 
 # ── Binance server-time offset cache ──────────────────────────────────────────
 _time_offset_ms: int   = 0      # local_ts + offset = binance_ts
@@ -91,7 +91,7 @@ async def binance_signed_get(
 
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.get(
-            spot(endpoint),
+            spot_private(endpoint),   # bertanda tangan → selalu host utama, tak ikut failover
             headers={"X-MBX-APIKEY": api_key},
             params=params,
         )

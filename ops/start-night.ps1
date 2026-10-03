@@ -167,7 +167,10 @@ if (Test-Path $PidFile) {
 # jadi soket SELALU sudah ditutup server saat dipakai lagi, dan Node melaporkannya
 # sebagai "socket hang up" (ECONNRESET). 75 detik melewati poller terlama (60 dtk),
 # sehingga koneksi masih hidup saat request berikutnya datang.
-$uvArgs = '-m','uvicorn','app.main:app','--host','0.0.0.0','--port','8000',
+# --host 127.0.0.1 (bukan 0.0.0.0): backend tak boleh terjangkau dari jaringan.
+# Dari LAN, satu-satunya pintu adalah FE Next yang menjaga sesi login (src/proxy.ts);
+# skrip ops/ & agen memanggil backend lokal seperti biasa.
+$uvArgs = '-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8000',
           '--timeout-keep-alive','75'
 # LEARNING_STANDALONE=true: langkah pembelajaran BERAT (latih model atas ledger
 # ratusan ribu baris) tidak lagi jalan di dalam proses API. Dulu satu putaran

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useContext } from "react";
+import React, { useContext, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import DottedSeparator from "@/components/ui/dotted-separator";
@@ -12,11 +12,13 @@ import CircleLoader from "@/components/ui/circleloader";
 import { useFormik } from "formik";
 import { signInSchema } from "../schema";
 import { useAsyncLoader } from "@/hooks/use-async-loader";
+import { apiFetch } from "@/lib/api";
 
 const SignInCard = () => {
   const router = useRouter();
-  const { pageLevelLoader } = useContext(GlobalContext)!;
+  const { pageLevelLoader, setCurrentUser } = useContext(GlobalContext)!;
   const run = useAsyncLoader();
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   const formik = useFormik({
     initialValues: {
@@ -30,11 +32,25 @@ const SignInCard = () => {
       }
       return {};
     },
-    onSubmit: async () => {
+    onSubmit: async (vals) => {
+      setLoginError(null);
       await run(async () => {
-        // TODO: ganti dengan pemanggilan API login nyata
-        await new Promise((resolve) => setTimeout(resolve, 800));
-        router.push("/dashboards");
+        // Backend memverifikasi password & memasang cookie sesi httpOnly; proxy Next
+        // (src/proxy.ts) lalu mengizinkan halaman & API.
+        const r = await apiFetch("/api/v1/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: vals.email, password: vals.password }),
+        });
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          setLoginError(typeof d.detail === "string" ? d.detail : `Login gagal (${r.status})`);
+          return;
+        }
+        setCurrentUser(await r.json());
+        // Hanya jalur internal yang boleh jadi tujuan (cegah open redirect).
+        const next = new URLSearchParams(window.location.search).get("next");
+        router.push(next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboards");
       });
     },
   });
@@ -68,6 +84,10 @@ const SignInCard = () => {
                 touched={touched[item.id as keyof typeof values]}
               />
             ) : null
+          )}
+
+          {loginError && (
+            <p role="alert" className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{loginError}</p>
           )}
 
           <div className="flex flex-col mt-5">
